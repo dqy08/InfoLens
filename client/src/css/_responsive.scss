@@ -1,0 +1,287 @@
+// 响应式样式模块
+// 依赖统一的断点配置（见 _breakpoints.scss）
+@use "breakpoints" as *;
+
+// ==================== Mixins ====================
+
+// 公共容器样式：100%宽度，border-box，可见溢出
+@mixin full-width-container {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+// 移动端滚动容器：使用 body 滚动条，禁止横向滚动
+@mixin mobile-scroll-container {
+  overflow: visible;  // 确保不使用自己的滚动条
+  overflow-x: hidden;  // 禁止横向滚动
+  overflow-y: visible;  // 允许垂直滚动，使用body的滚动条
+}
+
+// 全宽自适应容器：100%宽度，不超过父容器
+@mixin full-width-adaptive {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+// 窄屏布局（视口 ≤767px 与设置「强制窄屏」共用）
+@mixin narrow-app-layout($root) {
+  #{$root} {
+    margin: 0;
+    padding: 0;
+    height: auto;  // 不使用固定高度，避免100vh问题
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100vw;
+    touch-action: pan-y;
+  }
+
+  #{$root} body {
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;  // 允许垂直滚动
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100vw;
+    height: auto;  // 不使用100vh，让高度自适应内容
+    min-height: 0;  // 移除最小高度限制
+    touch-action: pan-y;  // 允许垂直触摸滑动
+    -webkit-overflow-scrolling: touch;  // iOS平滑滚动
+  }
+
+  #{$root} .main_frame {
+    position: relative;  // 覆盖桌面端的固定定位
+    height: auto;  // 覆盖桌面端的100vh，避免移动浏览器UI高度不一致
+    min-height: 0;  // 移除最小高度限制
+    flex-direction: column;
+    overflow-x: hidden;  // 禁止横向滚动
+    overflow-y: visible;  // 允许内容溢出，由body滚动
+    overflow: visible;  // 确保完全不阻止滚动
+    width: 100%;
+    max-width: 100vw;
+    box-sizing: border-box;
+    touch-action: pan-y;  // 允许垂直触摸滑动
+  }
+
+  #{$root} .left_panel {
+    flex: 0 0 auto;  // 不固定高度，根据内容自适应
+    @include full-width-adaptive;
+    min-width: 100%;  // 覆盖桌面端的 min-width: 10vw
+    padding: 8px 15px 15px;
+    border-right: none;  // 移除右边框
+    border-bottom: 1px solid var(--border-color);  // 添加底部分隔线
+    @include mobile-scroll-container;
+    touch-action: pan-y;  // 只允许垂直方向的触摸滑动
+  }
+
+  #{$root} .resizer {
+    display: none;
+  }
+
+  #{$root} .right_panel {
+    flex: 1 1 auto;
+    @include full-width-adaptive;
+    padding: 0;
+    overflow-x: hidden;
+    overflow-y: hidden;  // 窄屏模式下禁用滚动条，使用body滚动
+    overflow: hidden;  // 彻底禁用滚动条，防止出现多余的滚动条
+    background: var(--panel-bg);
+    min-height: 0;  // 移除最小高度，让内容自然展开
+    height: auto;  // 高度自适应内容
+    position: relative;
+    touch-action: pan-y;
+  }
+
+  #{$root} #results {
+    padding: 0;
+    margin: 0;
+    position: relative;
+    @include full-width-container;
+    @include mobile-scroll-container;
+    min-height: 0;  // 移除100%高度限制，让内容自然展开
+    height: auto;  // 高度自适应内容
+  }
+
+  #{$root} .LMF {
+    position: relative;
+    @include full-width-container;
+    @include mobile-scroll-container;
+    min-height: 350px;  // 确保至少350px高度以容纳tooltip（内容不足时生效）
+    height: auto;  // 高度自适应内容
+    padding: 15px 12px;  // 基础padding
+
+    &.minimap-enabled {
+      padding-right: calc(12px + var(--minimap-width));
+    }
+  }
+
+  #{$root} .text-loading-overlay {
+    min-height: 0;  // 移除100%高度限制
+    height: auto;  // 由于使用绝对定位和top/bottom:0，会自动填充，但确保不强制最小高度
+  }
+
+  #{$root} .container {
+    padding: 10px;  // 减小padding等小屏幕
+    box-sizing: border-box;
+  }
+
+  #{$root} .floating_content {
+    @include full-width-adaptive;
+    overflow: visible;
+  }
+
+  #{$root} #stats {
+    order: 2;
+    padding: 0 5px;  // 增加左右padding，避免直方图被遮挡
+    @include full-width-adaptive;
+
+    svg {
+      @include full-width-adaptive;
+      height: auto;
+      display: block;
+    }
+  }
+
+  #{$root} #all_result {
+    @include full-width-container;
+    @include mobile-scroll-container;
+    padding: 0;
+  }
+
+  #{$root} #res {
+    order: 1;
+  }
+
+  #{$root} .app-page-toolbar--bleed {
+    margin: 0 -15px 10px -15px;
+    padding: max(10px, env(safe-area-inset-top)) 15px 10px 15px;
+  }
+
+  #{$root} button {
+    padding: 8px 12px;
+    font-size: 11pt;
+  }
+
+  #{$root} .textarea-wrapper textarea {
+    min-height: 80px;
+    font-size: 16px;  // 设置为至少 16px，防止 iOS 自动缩放
+  }
+
+  #{$root} input[type="text"],
+  #{$root} input[type="url"],
+  #{$root} input[type="search"],
+  #{$root} input[type="email"],
+  #{$root} input[type="number"],
+  #{$root} input[type="tel"],
+  #{$root} input[type="password"],
+  #{$root} select {
+    font-size: 16px;  // 所有文本类输入控件在移动端统一使用 16px
+  }
+}
+
+// 平板及以上（≥768px）- 桌面端样式（强制窄屏时收紧为 html:not([data-force-narrow])）
+@media (min-width: $breakpoint-tablet) {
+  html:not([data-force-narrow]) {
+    height: 100%;  // 确保html高度为100%
+
+    body {
+      height: 100vh;  // 使用100vh确保填满视口，消除底部空白
+      min-height: 100vh;  // 同时设置min-height作为备用
+    }
+
+    .main_frame {
+      position: fixed;
+      top: 0px;
+      left: 0;
+      width: 100%;
+      height: 100%;  // 使用100%而不是100vh，基于body的高度，消除底部空白
+      min-height: 100vh;  // 确保至少填满视口
+      display: flex;  // 保持flex布局用于左右面板
+      overflow: hidden;
+    }
+
+    .left_panel {
+      flex: 0 0 1200px;  // 设置一个合理的默认值，会被JS动态覆盖
+      min-width: 10vw;   // 最小宽度为屏幕宽度的10%
+      max-width: 90vw;    // 最大宽度为屏幕宽度的90%
+      padding: 8px 20px 20px;
+      overflow-y: auto;
+      overflow-x: hidden;  // 防止水平滚动，确保内容不会被遮挡
+      border-right: 1px solid var(--border-color);
+      background-color: var(--bg-color);
+      box-sizing: border-box;  // 确保padding包含在宽度计算中
+      transition: background-color 0.3s ease, border-color 0.3s ease;
+
+      > * {
+        max-width: 100%;  // 确保子元素不超过容器宽度
+        box-sizing: border-box;  // 确保宽度计算正确
+      }
+    }
+
+    .resizer {
+      width: 8px;
+      background: var(--resizer-bg);
+      cursor: col-resize;
+      position: relative;
+      flex-shrink: 0;
+      transition: background-color 0.3s ease;
+    }
+
+    .resizer::before {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--border-color);
+      transform: translateX(-50%);
+      transition: background-color 0.3s ease;
+    }
+
+    .resizer:hover::before {
+      background: var(--resizer-hover);
+    }
+
+    .right_panel {
+      flex: 1;  // 占据剩余空间
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      padding: 0;  // 移除 padding，让 LMF 层填充整个区域
+      overflow-y: auto;
+      overflow-x: hidden;  // 禁止横向滚动，但允许内容溢出以显示发光效果
+      background: var(--panel-bg);
+      transition: background-color 0.3s ease;
+      position: relative;  // 为绝对定位的子元素提供定位上下文
+    }
+
+    #results {
+      @include full-width-container;
+      overflow: visible;  // 确保发光效果不被裁剪
+      position: relative;  // 相对定位，让内容自然扩展
+      min-height: 100%;  // 至少填充整个 right_panel
+      margin: 0;  // 移除 margin-top
+    }
+
+    .LMF {
+      @include full-width-container;
+      min-height: 100%;  // 至少填充整个 #results 容器
+      // 添加 padding 为发光效果留出空间（drop-shadow 最大约 16px）
+      padding: 20px;  // 为发光效果留出足够空间，略大于最大阴影范围
+      overflow: visible;  // 确保发光效果不被裁剪，不使用自己的滚动条
+    }
+
+    .floating_content {
+      @include full-width-adaptive;
+    }
+  }
+
+  // 宽屏下强制窄屏：仅匹配含 .main_frame 的子页（避免改写首页 body.nav-landing-page）
+  @include narrow-app-layout('html[data-force-narrow]:has(.main_frame)');
+}
+
+// 移动端响应式样式（≤767px）
+@media (max-width: $breakpoint-mobile) {
+  @include narrow-app-layout('html');
+}

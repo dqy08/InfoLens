@@ -1,0 +1,30 @@
+// GLTR 阅读区可读文本（与 SVG 覆盖层下纯文本节点一致：无 .token，字重继承 .LMF）
+// 日间继承 body 400；夜间见 start.scss [data-theme="dark"] .LMF { font-weight: 300 }
+// 有 .token 包裹的旧路径仍由 .token { font-weight: 500 } 单独加粗
+// 背景由各自容器设置（如 .LMF 用 --text-area-bg，chat 预览用 transparent）
+
+// 系统等宽栈（tooltip / Top-K / 语义 debug / 归因侧栏 code 与 pre / compare 等复用；--font-icon 除外）
+$mono-font-stack:
+  "SF Mono",
+  "Menlo",
+  "Monaco",
+  "Consolas",
+  "Liberation Mono",
+  "DejaVu Sans Mono",
+  "Courier New",
+  monospace;
+
+@mixin lmf-readout-text {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  font-size: 12pt;
+  line-height: 1.5;
+  font-family: inherit;
+  // 不显式设 font-weight，与 .LMF 正文一致
+  color: var(--text-color);
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+}

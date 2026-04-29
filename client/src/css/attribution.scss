@@ -1,0 +1,121 @@
+// Attribution：在 start + chat 之上仅叠本页差异（chat.scss 已含 toolbar / right-stack / cached bar / history 下拉）
+@use "attribution-inspector";
+
+// Cached history 下拉：覆盖全局 query-history（mixin 含 max-height:200px，须显式 max-height:none 才取消上限）；原生竖向 resize
+#attribution_cached_history_dropdown.semantic-search-history-dropdown {
+  height: min(32vh, 360px);
+  min-height: 120px;
+  max-height: none;
+  resize: vertical;
+  overflow-y: auto;
+}
+
+#attribution_result_info {
+  white-space: pre-line;
+  text-align: center;
+}
+
+// Target prediction 面板与上方 Context 面板之间的间距
+.attribution-target-panel {
+  margin-top: 12px;
+}
+
+// Target prediction 输入框较矮（chat.scss 中 .input-section textarea 默认 250px，此处覆盖 target）
+.attribution-target-panel .textarea-wrapper textarea {
+  height: 60px;
+}
+
+// Analyze 行下方：与 semantic_submode_row 同系样式（见 _semantic-analysis.scss）
+.attribution-max-score-row {
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.attribution-use-mapping-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: inherit;
+  cursor: pointer;
+  user-select: none;
+}
+
+.attribution-max-score-slider-group {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.attribution-max-score-range {
+  flex: 1 1 auto;
+  min-width: 80px;
+  max-width: 220px;
+  vertical-align: middle;
+}
+
+// 「Max score」标签与数值：继承字体；未勾选映射时为灰色，勾选后主色
+.attribution-max-score-row.semantic-submode-row {
+  .semantic-submode-label {
+    font-size: inherit;
+  }
+
+  .attribution-max-score-value {
+    font-size: inherit;
+    font-variant-numeric: tabular-nums;
+    min-width: 2.5em;
+    text-align: right;
+  }
+
+  &:not(:has(#attribution_use_mapping:checked)) {
+    .attribution-max-score-slider-group .semantic-submode-label,
+    .attribution-max-score-value {
+      color: var(--text-muted);
+    }
+  }
+
+  &:has(#attribution_use_mapping:checked) {
+    .attribution-max-score-slider-group .semantic-submode-label,
+    .attribution-max-score-value {
+      color: var(--text-primary);
+    }
+  }
+}
+
+.attribution-exclude-prompt-patterns-row {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+// 「Exclude prompt patterns」标签：与 Max score 行共用 semantic-submode-row（gap 等）；未勾选使能时为灰色，勾选后主色
+.attribution-exclude-prompt-patterns-header {
+  flex-wrap: wrap;
+
+  .semantic-submode-label {
+    font-size: inherit;
+  }
+
+  &:not(:has(#attribution_exclude_prompt_patterns_enable:checked)) .semantic-submode-label {
+    color: var(--text-muted);
+  }
+
+  &:has(#attribution_exclude_prompt_patterns_enable:checked) .semantic-submode-label {
+    color: var(--text-primary);
+  }
+}
+
+.attribution-exclude-prompt-patterns-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 9pt;
+  padding: 6px 8px;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text-color);
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+}

@@ -1,0 +1,186 @@
+// 首页：从信息密度视图打开的归因侧栏（与 attribution 页右栏共用 GLTR / inspector 结构）
+@use "lmf-readout" as lmf;
+
+// 复用 `dialog.scss` 的 `.dialog-overlay`；仅提高 z-index（低于侧栏），显隐仍由 TS 切换 `--visible`
+.attribution-flow-backdrop.dialog-overlay {
+  z-index: 10010;
+
+  &:not(.attribution-flow-backdrop--visible) {
+    display: none;
+  }
+
+  &.attribution-flow-backdrop--visible {
+    display: flex;
+  }
+}
+
+.attribution-side-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 10020;
+  // 与主栏 .resizer 列对齐：左侧 8px 给拖条热区，header/body 从内容区排版，避免与 LMF 叠层
+  padding-left: 8px;
+  // 宽度由 TS 按主区 right_panel / 窄屏 90vw 设置；未执行脚本前略窄于全屏
+  width: 90vw;
+  max-width: 100vw;
+  box-sizing: border-box;
+  height: 100vh;
+  max-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-bg, #fafafa);
+  border-left: 1px solid var(--border-color, #ddd);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.08);
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform 0.2s ease, visibility 0.2s;
+
+  &.attribution-side-panel--open {
+    transform: translateX(0);
+    visibility: visible;
+  }
+}
+
+.attribution-side-panel-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--border-color, #ddd);
+    transition: background-color 0.2s ease;
+  }
+
+  &:hover::before,
+  &:active::before {
+    background: var(--resizer-hover, #999);
+  }
+}
+
+.attribution-side-panel-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border-color, #ddd);
+  background: var(--bg-color, #fff);
+}
+
+.attribution-side-panel-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.attribution-side-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.attribution-side-panel-link {
+  font-size: 9pt;
+  color: var(--link-color, #06c);
+  text-decoration: none;
+  white-space: nowrap;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.attribution-side-panel-close {
+  border: none;
+  background: transparent;
+  font-size: var(--font-icon-size, 20px);
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  color: var(--text-muted, #777);
+
+  &:hover {
+    color: var(--text-color, #333);
+  }
+}
+
+// 与主栏 .right_panel > #results 一致：不外圈留白，避免 --panel-bg 与 .LMF（--text-area-bg）间出现灰缝；正文边距由全局 .LMF（_responsive.scss）承担
+.attribution-side-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 0;
+}
+
+.attribution-panel-results {
+  min-height: 120px;
+}
+
+// 归因确认弹窗内文案
+.dialog-attribution-confirm-hint {
+  margin-bottom: 12px;
+  font-size: 9pt;
+  color: var(--text-muted, #666);
+  line-height: 1.4;
+}
+
+.dialog-attribution-confirm-target,
+.dialog-attribution-confirm-context {
+  margin-bottom: 10px;
+  font-size: 9pt;
+
+  .label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--text-muted, #666);
+  }
+
+  code {
+    display: block;
+    padding: 6px 8px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+    word-break: break-all;
+    font-family: lmf.$mono-font-stack;
+  }
+
+  .ctx-pre {
+    margin: 0;
+    max-height: 160px;
+    overflow: auto;
+    padding: 8px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 8.5pt;
+    font-family: lmf.$mono-font-stack;
+  }
+}
+
+// 与主区 Tooltip `.predictions` 同结构，紧跟 Target prediction 下方
+.dialog-attribution-confirm-topk.predictions-table {
+  margin-top: 10px;
+  font-size: 9pt;
+
+  .topk-chart-row--pickable:hover {
+    background: var(--hover-bg, rgba(0, 0, 0, 0.06));
+  }
+}

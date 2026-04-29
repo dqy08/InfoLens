@@ -1,0 +1,5 @@
+// 响应式断点配置（Sass 变量）
+// 统一在这里维护数值，供各处通过 @use 引入
+$breakpoint-mobile: 767px;
+$breakpoint-tablet: 768px;
+

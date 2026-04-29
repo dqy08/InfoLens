@@ -1,0 +1,22 @@
+/**
+ * GLTR可视化组件的常量定义
+ */
+
+/**
+ * 高亮相关的CSS类名和样式常量
+ */
+export const HIGHLIGHT_CONSTANTS = {
+    /** 高亮CSS类名 */
+    HIGHLIGHT_CLASS: 'bin-highlighted',
+    /** 下划线CSS类名 */
+    UNDERLINE_CLASS: 'bin-highlight-underline',
+    /** chunk 字符半开区间下划线（由 DOM Range 推算，不依赖 token rect） */
+    INTERVAL_UNDERLINE_CLASS: 'chunk-interval-underline',
+    /** 高亮边框颜色（CSS变量） */
+    HIGHLIGHT_COLOR: 'var(--bin-highlight-outline, #1e6fff)',
+    /** 边框宽度 */
+    BORDER_WIDTH: '1.5',
+    /** 下划线宽度 */
+    UNDERLINE_WIDTH: '2',
+} as const;
+

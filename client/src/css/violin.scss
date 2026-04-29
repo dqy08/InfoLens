@@ -1,0 +1,49 @@
+.discreteViolin,.compareVio, .HistogramX, .ScatterPlotX, .barchartX {
+  .bar {
+    fill: #666666;
+    stroke: #ccc;        // 添加浅灰色边框
+    stroke-width: 0.5px; // 细边框
+    transition-duration: .5s;
+
+    &:hover {
+      stroke: #666666;
+      stroke-width: 1px;
+      stroke-dasharray: 2,2 ;
+      //opacity: 1;
+    }
+
+    &.selected{
+      //stroke: #666666;
+      //stroke-width: 1px;
+      //stroke-dasharray: 2,2 ;
+      opacity: 1;
+    }
+  }
+
+  .sizeLabel {
+    font-size: 8px;
+    // font-family: "IBM Plex Sans", sans-serif;
+    font-weight: 400;
+    fill: var(--text-color);
+    // dominant-baseline: middle;
+    text-anchor: middle;
+  }
+
+
+  .label {
+    font-size: 10px;
+    // font-family: "IBM Plex Sans", sans-serif;
+    font-weight: bold;
+    dominant-baseline: middle;
+    text-anchor: middle;
+  }
+
+  .x-axis, .y-axis {
+    font-family: inherit;
+  }
+}
+
+.HistogramX {
+  background-color: transparent;
+  border-radius: 6px;
+}

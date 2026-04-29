@@ -1,0 +1,42 @@
+.cursor/
+.cache_huggingface
+# --- 核心语言与依赖 ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+node_modules/
+client/src/node_modules/
+client/src/.cache-loader/
+
+# --- 构建产物 ---
+client/dist/
+build/
+dist/
+*.egg-info/
+
+# --- 项目特定配置 ---
+# 忽略所有数据，防止误传大文件
+data/*
+# 白名单：只保留 GLTR 演示数据
+!data/demo/
+data/demo/*
+!data/demo/public/
+data/demo/public/.deleted/
+
+# 忽略临时笔记和 HuggingFace 缓存
+notes/*
+user_dialog_history/*
+.cache_huggingface/
+.env
+
+# --- 系统与 IDE ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.log
+.specstory
+scripts/log.py
+scripts/results/

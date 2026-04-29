@@ -1,0 +1,36 @@
+// 归因：GLTR 结果区 + debug 面板中与完整页/侧栏共用的展示（单一数据源）。
+// 修改本文件即可同时影响 attribution.html 右栏与 index 侧栏 #attribution_panel_results。
+@use "lmf-readout" as lmf;
+
+.attribution-inspector-surface {
+  position: relative;
+  min-width: 0;
+}
+
+// Ghost pill：箭头用 ::before，正文为单个文本子节点
+.LMF .text-layer .attribution-predicted-ghost-pill {
+  font-family: lmf.$mono-font-stack;
+  font-size: 10pt;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle; // 行内相对父级文字中线，避免默认基线对齐显得偏下
+  box-sizing: border-box;
+  margin-left: 1.5em;
+  padding: 0.12em 0.5em; // 箭头在框外，左右内边距对称
+  // border: 1px dashed rgba(120, 120, 130, 0.55);
+  border-radius: 9px;
+  background: rgba(255, 71, 64, 0.7);
+  // opacity: 0.75;
+
+  // 箭头在虚线框左侧外侧（仍用 ::before，无额外 DOM）
+  &::before {
+    content: '->';
+    position: absolute;
+    right: 100%;
+    margin-right: 0.1em;
+    opacity: 0.75;
+    color: var(--text-muted, #666);
+    white-space: nowrap;
+  }
+}

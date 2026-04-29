@@ -1,0 +1,276 @@
+// 通用弹窗样式
+
+// 遮罩层
+.dialog-overlay {
+  position: fixed;
+  top: -500px;  // 上边多500px余量，确保完全覆盖屏幕
+  left: 0;
+  right: 0;
+  bottom: -500px;  // 下边多500px余量
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;  // 模态框层级
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;  // 允许弹框内容滚动
+  -webkit-overflow-scrolling: touch;  // iOS 平滑滚动
+}
+
+// 对话框主体
+.dialog {
+  background: var(--bg-color, #fff);
+  border-radius: 8px;
+  padding: 16px;
+  // width 和 height 通过内联样式动态设置（因为需要根据参数计算）
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;  // 最大高度不超过视口高度的85%
+  overflow: hidden;  // 防止对话框本身滚动，由内部内容区域滚动
+  -webkit-overflow-scrolling: touch;  // iOS 平滑滚动
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  margin: 20px;  // 移动端边距
+  margin-top: max(20px, env(safe-area-inset-top, 20px));  // 安全区域顶部
+  margin-bottom: max(20px, env(safe-area-inset-bottom, 20px));  // 安全区域底部
+  margin-left: max(20px, env(safe-area-inset-left, 20px));  // 安全区域左侧
+  margin-right: max(20px, env(safe-area-inset-right, 20px));  // 安全区域右侧
+  box-sizing: border-box;  // 确保 padding 包含在宽度内
+  flex-shrink: 0;  // 防止 flex 压缩
+  
+  // 降级方案：不支持 env() 的浏览器
+  @supports not (margin-top: env(safe-area-inset-top)) {
+    margin-top: 20px;
+    margin-bottom: 20px;
+    margin-left: 20px;
+    margin-right: 20px;
+  }
+}
+
+// 对话框标题
+.dialog-title {
+  font-size: 16px;
+  font-weight: bold;
+  margin-bottom: 12px;
+  color: var(--text-color);
+  flex-shrink: 0; // 标题不收缩
+}
+
+// 对话框内容区域
+.dialog-content {
+  margin-bottom: 12px;
+  flex: 1;
+  min-height: 0;  // 允许flex子元素收缩
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;  // 防止内容区域本身滚动，由内部元素控制滚动
+}
+
+// 按钮容器
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-shrink: 0; // 按钮容器不收缩
+}
+
+// 对话框按钮基础样式
+.dialog-button {
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 500;
+  
+  // 取消按钮（次按钮：边框样式）
+  &.cancel {
+    background-color: transparent;
+    color: var(--text-color, #333);
+    border: 1px solid var(--input-border, #ccc);
+    
+    &:hover {
+      background-color: rgba(0, 0, 0, 0.05);
+      border-color: var(--input-border, #999);
+    }
+  }
+  
+  // 夜间模式下的取消按钮
+  :root[data-theme="dark"] & {
+    &.cancel {
+      &:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+      }
+    }
+  }
+  
+  // 确定按钮（主按钮：填充样式）
+  &.confirm {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    font-weight: 600;
+    
+    &:hover:not(:disabled) {
+      background-color: #0056b3;
+    }
+    
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    // 排队状态样式
+    &.queuing {
+      position: relative;
+      opacity: 0.7;
+      cursor: wait;
+      
+      .queuing-text {
+        display: inline-block;
+        margin-right: 8px;
+      }
+      
+      .queuing-spinner {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-top-color: white;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+    }
+    
+    // 排队状态动画
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  }
+}
+
+// 对话框表单元素样式
+.dialog-form-container {
+  margin-bottom: 15px;
+}
+
+.dialog-label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 14px;
+  color: var(--text-color);
+}
+
+// 标签容器（用于标签和字数显示同一行）
+.dialog-label-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+  
+  .dialog-label {
+    margin-bottom: 0;  // 在容器内时不需要底部边距
+    flex: 1;  // 标签占据剩余空间
+  }
+}
+
+.dialog-input {
+  width: 100%;
+  padding: 8px;
+  font-size: 16px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+  background: var(--bg-color, #fff);
+  color: var(--text-color);
+  
+  &:focus {
+    outline: none;
+    border-color: #007bff;
+  }
+}
+
+.dialog-select {
+  width: 100%;
+  padding: 8px;
+  font-size: 16px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+  background: var(--bg-color, #fff);
+  color: var(--text-color);
+  font-weight: normal;
+  
+  &:focus {
+    outline: none;
+    border-color: #007bff;
+  }
+}
+
+// 对话框消息文本
+.dialog-message {
+  font-size: 14px;
+  color: var(--text-color);
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+// 对话框文本区域（复用主输入框样式）
+.dialog-textarea {
+  font-family: inherit;
+  width: 100%;
+  min-height: 100px;
+  max-height: 300px;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 8px;
+  font-size: 16px;
+  border: 1px solid var(--input-border, #ccc);
+  border-radius: 4px;
+  background-color: var(--input-bg, #fff);
+  color: var(--text-color);
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+  
+  &:focus {
+    outline: none;
+    border-color: #007bff;
+  }
+}
+
+// 对话框文本区域字数显示（参照原有文本输入框的字数显示样式）
+.dialog-textarea-counter {
+  font-size: 8pt;
+  color: var(--text-muted, #666);
+  white-space: nowrap;
+  flex-shrink: 0;  // 字数显示不收缩
+}
+
+// 模型管理：设备信息块内文字继承主题色（.device-type / .quantization 无单独样式则继承）
+.dialog-form-container .device-info {
+  color: var(--text-color);
+}
+
+// Loading overlay（用于模型管理等长时操作）
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 150;  // 高于对话框层级
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.loading-content {
+  background: var(--bg-color, #fff);
+  border-radius: 8px;
+  padding: 30px 40px;
+  text-align: center;
+  
+  p {
+    margin-top: 15px;
+    color: var(--text-color);
+    font-size: 14px;
+  }
+}
+

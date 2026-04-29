@@ -1,0 +1,365 @@
+// Generate & Attribute 页：在 start + chat + attribution-inspector 之上叠本页差异
+@use "attribution-inspector";
+@use "generation-status";
+@use "lmf-readout" as lmf;
+
+// 单行右对齐：Cached history 最右、下拉相对整行 bar 全宽；Cached demos 靠其左侧、下拉随按钮宽（同 query-history 默认 left/right 于窄 wrapper）
+.chat-cached-history-bar.chat-cached-history-bar--dual {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 8px 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.chat-cached-history-bar--dual .chat-prompt-history-wrapper {
+  width: auto;
+  max-width: none;
+  flex: 0 0 auto;
+}
+
+// Demos：定位层仍在窄 wrapper 上；下拉本身用 max-content 加宽（见下方 #gen_attr_cached_demos_dropdown）
+.chat-cached-history-bar--dual .gen-attr-cached-demos-wrap {
+  position: relative;
+}
+
+// History：不设定位层，子下拉以父级 bar 为 containing block，left/right:0 占满整行
+.chat-cached-history-bar--dual .gen-attr-cached-history-wrap {
+  position: static;
+}
+
+#gen_attr_cached_history_dropdown.semantic-search-history-dropdown,
+#gen_attr_cached_demos_dropdown.semantic-search-history-dropdown {
+  height: min(32vh, 360px);
+  min-height: 120px;
+  max-height: none;
+  resize: vertical;
+  overflow-y: auto;
+}
+
+// 覆盖 mixin 的 left/right:0（与按钮同宽）：按标签内容加宽，右缘与按钮对齐、向左延伸；过长时由 max-width 限制，条内仍 ellipsis
+#gen_attr_cached_demos_dropdown.semantic-search-history-dropdown {
+  left: auto;
+  right: 0;
+  width: max-content;
+  min-width: max(100%, 240px);
+  max-width: min(100vw - 32px, 40rem);
+  box-sizing: border-box;
+}
+
+// 右栏：#results 即 LMF + 归因表面 + DAG 容器（一层 DOM）；.right_panel 纵向 flex 见 _responsive.scss
+.gen-attribute-page {
+  // 覆盖全局 .LMF 的 min-height:350px，使本栏可作为 flex 子项收缩；图区高度由 svg min-height 兜底
+  #results.gen-attr-results-surface.LMF {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 20px;
+    background: var(--text-area-bg);
+    color: var(--text-color);
+    overflow: visible;
+  }
+
+  @media (max-width: 767px) {
+    #results.gen-attr-results-surface.LMF {
+      padding: 15px 12px;
+    }
+  }
+
+  // DAG：不可见测量层撑开高度，SVG 绝对定位叠在同栈内（坐标与 LMF 正文一致）
+  // 初始 d3.zoom 缩放为 1/本变量，抵消 display-scale 在屏上的整体缩小感（见 genAttributeDagView）
+  // 边色：`--dag-normal-line-color`、`--dag-highlight-line-color-in` / `out` 与节点描边 `--token-hover-outline` 同在 start.scss（见 genAttributeDagView）。
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-stack {
+    // display-scale：节点框大小相对测量几何的缩放；节点标签字号在此基础上再乘 node-text-font-scale（略小于 1 即自带左右留白感）
+    --gen-attr-dag-display-scale: 0.5;
+    --gen-attr-dag-node-text-font-scale: 0.9;
+    // --gen-attr-dag-prompt-node-fill: rgba(221, 179, 120, 0.29);
+    // #99BFD1 浅蓝
+    --gen-attr-dag-prompt-node-fill: rgba(0, 255, 225, 0.28);
+    // --gen-attr-dag-prompt-node-fill: rgba(0, 174, 255, 0.28);
+    --gen-attr-dag-generated-node-fill: rgba(255, 165, 0, 0.28);
+    position: relative;
+    // 测量层在流内可极高；basis 用 0% 避免「内容高度」参与 flex 初始主尺寸，把图区限制在 #results 剩余高度内，以免撑出 .right_panel 纵向滚动条；overflow 非 visible 使 flex 自动最小高度按 0 计（见 css-flexbox-1 #min-size-auto）
+    flex: 1 1 0%;
+    min-height: 280px;
+    overflow: hidden;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  // 勾选「Hide inactive edges」时隐藏未与焦点相邻的灰边（linkG 容器内的边）；
+  // 与焦点相邻的高亮边由 genAttributeDagView 运行时搬运到 .gen-attr-dag-links-front 中，不受影响。
+  #results.gen-attr-results-surface.LMF.gen-attr-dag-hide-inactive-edges .gen-attr-dag-svg .gen-attr-dag-links {
+    display: none;
+  }
+
+  // 节点标签：与测量层同源 1em × display-scale × node-text-font-scale（后者略小于 1 替代固定 padding）
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node-text {
+    font-size: calc(
+      1em * var(--gen-attr-dag-display-scale, 1) * var(--gen-attr-dag-node-text-font-scale, 0.9)
+    );
+    font-family: inherit;
+    font-weight: inherit;
+    fill: var(--text-color, #222);
+    // 与 `xml:space="preserve"` 一致，避免部分引擎压扁/吞掉空格
+    white-space: pre;
+  }
+
+  // 节点框：默认无边框；悬停/选中描边与 start.scss `.token` 的 outline 2px 在屏上一致：
+  // 几何按 --gen-attr-dag-display-scale 缩小后，genAttributeDagView 用 zoom 1/scale 拉回，故用户空间描边需 ×scale，
+  // 使 2×s × (1/s) = 2（css px）。（s 可变时仍成立。）
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node > rect {
+    stroke: none;
+    stroke-width: 0;
+    fill: var(--gen-attr-dag-generated-node-fill);
+  }
+
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node--prompt > rect {
+    fill: var(--gen-attr-dag-prompt-node-fill);
+  }
+
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node--hover > rect,
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node--selected > rect {
+    stroke: var(--token-hover-outline);
+    stroke-width: calc(2 * var(--gen-attr-dag-display-scale, 1));
+  }
+
+  // 与 genAttributeDagView 中「仅选中节点可拖」一致：可拖时提示 grab
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node--selected {
+    cursor: grab;
+    &:active {
+      cursor: grabbing;
+    }
+  }
+
+  // 默认 width:100%（随容器）仅作回退；genAttributeDagView 会在 init 与 `setMeasureWidthPx`
+  // 时以 inline style 写入固定像素宽度。测量层宽度是节点几何（折行位置）的唯一输入，
+  // 固定后 resize/全屏等容器变化不再影响节点布局，只影响 fit 的视口缩放/平移。
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-measure-layer {
+    @include lmf.lmf-readout-text;
+    visibility: hidden;
+    pointer-events: none;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    min-height: 280px;
+    display: block;
+    touch-action: none;
+    z-index: 1;
+    // 使子节点 `1em` 与右栏 LMF 正文字号一致（与测量层同源）
+    font-size: inherit;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  // 窄屏 / 强制窄屏：右栏常为 height:auto，DAG 易「很宽、很矮」；min-height 兜底；若非全屏再对 stack 设 max-height(≈80dvh)+flex-shrink:0。（全屏时 #results 带 :fullscreen 或 .css-pseudo-fullscreen-target，用 :not 排除后不施加封顶。）
+  $_dag-narrow-stack-min: max(300px, min(60dvh, 680px));
+  $_dag-narrow-stack-max-h: 80dvh;
+  $_results-not-fs: ':not(:fullscreen):not(.css-pseudo-fullscreen-target)';
+
+  @media (max-width: 767px) {
+    #results.gen-attr-results-surface.LMF .gen-attr-dag-stack,
+    #results.gen-attr-results-surface.LMF .gen-attr-dag-svg {
+      min-height: min($_dag-narrow-stack-min, $_dag-narrow-stack-max-h);
+    }
+
+    #results.gen-attr-results-surface.LMF#{$_results-not-fs} .gen-attr-dag-stack {
+      flex-shrink: 0;
+      max-height: $_dag-narrow-stack-max-h;
+    }
+  }
+
+  @at-root html[data-force-narrow]:has(.main_frame) body#{&} {
+    #results.gen-attr-results-surface.LMF .gen-attr-dag-stack,
+    #results.gen-attr-results-surface.LMF .gen-attr-dag-svg {
+      min-height: min($_dag-narrow-stack-min, $_dag-narrow-stack-max-h);
+    }
+
+    #results.gen-attr-results-surface.LMF#{$_results-not-fs} .gen-attr-dag-stack {
+      flex-shrink: 0;
+      max-height: $_dag-narrow-stack-max-h;
+    }
+  }
+
+  // #results 已有 .attribution-inspector-surface { position: relative }
+  // 与历史下拉里 ↑ / × 一致：等宽 `--font-icon`（见 start.scss）
+  #results.gen-attr-results-surface.LMF > button.gen-attr-dag-play,
+  #results.gen-attr-results-surface.LMF > button.gen-attr-dag-refresh,
+  #results.gen-attr-results-surface.LMF > button.gen-attr-dag-fullscreen {
+    position: absolute;
+    top: 12px;
+    z-index: 2;
+    font-family: var(--font-icon);
+    font-size: var(--font-icon-size);
+    line-height: 1;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  // 从右到左：⛶ (fullscreen) → ↻ (refresh) → ▶ (play)
+  #results.gen-attr-results-surface.LMF > button.gen-attr-dag-fullscreen {
+    right: 12px;
+  }
+
+  #results.gen-attr-results-surface.LMF > button.gen-attr-dag-refresh {
+    right: 48px;
+  }
+
+  #results.gen-attr-results-surface.LMF > button.gen-attr-dag-play {
+    right: 84px;
+  }
+
+  // --- WORKAROUND：原生全屏不可用时的 CSS 伪全屏（见 ts/ui/cssPseudoFullscreen.ts），与 :fullscreen 共用版心样式 ---
+  #results.gen-attr-results-surface.LMF:fullscreen,
+  #results.gen-attr-results-surface.LMF.css-pseudo-fullscreen-target {
+    width: 100vw;
+    height: 100vh;
+    padding: 20px;
+    background: var(--text-area-bg);
+    color: var(--text-color);
+    overflow: auto;
+    box-sizing: border-box;
+  }
+
+  #results.gen-attr-results-surface.LMF.css-pseudo-fullscreen-target {
+    position: fixed;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9000;
+  }
+}
+
+:root[data-theme="dark"] .gen-attribute-page #results.gen-attr-results-surface.LMF:fullscreen,
+:root[data-theme="dark"] .gen-attribute-page #results.gen-attr-results-surface.LMF.css-pseudo-fullscreen-target {
+  background: var(--gen-attr-dag-canvas-bg);
+}
+
+// 夜间：DAG 与 #results 的 padding「外圈」同色（外圈属父级 #results，非 .gen-attr-dag-stack 的 border）
+:root[data-theme="dark"] .gen-attribute-page #results.gen-attr-results-surface.LMF {
+  --gen-attr-dag-canvas-bg: #101010;
+  background: var(--gen-attr-dag-canvas-bg);
+}
+
+:root[data-theme="dark"] .gen-attribute-page #results.gen-attr-results-surface.LMF .gen-attr-dag-stack {
+  background: var(--gen-attr-dag-canvas-bg);
+  // --gen-attr-dag-prompt-node-fill: rgba(203, 160, 115, 0.28);
+}
+
+// 与 Chat 页 .text-metrics-chat #metric_usage 对齐（本页使用独立 id）
+.text-metrics-chat #gen_attr_metric_usage .text-metrics-api-usage {
+  font-size: inherit;
+  line-height: inherit;
+  opacity: 1;
+}
+
+// Max tokens 输入框：紧凑数字输入
+.gen-attr-max-tokens-input {
+  width: 64px;
+  padding: 3px 6px;
+  font-size: inherit;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text-color);
+  text-align: right;
+}
+
+// 与 Chat 共用的 .generation-status-slot 见 _generation-status.scss
+
+// 与 Chat 页一致：System 输入框较矮
+.input-section .textarea-wrapper textarea#gen_attr_system_text {
+  height: 50px;
+}
+
+// 与 Attribution 页 Exclude prompt patterns 同形；generated 仅本页有 UI（持久化键见 attributionExclude*PatternsStorage）
+.attribution-exclude-prompt-patterns-row {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.attribution-exclude-prompt-patterns-header {
+  flex-wrap: wrap;
+
+  .semantic-submode-label {
+    font-size: inherit;
+  }
+
+  &:not(:has(#gen_attr_exclude_prompt_patterns_enable:checked)) .semantic-submode-label {
+    color: var(--text-muted);
+  }
+
+  &:has(#gen_attr_exclude_prompt_patterns_enable:checked) .semantic-submode-label {
+    color: var(--text-primary);
+  }
+}
+
+.attribution-exclude-generated-patterns-header {
+  flex-wrap: wrap;
+
+  .semantic-submode-label {
+    font-size: inherit;
+  }
+
+  &:not(:has(#gen_attr_exclude_generated_patterns_enable:checked)) .semantic-submode-label {
+    color: var(--text-muted);
+  }
+
+  &:has(#gen_attr_exclude_generated_patterns_enable:checked) .semantic-submode-label {
+    color: var(--text-primary);
+  }
+}
+
+// DAG 测量层宽度：与 .gen-attr-max-tokens-input 同形
+.gen-attr-dag-measure-width-row {
+  margin-top: 8px;
+}
+
+.gen-attr-dag-measure-width-input {
+  width: 72px;
+  padding: 3px 6px;
+  font-size: inherit;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text-color);
+  text-align: right;
+}
+
+.attribution-exclude-prompt-patterns-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 9pt;
+  padding: 6px 8px;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text-color);
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+}
+
+// --- WORKAROUND：伪全屏时锁 body 滚动（同 ts/ui/cssPseudoFullscreen.ts） ---
+body.css-pseudo-fullscreen-body-lock {
+  overflow: hidden;
+}

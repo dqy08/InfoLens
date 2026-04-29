@@ -1,0 +1,17 @@
+// 生成类页面（Raw Chat、Causal Flow 等）共用：转圈与生成结束原因同槽展示
+
+.generation-status-slot.loader-small-container {
+  display: flex;
+  align-items: center;
+}
+
+.generation-status-slot .generation-end-reason {
+  font-size: 8.5pt;
+  font-style: italic;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.generation-status-slot .generation-end-reason:empty {
+  display: none;
+}

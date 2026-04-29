@@ -1,0 +1,14 @@
+transformers>=4.51.0,<5.0.0  # 5.x 需 accelerate库，HF Spaces 上易出问题
+torch>=2.1.0,<2.5.0
+numpy>=1.24.0
+connexion[flask,swagger-ui,uvicorn]>=3.0.0
+flask>=3.0.0
+PyYAML>=6.0
+flask-cors>=4.0.0
+Flask-Compress>=1.14
+accelerate>=0.30.0,<1.0.0
+bitsandbytes>=0.43.0
+hf-transfer>=0.1.0
+autoawq>=0.2.0  # Transformers AWQ 支持所需的后端库（已弃用但必需）
+trafilatura>=1.6.0
+requests>=2.31.0

@@ -1,0 +1,204 @@
+// Chat 页面：在 start.scss 之上叠少量工具栏与内联下拉样式
+
+@use "buttons";
+@use "generation-status";
+@use "lmf-readout" as lmf;
+@use "query-history-dropdown" as qh;
+
+// Raw prompt mode 行在输入区上方，与下方面板留出间距
+.input-section > .chat-raw-prompt-mode-row {
+  margin-bottom: 8px;
+}
+
+// 与 Raw prompt 行同结构：Ask 行上方单独配置（max new tokens）
+.input-section .textarea-wrapper.chat-prompt-actions-row .chat-completion-options-row {
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+.chat-max-new-tokens-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-max-new-tokens-input {
+  min-width: 5em;
+}
+
+// Chat 模板模式：System / User 两块纵向堆叠
+#chat_input_panel .chat-prompt-panel + .chat-prompt-panel {
+  margin-top: 12px;
+}
+
+// System 行：勾选「使用 system」时与标签同一行；未勾选时仅禁用输入区与按钮（标签仍可点）
+.chat-use-system-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+}
+
+.chat-prompt-panel.chat-system-prompt-suppressed .text-action-buttons-top,
+.chat-prompt-panel.chat-system-prompt-suppressed .textarea-wrapper.chat-prompt-textarea-block {
+  opacity: 0.55;
+}
+
+// 右栏 .right_panel 的纵向 flex 已见 _responsive.scss（全页统一）
+
+// 双实例：与下方 LMF 视觉上同一阅读区（同色、同字号行高、单一内边距，无分隔缝）
+// 不设 min-height:0：否则栈被压成视口高，长文 overflow 落在盒外，背景不跟字延伸（露出 .right_panel 灰底）。
+.chat-right-stack {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--text-area-bg);
+  color: var(--text-color);
+  // 与桌面端 #results .LMF 的 20px 一致，整块共用一个 padding，避免 prompt / LMF 双份留白
+  padding: 20px;
+  // 为 token 发光留出与原先 LMF 相当的边距（原先由 LMF padding 承担）
+  overflow: visible;
+}
+
+// 归因/Chat 右栏：栈内整栏为 --text-area-bg，debug 条需与首页语义区下方（透出 .right_panel）视觉一致
+.chat-right-stack .semantic-debug-info {
+  background-color: var(--panel-bg);
+}
+
+// 与 LMF 可读正文同源（_lmf-readout.scss）；颜色用 token 截断区同款灰，与续写主文区分
+// 与窄屏一致：不设框内 max-height/scroll，长文由 .right_panel 纵向滚动，整块背景随内容延伸
+.chat-prompt-used {
+  @include lmf.lmf-readout-text;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  border: none;
+  background-color: transparent;
+  color: var(--token-truncated-color);
+}
+
+// 流式续写预览：delta 阶段替代 #results 内 LMF 的阅读区；结束后由 LMF 接管信息密度可视化
+.chat-streaming-preview {
+  @include lmf.lmf-readout-text;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  position: relative;
+  background-color: transparent; // 不叠在 .chat-right-stack 的 --text-area-bg 上
+}
+
+// 首包前预览仍 hidden：保留 #results 占位；有正文后与 LMF 互斥，占满剩余高度，由 .right_panel 滚动（与 LMF 一致）
+// 不设 min-height:0：与 .chat-right-stack 同理，避免预览区被压扁后正文落在盒外、背景断层。
+.chat-right-stack.chat-ask-in-flight #chat_streaming_preview:not([hidden]) {
+  flex: 1 1 auto;
+  overflow: visible;
+}
+
+.chat-right-stack.chat-ask-in-flight #chat_streaming_preview:not([hidden]) ~ #results {
+  flex: 0 0 0;
+  min-height: 0 !important;
+  max-height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+// 与 :root[data-theme="dark"] .LMF 一致：该二元素不在 .LMF 内，需单独对齐 300
+:root[data-theme="dark"] {
+  .chat-prompt-used,
+  .chat-streaming-preview {
+    font-weight: 300;
+  }
+}
+
+.chat-right-stack #results {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-copy-fulltext-row {
+  flex: 0 0 auto;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+  display: flex;
+  justify-content: flex-end;
+}
+
+// 内边距已由 .chat-right-stack 提供，此处去掉 LMF 默认 padding，与 prompt 区无缝衔接
+.chat-right-stack #results .LMF {
+  padding: 0;
+}
+
+@media (max-width: 767px) {
+  .chat-right-stack {
+    // 与 _responsive.scss 窄屏 .LMF 的 15px 12px 对齐
+    padding: 15px 12px;
+  }
+
+  // 窄屏：随内容增高，由 body 滚动，无框内滚动条
+  .input-section .textarea-wrapper textarea {
+    min-height: 80px;
+    max-height: none;
+    height: auto;
+    field-sizing: content;
+  }
+
+  .chat-right-stack #results .LMF.minimap-enabled {
+    padding-right: calc(12px + var(--minimap-width));
+  }
+}
+
+// 顶栏外壳与动作区见 start.scss（.app-page-toolbar / .app-page-toolbar--bleed / .app-page-toolbar-actions）
+
+// 与原先指标区首行（bytes|chars|tokens）一致；不再用嵌套在 tokens 下时的 0.88em 子行缩小
+.text-metrics-chat #metric_usage .text-metrics-api-usage {
+  font-size: inherit;
+  line-height: inherit;
+  opacity: 1;
+}
+
+// 左栏：toolbar 与输入区之间，续写缓存入口（wrapper 全宽以便下拉 left/right 撑满；按钮用 flex 靠右）
+.chat-cached-history-bar {
+  margin-bottom: 12px;
+}
+
+.chat-cached-history-bar .chat-prompt-history-wrapper {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+// Chat：与首页共用 mixin（类名与 localStorage 亦与 semantic 查询历史一致）
+.chat-prompt-history-wrapper {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.chat-prompt-history-wrapper .semantic-search-history-dropdown {
+  @include qh.query-history-dropdown;
+}
+
+// Chat：Prompt 文本框初始高度（覆盖 start.scss 全局 textarea 与 max-height:300px）
+.input-section .textarea-wrapper textarea {
+  height: 250px;
+}
+
+// System 输入框单独较矮，默认 50px
+.input-section .textarea-wrapper textarea#chat_system_text {
+  height: 50px;
+}
+@media (min-width: 768px) {
+  .input-section .textarea-wrapper textarea {
+    font-size: calc(var(--font-size-base) + 2pt);
+  }
+}

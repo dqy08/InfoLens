@@ -1,0 +1,43 @@
+// 语义搜索 / Chat 共用：查询历史下拉列表视觉
+@mixin query-history-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin: 2px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 100;
+  display: none;
+
+  &.is-visible {
+    display: block;
+  }
+
+  li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    cursor: pointer;
+    gap: 8px;
+
+    &:hover {
+      background: var(--hover-bg, rgba(0, 0, 0, 0.05));
+    }
+
+    .history-text {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}

@@ -1,0 +1,210 @@
+// 语义分析相关样式（section、查询输入、历史下拉、loader）
+
+@use "loaders";
+@use "breakpoints" as *;
+@use "query-history-dropdown" as qh;
+@use "lmf-readout" as lmf;
+
+// 子模式行：首页语义区、Chat 等复用（与 Ask 按钮分离时单独成行）
+.semantic-submode-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  .semantic-submode-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    &.semantic-submode-group-right {
+      margin-left: auto;
+    }
+  }
+
+  .semantic-submode-label {
+    font-size: 9pt;
+    color: var(--text-muted);
+  }
+
+  .semantic-submode-select {
+    padding: 4px 8px;
+    font-size: inherit;
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+    background: var(--input-bg);
+    color: var(--text-color);
+    min-width: 100px;
+  }
+
+  .semantic-threshold-input {
+    width: 4em;
+    padding: 4px 8px;
+    font-size: inherit;
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+    background: var(--input-bg);
+    color: var(--text-color);
+  }
+}
+
+// 语义分析区（在 button-group 与 histogram 之间，仅在 semantic_analysis 模式下显示）
+.semantic-analysis-section {
+  margin-top: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-color);
+
+  .semantic-index-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+
+    .semantic-index-model {
+      flex: 1 1 auto;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 8pt;
+      color: var(--text-muted);
+      min-width: 150px;
+      min-height: 32px;
+      text-align: center;
+    }
+
+    .semantic-index-model.is-hidden {
+      visibility: hidden;
+      opacity: 0;
+    }
+  }
+
+  .semantic-analysis-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    .semantic-search-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .semantic-search-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+      min-width: 0;  // 允许内部长文案在 wrap 时换行，而非撑破父级后裁切
+    }
+
+    .semantic-match-degree {
+      font-size: 9pt;
+      color: var(--text-muted, #666);
+      white-space: nowrap;
+      flex-shrink: 0;  // 参与布局，且不被 flex 挤没
+
+      :root[data-theme="dark"] & {
+        color: var(--text-muted, #999);
+      }
+    }
+
+    // flex-grow: 0 — 输入区宽度不随右侧（匹配度/Stop·Search 切换）变化，Search 按钮相对行首位置固定
+    .semantic-search-input-wrapper {
+      flex: 0 1 300px;
+      min-width: 100px;
+      max-width: 300px;
+      position: relative;
+    }
+
+    .semantic-search-input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 28px 6px 10px;
+      font-family: inherit;
+      border: 1px solid var(--input-border);
+      border-radius: 4px;
+      background: var(--input-bg);
+      color: var(--text-color);
+    }
+
+    .semantic-search-clear {
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 16px;
+      height: 16px;
+      padding: 0;
+      outline: none;
+      display: none;
+      align-items: center;
+      justify-content: center;
+
+      &.is-visible { display: flex; }
+    }
+
+    .semantic-search-history-dropdown {
+      @include qh.query-history-dropdown;
+    }
+  }
+}
+
+// 语义索引 loader：与 loadersmall 同风格，独立控制（不受 isGlobalLoading 影响）
+.semantic-index-loader {
+  @extend .loadersmall;
+}
+
+// 语义搜索 loader：与 semantic-index-loader 同风格
+.semantic-search-loader {
+  @extend .loadersmall;
+}
+
+// 语义分析 debug 信息（文本渲染区下方，仅在有 debug 数据时显示）
+.semantic-debug-info {
+  margin-top: 8px;
+  padding: 8px;
+  font-size: 9pt;
+  color: var(--text-muted, #666);
+  border-top: 1px solid var(--border-color);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  min-width: 0;  // 允许在 flex 中收缩
+  max-width: 100%;
+  box-sizing: border-box;
+
+  .semantic-debug-abbrev pre {
+    margin: 0 0 6px 0;
+    font-size: inherit;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    max-width: 100%;
+  }
+
+  // TopK 图表：与 tooltip 一致，宽度更大，与上方打印区留间隔
+  .semantic-debug-topk-chart {
+    margin-top: 20px;
+  }
+}
+
+// 语义分析阶段级进度：参与 flex 布局，占据实际宽度，避免绝对定位溢出被裁切/遮挡
+.semantic-progress {
+  display: none;
+  font-size: 9pt;
+  color: var(--text-muted, #666);
+  white-space: nowrap;
+  line-height: 1.2;
+  flex-shrink: 0;
+
+  :root[data-theme="dark"] & {
+    color: var(--text-muted, #999);
+  }
+}
+
+// 窄屏：与 _responsive 中 input[type=text] 的 16px 一致；上方三层嵌套选择器优先级高于 input[type=text]，故在此用同权重规则 + 源顺序覆盖
+@media (max-width: $breakpoint-mobile) {
+  .semantic-analysis-section .semantic-analysis-controls .semantic-search-input {
+    font-size: 16px;
+  }
+}

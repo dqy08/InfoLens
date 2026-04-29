@@ -1,0 +1,207 @@
+$breakpoint-mobile: 767px;
+
+// 导航页主/副标题字阶与顶栏子页解耦；仅本页使用下列变量
+body.nav-landing-page {
+  --nav-landing-title-size: 22px;
+  --nav-landing-title-weight: 600;
+  --nav-landing-subtitle-size: 16px;
+  --nav-landing-subtitle-weight: 400;
+  --nav-landing-line-height: 1.2;
+  --nav-landing-subtitle-line-height: 1.5;
+  --nav-landing-card-bg: #eeeeee;
+  --nav-landing-card-bg-hover: #e0e0e0;
+
+  // 覆盖子页/响应式里对 body{height:100vh} 的设定：固定视口高 + flex 纵向居中时，
+  // 内容总高超过一屏会向上溢出，顶栏（设置按钮）会落在首屏外。
+  position: relative;
+  min-height: 100vh;
+  height: auto;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-color, #1a1a1a);
+  background: var(--app-bg, #f5f5f5);
+}
+
+// 相对 body 右上角定位，随页面滚动；不参与 flex 流，不单独占一行
+.nav-landing-settings {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(1.25rem, env(safe-area-inset-right));
+  z-index: 10;
+  box-sizing: border-box;
+}
+
+html[data-theme='dark'] body.nav-landing-page {
+  color: var(--text-color, #e4e4e4);
+  background: var(--app-bg, #121212);
+  --nav-landing-card-bg: #2a2a2a;
+  --nav-landing-card-bg-hover: #333333;
+}
+
+.nav-landing-main {
+  width: 100%;
+  // 与双列断点一致：窄/中屏仍由 width:100% 撑满视口（受 padding 限制）
+  max-width: 44rem;
+  box-sizing: border-box;
+  padding: 2rem 1.25rem;
+}
+
+// 宽屏：放大主区域，卡片与预览块随之变宽变高
+@media (min-width: $breakpoint-mobile + 1) {
+  .nav-landing-main {
+    max-width: 64rem;
+  }
+}
+
+.nav-landing-hero {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.nav-landing-title {
+  font-size: var(--nav-landing-title-size);
+  font-weight: var(--nav-landing-title-weight);
+  line-height: var(--nav-landing-line-height);
+  margin: 0 0 0.35rem 0;
+}
+
+.nav-landing-subtitle {
+  margin: 0 auto;
+  max-width: 40rem;
+  font-size: var(--nav-landing-subtitle-size);
+  font-weight: var(--nav-landing-subtitle-weight);
+  line-height: var(--nav-landing-subtitle-line-height);
+}
+
+.nav-landing-hint {
+  margin: 2rem 0 0;
+  text-align: center;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--text-muted, #666);
+  opacity: 0.82;
+  letter-spacing: 0.02em;
+}
+
+.nav-landing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: $breakpoint-mobile) {
+  .nav-landing-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.nav-landing-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 8px;
+  text-decoration: none;
+  color: inherit;
+  text-align: left;
+  background: var(--nav-landing-card-bg, #e6e6e6);
+  border: 1px solid var(--border-color, #ddd);
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: var(--nav-landing-card-bg-hover, #dcdcdc);
+  }
+}
+
+html[data-theme='dark'] .nav-landing-card {
+  border-color: var(--border-color, #333);
+}
+
+// 与卡片同色，不单独铺底
+.nav-landing-card-text {
+  padding: 0;
+}
+
+.nav-landing-card-title {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: var(--nav-landing-line-height);
+}
+
+.nav-landing-card-subtitle {
+  display: block;
+  text-align: right;
+  font-size: 0.82rem;
+  font-weight: 400;
+  line-height: var(--nav-landing-line-height);
+  color: var(--text-muted, #666);
+}
+
+.nav-landing-card-shot {
+  flex-shrink: 0;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  box-sizing: border-box;
+  background: var(--bg-hover, #f0f0f0);
+  background-size: cover;
+  // 裁切时保留左上内容（右侧、下侧被裁）
+  background-position: left top;
+  background-repeat: no-repeat;
+}
+
+// content/images：日/夜各一套；LLM Causal Flow 另按 html lang 分中/英，经 webpack 产出 URL
+.nav-landing-card[data-nav-page='analysis'] .nav-landing-card-shot {
+  background-image: url('../content/images/highlight.png');
+  background-color: var(--bg-hover, #f0f0f0);
+}
+
+.nav-landing-card[data-nav-page='chat'] .nav-landing-card-shot {
+  background-image: url('../content/images/chat.png');
+  background-color: var(--bg-hover, #f0f0f0);
+}
+
+.nav-landing-card[data-nav-page='attribution'] .nav-landing-card-shot {
+  background-image: url('../content/images/attribute.png');
+  background-color: var(--bg-hover, #f0f0f0);
+}
+
+// LLM Causal Flow：日/夜 × 中/英（见 content/images/dag-*.png）
+.nav-landing-card[data-nav-page='genAttribute'] .nav-landing-card-shot {
+  background-image: url('../content/images/dag-en.png');
+  background-color: var(--bg-hover, #f0f0f0);
+}
+
+html[lang='zh-CN'] .nav-landing-card[data-nav-page='genAttribute'] .nav-landing-card-shot {
+  background-image: url('../content/images/dag-cn.png');
+  background-color: var(--bg-hover, #f0f0f0);
+}
+
+html[data-theme='dark'] .nav-landing-card[data-nav-page='analysis'] .nav-landing-card-shot {
+  background-image: url('../content/images/highlight-dark.png');
+  background-color: var(--bg-hover, #2a2a2a);
+}
+
+html[data-theme='dark'] .nav-landing-card[data-nav-page='chat'] .nav-landing-card-shot {
+  background-image: url('../content/images/chat-dark.png');
+  background-color: var(--bg-hover, #2a2a2a);
+}
+
+html[data-theme='dark'] .nav-landing-card[data-nav-page='attribution'] .nav-landing-card-shot {
+  background-image: url('../content/images/attribute-dark.png');
+  background-color: var(--bg-hover, #2a2a2a);
+}
+
+html[data-theme='dark'] .nav-landing-card[data-nav-page='genAttribute'] .nav-landing-card-shot {
+  background-image: url('../content/images/dag-dark-en.png');
+  background-color: var(--bg-hover, #2a2a2a);
+}
+
+html[data-theme='dark'][lang='zh-CN'] .nav-landing-card[data-nav-page='genAttribute'] .nav-landing-card-shot {
+  background-image: url('../content/images/dag-dark-cn.png');
+  background-color: var(--bg-hover, #2a2a2a);
+}

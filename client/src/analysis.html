@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title></title>
+    <meta name="description"
+      content="Info Highlight visualizes token-level information density in text using LLMs, helping you quickly find key content and skip redundancy.">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="start.css">
+</head>
+
+<body>
+
+    <main class="main_frame">
+        <section class="left_panel">
+            <div class="floating_content">
+                <header class="app-page-toolbar app-page-toolbar--bleed">
+                    <h1 class="page-toolbar-title"><span class="title-main-line"><span data-page-title data-i18n></span><span class="title-tagline" data-page-subtitle data-i18n></span></span></h1>
+                    <div class="app-page-toolbar-actions">
+                        <a href="index.html" class="home-link" title="InfoLens Home" data-i18n="text,title">InfoLens Home</a>
+                        <a href="compare.html?showTextRender=1&demos=/quick-start-1.json,/quick-start-2.json" target="_blank" class="compare-link" style="display: none;" title="Compare analysis results" data-i18n="text,title">Compare results</a>
+                        <div class="settings-menu-wrapper">
+                            <button id="settings_btn" class="settings-btn" title="Settings" data-i18n="title">
+                                <span class="settings-icon">⚙️</span>
+                            </button>
+                            <div id="settings_menu" class="settings-menu" style="display: none;">
+                                <!-- INCLUDE partials/settings-menu-analysis.html -->
+                                <!-- INCLUDE partials/settings-menu-common-mid.html -->
+                                <!-- INCLUDE partials/settings-menu-trailing-admin.html -->
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <!-- 首页介绍内容容器（由 JS 动态加载） -->
+                <section id="home-intro-content" class="intro-section">
+                    <!-- Content will be loaded dynamically -->
+                </section>
+
+                <section class="demo-section">
+                    <div class="demo-header">
+                        <span id="demo_header_text" data-i18n>Quick start - select a demo:</span>
+                        <button id="refresh_demo_btn" class="refresh-btn" title="Refresh demo list" data-i18n="title">↻</button>
+                        <div class="file-input-wrapper">
+                            <button id="open_local_demo_btn" class="file-input-button" type="button" title="Open demo file from local" data-i18n="text,title">Select local</button>
+                            <span id="open_local_demo_filename" class="file-input-filename" data-i18n>No file
+                                selected</span>
+                            <input type="file" id="open_local_demo_input" style="display: none;"
+                                accept=".json,application/json">
+                        </div>
+                        <span id="demos_loading" class="demos-loading" data-i18n>Refreshing...</span>
+                    </div>
+                    <div class="demos"></div>
+                </section>
+
+                <section class="input-section">
+                    <div class="input-header">
+                        <span id="input_header_text"><span class="demo" data-i18n>or enter text:</span></span>
+                        <div class="text-action-buttons-top">
+                            <div class="textarea-counter" id="text_count_display">
+                                <span id="text_count_value">0</span> <span id="char_unit" data-i18n>chars</span>
+                            </div>
+                            <button id="clear_text_btn" class="text-action-btn" data-i18n>Clear</button>
+                            <button id="paste_text_btn" class="text-action-btn" data-i18n>Paste</button>
+                            <button id="load_url_btn" class="text-action-btn" title="Load text from URL and analyze"
+                                data-i18n="text,title">Analyze URL</button>
+                            <button id="analyze_save_btn" class="text-action-btn" data-i18n>Analyze&Upload</button>
+                        </div>
+                    </div>
+                    <div class="textarea-wrapper">
+                        <textarea id="test_text"></textarea>
+                        <div class="button-group">
+                            <div class="button-left">
+                                <button id="submit_text_btn" class="primary-btn" data-i18n>Analyze</button>
+                                <div class="loadersmall loader-small-container"></div>
+                                <span id="analyze_progress" class="analyze-progress"></span>
+                            </div>
+                            <div id="text_metrics" class="text-metrics">
+                                <div class="text-metrics-primary">
+                                    <span id="metric_bytes">0 B</span>
+                                    <span class="text-metrics-divider">|</span>
+                                    <span id="metric_chars">0 chars</span>
+                                    <span class="text-metrics-divider">|</span>
+                                    <span id="metric_tokens">0 tokens</span>
+                                </div>
+                                <div id="metric_total_surprisal" class="text-metrics-secondary">total information = 0
+                                    bits</div>
+                                <div id="metric_model" class="text-metrics-secondary">model: </div>
+                            </div>
+                            <div class="button-right">
+                                <button id="save_demo_btn" class="primary-btn inactive" data-i18n>Upload</button>
+                                <button id="save_local_demo_btn" class="primary-btn inactive" title="Save to local file"
+                                    data-i18n="text,title">Save</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="semantic_analysis_section" class="semantic-analysis-section" style="display: none;">
+                    <div class="semantic-analysis-controls">
+                        <div class="semantic-search-row">
+                            <div class="semantic-search-input-wrapper">
+                                <input type="text" id="semantic_search_input" class="semantic-search-input" placeholder="Enter query for semantic analysis">
+                                <button type="button" id="semantic_search_clear" class="semantic-search-clear demo-delete-btn" title="Clear" aria-label="Clear" data-i18n="title,aria-label">×</button>
+                                <ul id="semantic_search_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                            </div>
+                            <div class="semantic-search-actions">
+                                <button id="semantic_search_btn" class="primary-btn" data-i18n>Search</button>
+                                <span id="semantic_match_degree" class="semantic-match-degree" style="display: none;"></span>
+                                <div id="semantic_search_loader" class="semantic-search-loader" style="visibility: hidden;"></div>
+                                <span id="semantic_progress" class="semantic-progress"></span>
+                            </div>
+                        </div>
+                        <div id="semantic_submode_row" class="semantic-submode-row" data-admin-only style="display: none;">
+                            <span class="semantic-submode-group">
+                                <label><input type="checkbox" id="semantic_chunked_mode" title="analyse in chunks" checked> chunked</label>
+                            </span>
+                            <span class="semantic-submode-group">
+                                <label class="semantic-submode-label" for="semantic_submode_select">submode: </label>
+                                <select id="semantic_submode_select" class="semantic-submode-select">
+                                    <option value="count">count</option>
+                                    <option value="fill_blank">fill_blank</option>
+                                    <option value="hybrid" selected>hybrid</option>
+                                </select>
+                            </span>
+                            <span id="semantic_threshold_item" class="semantic-submode-group" data-admin-only style="display: none;">
+                                <label class="semantic-submode-label" for="semantic_threshold_input">Match threshold:</label>
+                                <input type="number" id="semantic_threshold_input" class="semantic-threshold-input" min="0" max="1">
+                            </span>
+                            <span class="semantic-submode-group semantic-submode-group-right">
+                                <label class="semantic-submode-label" for="semantic_color_source_select">color source: </label>
+                                <select id="semantic_color_source_select" class="semantic-submode-select">
+                                    <option value="raw_score_normed">raw score normed</option>
+                                    <option value="signal_probability">signal probability</option>
+                                    <option value="pw_score" selected>pw score</option>
+                                </select>
+                            </span>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <section id="all_result" class="results-section">
+                <div id="stats" class="stats-container">
+                    <div id="match_score_progress_item" class="histogram-item" style="display: none;">
+                        <div id="match_score_progress_title"></div>
+                        <svg id="stats_match_score_progress"></svg>
+                    </div>
+                    <div id="raw_score_normed_histogram_item" class="histogram-item" style="display: none;">
+                        <div id="raw_score_normed_histogram_title"></div>
+                        <svg id="stats_raw_score_normed"></svg>
+                    </div>
+                    <div id="token_histogram_item" class="histogram-item" style="display: none;">
+                        <div id="token_histogram_title"></div>
+                        <svg id="stats_frac"></svg>
+                    </div>
+                    <div id="surprisal_progress_item" class="histogram-item" style="display: none;">
+                        <div id="surprisal_progress_title"></div>
+                        <svg id="stats_surprisal_progress"></svg>
+                    </div>
+                </div>
+            </section>
+        </section>
+
+        <div class="resizer" id="resizer"></div>
+
+        <section class="right_panel">
+            <div id="results">
+                <div id="major_tooltip" class="tooltip">
+                    <div class="currentToken"></div>
+                    <div class="myDetail"></div>
+                    <br />
+                    <div class="predictions predictions-table"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+    <!-- INCLUDE partials/attribution-sidebar.html -->
+
+    <script src="vendor.js"></script>
+    <script src="start.js"></script>
+</body>
+
+</html>

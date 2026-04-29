@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Info Highlight / Compare</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="compare.css">
+    <!--<link rel="stylesheet" type="text/css" href="vendor.css">-->
+
+</head>
+
+<body>
+    
+    <div class="main_frame">
+        <!-- Grid 容器包裹工具栏和内容区 -->
+        <div class="compare-wrapper">
+            <!-- 顶部工具栏 -->
+            <div class="app-page-toolbar">
+                <h1 class="compare-toolbar-title">
+                    <span class="compare-toolbar-title-app" data-i18n>Info Highlight</span>
+                    <span class="compare-toolbar-title-sep" aria-hidden="true">/</span>
+                    <span class="compare-toolbar-title-page" data-i18n>Compare</span>
+                </h1>
+                <div class="app-page-toolbar-actions">
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                        <input type="checkbox" id="show_text_render_toggle">
+                        <span data-i18n>Show Text Rendering</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                        <input type="checkbox" id="model_diff_mode_toggle">
+                        <span data-i18n>Diff Mode</span>
+                    </label>
+                    <button id="edit_mode_toggle" data-i18n>Edit</button>
+                    <button id="clear_demos_btn" data-i18n>Clear</button>
+                    <button id="add_demos_btn" data-i18n>Add</button>
+                </div>
+            </div>
+
+            <!-- 对比结果展示区 -->
+            <div id="compare-container" class="compare-container">
+                <!-- 空状态提示（自动显示/隐藏） -->
+                <div class="compare-empty-state">
+                    <div class="empty-icon">📊</div>
+                    <div class="empty-title" data-i18n>No comparison data</div>
+                </div>
+                <!-- Demo 列将通过 JavaScript 动态创建 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast通知容器 -->
+    <div id="toast" class="toast"></div>
+
+    <!-- 全局tooltip容器（用于对比模式） -->
+    <div id="global_tooltip" class="tooltip">
+        <div class="currentToken"></div>
+        <div class="myDetail"></div>
+        <br />
+        <div class="predictions predictions-table"></div>
+    </div>
+
+    <script src="vendor.js"></script>
+    <script src="compare.js"></script>
+
+</body>
+
+</html>
+

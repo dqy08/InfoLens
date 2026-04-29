@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title></title>
+    <meta name="description"
+        content="Info Lens is a toolbox for exploring the informational nature of LLMs and language. LLM Causal Flow - explore the context-attribution DAG, Info Highlight - highlight the 'informative' parts, LLM Raw Chat - chat with explicit raw prompts, Context Attribution - attribute a predicted token to its context">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="home.css">
+</head>
+
+<body class="nav-landing-page">
+
+    <div class="nav-landing-settings settings-menu-wrapper">
+        <button id="settings_btn" class="settings-btn" title="Settings" data-i18n="title">
+            <span class="settings-icon">⚙️</span>
+        </button>
+        <div id="settings_menu" class="settings-menu" style="display: none;">
+            <!-- INCLUDE partials/settings-menu-common-mid.html -->
+            <!-- INCLUDE partials/settings-menu-trailing-admin.html -->
+        </div>
+    </div>
+
+    <main class="nav-landing-main">
+        <header class="nav-landing-hero">
+            <h1 class="nav-landing-title" data-page-title data-i18n></h1>
+            <p class="nav-landing-subtitle" data-page-subtitle data-i18n></p>
+        </header>
+        <nav class="nav-landing-grid" aria-label="App pages">
+            <a class="nav-landing-card" href="gen_attribute.html" target="_blank" rel="noopener" data-nav-page="genAttribute" data-i18n="title"></a>
+            <a class="nav-landing-card" href="analysis.html" target="_blank" rel="noopener" data-nav-page="analysis" data-i18n="title"></a>
+            <a class="nav-landing-card" href="attribution.html" target="_blank" rel="noopener" data-nav-page="attribution" data-i18n="title"></a>
+            <a class="nav-landing-card" href="chat.html" target="_blank" rel="noopener" data-nav-page="chat" data-i18n="title"></a>
+        </nav>
+        <p class="nav-landing-hint" data-page-formula data-i18n></p>
+    </main>
+
+    <script src="vendor.js"></script>
+    <script src="home.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,68 @@
+<!-- 简介 / Hero（始终可见） -->
+<div class="intro-brief" style="--intro-rgb: 255, 71, 64">
+    <span class="intro-token" style="--a:0.63">想</span><span class="intro-token" style="--a:0.58">一眼</span><span class="intro-token" style="--a:0.43">找到</span><span class="intro-token" style="--a:0.52">文章</span><span class="intro-token" style="--a:0.35">的关键</span><span class="intro-token" style="--a:0.13">点</span><span class="intro-token" style="--a:0.31">？</span><span class="intro-token" style="--a:0.29">或者</span><span class="intro-token" style="--a:0.27">只是</span><span class="intro-token" style="--a:0.37">好奇</span><span class="intro-token" style="--a:0.38">文字</span><span class="intro-token" style="--a:0.48">的信息</span><span class="intro-token" style="--a:0.56">论</span><span class="intro-token" style="--a:0.48">奥</span><span class="intro-token" style="--a:0.03">秘</span><span class="intro-token" style="--a:0.18">？</span><br><br><span class="intro-token" style="--a:0.47">试试</span><span class="intro-token" style="--a:0.38">Info</span><span class="intro-token" style="--a:0.70"> Highlight</span><span class="intro-token" style="--a:0.36">.</span><span class="intro-token" style="--a:0.16"> 它</span><span class="intro-token" style="--a:0.00">它</span><span class="intro-token" style="--a:0.27">用</span><span class="intro-token" style="--a:0.29">大</span><span class="intro-token" style="--a:0.13">语言</span><span class="intro-token" style="--a:0.00">模型</span><span class="intro-token" style="--a:0.18">分析</span><span class="intro-token" style="--a:0.15">文本</span><span class="intro-token" style="--a:0.34">的信息</span><span class="intro-token" style="--a:0.09">密度</span><span class="intro-token" style="--a:0.03">，</span><span class="intro-token" style="--a:0.48">可视化</span><span class="intro-token" style="--a:0.19">展示</span><span class="intro-token" style="--a:0.49">哪里</span><span class="intro-token" style="--a:0.30">更重要</span><span class="intro-token" style="--a:0.11">。</span><br><br><span class="intro-token" style="--a:0.41">每个</span><span class="intro-token" style="--a:0.21">字</span><span class="intro-token" style="--a:0.41">的颜色</span><span class="intro-token" style="--a:0.18">深</span><span class="intro-token" style="--a:0.00">浅</span><span class="intro-token" style="--a:0.11">，</span><span class="intro-token" style="--a:0.18">表示</span><span class="intro-token" style="--a:0.11">它</span><span class="intro-token" style="--a:0.31">承载</span><span class="intro-token" style="--a:0.02">的信息</span><span class="intro-token" style="--a:0.03">量</span><span class="intro-token" style="--a:0.11">大小</span><span class="intro-token" style="--a:0.05">。</span><span class="intro-token" style="--a:0.49">自己</span><span class="intro-token" style="--a:0.28">试试</span><span class="intro-token" style="--a:0.06">吧</span><span class="intro-token" style="--a:0.11">！</span>
+</div>
+
+<!-- 了解更多（默认折叠） -->
+<details class="intro-more">
+    <summary>
+        <span class="intro-summary-when-closed">了解更多</span>
+        <span class="intro-summary-when-open">收起</span>
+    </summary>
+
+    <!-- 原理直觉 -->
+    <div class="intro-block">
+        <h4>信息量的直观理解</h4>
+        <p>从语言学角度看，信息量代表一个词所包含的新意/意外性/关键程度。越难从上下文中预测出来的词，通常携带的信息就越多。一个简单的例子："今天早上我打开门看见了一只'飞碟'" 和
+            "今天早上我打开门看见了一只'猫'"：在这里显然"飞碟"的信息量更大。</p>
+    </div>
+
+    <!-- 技术定义 -->
+    <div class="intro-block intro-technical">
+        <h4>信息论视角</h4>
+        <p>在工程实现中，每个 token 的信息量，来自大模型从左到右预测当前 token 的难度。</p>
+        <p>从信息论角度，它可以表示为当前 token 相对于大模型和已读上下文的条件信息量：</p>
+        <pre>
+            一段文本中的 tokenᵢ 的信息量 = -log₂P(tokenᵢ | model, token₀, …, tokenᵢ₋₁)
+        </pre>
+        <p>Info Highlight 的核心假设就是，这个条件信息量的大小和人类的主观感受（新意/意外性/潜在关键程度）是一致的。</p>
+    </div>
+
+    <!-- 误差与局限 -->
+    <div class="intro-block">
+        <h4>理想与现实</h4>
+        <p>对于一个想象中的理想模型（它的包含了上下文的知识量和阅读者一致），那么它评估出的结果应该和阅读者的主观感受是完全一致的。</p>
+        <p>所以，目前的实际结果和阅读者主观感受之间的差距，主要来自两个方面：</p>
+        <ul>
+            <li><strong>模型能力和阅读者的差异：</strong>模型的理解能力和知识量很可能不如阅读者，也有小可能性过剩，想象一下目前的SOTA大模型和一个十岁孩子阅读者相比。</li>
+            <li><strong>模型上下文和阅读者的差异：</strong>模型只有文章已读部分作为上下文，远小于阅读者。Info Highlight 使用没有 instruct 微调的 base 模型，也没有任何提示词（其实这样效果已经是最好了）。
+            </li>
+        </ul>
+        <p>好消息是，大模型进步实在太快了：目前的分析结果已经在一定程度上反映了主流阅读者的主观感受，可以用来评估文章的信息含量，还可以提高阅读速度。</p>
+    </div>
+
+    <!-- 致谢 -->
+    <div class="intro-block">
+        <h4>致谢</h4>
+        <p>基于 2019 年 Hendrik Strobelt 等人开发的经典项目 <a href="http://gltr.io" target="_blank" rel="noopener">GLTR.io</a>。GLTR 是一个网页演示，率先用 GPT-2 的预测概率来检测生成文本。</p>
+        <p>不过 Info Highlight 的目标不是检测 AI 文本，而是评估文本的“信息质量”。</p>
+    </div>
+
+    <!-- FAQ -->
+    <div class="intro-block intro-faq">
+        <h4>常见问题</h4>
+
+        <p><strong>它是 AI 文本检测器吗？</strong></p>
+        <p>不是。</p>
+        <p>当我们反感AI文本时，我们其实是反感低质量的文本。我们更反感低质量的真人写的文本，而不是AI生成的高质量内容。所以，关键是文本的"信息质量"。Info Highlight 的目标是检测"信息质量"而不是“AI痕迹”，虽然它可以用来检测没有信息量的AI胡编文本。
+        </p>
+
+        <p><strong>目前使用的是什么大模型？</strong></p>
+        <p>当前使用的是开源的 <strong>Qwen3-0.6B/1.7B/4B/14B-Base</strong>，其中4B模型是作者测试过的模型里结果挺接近大部分人主观感受的一个（注意并不一定是模型越大越符合阅读者的主观感受）。
+        当硬件配置限制时，会用0.6B/1.7B模型，它们效果比4B稍差（信息量评估结果差异约15%以内），但趋势是类似的。</p>
+
+        <p><strong>说到底，为什么信息量会影响文本的质量？</strong></p>
+        <p>一个词的信息量低，意味着大模型能很容易从上文预测出来。既然机器都能预测出来，那它还能有多关键呢？反之，一个词的信息量高，意味着大模型很难从上文预测出来。（如果不是错误表达的话）那它就代表了作者想要表达，而机器不知道的关键信息。
+        </p>
+    </div>
+</details>

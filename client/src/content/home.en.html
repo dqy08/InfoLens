@@ -1,0 +1,91 @@
+<!-- 简介 / Hero（始终可见） -->
+<div class="intro-brief" style="--intro-rgb: 255, 71, 64">
+    <span class="intro-token" style="--a:0.56">Want</span><span class="intro-token" style="--a:0.53"> key</span><span class="intro-token" style="--a:0.29"> points</span><span class="intro-token" style="--a:0.31"> at</span><span class="intro-token" style="--a:0.09"> a</span><span class="intro-token" style="--a:0.00"> glance</span><span class="intro-token" style="--a:0.04">?</span><span class="intro-token" style="--a:0.26"> Or</span><span class="intro-token" style="--a:0.31"> simply</span><span class="intro-token" style="--a:0.29"> curious</span><span class="intro-token" style="--a:0.03"> about</span><span class="intro-token" style="--a:0.08"> the</span><span class="intro-token" style="--a:0.33"> information</span><span class="intro-token" style="--a:0.68">-the</span><span class="intro-token" style="--a:0.02">oret</span><span class="intro-token" style="--a:0.00">ic</span><span class="intro-token" style="--a:0.29"> nature</span><span class="intro-token" style="--a:0.00"> of</span><span class="intro-token" style="--a:0.31"> language</span><span class="intro-token" style="--a:0.19">?</span><br><br><span class="intro-token" style="--a:0.32">Try</span><span class="intro-token" style="--a:0.47"> Info</span><span class="intro-token" style="--a:0.70"> Highlight</span><span class="intro-token" style="--a:0.17">.</span><span class="intro-token" style="--a:0.06"> It</span><span class="intro-token" style="--a:0.25"> uses</span><span class="intro-token" style="--a:0.34"> large</span><span class="intro-token" style="--a:0.02"> language</span><span class="intro-token" style="--a:0.00"> models</span><span class="intro-token" style="--a:0.02"> to</span><span class="intro-token" style="--a:0.23"> analyze</span><span class="intro-token" style="--a:0.14"> text</span><span class="intro-token" style="--a:0.37"> information</span><span class="intro-token" style="--a:0.19"> density</span><span class="intro-token" style="--a:0.05"> and</span><span class="intro-token" style="--a:0.34"> visual</span><span class="intro-token" style="--a:0.01">izes</span><span class="intro-token" style="--a:0.39"> where</span><span class="intro-token" style="--a:0.08"> the</span><span class="intro-token" style="--a:0.26"> important</span><span class="intro-token" style="--a:0.13"> parts</span><span class="intro-token" style="--a:0.05"> are</span><span class="intro-token" style="--a:0.08">.</span><br><br><span class="intro-token" style="--a:0.17">The</span><span class="intro-token" style="--a:0.40"> color</span><span class="intro-token" style="--a:0.17"> intensity</span><span class="intro-token" style="--a:0.07"> of</span><span class="intro-token" style="--a:0.06"> each</span><span class="intro-token" style="--a:0.27"> token</span><span class="intro-token" style="--a:0.10"> indicates</span><span class="intro-token" style="--a:0.07"> how</span><span class="intro-token" style="--a:0.04"> much</span><span class="intro-token" style="--a:0.03"> information</span><span class="intro-token" style="--a:0.03"> it</span><span class="intro-token" style="--a:0.09"> carries</span><span class="intro-token" style="--a:0.04">.</span><span class="intro-token" style="--a:0.39"> Try</span><span class="intro-token" style="--a:0.04"> it</span><span class="intro-token" style="--a:0.12"> yourself</span><span class="intro-token" style="--a:0.21">!</span>
+</div>
+
+<!-- 了解更多（默认折叠） -->
+<details class="intro-more">
+    <summary>
+        <span class="intro-summary-when-closed">Learn more</span>
+        <span class="intro-summary-when-open">Hide</span>
+    </summary>
+
+    <!-- 原理直觉 -->
+    <div class="intro-block">
+        <h4>Intuitive Understanding of Information</h4>
+        <p>From a linguistic perspective, information represents the novelty/surprise/importance of a word. Words that
+            are harder to predict from context typically carry more information. A simple example: "This morning I opened the door and saw a 'UFO'."
+            vs "This morning I opened the door and saw a 'cat'." — clearly "UFO" carries more information.</p>
+    </div>
+
+    <!-- 技术定义 -->
+    <div class="intro-block intro-technical">
+        <h4>Information-Theoretic Perspective</h4>
+        <p>In our implementation, the information content of each token comes from how difficult it is for the LLM to
+            predict that token from left to right.</p>
+        <p>
+            From an information-theoretic perspective, this can be expressed as the conditional information of a token
+            given the model and the preceding context:
+        </p>
+        <pre>
+            Information of tokenᵢ in a text = -log₂P(tokenᵢ | model, token₀, …, tokenᵢ₋₁)
+        </pre>
+        <p>The core assumption behind Info Highlight is that this conditional information aligns with human subjective
+            perception, such as novelty, surprise, and potential importance.
+        </p>
+    </div>
+
+    <!-- 误差与局限 -->
+    <div class="intro-block">
+        <h4>Ideal vs Reality</h4>
+        <p>
+            For an ideal model, whose knowledge and contextual understanding match that of the reader, the evaluation
+            would perfectly align with human subjective perception.
+        </p>
+        <p>Therefore, the gap between current results and reader perception mainly comes from two aspects:</p>
+        <ul>
+            <li><strong>Model capability vs human reader:</strong> The model's understanding and knowledge may be generally less than,
+                or possibly exceed, the reader's. Imagine comparing a state-of-the-art LLM with a ten-year-old reader.</li>
+            <li><strong>Model context vs human reader:</strong> The model only has the text read so far as context, much less
+                than the reader's. Info Highlight uses base models without instruction tuning or prompts (which actually
+                gives the best results).</li>
+        </ul>
+        <p>The good news is that LLMs are improving so fast: current analysis results already reflect mainstream
+            readers' subjective perception to some extent, and can be used to evaluate article information content and
+            improve reading speed.</p>
+    </div>
+
+    <!-- Tribute -->
+    <div class="intro-block">
+        <h4>Tribute</h4>
+        <p>Built on the classic project <a href="http://gltr.io" target="_blank" rel="noopener">GLTR.io</a>,
+            developed by Hendrik Strobelt et al. in 2019. GLTR was a web demo that pioneered using GPT-2 prediction
+            probabilities to detect generated text.</p>
+        <p>However, Info Highlight is not meant to detect AI text, but to evaluate the "information quality" of text.</p>
+    </div>
+
+    <!-- FAQ -->
+    <div class="intro-block intro-faq">
+        <h4>FAQ</h4>
+
+        <p><strong>Is it an AI text detector?</strong></p>
+        <p>No.</p>
+        <p>When we dislike AI text, we actually dislike low-quality text. We dislike low-quality human-written text, 
+            rather than high-quality AI-generated content. So the key is the "information quality" of the text.
+            Info Highlight aims to detect "information quality" rather than "AI signs", though it can be used to detect
+            AI-generated nonsense with no information content.</p>
+
+        <p><strong>What LLM is currently used?</strong></p>
+        <p>Currently the open-source <strong>Qwen3-0.6B/1.7B/4B/14B-Base</strong> is used. Among them, the 4B model gives
+            results quite close to most people's subjective perception among the models the author has tested (note that
+            larger model does not necessarily lead to more consistency with the reader's subjective perception). When
+            hardware is limited, 0.6B/1.7B models are used; they perform slightly worse than 4B (information
+            content difference is within ~15%), but the trend is similar.</p>
+
+        <p><strong>Why does information content affect text quality?</strong></p>
+        <p>Low information content means the LLM can easily predict it from context. If even a machine can predict it,
+            how important can it be? Conversely, high information content means the LLM has difficulty predicting it
+            from context. (Assuming it's not a mistake) Then it represents key information the author wants to convey
+            that the machine doesn't know.</p>
+    </div>
+</details>

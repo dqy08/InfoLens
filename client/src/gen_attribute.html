@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title></title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="gen_attribute.css">
+</head>
+
+<body class="gen-attribute-page">
+
+    <main class="main_frame">
+        <section class="left_panel">
+            <div class="floating_content">
+                <header class="app-page-toolbar app-page-toolbar--bleed">
+                    <h1 class="page-toolbar-title"><span class="title-main-line"><span data-page-title data-i18n></span><span class="title-tagline" data-page-subtitle data-i18n></span></span></h1>
+                    <div class="app-page-toolbar-actions">
+                        <a href="index.html" class="home-link" title="InfoLens Home" data-i18n="text,title">InfoLens Home</a>
+                        <div class="settings-menu-wrapper">
+                            <button id="settings_btn" class="settings-btn" title="Settings" data-i18n="title">
+                                <span class="settings-icon">⚙️</span>
+                            </button>
+                            <div id="settings_menu" class="settings-menu" style="display: none;">
+                                <!-- INCLUDE partials/settings-menu-common-mid.html -->
+                                <!-- INCLUDE partials/settings-menu-trailing-admin.html -->
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <div class="chat-cached-history-bar chat-cached-history-bar--dual">
+                    <div class="semantic-search-input-wrapper chat-prompt-history-wrapper gen-attr-cached-demos-wrap">
+                        <button type="button" id="gen_attr_cached_demos_btn" class="text-action-btn" data-i18n>Cached demos</button>
+                        <ul id="gen_attr_cached_demos_dropdown" class="semantic-search-history-dropdown"></ul>
+                    </div>
+                    <div class="semantic-search-input-wrapper chat-prompt-history-wrapper gen-attr-cached-history-wrap">
+                        <button type="button" id="gen_attr_cached_history_btn" class="text-action-btn" data-i18n>Cached history</button>
+                        <ul id="gen_attr_cached_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                    </div>
+                </div>
+
+                <section class="input-section">
+                    <div class="semantic-submode-row chat-raw-prompt-mode-row">
+                        <span class="semantic-submode-group">
+                            <label for="gen_attr_skip_chat_template">
+                                <input type="checkbox" id="gen_attr_skip_chat_template" />
+                                <span data-i18n>Raw prompt mode</span>
+                            </label>
+                        </span>
+                    </div>
+
+                    <div id="gen_attr_raw_input_panel" class="chat-prompt-panel">
+                        <div class="input-header">
+                            <span><span class="demo" data-i18n>Raw prompt</span></span>
+                            <div class="text-action-buttons-top">
+                                <div class="textarea-counter" id="gen_attr_raw_text_count_display">
+                                    <span id="gen_attr_raw_text_count_value">0</span> <span data-i18n>chars</span>
+                                </div>
+                                <button type="button" id="gen_attr_clear_raw_btn" class="text-action-btn" data-i18n>Clear</button>
+                                <button type="button" id="gen_attr_paste_raw_btn" class="text-action-btn" data-i18n>Paste</button>
+                                <button type="button" id="gen_attr_raw_history_btn" class="text-action-btn" data-i18n>History</button>
+                            </div>
+                        </div>
+                        <div class="textarea-wrapper chat-prompt-textarea-block">
+                            <div class="semantic-search-input-wrapper chat-prompt-history-wrapper">
+                                <textarea id="gen_attr_raw_text"></textarea>
+                                <ul id="gen_attr_raw_input_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="gen_attr_chat_input_panel" hidden>
+                        <div class="chat-prompt-panel" id="gen_attr_system_prompt_panel">
+                            <div class="input-header">
+                                <label class="chat-use-system-label">
+                                    <input type="checkbox" id="gen_attr_use_system_prompt" checked />
+                                    <span class="demo" data-i18n>System</span>
+                                </label>
+                                <div class="text-action-buttons-top">
+                                    <div class="textarea-counter" id="gen_attr_system_text_count_display">
+                                        <span id="gen_attr_system_text_count_value">0</span> <span data-i18n>chars</span>
+                                    </div>
+                                    <button type="button" id="gen_attr_clear_system_btn" class="text-action-btn" data-i18n>Clear</button>
+                                    <button type="button" id="gen_attr_paste_system_btn" class="text-action-btn" data-i18n>Paste</button>
+                                    <button type="button" id="gen_attr_system_history_btn" class="text-action-btn" data-i18n>History</button>
+                                </div>
+                            </div>
+                            <div class="textarea-wrapper chat-prompt-textarea-block">
+                                <div class="semantic-search-input-wrapper chat-prompt-history-wrapper">
+                                    <textarea id="gen_attr_system_text">You are a helpful assistant.</textarea>
+                                    <ul id="gen_attr_system_prompt_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chat-prompt-panel">
+                            <div class="input-header">
+                                <span><span class="demo" data-i18n>User</span></span>
+                                <div class="text-action-buttons-top">
+                                    <div class="textarea-counter" id="gen_attr_user_text_count_display">
+                                        <span id="gen_attr_user_text_count_value">0</span> <span data-i18n>chars</span>
+                                    </div>
+                                    <button type="button" id="gen_attr_clear_user_btn" class="text-action-btn" data-i18n>Clear</button>
+                                    <button type="button" id="gen_attr_paste_user_btn" class="text-action-btn" data-i18n>Paste</button>
+                                    <button type="button" id="gen_attr_user_history_btn" class="text-action-btn" data-i18n>History</button>
+                                </div>
+                            </div>
+                            <div class="textarea-wrapper chat-prompt-textarea-block">
+                                <div class="semantic-search-input-wrapper chat-prompt-history-wrapper">
+                                    <textarea id="gen_attr_user_text"></textarea>
+                                    <ul id="gen_attr_user_prompt_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="textarea-wrapper chat-prompt-actions-row">
+                        <div class="semantic-submode-row chat-completion-options-row attribution-model-variant-row">
+                            <span class="semantic-submode-group">
+                                <label class="semantic-submode-label" for="gen_attr_model_variant">Model</label>
+                                <select id="gen_attr_model_variant" class="semantic-submode-select" aria-label="Model slot">
+                                    <option value="base">base</option>
+                                    <option value="instruct" selected>instruct</option>
+                                </select>
+                            </span>
+                            <span class="semantic-submode-group">
+                                <label class="semantic-submode-label" for="gen_attr_max_tokens">Max tokens</label>
+                                <input type="number" id="gen_attr_max_tokens" class="gen-attr-max-tokens-input"
+                                    value="100" min="1" max="500" step="1">
+                            </span>
+                        </div>
+                        <div class="button-group">
+                            <div class="button-left">
+                                <button type="button" id="gen_attr_submit_btn" class="primary-btn inactive" disabled>Start</button>
+                                <div class="generation-status-slot loader-small-container">
+                                    <div class="loadersmall"></div>
+                                    <span id="gen_attr_complete_reason" class="generation-end-reason"></span>
+                                </div>
+                                <span id="gen_attr_analyze_progress" class="analyze-progress"></span>
+                            </div>
+                            <div id="gen_attr_text_metrics" class="text-metrics text-metrics-chat">
+                                <div id="gen_attr_metric_usage" class="text-metrics-secondary"></div>
+                                <div id="gen_attr_metric_model" class="text-metrics-secondary">model: </div>
+                            </div>
+                            <button type="button" id="gen_attr_export_demo_btn" class="primary-btn" style="display: none" title="Admin: download current run as JSON for bundled demos">Export demo</button>
+                        </div>
+                    </div>
+
+                    <div class="attribution-exclude-prompt-patterns-row">
+                        <div class="semantic-submode-row attribution-exclude-prompt-patterns-header">
+                            <span class="semantic-submode-group">
+                                <label class="attribution-use-mapping-label"
+                                    title="When enabled, each line below is a regex with the global flag, matched only within the initial static prompt prefix (excluding generated continuation). If a token offset lies fully inside a match, its score is treated as 0."
+                                    data-i18n="title">
+                                    <input type="checkbox" id="gen_attr_exclude_prompt_patterns_enable" checked>
+                                    <span></span>
+                                </label>
+                            </span>
+                            <span class="semantic-submode-group">
+                                <label class="semantic-submode-label" for="gen_attr_exclude_prompt_patterns" data-i18n>Exclude prompt patterns</label>
+                            </span>
+                        </div>
+                        <textarea id="gen_attr_exclude_prompt_patterns" class="attribution-exclude-prompt-patterns-input" rows="2"
+                            placeholder="One regex per line (prompt prefix only)"
+                            spellcheck="false"
+                            autocomplete="off"
+                            title="One regex per line (global flag), matched only within the initial prompt prefix; if a token offset lies fully inside a match, its score is treated as 0."
+                            data-i18n="placeholder,title"></textarea>
+                    </div>
+
+                    <div class="attribution-exclude-prompt-patterns-row">
+                        <div class="semantic-submode-row attribution-exclude-generated-patterns-header">
+                            <span class="semantic-submode-group">
+                                <label class="attribution-use-mapping-label"
+                                    title="When enabled, each line below is a regex with the global flag, matched only within the model-generated continuation (excluding the initial static prompt). If a token offset lies fully inside a match, its score is treated as 0."
+                                    data-i18n="title">
+                                    <input type="checkbox" id="gen_attr_exclude_generated_patterns_enable" checked>
+                                    <span></span>
+                                </label>
+                            </span>
+                            <span class="semantic-submode-group">
+                                <label class="semantic-submode-label" for="gen_attr_exclude_generated_patterns" data-i18n>Exclude generated patterns</label>
+                            </span>
+                        </div>
+                        <textarea id="gen_attr_exclude_generated_patterns" class="attribution-exclude-prompt-patterns-input" rows="2"
+                            placeholder="One regex per line (generated continuation only)"
+                            spellcheck="false"
+                            autocomplete="off"
+                            title="One regex per line (global flag), matched only within the generated suffix; if a token offset lies fully inside a match, its score is treated as 0."
+                            data-i18n="placeholder,title"></textarea>
+                    </div>
+
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_hide_inactive_edges"
+                                    title="When checked, gray DAG edges not adjacent to the hovered or selected node are hidden."
+                                    data-i18n="title">
+                                Hide inactive edges
+                            </label>
+                        </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label" for="gen_attr_dag_measure_width">Text width</label>
+                            <input type="number" id="gen_attr_dag_measure_width" class="gen-attr-dag-measure-width-input"
+                                value="500" min="200" max="4000" step="10"
+                                title="Width (px) of the invisible measurement layer used for DAG layout. Only this width affects wrapping and node positions. When idle, changes replay and fit automatically; during generation or DAG playback, the setting updates for the next run or refresh."
+                                data-i18n="title">
+                            <span class="semantic-submode-label">px</span>
+                        </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label" for="gen_attr_dag_playback_step_ms">DAG play step</label>
+                            <input type="number" id="gen_attr_dag_playback_step_ms" class="gen-attr-dag-measure-width-input"
+                                value="200" min="0" max="10000" step="10"
+                                title="Delay in milliseconds between steps during DAG playback. Stored locally; the value is read when you press play—changing it mid-playback does not affect the current run."
+                                data-i18n="title">
+                            <span class="semantic-submode-label">ms</span>
+                        </span>
+                    </div>
+                </section>
+            </div>
+        </section>
+
+        <div class="resizer" id="resizer"></div>
+
+        <section class="right_panel">
+            <div id="results" class="attribution-inspector-surface gen-attr-results-surface LMF"></div>
+        </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="vendor.js"></script>
+    <script src="gen_attribute.js"></script>
+
+</body>
+
+</html>

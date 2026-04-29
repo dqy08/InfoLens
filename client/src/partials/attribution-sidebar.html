@@ -1,0 +1,26 @@
+    <!-- 与 .dialog-overlay 同视觉：确认框关闭后至侧栏关闭期间保持主内容遮罩（z-index 低于侧栏） -->
+    <div id="attribution_flow_backdrop" class="dialog-overlay attribution-flow-backdrop" aria-hidden="true"></div>
+
+    <aside id="attribution_side_panel" class="attribution-side-panel" aria-hidden="true">
+        <div id="attribution_side_panel_resize_handle" class="attribution-side-panel-resize-handle" role="separator"
+            aria-orientation="vertical" aria-label="Resize attribution panel" title="Resize"></div>
+        <div class="attribution-side-panel-header">
+            <h2 class="attribution-side-panel-title">Attribution preview</h2>
+            <div class="attribution-side-panel-actions">
+                <a id="attribution_open_full_page" class="attribution-side-panel-link" href="attribution.html"
+                    target="_blank" rel="noopener noreferrer">View in full page</a>
+                <button type="button" id="attribution_side_panel_close" class="attribution-side-panel-close"
+                    aria-label="Close" title="Close">×</button>
+            </div>
+        </div>
+        <div class="attribution-side-panel-body">
+            <div id="attribution_panel_results" class="attribution-panel-results attribution-inspector-surface">
+                <div id="attribution_panel_tooltip" class="tooltip">
+                    <div class="currentToken"></div>
+                    <div class="myDetail"></div>
+                    <br />
+                    <div class="predictions predictions-table"></div>
+                </div>
+            </div>
+        </div>
+    </aside>

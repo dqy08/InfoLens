@@ -1,0 +1,186 @@
+# OpenAI 兼容层 schema，供 server.yaml 通过 $ref 引用
+swagger: '2.0'
+info:
+  title: OpenAPI fragments — OpenAI-compatible schemas
+  version: "0.0"
+definitions:
+
+  # --- Completions /v1/completions ---
+
+  # POST /v1/completions/prompt：将用户原文套用 chat template，返回实际送入续写接口的字符串
+  OpenAICompletionsPromptRequest:
+    type: object
+    additionalProperties: true
+    required:
+      - model
+      - prompt
+    properties:
+      model:
+        type: string
+        description: Model ID
+      prompt:
+        description: 用户输入原文（非已格式化全文）
+        type: string
+      system:
+        description: 可选；chat template 的 system 段。省略时不拼装 system（仅 user）；传入字符串时原样作为 system 段（含空字符串、仅空白等）
+        type: string
+
+  OpenAICompletionsPromptResponse:
+    type: object
+    required:
+      - prompt_used
+    properties:
+      prompt_used:
+        type: string
+        description: 套用 chat template 后、与 POST /v1/completions 的 prompt 字段同义的完整模型输入
+
+  OpenAICompletionsRequest:
+    type: object
+    additionalProperties: true
+    required:
+      - model
+      - prompt
+    properties:
+      model:
+        type: string
+        description: Model ID
+      prompt:
+        description: 已确定的完整模型输入（需 chat template 时请先 POST /v1/completions/prompt）
+        type: string
+      best_of:
+        type: integer
+        minimum: 0
+        maximum: 20
+      echo:
+        type: boolean
+      frequency_penalty:
+        type: number
+        minimum: -2
+        maximum: 2
+      logit_bias:
+        type: object
+        additionalProperties:
+          type: number
+      logprobs:
+        type: integer
+        minimum: 0
+        maximum: 5
+      max_tokens:
+        description: 可选；正整数（> 0），且与 prompt 合计不超过续写接口的上下文 token 上限；省略则用满剩余额度
+        type: integer
+        minimum: 1
+      n:
+        type: integer
+        minimum: 1
+        maximum: 128
+      presence_penalty:
+        type: number
+        minimum: -2
+        maximum: 2
+      seed:
+        type: integer
+        format: int64
+      stop:
+        description: 停止序列，最多 4 个
+        type:
+          - string
+          - array
+        items:
+          type: string
+        maxItems: 4
+      stream:
+        type: boolean
+        description: 本服务忽略；响应恒为 SSE
+      stream_options:
+        type: object
+        properties:
+          include_usage:
+            type: boolean
+      suffix:
+        type: string
+      temperature:
+        type: number
+        minimum: 0
+        maximum: 2
+      top_p:
+        type: number
+        minimum: 0
+        maximum: 1
+      user:
+        type: string
+
+  OpenAICompletionUsage:
+    type: object
+    properties:
+      prompt_tokens:
+        type: integer
+      completion_tokens:
+        type: integer
+      total_tokens:
+        type: integer
+      completion_tokens_details:
+        type: object
+        additionalProperties: true
+      prompt_tokens_details:
+        type: object
+        additionalProperties: true
+
+  OpenAICompletionChoice:
+    type: object
+    properties:
+      text:
+        type: string
+      index:
+        type: integer
+      logprobs:
+        description: 无 logprobs 时为 null；否则含 text_offset、token_logprobs、tokens、top_logprobs
+        type: object
+        x-nullable: true
+      finish_reason:
+        type: string
+        enum:
+          - stop
+          - length
+          - content_filter
+        x-nullable: true
+
+  # bpe_strings 项与 server.yaml#/definitions/TokenWithOffset 一致（跨文件复用）
+  InfoRadarCompletionPayload:
+    type: object
+    properties:
+      bpe_strings:
+        type: array
+        items:
+          $ref: "server.yaml#/definitions/TokenWithOffset"
+
+  OpenAICompletionsResponse:
+    type: object
+    required:
+      - id
+      - object
+      - created
+      - model
+      - choices
+    properties:
+      id:
+        type: string
+      object:
+        type: string
+        enum:
+          - text_completion
+      created:
+        type: integer
+        description: Unix 时间戳（秒）
+      model:
+        type: string
+      choices:
+        type: array
+        items:
+          $ref: "#/definitions/OpenAICompletionChoice"
+      system_fingerprint:
+        type: string
+      usage:
+        $ref: "#/definitions/OpenAICompletionUsage"
+      info_radar:
+        $ref: "#/definitions/InfoRadarCompletionPayload"
+        description: 续写 token 级概率与 top-N，便于与信息密度可视化对齐

@@ -1,0 +1,14 @@
+// 通用小尺寸 loading 动画（供 loadersmall、semantic-index-loader 等复用）
+
+.loadersmall {
+  display: inline-block;
+  border: 3px solid var(--loading-spinner-border);
+  -webkit-animation: spin 1s linear infinite;
+  animation: spin 1s linear infinite;
+  border-top: 3px solid var(--loading-spinner-top);
+  border-radius: 50%;
+  width: 10px;
+  height: 10px;
+  transition: border-color 0.3s ease;
+  flex-shrink: 0;
+}

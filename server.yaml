@@ -1,0 +1,803 @@
+swagger: '2.0'
+info:
+  title: InfoRadar API
+  version: "0.1"
+consumes:
+  - application/json
+produces:
+  - application/json
+
+basePath: /api
+
+paths:
+
+  /analyze:
+    post:
+      tags:
+        - all
+      summary: analyze text
+      operationId: server.analyze
+      parameters:
+        - in: body
+          name: analyze_request
+          description: request analyze
+          schema:
+            $ref: "#/definitions/AnalyzeRequest"
+
+      responses:
+        200:
+          description: |
+            成功时为信息密度分析结果。`stream=false`（默认）时响应体即本 schema；
+            `stream=true` 时为 `text/event-stream`，最后一条 `data` 事件内为同形 JSON。
+            业务错误（4xx/5xx）时响应体含 `success`/`message` 等，见各状态码说明，非本 schema。
+          schema:
+            $ref: "#/definitions/AnalyzeResponse"
+        400:
+          description: invalid request payload (missing text or model)
+        404:
+          description: requested model is not registered
+        500:
+          description: model inference failed
+        503:
+          description: requested model could not be loaded
+
+  /list_demos:
+    get:
+      tags:
+        - all
+      summary: list all available demo files and folders
+      operationId: server.list_demos
+      parameters:
+        - in: query
+          name: path
+          type: string
+          required: false
+          description: path to list (empty string for root)
+      responses:
+        200:
+          description: return list of demo files and folders
+          schema:
+            type: object
+            properties:
+              path:
+                type: string
+                description: current path
+              items:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                      enum: [folder, file]
+                      description: item type
+                    name:
+                      type: string
+                      description: item name
+                    path:
+                      type: string
+                      description: full path
+                    file:
+                      type: string
+                      description: relative file path (only for files)
+
+  /save_demo:
+    post:
+      tags:
+        - all
+      summary: save demo file
+      operationId: server.save_demo
+      parameters:
+        - in: body
+          name: save_request
+          description: request to save demo
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+                description: demo name (will be used as filename)
+              data:
+                type: object
+                description: AnalyzeResponse data to save
+              path:
+                type: string
+                description: "target folder path (default: \"/\" for root directory)"
+                default: "/"
+            required:
+              - name
+              - data
+      responses:
+        200:
+          description: return save result
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              message:
+                type: string
+              file:
+                type: string
+                description: saved filename
+
+  /delete_demo:
+    post:
+      tags:
+        - all
+      summary: delete demo file
+      operationId: server.delete_demo
+      parameters:
+        - in: body
+          name: delete_request
+          description: request to delete demo
+          schema:
+            type: object
+            properties:
+              file:
+                type: string
+                description: demo filename (with .json extension)
+            required:
+              - file
+      responses:
+        200:
+          description: return delete result
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              message:
+                type: string
+
+  /move_demo:
+    post:
+      tags:
+        - all
+      summary: move demo file or folder
+      operationId: server.move_demo
+      parameters:
+        - in: body
+          name: move_request
+          description: request to move demo or folder
+          schema:
+            type: object
+            properties:
+              file:
+                type: string
+                description: file path (for moving files)
+              path:
+                type: string
+                description: folder path (for moving folders)
+              target_path:
+                type: string
+                description: target folder path (empty string for root)
+            required:
+              - target_path
+      responses:
+        200:
+          description: return move result
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              message:
+                type: string
+
+  /rename_demo:
+    post:
+      tags:
+        - all
+      summary: rename demo file
+      operationId: server.rename_demo
+      parameters:
+        - in: body
+          name: rename_request
+          description: request to rename demo file
+          schema:
+            type: object
+            properties:
+              file:
+                type: string
+                description: file path
+              new_name:
+                type: string
+                description: new name (without extension)
+            required:
+              - file
+              - new_name
+      responses:
+        200:
+          description: return rename result
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              message:
+                type: string
+
+  /rename_folder:
+    post:
+      tags:
+        - all
+      summary: rename folder
+      operationId: server.rename_folder
+      parameters:
+        - in: body
+          name: rename_request
+          description: request to rename folder
+          schema:
+            type: object
+            properties:
+              path:
+                type: string
+                description: folder path
+              new_name:
+                type: string
+                description: new folder name
+            required:
+              - path
+              - new_name
+      responses:
+        200:
+          description: return rename result
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              message:
+                type: string
+
+  /delete_folder:
+    post:
+      tags:
+        - all
+      summary: delete folder
+      operationId: server.delete_folder
+      parameters:
+        - in: body
+          name: delete_request
+          description: request to delete folder
+          schema:
+            type: object
+            properties:
+              path:
+                type: string
+                description: folder path
+            required:
+              - path
+      responses:
+        200:
+          description: return delete result
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              message:
+                type: string
+
+  /list_all_folders:
+    get:
+      tags:
+        - all
+      summary: list all folders for move operation
+      operationId: server.list_all_folders
+      responses:
+        200:
+          description: return list of all folders
+          schema:
+            type: object
+            properties:
+              folders:
+                type: array
+                items:
+                  type: string
+                description: list of folder paths
+
+  /create_folder:
+    post:
+      tags:
+        - all
+      summary: create a new folder
+      operationId: server.create_folder_api
+      parameters:
+        - in: body
+          name: create_request
+          description: request to create folder
+          schema:
+            type: object
+            properties:
+              parent_path:
+                type: string
+                description: 'parent folder path (default: "/" for root directory)'
+                default: "/"
+              folder_name:
+                type: string
+                description: new folder name
+            required:
+              - folder_name
+      responses:
+        200:
+          description: return create result
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              message:
+                type: string
+
+  /fetch_url:
+    post:
+      tags:
+        - all
+      summary: fetch text content from URL
+      operationId: server.fetch_url
+      parameters:
+        - in: body
+          name: fetch_request
+          description: request to fetch text from URL
+          schema:
+            type: object
+            properties:
+              url:
+                type: string
+                description: URL to fetch text from
+            required:
+              - url
+      responses:
+        200:
+          description: return fetched text content
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              text:
+                type: string
+                description: extracted text content
+              url:
+                type: string
+                description: original URL
+              char_count:
+                type: integer
+                description: character count of extracted text
+              message:
+                type: string
+                description: error message if success is false
+        400:
+          description: invalid request (missing url or invalid URL format)
+        500:
+          description: failed to fetch or extract text from URL
+
+  /check_admin:
+    post:
+      tags:
+        - all
+      summary: check admin token
+      operationId: server.check_admin
+      parameters:
+        - in: body
+          name: check_request
+          description: request to check admin token
+          schema:
+            type: object
+            properties:
+              token:
+                type: string
+                description: admin token to check
+            required:
+              - token
+      responses:
+        200:
+          description: return check result
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              message:
+                type: string
+
+  /available_models:
+    get:
+      tags:
+        - all
+      summary: get available models
+      operationId: server.get_available_models
+      responses:
+        200:
+          description: return list of available models
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              models:
+                type: array
+                items:
+                  type: string
+
+  /current_model:
+    get:
+      tags:
+        - all
+      summary: get current model
+      operationId: server.get_current_model
+      responses:
+        200:
+          description: return current model name and quantization config
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              model:
+                type: string
+              switching:
+                type: boolean
+              device_type:
+                type: string
+                enum: [cpu, cuda, mps]
+                description: current device type
+              use_int8:
+                type: boolean
+                description: whether INT8 quantization is enabled
+              use_bfloat16:
+                type: boolean
+                description: whether bfloat16 is enabled (CPU only)
+
+  /prediction-attribute:
+    post:
+      tags:
+        - all
+      summary: prediction attribute
+      operationId: server.prediction_attribute
+      parameters:
+        - in: body
+          name: attribution_request
+          schema:
+            type: object
+            properties:
+              context:
+                type: string
+                description: 输入上下文文本（不做 trim；token 数不得超过 2000，否则 400）
+              target_prediction:
+                type: string
+                description: 目标预测文本，取首个 token 作为归因目标（不做 trim）。省略时自动使用 top-1（贪心解码）。
+              model:
+                type: string
+                enum: [base, instruct]
+                description: base 使用主槽位（--model），instruct 使用语义槽位（--semantic_model）
+            required:
+              - context
+              - model
+      responses:
+        200:
+          description: 返回各输入 token 对目标预测的归因分
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              model:
+                type: string
+              target_token:
+                type: string
+                description: 归因目标 token 的字符串
+              target_prob:
+                type: number
+                description: 该 token 在 next-token 分布中的预测概率
+              token_attribution:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    offset:
+                      type: array
+                      items:
+                        type: integer
+                      description: 字符偏移 [start, end]
+                    raw:
+                      type: string
+                      description: token 原文
+                    score:
+                      type: number
+                      description: 梯度 L2 范数归因分
+              debug_info:
+                type: object
+                description: 下一 token 的 top10 与概率（与语义分析 debug_info 同形，无 abbrev）
+                properties:
+                  topk_tokens:
+                    type: array
+                    items:
+                      type: string
+                  topk_probs:
+                    type: array
+                    items:
+                      type: number
+              is_eos:
+                type: boolean
+                description: target_token 是否为模型的 EOS token（top-1 模式下尤为重要，客户端据此判断是否终止生成循环）
+        400:
+          description: 缺少必要字段、model 非法、context 超长、或 target 无法 tokenize
+        500:
+          description: 推理失败
+        503:
+          description: 服务繁忙
+
+  /analyze-semantic:
+    post:
+      tags:
+        - all
+      summary: analyze semantic (token-level relevance to query)
+      operationId: server.analyze_semantic
+      parameters:
+        - in: body
+          name: semantic_request
+          schema:
+            type: object
+            properties:
+              query:
+                type: string
+                description: 查询主题
+              text:
+                type: string
+                description: 原文
+              stream:
+                type: boolean
+                description: 是否使用 SSE 流式响应（带阶段级进度）
+              submode:
+                type: string
+                enum: [count, match_score, fill_blank]
+                description: 可选子模式，不传则用服务端默认。match_score 已废弃
+              debug_info:
+                type: boolean
+                description: 为 true 时响应包含 debug_info（abbrev、topk_tokens、topk_probs），默认关，不传则不返回
+            required:
+              - query
+              - text
+      responses:
+        200:
+          description: 返回 model 和 token_attention
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              model:
+                type: string
+                description: 使用的 semantic 模型名
+              token_attention:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    offset:
+                      type: array
+                      items:
+                        type: integer
+                      description: 原文中的字符偏移 [start, end]
+                    raw:
+                      type: string
+                      description: token 原文
+                    score:
+                      type: number
+                      description: 对 prompt 区域的平均关注度
+              debug_info:
+                type: object
+                description: 请求中 debug_info=true 时返回
+                properties:
+                  abbrev:
+                    type: string
+                    description: 推理原文缩写
+                  topk_tokens:
+                    type: array
+                    items:
+                      type: string
+                    description: top10 预测 token 列表
+                  topk_probs:
+                    type: array
+                    items:
+                      type: number
+                    description: top10 对应的概率
+              message:
+                type: string
+        400:
+          description: 缺少 query 或 text 参数
+        500:
+          description: 分析失败
+
+  /switch_model:
+    post:
+      tags:
+        - all
+      summary: switch model (admin only)
+      operationId: server.switch_model
+      parameters:
+        - in: body
+          name: switch_request
+          description: request to switch model with quantization options
+          schema:
+            type: object
+            properties:
+              model:
+                type: string
+                description: target model name
+              use_int8:
+                type: boolean
+                description: enable INT8 quantization (not supported on MPS)
+                default: false
+              use_bfloat16:
+                type: boolean
+                description: enable bfloat16 (CPU only)
+                default: false
+            required:
+              - model
+      responses:
+        200:
+          description: return switch result
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              message:
+                type: string
+              model:
+                type: string
+        400:
+          description: invalid request or incompatible quantization settings
+        404:
+          description: model not found
+        500:
+          description: model switch failed
+        503:
+          description: model switching in progress
+
+  /v1/completions/prompt:
+    post:
+      tags:
+        - openai
+      summary: Apply chat template to user text (completion prompt assembly)
+      description: |
+        将 prompt 作为单条 user 经 tokenizer.apply_chat_template 封装，返回实际送入 POST /v1/completions 的完整字符串（JSON 字段 prompt_used）。
+        可选 system 字段：省略时仅拼装 user；传入时原样作为 system 段（含空字符串）。
+        与续写共用 semantic 模型/tokenizer；过长时返回 400。
+      operationId: server.completions_prompt
+      parameters:
+        - in: body
+          name: completions_prompt_request
+          required: true
+          schema:
+            $ref: "server_openai_definitions.yaml#/definitions/OpenAICompletionsPromptRequest"
+      responses:
+        200:
+          description: ok
+          schema:
+            $ref: "server_openai_definitions.yaml#/definitions/OpenAICompletionsPromptResponse"
+        400:
+          description: invalid body or prompt too long
+
+  /v1/completions:
+    post:
+      tags:
+        - openai
+      summary: OpenAI-compatible text completion (minimal v1)
+      description: |
+        与 OpenAI POST /v1/completions 对齐（见 platform.openai.com Completions）。
+        必填 model、prompt；prompt 须为已确定的完整模型输入（需 chat template 时请先 POST /v1/completions/prompt）。
+        本接口响应恒为 text/event-stream（忽略 body 中的 stream 字段）：type=delta…，末条 type=result，其 data 与 OpenAICompletionsResponse 同形（含 choices[0].text、info_radar.bpe_strings）；若需「非流式」语义，由客户端消费 SSE 末条 result 即可。
+      operationId: server.completions
+      parameters:
+        - in: body
+          name: completions_request
+          required: true
+          schema:
+            $ref: "server_openai_definitions.yaml#/definitions/OpenAICompletionsRequest"
+      responses:
+        200:
+          description: |
+            text/event-stream（SSE）；末条事件的 data 与 OpenAICompletionsResponse 同形。
+          schema:
+            $ref: "server_openai_definitions.yaml#/definitions/OpenAICompletionsResponse"
+        400:
+          description: invalid request body
+
+  /v1/completions/stop:
+    post:
+      tags:
+        - openai
+      summary: Global completions stop (single-user serial)
+      description: |
+        置位全局停止标志，使当前正在进行的续写尽快结束（与单次 SSE 断开/GeneratorExit 叠加）。
+        单用户串行场景下无需 request_id；新一次 POST /v1/completions 开始时清除该标志。
+      operationId: server.completions_stop
+      responses:
+        200:
+          description: ok
+          schema:
+            type: object
+            properties:
+              ok:
+                type: boolean
+
+
+definitions:
+
+  # 与 client generatedSchemas TokenWithOffset 一致；信息密度 analyze 与 completions info_radar 共用
+  TokenWithOffset:
+    type: object
+    properties:
+      offset:
+        type: array
+        description: |
+          字符下标 [start, end)：信息密度分析相对 request.text；
+          completions 的 info_radar 相对续写全文 choices[0].text。
+        items:
+          type: integer
+        minItems: 2
+        maxItems: 2
+      raw:
+        type: string
+      real_topk:
+        type: array
+        description: "[模型排序名次, 该 token 的 softmax 概率]"
+        items:
+          type: number
+        minItems: 2
+        maxItems: 2
+      pred_topk:
+        type: array
+        description: 该位置 logits softmax 后的 top-N 候选 [token 文本, 概率]（N 由服务端 DEFAULT_TOPK 决定）
+
+  # 与 client generatedSchemas AnalyzeResult 一致；成功路径下 backend.api.analyze._build_response
+  AnalyzeResult:
+    type: object
+    required:
+      - bpe_strings
+    properties:
+      model:
+        type: string
+      bpe_strings:
+        type: array
+        items:
+          $ref: "#/definitions/TokenWithOffset"
+      error:
+        type: string
+        x-nullable: true
+
+  AnalyzeResponse:
+    type: object
+    required:
+      - request
+      - result
+    properties:
+      request:
+        type: object
+        required:
+          - text
+        properties:
+          text:
+            type: string
+            description: 与请求中分析的原文一致（响应中仅回显 text）
+      result:
+        $ref: "#/definitions/AnalyzeResult"
+
+  AnalyzeRequest:
+    type: object
+    required:
+      - model
+      - text
+    properties:
+      model:
+        type: string
+      text:
+        type: string
+      stream:
+        type: boolean
+        description: 是否使用 SSE 流式响应

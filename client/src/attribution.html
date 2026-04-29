@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title></title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="attribution.css">
+</head>
+
+<body>
+
+    <main class="main_frame">
+        <section class="left_panel">
+            <div class="floating_content">
+                <header class="app-page-toolbar app-page-toolbar--bleed">
+                    <h1 class="page-toolbar-title"><span class="title-main-line"><span data-page-title data-i18n></span><span class="title-tagline" data-page-subtitle data-i18n></span></span></h1>
+                    <div class="app-page-toolbar-actions">
+                        <a href="index.html" class="home-link" title="InfoLens Home" data-i18n="text,title">InfoLens Home</a>
+                        <div class="settings-menu-wrapper">
+                            <button id="settings_btn" class="settings-btn" title="Settings" data-i18n="title">
+                                <span class="settings-icon">⚙️</span>
+                            </button>
+                            <div id="settings_menu" class="settings-menu" style="display: none;">
+                                <!-- INCLUDE partials/settings-menu-common-mid.html -->
+                                <!-- INCLUDE partials/settings-menu-trailing-admin.html -->
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <div class="chat-cached-history-bar">
+                    <div class="semantic-search-input-wrapper chat-prompt-history-wrapper">
+                        <button type="button" id="attribution_cached_history_btn" class="text-action-btn" data-i18n>Cached history</button>
+                        <ul id="attribution_cached_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                    </div>
+                </div>
+
+                <section class="input-section">
+                    <div class="chat-prompt-panel">
+                        <div class="input-header">
+                            <span data-i18n>Context</span>
+                            <div class="text-action-buttons-top">
+                                <div class="textarea-counter" id="context_count_display">
+                                    <span id="context_count_value">0</span> <span data-i18n>chars</span>
+                                </div>
+                                <button type="button" id="clear_context_btn" class="text-action-btn" data-i18n>Clear</button>
+                                <button type="button" id="paste_context_btn" class="text-action-btn" data-i18n>Paste</button>
+                                <button type="button" id="context_history_btn" class="text-action-btn" data-i18n>History</button>
+                            </div>
+                        </div>
+                        <div class="textarea-wrapper chat-prompt-textarea-block">
+                            <div class="semantic-search-input-wrapper chat-prompt-history-wrapper">
+                                <textarea id="context_text"></textarea>
+                                <ul id="context_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chat-prompt-panel attribution-target-panel">
+                        <div class="input-header">
+                            <span data-i18n>Target prediction</span>
+                            <div class="text-action-buttons-top">
+                                <div class="textarea-counter" id="target_count_display">
+                                    <span id="target_count_value">0</span> <span data-i18n>chars</span>
+                                </div>
+                                <button type="button" id="clear_target_btn" class="text-action-btn" data-i18n>Clear</button>
+                                <button type="button" id="paste_target_btn" class="text-action-btn" data-i18n>Paste</button>
+                                <button type="button" id="target_history_btn" class="text-action-btn" data-i18n>History</button>
+                            </div>
+                        </div>
+                        <div class="textarea-wrapper chat-prompt-textarea-block">
+                            <div class="semantic-search-input-wrapper chat-prompt-history-wrapper">
+                                <textarea id="target_text"></textarea>
+                                <ul id="target_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="textarea-wrapper chat-prompt-actions-row">
+                        <div class="semantic-submode-row chat-completion-options-row attribution-model-variant-row">
+                            <span class="semantic-submode-group">
+                                <label class="semantic-submode-label" for="attribution_model_variant" data-i18n>Model</label>
+                                <select id="attribution_model_variant" class="semantic-submode-select" aria-label="Attribution model slot" data-i18n="aria-label">
+                                    <option value="base">base</option>
+                                    <option value="instruct">instruct</option>
+                                </select>
+                            </span>
+                        </div>
+                        <div class="button-group">
+                            <div class="button-left">
+                                <button type="button" id="analyze_btn" class="primary-btn inactive" disabled data-i18n>Analyze attribution</button>
+                                <div class="loadersmall loader-small-container"></div>
+                            </div>
+                            <div id="attribution_result_info" class="text-metrics is-hidden"></div>
+                            <div class="button-right">
+                                <button type="button" id="force_retry_btn" class="primary-btn inactive" disabled title="Fetch again without using cached result" data-i18n="text,title">Force retry</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="semantic-submode-row attribution-max-score-row">
+                        <span class="semantic-submode-group">
+                            <label class="attribution-use-mapping-label">
+                                <input type="checkbox" id="attribution_use_mapping">
+                                <span></span>
+                            </label>
+                        </span>
+                        <span class="semantic-submode-group attribution-max-score-slider-group">
+                            <label class="semantic-submode-label" for="attribution_max_score_range" data-i18n>Max score</label>
+                            <input type="range" id="attribution_max_score_range" class="attribution-max-score-range"
+                                min="0.01" max="1" step="0.01" value="1"
+                                title="For threshold x∈(0,1]: map normalized scores in [0,x] linearly to display intensities [0,1]; scores above x saturate at maximum intensity. At x=1, equivalent to disabling mapping."
+                                data-i18n="title"
+                                disabled>
+                            <span id="attribution_max_score_value" class="attribution-max-score-value" aria-live="polite">1.00</span>
+                        </span>
+                    </div>
+
+                    <div class="attribution-exclude-prompt-patterns-row">
+                        <div class="semantic-submode-row attribution-exclude-prompt-patterns-header">
+                            <span class="semantic-submode-group">
+                                <label class="attribution-use-mapping-label"
+                                    title="When enabled, each line below is a regex with the global flag, matched only within the context field below. If a token offset lies fully inside a match, its score is treated as 0."
+                                    data-i18n="title">
+                                    <input type="checkbox" id="attribution_exclude_prompt_patterns_enable" checked>
+                                    <span></span>
+                                </label>
+                            </span>
+                            <span class="semantic-submode-group">
+                                <label class="semantic-submode-label" for="attribution_exclude_prompt_patterns" data-i18n>Exclude prompt patterns</label>
+                            </span>
+                        </div>
+                        <textarea id="attribution_exclude_prompt_patterns" class="attribution-exclude-prompt-patterns-input" rows="2"
+                            placeholder="One regex per line (context only)"
+                            spellcheck="false"
+                            autocomplete="off"
+                            title="One regex per line (global flag), matched only within the context text; if a token offset lies fully inside a match, its score is treated as 0."
+                            data-i18n="placeholder,title"></textarea>
+                    </div>
+                </section>
+            </div>
+        </section>
+
+        <div class="resizer" id="resizer"></div>
+
+        <section class="right_panel">
+            <div id="results" class="attribution-inspector-surface">
+                <div id="major_tooltip" class="tooltip">
+                    <div class="currentToken"></div>
+                    <div class="myDetail"></div>
+                    <br />
+                    <div class="predictions predictions-table"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="vendor.js"></script>
+    <script src="attribution.js"></script>
+
+</body>
+
+</html>

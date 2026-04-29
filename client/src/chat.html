@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title></title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="chat.css">
+</head>
+
+<body>
+
+    <main class="main_frame">
+        <section class="left_panel">
+            <div class="floating_content">
+                <header class="app-page-toolbar app-page-toolbar--bleed">
+                    <h1 class="page-toolbar-title"><span class="title-main-line"><span data-page-title data-i18n></span><span class="title-tagline" data-page-subtitle data-i18n></span></span></h1>
+                    <div class="app-page-toolbar-actions">
+                        <a href="index.html" class="home-link" title="InfoLens Home" data-i18n="text,title">InfoLens Home</a>
+                        <div class="settings-menu-wrapper">
+                            <button id="settings_btn" class="settings-btn" title="Settings" data-i18n="title">
+                                <span class="settings-icon">⚙️</span>
+                            </button>
+                            <div id="settings_menu" class="settings-menu" style="display: none;">
+                                <!-- INCLUDE partials/settings-menu-common-mid.html -->
+                                <!-- INCLUDE partials/settings-menu-trailing-admin.html -->
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <div class="chat-cached-history-bar">
+                    <div class="semantic-search-input-wrapper chat-prompt-history-wrapper">
+                        <button type="button" id="chat_cached_history_btn" class="text-action-btn" data-i18n>Cached history</button>
+                        <ul id="chat_cached_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                    </div>
+                </div>
+
+                <section class="input-section">
+                    <div class="semantic-submode-row chat-raw-prompt-mode-row">
+                        <span class="semantic-submode-group">
+                            <label for="chat_skip_chat_template">
+                                <input type="checkbox" id="chat_skip_chat_template" />
+                                <span data-i18n>Raw prompt mode</span>
+                            </label>
+                        </span>
+                    </div>
+                    <div id="raw_input_panel" class="chat-prompt-panel">
+                        <div class="input-header">
+                            <span><span class="demo" data-i18n>Raw prompt</span></span>
+                            <div class="text-action-buttons-top">
+                                <div class="textarea-counter" id="text_count_display">
+                                    <span id="text_count_value">0</span> <span data-i18n>chars</span>
+                                </div>
+                                <button type="button" id="clear_text_btn" class="text-action-btn">Clear</button>
+                                <button type="button" id="paste_text_btn" class="text-action-btn">Paste</button>
+                                <button type="button" id="chat_raw_input_history_btn" class="text-action-btn" data-i18n>History</button>
+                            </div>
+                        </div>
+                        <div class="textarea-wrapper chat-prompt-textarea-block">
+                            <div class="semantic-search-input-wrapper chat-prompt-history-wrapper">
+                                <textarea id="test_text"></textarea>
+                                <ul id="chat_raw_input_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="chat_input_panel" hidden>
+                        <div class="chat-prompt-panel" id="chat_system_prompt_panel">
+                            <div class="input-header">
+                                <label class="chat-use-system-label">
+                                    <input type="checkbox" id="chat_use_system_prompt" checked />
+                                    <span class="demo" data-i18n>System</span>
+                                </label>
+                                <div class="text-action-buttons-top">
+                                    <div class="textarea-counter" id="chat_system_text_count_display">
+                                        <span id="chat_system_text_count_value">0</span> <span data-i18n>chars</span>
+                                    </div>
+                                    <button type="button" id="chat_system_clear_text_btn" class="text-action-btn">Clear</button>
+                                    <button type="button" id="chat_system_paste_text_btn" class="text-action-btn">Paste</button>
+                                    <button type="button" id="chat_system_prompt_history_btn" class="text-action-btn">History</button>
+                                </div>
+                            </div>
+                            <div class="textarea-wrapper chat-prompt-textarea-block">
+                                <div class="semantic-search-input-wrapper chat-prompt-history-wrapper">
+                                    <textarea id="chat_system_text">You are a helpful assistant.</textarea>
+                                    <ul id="chat_system_prompt_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chat-prompt-panel">
+                            <div class="input-header">
+                                <span><span class="demo" data-i18n>User</span></span>
+                                <div class="text-action-buttons-top">
+                                    <div class="textarea-counter" id="chat_user_text_count_display">
+                                        <span id="chat_user_text_count_value">0</span> <span data-i18n>chars</span>
+                                    </div>
+                                    <button type="button" id="chat_user_clear_text_btn" class="text-action-btn">Clear</button>
+                                    <button type="button" id="chat_user_paste_text_btn" class="text-action-btn">Paste</button>
+                                    <button type="button" id="chat_user_prompt_history_btn" class="text-action-btn">History</button>
+                                </div>
+                            </div>
+                            <div class="textarea-wrapper chat-prompt-textarea-block">
+                                <div class="semantic-search-input-wrapper chat-prompt-history-wrapper">
+                                    <textarea id="chat_user_text"></textarea>
+                                    <ul id="chat_user_prompt_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="textarea-wrapper chat-prompt-actions-row">
+                        <div class="semantic-submode-row chat-completion-options-row">
+                            <span class="semantic-submode-group">
+                                <label class="chat-max-new-tokens-label" for="chat_max_new_tokens">
+                                    <span class="semantic-submode-label" data-i18n>Max new tokens:</span>
+                                    <input type="text" id="chat_max_new_tokens" class="semantic-threshold-input chat-max-new-tokens-input" inputmode="numeric" autocomplete="off" />
+                                </label>
+                            </span>
+                        </div>
+                        <div class="button-group">
+                            <div class="button-left">
+                                <button type="button" id="submit_text_btn" class="primary-btn inactive" disabled data-i18n>Ask</button>
+                                <div class="generation-status-slot loader-small-container">
+                                    <div class="loadersmall"></div>
+                                    <span id="chat_complete_reason" class="generation-end-reason"></span>
+                                </div>
+                                <span id="analyze_progress" class="analyze-progress"></span>
+                            </div>
+                            <div id="text_metrics" class="text-metrics text-metrics-chat">
+                                <div id="metric_usage" class="text-metrics-secondary"></div>
+                                <div id="metric_model" class="text-metrics-secondary">model: </div>
+                            </div>
+                            <div class="button-right">
+                                <button type="button" id="force_retry_btn" class="primary-btn inactive" disabled title="Fetch again without using cached result" data-i18n="text,title">Force retry</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </section>
+
+        <div class="resizer" id="resizer"></div>
+
+        <section class="right_panel">
+            <div class="chat-right-stack">
+                <div id="chat_prompt_used" class="chat-prompt-used truncated-text" hidden></div>
+                <div id="chat_streaming_preview" class="chat-streaming-preview" hidden></div>
+                <div id="results">
+                <div id="major_tooltip" class="tooltip">
+                    <div class="currentToken"></div>
+                    <div class="myDetail"></div>
+                    <br />
+                    <div class="predictions predictions-table"></div>
+                </div>
+                </div>
+                <div class="chat-copy-fulltext-row">
+                    <button type="button" id="chat_copy_fulltext_btn" class="text-action-btn">Copy full text</button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+    <!-- INCLUDE partials/attribution-sidebar.html -->
+
+    <script src="vendor.js"></script>
+    <script src="chat.js"></script>
+
+</body>
+
+</html>

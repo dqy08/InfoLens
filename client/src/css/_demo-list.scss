@@ -1,0 +1,53 @@
+// Demo列表公共样式 - 被start.scss和compare.scss共享
+
+// Demo列表容器 - 基础布局样式
+.demos {
+  display: flex;  // 使用flex布局
+  flex-direction: column;  // 单列竖向排列
+  overflow-y: auto;  // 垂直滚动
+  overflow-x: auto;  // 水平滚动，当内容超出时显示横向滚动条
+  // 禁用CSS Columns布局
+  column-count: 1;  // 强制单列
+  column-width: auto;  // 取消固定列宽
+  column-gap: 0;  // 取消列间距
+}
+
+// Demo项基础样式
+.demo-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  break-inside: avoid;  // 防止demo项被分列截断
+}
+
+// Demo按钮样式
+.demoBtn, .demo-folder-btn {
+  display: block;  // 每个按钮占一行
+  width: max-content;  // 宽度根据内容自适应，确保完整显示文件名
+  box-sizing: border-box;  // 确保padding和border包含在宽度内
+  border-radius: 3px;
+  border: none;  // 去除外框
+  padding: 0 6px;  // 去掉上下留白以压缩行距
+  margin-bottom: 0;  // 移除按钮之间的额外间隔
+  font-size: 9pt;
+  line-height: 1.2;  // 紧凑但可读
+  text-align: center;  // 文字居中
+  white-space: nowrap;  // 防止文字换行
+  background-color: var(--button-bg);
+  color: var(--text-color);
+  transition: background-color 0.3s ease, color 0.3s ease, border 0.2s ease, box-shadow 0.2s ease;
+
+  &:hover {
+    background-color: var(--button-hover-bg);
+  }
+}
+
+// 选中状态的按钮样式
+.demoBtn.demo-selected,
+.demo-folder-btn.demo-selected {
+  border: 1px solid var(--primary-color, #3b82f6);
+  background-color: rgba(59, 130, 246, 0.12);
+  color: var(--primary-color, #3b82f6);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35);
+}
+
