@@ -1,6 +1,7 @@
 """服务访问日志"""
 from datetime import datetime
 from typing import Optional
+from urllib.parse import unquote
 
 from flask import request
 import threading
@@ -45,15 +46,12 @@ def _log_request(event_type: str, details: str = "", client_ip: str = None):
 
 
 def log_page_load(path: str):
-    """记录页面访问（含 ?ref= 参数）"""
-    details = f"path='{path}'"
     try:
-        ref = request.args.get("ref")
-        if ref:
-            details += f", ref='{ref}'"
+        qs = request.query_string.decode("utf-8", errors="replace")
+        combined = f"{path}?{unquote(qs)}" if qs else path
     except RuntimeError:
-        pass
-    _log_request("📄 页面访问", details)
+        combined = path
+    _log_request("📄 页面访问", f"path={combined!r}")
 
 
 def log_demo_file(path: str):

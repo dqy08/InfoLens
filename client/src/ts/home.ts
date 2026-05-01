@@ -2,10 +2,12 @@
  * 极简导航首页：主题与语言与 analysis 等页通过 localStorage 一致。
  */
 import './utils/d3-polyfill';
+import dagPreviewLight from '../content/images/dag.mov';
+import dagPreviewDark from '../content/images/dag-dark.mov';
 import '../css/start.scss';
 import '../css/home.scss';
 
-import { initThemeManager } from './ui/theme';
+import { initThemeManager, type Theme } from './ui/theme';
 import { initLanguageManager } from './ui/language';
 import { getCurrentLanguage, initI18n, tr } from './lang/i18n-lite';
 import { AdminManager } from './utils/adminManager';
@@ -28,6 +30,19 @@ function applyGenAttributeNavCardHref(): void {
     a.setAttribute('href', `gen_attribute.html?demo=${encodeURIComponent(slug)}`);
 }
 
+const DAG_PREVIEW_BY_THEME: Record<Theme, string> = {
+    light: dagPreviewLight,
+    dark: dagPreviewDark,
+};
+
+function syncGenAttributeCardPreviewVideo(theme: Theme): void {
+    const v = document.querySelector<HTMLVideoElement>(
+        'a.nav-landing-card[data-nav-page="genAttribute"] video.nav-landing-card-shot'
+    );
+    if (!v) return;
+    v.src = DAG_PREVIEW_BY_THEME[theme];
+}
+
 applyGenAttributeNavCardHref();
 
 const apiPrefix = URLHandler.parameters['api'] || '';
@@ -35,7 +50,7 @@ const { api } = initializeCommonApp(apiPrefix);
 const adminManager = AdminManager.getInstance();
 api.setAdminToken(adminManager.isInAdminMode() ? adminManager.getAdminToken() : null);
 
-const themeManager = initThemeManager({}, '#theme_dropdown');
+const themeManager = initThemeManager({ onThemeChange: syncGenAttributeCardPreviewVideo }, '#theme_dropdown');
 const languageManager = initLanguageManager({}, '#language_dropdown');
 
 void new SettingsMenuManager(

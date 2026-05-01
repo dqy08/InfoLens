@@ -1,6 +1,23 @@
 $breakpoint-mobile: 767px;
 
-// 导航页主/副标题字阶与顶栏子页解耦；仅本页使用下列变量
+// ----- 导航首页卡片尺寸（只改此块）-----
+$nav-grid-gap: 0.75rem;
+$nav-card-gap: 0.65rem;
+$nav-card-pad-block: 0.75rem;
+$nav-card-pad-inline: 0.85rem;
+$nav-card-radius: 8px;
+$nav-card-shot-radius: 6px;
+$nav-title-size: 0.95rem;
+$nav-subtitle-size: 0.82rem;
+
+$nav-featured-width-narrow: 100%; // 单列竖排时大卡铺满轨宽
+$nav-featured-width-wide: 60%; // 宽屏首行内宽度，对齐旧版双列中单列占比
+
+// 小卡一键标度；只占格宽时用 track，只缩内边距/字时用 inner
+$nav-compact-track-fraction: 0.9;
+$nav-compact-inner-scale: 0.9;
+// -----
+
 body.nav-landing-page {
   --nav-landing-title-size: 22px;
   --nav-landing-title-weight: 600;
@@ -11,8 +28,6 @@ body.nav-landing-page {
   --nav-landing-card-bg: #eeeeee;
   --nav-landing-card-bg-hover: #e0e0e0;
 
-  // 覆盖子页/响应式里对 body{height:100vh} 的设定：固定视口高 + flex 纵向居中时，
-  // 内容总高超过一屏会向上溢出，顶栏（设置按钮）会落在首屏外。
   position: relative;
   min-height: 100vh;
   height: auto;
@@ -25,7 +40,6 @@ body.nav-landing-page {
   background: var(--app-bg, #f5f5f5);
 }
 
-// 相对 body 右上角定位，随页面滚动；不参与 flex 流，不单独占一行
 .nav-landing-settings {
   position: absolute;
   top: max(12px, env(safe-area-inset-top));
@@ -43,13 +57,11 @@ html[data-theme='dark'] body.nav-landing-page {
 
 .nav-landing-main {
   width: 100%;
-  // 与双列断点一致：窄/中屏仍由 width:100% 撑满视口（受 padding 限制）
   max-width: 44rem;
   box-sizing: border-box;
   padding: 2rem 1.25rem;
 }
 
-// 宽屏：放大主区域，卡片与预览块随之变宽变高
 @media (min-width: $breakpoint-mobile + 1) {
   .nav-landing-main {
     max-width: 64rem;
@@ -86,30 +98,92 @@ html[data-theme='dark'] body.nav-landing-page {
   letter-spacing: 0.02em;
 }
 
+// 首行一张 featured，末行三张 compact；单列时竖排同序
 .nav-landing-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+  gap: $nav-grid-gap;
+  justify-items: center;
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    'hero'
+    'c1'
+    'c2'
+    'c3';
 }
 
-@media (max-width: $breakpoint-mobile) {
+// 宽屏：首行大卡跨三列，末行三列各放一张小卡
+@media (min-width: $breakpoint-mobile + 1) {
   .nav-landing-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      'hero hero hero'
+      'c1 c2 c3';
   }
 }
 
+// index.html 顺序：nth-child(1) featured，(2)(3)(4) 为三张 compact
+.nav-landing-card--featured {
+  grid-area: hero;
+  width: $nav-featured-width-narrow;
+  justify-self: stretch;
+}
+
+@media (min-width: $breakpoint-mobile + 1) {
+  .nav-landing-card--featured {
+    width: $nav-featured-width-wide;
+    justify-self: center; // 在跨三列的首行里水平居中
+  }
+}
+
+// 三张 compact 对应第二行 c1–c3（与 grid-template-areas 一致）
+.nav-landing-card.nav-landing-card--compact:nth-child(2) {
+  grid-area: c1;
+  width: #{$nav-compact-track-fraction * 100%};
+}
+
+.nav-landing-card.nav-landing-card--compact:nth-child(3) {
+  grid-area: c2;
+  width: #{$nav-compact-track-fraction * 100%};
+}
+
+.nav-landing-card.nav-landing-card--compact:nth-child(4) {
+  grid-area: c3;
+  width: #{$nav-compact-track-fraction * 100%};
+}
+
+// 双类链：特异性高于单独 .nav-landing-card，避免基类盖掉小卡的 padding/gap
+.nav-landing-card.nav-landing-card--compact {
+  padding: #{$nav-card-pad-block * $nav-compact-inner-scale} #{$nav-card-pad-inline * $nav-compact-inner-scale};
+  gap: #{$nav-card-gap * $nav-compact-inner-scale};
+  border-radius: #{$nav-card-radius * $nav-compact-inner-scale};
+
+  .nav-landing-card-title {
+    font-size: #{$nav-title-size * $nav-compact-inner-scale};
+  }
+
+  .nav-landing-card-subtitle {
+    font-size: #{$nav-subtitle-size * $nav-compact-inner-scale};
+  }
+
+  .nav-landing-card-shot {
+    border-radius: #{$nav-card-shot-radius * $nav-compact-inner-scale};
+  }
+}
+
+// 大卡与小卡共用基类；小卡另加 .nav-landing-card--compact 覆写尺寸
 .nav-landing-card {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
-  padding: 0.75rem 0.85rem;
-  border-radius: 8px;
+  gap: $nav-card-gap;
+  padding: $nav-card-pad-block $nav-card-pad-inline;
+  border-radius: $nav-card-radius;
   text-decoration: none;
   color: inherit;
   text-align: left;
   background: var(--nav-landing-card-bg, #e6e6e6);
   border: 1px solid var(--border-color, #ddd);
   transition: background 0.15s ease, border-color 0.15s ease;
+  box-sizing: border-box;
 
   &:hover {
     background: var(--nav-landing-card-bg-hover, #dcdcdc);
@@ -120,14 +194,13 @@ html[data-theme='dark'] .nav-landing-card {
   border-color: var(--border-color, #333);
 }
 
-// 与卡片同色，不单独铺底
 .nav-landing-card-text {
   padding: 0;
 }
 
 .nav-landing-card-title {
   display: block;
-  font-size: 0.95rem;
+  font-size: $nav-title-size;
   font-weight: 600;
   line-height: var(--nav-landing-line-height);
 }
@@ -135,7 +208,7 @@ html[data-theme='dark'] .nav-landing-card {
 .nav-landing-card-subtitle {
   display: block;
   text-align: right;
-  font-size: 0.82rem;
+  font-size: $nav-subtitle-size;
   font-weight: 400;
   line-height: var(--nav-landing-line-height);
   color: var(--text-muted, #666);
@@ -145,16 +218,14 @@ html[data-theme='dark'] .nav-landing-card {
   flex-shrink: 0;
   width: 100%;
   aspect-ratio: 4 / 3;
-  border-radius: 6px;
+  border-radius: $nav-card-shot-radius;
   box-sizing: border-box;
   background: var(--bg-hover, #f0f0f0);
   background-size: cover;
-  // 裁切时保留左上内容（右侧、下侧被裁）
   background-position: left top;
   background-repeat: no-repeat;
 }
 
-// content/images：日/夜各一套；LLM Causal Flow 另按 html lang 分中/英，经 webpack 产出 URL
 .nav-landing-card[data-nav-page='analysis'] .nav-landing-card-shot {
   background-image: url('../content/images/highlight.png');
   background-color: var(--bg-hover, #f0f0f0);
@@ -170,15 +241,15 @@ html[data-theme='dark'] .nav-landing-card {
   background-color: var(--bg-hover, #f0f0f0);
 }
 
-// LLM Causal Flow：日/夜 × 中/英（见 content/images/dag-*.png）
-.nav-landing-card[data-nav-page='genAttribute'] .nav-landing-card-shot {
-  background-image: url('../content/images/dag-en.png');
+.nav-landing-card[data-nav-page='genAttribute'] video.nav-landing-card-shot {
+  object-fit: cover;
+  object-position: left top;
+  display: block;
   background-color: var(--bg-hover, #f0f0f0);
 }
 
-html[lang='zh-CN'] .nav-landing-card[data-nav-page='genAttribute'] .nav-landing-card-shot {
-  background-image: url('../content/images/dag-cn.png');
-  background-color: var(--bg-hover, #f0f0f0);
+html[data-theme='dark'] .nav-landing-card[data-nav-page='genAttribute'] video.nav-landing-card-shot {
+  background-color: var(--bg-hover, #2a2a2a);
 }
 
 html[data-theme='dark'] .nav-landing-card[data-nav-page='analysis'] .nav-landing-card-shot {
@@ -193,15 +264,5 @@ html[data-theme='dark'] .nav-landing-card[data-nav-page='chat'] .nav-landing-car
 
 html[data-theme='dark'] .nav-landing-card[data-nav-page='attribution'] .nav-landing-card-shot {
   background-image: url('../content/images/attribute-dark.png');
-  background-color: var(--bg-hover, #2a2a2a);
-}
-
-html[data-theme='dark'] .nav-landing-card[data-nav-page='genAttribute'] .nav-landing-card-shot {
-  background-image: url('../content/images/dag-dark-en.png');
-  background-color: var(--bg-hover, #2a2a2a);
-}
-
-html[data-theme='dark'][lang='zh-CN'] .nav-landing-card[data-nav-page='genAttribute'] .nav-landing-card-shot {
-  background-image: url('../content/images/dag-dark-cn.png');
   background-color: var(--bg-hover, #2a2a2a);
 }

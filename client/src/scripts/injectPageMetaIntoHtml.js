@@ -103,12 +103,16 @@ function injectPageMeta(html, pageKey, doc) {
             } else {
                 openTag = openTag.replace(/>$/, ` title="${escapeHtmlText(navTitle)}">`);
             }
+            const shot =
+                navKey === 'genAttribute'
+                    ? `<video class="nav-landing-card-shot" muted loop playsinline autoplay preload="metadata" aria-hidden="true"></video>`
+                    : `<div class="nav-landing-card-shot" aria-hidden="true"></div>`;
             const inner =
                 `<div class="nav-landing-card-text">` +
                 `<span class="nav-landing-card-title" data-i18n>${escapeHtmlText(navMeta.title)}</span>` +
                 `<span class="nav-landing-card-subtitle" data-i18n>${escapeHtmlText(navMeta.subtitle)}</span>` +
                 `</div>` +
-                `<div class="nav-landing-card-shot" aria-hidden="true"></div>`;
+                shot;
             html = html.replace(re, `${openTag}${inner}${m[3]}`);
         }
     }

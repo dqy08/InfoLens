@@ -1,10 +1,10 @@
 /**
- * Gen Attribute 打包 demo：JSON 放在 `dist/demos/gen_attribute/`，运行时 fetch，不打入 bundle。
- * 列表来自同目录 `manifest.json`（构建时由 webpack 插件生成）。
+ * Gen Attribute 打包 demo：大 JSON 在 `dist/demos/gen_attribute/`，运行时 fetch；slug 列表构建期内联自 generated 模块。
  */
 
 import type { GenAttrCachedRun } from '../storage/genAttributeRunCache';
 import { isKnownPersistedCompletionReason } from '../utils/generationEndReasonLabel';
+import { GEN_ATTRIBUTE_BUNDLED_DEMO_SLUGS } from './genAttributeBundledDemoManifest.generated';
 
 const BASE = 'demos/gen_attribute/';
 
@@ -43,39 +43,11 @@ function isValidGenAttrCachedRunPayload(v: unknown): v is GenAttrCachedRun {
 const payloadCache = new Map<string, GenAttrCachedRun>();
 const payloadInflight = new Map<string, Promise<GenAttrCachedRun | undefined>>();
 
-type BundledDemoListEntry = { id: string; label: string };
+export type BundledDemoListEntry = { id: string; label: string };
 
-let manifestListCache: readonly BundledDemoListEntry[] | undefined;
-let manifestListInflight: Promise<readonly BundledDemoListEntry[]> | undefined;
-
-/**
- * manifest 构建期固定；本会话内只网络请求一次，并发首次调用会去重。
- */
-export async function fetchBundledGenAttributeDemoList(): Promise<readonly BundledDemoListEntry[]> {
-    if (manifestListCache) return manifestListCache;
-    if (!manifestListInflight) {
-        manifestListInflight = fetch(new URL('manifest.json', baseUrl()))
-            .then((r) => {
-                if (!r.ok) throw new Error(`manifest: ${r.status}`);
-                return r.json() as Promise<unknown>;
-            })
-            .then((j) => {
-                const slugs =
-                    j != null &&
-                    typeof j === 'object' &&
-                    'slugs' in j &&
-                    Array.isArray((j as { slugs: unknown }).slugs)
-                        ? (j as { slugs: unknown[] }).slugs.filter((x): x is string => typeof x === 'string')
-                        : [];
-                const list = slugs.map((slug) => ({ id: slug, label: slug }));
-                manifestListCache = list;
-                return list;
-            })
-            .finally(() => {
-                manifestListInflight = undefined;
-            });
-    }
-    return manifestListInflight;
+/** 构建期固定的 bundled demo 列表（与当前 JS 同版本）。 */
+export function getBundledGenAttributeDemoList(): readonly BundledDemoListEntry[] {
+    return GEN_ATTRIBUTE_BUNDLED_DEMO_SLUGS.map((slug) => ({ id: slug, label: slug }));
 }
 
 /**

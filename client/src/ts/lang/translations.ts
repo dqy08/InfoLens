@@ -215,7 +215,6 @@ export const translations: Translations = {
         'This action cannot be undone.': '此操作不可撤销。',
 
         // ========== Demo 对比页面 ==========
-        'InfoLens Home': '返回首页',
         'Import Result': '导入结果',
         'Diff Mode': '差分模式',
         'Move left': '左移',

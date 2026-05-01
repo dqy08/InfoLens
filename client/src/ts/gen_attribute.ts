@@ -46,7 +46,7 @@ import {
 } from './utils/contentUrl';
 import {
     fetchBundledGenAttributeDemoBySlug,
-    fetchBundledGenAttributeDemoList,
+    getBundledGenAttributeDemoList,
     isGenAttrRunPayloadValidForUi,
 } from './demos/genAttributeBundledDemos';
 import { extractErrorMessage } from './utils/errorUtils';
@@ -865,8 +865,8 @@ async function restoreGenAttrFromDemoSlug(slug: string): Promise<void> {
 const genAttrCachedHistoryBtn = document.getElementById('gen_attr_cached_history_btn');
 let genAttrBundledDemoEntries: Array<{ id: string; label: string }> = [];
 
-async function refreshGenAttrBundledDemoEntriesList(): Promise<void> {
-    genAttrBundledDemoEntries = [...(await fetchBundledGenAttributeDemoList())];
+function refreshGenAttrBundledDemoEntriesList(): void {
+    genAttrBundledDemoEntries = [...getBundledGenAttributeDemoList()];
 }
 
 const genCachedHistory = initCachedHistoryQueryDropdown({
@@ -898,9 +898,7 @@ initQueryHistoryDropdown({
     applyHistoryOnHover: true,
 });
 
-void refreshGenAttrBundledDemoEntriesList().catch((e) => {
-    console.warn('[gen_attribute] bundled demo manifest prefetch failed', e);
-});
+refreshGenAttrBundledDemoEntriesList();
 
 // --- 进度与指标 ---
 function showProgress(current: number, total: number): void {

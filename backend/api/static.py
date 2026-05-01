@@ -41,6 +41,8 @@ def register_static_routes(app):
         """serves all files from ./client/dist/ to ``/client/<path:path>``"""
         if path.endswith('.html'):
             log_page_load(path)
+        if path.endswith('.json'):
+            log_demo_file(path)
         return _read_static_file('client/dist', path)
 
     @app.route('/demo/<path:path>')

@@ -74,6 +74,10 @@ module.exports = {
                 }
             },
             {
+                test: /\.mov$/,
+                type: 'asset/resource'
+            },
+            {
                 test: /\.woff(2)?(\?v=[0-9]\.[0-9]\.[0-9])?$/,
                 type: 'asset',
                 parser: {

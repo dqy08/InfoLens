@@ -6,3 +6,8 @@ declare module '*.html' {
     const content: string;
     export default content;
 }
+
+declare module '*.mov' {
+    const url: string;
+    export default url;
+}
