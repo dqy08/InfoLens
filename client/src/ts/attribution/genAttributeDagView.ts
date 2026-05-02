@@ -125,10 +125,12 @@ function stackLayoutViewportPx(stackEl: HTMLElement): { w: number; h: number } {
 }
 
 /** 在「抵消 display-scale」的基准上再放大，作为 DAG 默认初始视图（d3 zoom 的 k） */
-const DAG_INITIAL_ZOOM_BOOST = 1.25;
+const DAG_INITIAL_ZOOM_BOOST = 1.5;
 
 /** 与 {@link gen_attribute.scss} `.gen-attr-dag-stack` 中 `--gen-attr-dag-display-scale` 一致 */
 const CSS_VAR_DISPLAY_SCALE = '--gen-attr-dag-display-scale';
+/** 与 {@link gen_attribute.scss} `.gen-attr-dag-stack` 中 `--gen-attr-dag-link-stroke-width` 一致 */
+const CSS_VAR_DAG_LINK_STROKE_WIDTH = '--gen-attr-dag-link-stroke-width';
 
 /** 与 {@link start.scss} `--dag-normal-line-color` 一致（普通边：线 stroke + 箭头 marker stroke） */
 const CSS_VAR_DAG_NORMAL_LINE_COLOR = '--dag-normal-line-color';
@@ -136,9 +138,6 @@ const CSS_VAR_DAG_NORMAL_LINE_COLOR = '--dag-normal-line-color';
 const CSS_VAR_DAG_HIGHLIGHT_LINE_IN = '--dag-highlight-line-color-in';
 /** 与 {@link start.scss} `--dag-highlight-line-color-out` 一致（出边：从焦点出发） */
 const CSS_VAR_DAG_HIGHLIGHT_LINE_OUT = '--dag-highlight-line-color-out';
-
-/** 可见边与开放箭头描边宽度（px，与 marker 中 `vector-effect: non-scaling-stroke` 配合） */
-const DAG_LINK_STROKE_WIDTH = 1;
 
 /** 弱化：未排除的 prompt 无出边，或（prompt/生成区）邻域外且存在悬停/选中焦点时 */
 const DAG_NODE_WEAKEN_OPACITY = 0.5;
@@ -373,7 +372,7 @@ export type InitGenAttributeDagViewOptions = {
     onDagRefresh?: () => void;
     /**
      * 写入 `.gen-attr-dag-stack` 的 `--gen-attr-dag-display-scale`（矩形与节点文字同时缩放）。
-     * 未设置时仅用样式表中的变量（默认 1，与测量层同字号、同框比例）。
+     * 未设置时沿用样式表（`--gen-attr-dag-display-scale` 与 `--gen-attr-dag-compactness` 同源）。
      */
     displayScale?: number;
     /**
@@ -715,7 +714,7 @@ export function initGenAttributeDagView(
                     .attr('d', 'M0,-5 L10,0 L0,5')
                     .attr('fill', 'none')
                     .attr('stroke', `var(${CSS_VAR_DAG_NORMAL_LINE_COLOR})`)
-                    .attr('stroke-width', DAG_LINK_STROKE_WIDTH)
+                    .attr('stroke-width', `var(${CSS_VAR_DAG_LINK_STROKE_WIDTH})`)
                     .attr('vector-effect', 'non-scaling-stroke')
                     .attr('stroke-linecap', 'round')
                     .attr('stroke-linejoin', 'round');
@@ -734,7 +733,7 @@ export function initGenAttributeDagView(
                     el.append('line')
                         .attr('class', 'gen-attr-dag-link-visible')
                         .attr('stroke', `var(${CSS_VAR_DAG_NORMAL_LINE_COLOR})`)
-                        .attr('stroke-width', DAG_LINK_STROKE_WIDTH)
+                        .attr('stroke-width', `var(${CSS_VAR_DAG_LINK_STROKE_WIDTH})`)
                         .attr('pointer-events', 'stroke')
                         .attr('marker-end', `url(#${mkId})`);
                 });

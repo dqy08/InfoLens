@@ -15,6 +15,7 @@ from backend.api.utils import (
     validate_admin_token,
 )
 from backend.access_log import log_check_admin
+from backend.visit_stats import print_visit_summary
 
 
 def list_demos(path: str = ""):
@@ -158,23 +159,15 @@ def rename_demo(rename_request):
 
 
 def check_admin(check_request):
-    """
-    检查管理员token是否有效
-    请求格式: { token: string }
-    """
     from flask import request
-    
-    # 从请求体或请求头获取token
+
     request_token = check_request.get('token') or request.headers.get('X-Admin-Token')
-    
-    # 验证token
     is_valid, error_message = validate_admin_token(request_token)
-    
-    # 记录管理员权限检查
     log_check_admin(is_valid, token=request_token)
 
     if is_valid:
-        return {'success': True}
+        print_visit_summary()
+        return {"success": True}
     else:
         return {
             'success': False,

@@ -77,9 +77,11 @@
   // 初始 d3.zoom 缩放为 1/本变量，抵消 display-scale 在屏上的整体缩小感（见 genAttributeDagView）
   // 边色：`--dag-normal-line-color`、`--dag-highlight-line-color-in` / `out` 与节点描边 `--token-hover-outline` 同在 start.scss（见 genAttributeDagView）。
   #results.gen-attr-results-surface.LMF .gen-attr-dag-stack {
-    // display-scale：节点框大小相对测量几何的缩放；节点标签字号在此基础上再乘 node-text-font-scale（略小于 1 即自带左右留白感）
-    --gen-attr-dag-display-scale: 0.5;
+    // compactness：dag界面紧凑程度，范围 [0, 1]；1时和普通文本排版一致，最紧凑；0.5为默认。
+    --gen-attr-dag-compactness: 0.5;
+    --gen-attr-dag-display-scale: var(--gen-attr-dag-compactness);
     --gen-attr-dag-node-text-font-scale: 0.9;
+    --gen-attr-dag-link-stroke-width: calc(2px * var(--gen-attr-dag-compactness));
     // --gen-attr-dag-prompt-node-fill: rgba(221, 179, 120, 0.29);
     // #99BFD1 浅蓝
     --gen-attr-dag-prompt-node-fill: rgba(0, 255, 225, 0.28);

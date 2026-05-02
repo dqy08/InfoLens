@@ -8,6 +8,7 @@ import { SimpleEventHandler } from './utils/SimpleEventHandler';
 import { TextAnalysisAPI } from './api/GLTR_API';
 import { initForceNarrowFromStorage } from './utils/responsive';
 import { getTokenSurprisalColor, getByteSurprisalColor, HISTOGRAM_MIN_ALPHA } from './utils/SurprisalColorConfig';
+import { initClientActivityPing } from './utils/clientActivityPing';
 
 /**
  * 公共初始化返回对象
@@ -28,6 +29,7 @@ export interface CommonAppContext {
  */
 export function initializeCommonApp(apiPrefix: string = '', element?: Element): CommonAppContext {
     initForceNarrowFromStorage();
+    initClientActivityPing(apiPrefix);
 
     // 使用传入的元素或默认 body 元素
     const targetElement = element || document.body;

@@ -374,6 +374,38 @@ paths:
         500:
           description: failed to fetch or extract text from URL
 
+  /client-activity:
+    post:
+      tags:
+        - all
+      summary: anonymous client activity heartbeat
+      operationId: server.client_activity_report
+      parameters:
+        - in: body
+          name: activity_body
+          required: false
+          schema:
+            type: object
+            properties:
+              page_path:
+                type: string
+                description: pathname+search；汇总按去掉 ?/# 的路径末段，逐条日志里 path 仍带 query（unquote）
+              total_active_sec:
+                type: integer
+              delta_active_sec:
+                type: integer
+              client_os:
+                type: string
+                description: 首轮心跳附带；ios / android / windows / macos / linux / unknown
+      responses:
+        200:
+          description: acknowledged
+          schema:
+            type: object
+            properties:
+              ok:
+                type: boolean
+
   /check_admin:
     post:
       tags:

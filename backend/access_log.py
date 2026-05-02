@@ -6,9 +6,16 @@ from urllib.parse import unquote
 from flask import request
 import threading
 
+
 # 全局请求计数器和锁
 _request_counter = 0
 _request_counter_lock = threading.Lock()
+
+
+def _hit_api(kind: str) -> None:
+    from backend.visit_stats import bump_api
+
+    bump_api(kind)
 
 
 def _get_client_ip():
@@ -81,7 +88,8 @@ def log_analyze_request(text: str, stream_mode: bool = False, client_ip: str = N
 
     details = f"req_id={request_id}, text='{text_preview}', chars={char_count}, bytes={byte_count}"
     _log_request(f"📥 收到请求{mode_str}", details, client_ip)
-    
+
+    _hit_api("analyze")
     return request_id
 
 
@@ -138,6 +146,8 @@ def log_analyze_semantic_request(query: str, text: str, client_ip: str = None):
     t_preview = text[:preview] + "..." if len(text) > preview else text
     details = f"req_id={request_id}, query='{q_preview}', text='{t_preview}', chars={len(text)}"
     _log_request("📥 semantic 分析请求", details, client_ip)
+
+    _hit_api("analyze_semantic")
     return request_id
 
 
@@ -207,6 +217,8 @@ def log_prediction_attribute_request(
         f"context_chars={len(context)}"
     )
     _log_request("📥 prediction_attribute 请求", details, client_ip)
+
+    _hit_api("prediction_attribute")
     return request_id
 
 
