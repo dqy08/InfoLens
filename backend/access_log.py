@@ -174,13 +174,14 @@ def log_openai_completions_request(
         _request_counter += 1
         request_id = _request_counter
 
-    preview = 50
+    preview = 100
     p_preview = prompt[:preview] + "..." if len(prompt) > preview else prompt
     details = (
         f"req_id={request_id}, model='{model}', "
         f"prompt='{p_preview}', chars={len(prompt)}"
     )
     _log_request("📥 openai completions 请求", details, client_ip)
+    _hit_api("chat")
     return request_id
 
 
@@ -202,18 +203,15 @@ def log_prediction_attribute_request(
         _request_counter += 1
         request_id = _request_counter
 
-    preview = 50
-    c_preview = context[:preview] + "..." if len(context) > preview else context
-    if target_prediction is None:
-        t_preview = "<top-1>"
-    else:
-        t_preview = (
-            target_prediction[:preview] + "..."
-            if len(target_prediction) > preview
-            else target_prediction
-        )
+    context_preview = 150
+    c_preview = (
+        context[:context_preview] + "..."
+        if len(context) > context_preview
+        else context
+    )
+    target_show = "<top-1>" if target_prediction is None else target_prediction
     details = (
-        f"req_id={request_id}, model={model!r}, context='{c_preview}', target='{t_preview}', "
+        f"req_id={request_id}, model={model!r}, context='{c_preview}', target='{target_show}', "
         f"context_chars={len(context)}"
     )
     _log_request("📥 prediction_attribute 请求", details, client_ip)

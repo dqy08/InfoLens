@@ -63,12 +63,13 @@ def print_visit_summary():
                 os_cnt[o] += 1
     os_order = ("ios", "android", "windows", "macos", "linux", "unknown")
     os_pg = [f"  {k}: {os_cnt[k]}" for k in os_order if os_cnt[k]]
+    now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
-    body = ["========== [访问统计] ==========",
+    body = [f"========== [访问统计] {now} ==========",
             f"进程约 {h:.2f}h | 页面访问IP:{n_ip} | 真实活跃IP:{n_act}", "--- 活跃IP中OS统计 ---",
             *(os_pg or ["  （尚无）"]), "--- 页面活跃时间统计(秒) ---",
-            *(pg or ["  （尚无）"]), "--- 分析API调用统计 ---",
-            *[f"  {k}: {apis.get(k, 0)}" for k in ("analyze", "analyze_semantic", "prediction_attribute")],
+            *(pg or ["  （尚无）"]), "--- API调用统计 ---",
+            *[f"  {k}: {apis.get(k, 0)}" for k in ("analyze", "analyze_semantic", "prediction_attribute", "chat")],
             "=" * 42]
     print("\n".join(body), flush=True)
 

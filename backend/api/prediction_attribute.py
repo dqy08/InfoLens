@@ -71,9 +71,10 @@ def prediction_attribute(attribution_request):
 
     elapsed = time.perf_counter() - start_time
     tokens = len(result.get("token_attribution", []))
+    target_token = result.get("target_token")
     print(
         f"\t📤 API prediction_attribute response: req_id={request_id}, "
-        f"tokens={tokens}, response_time={elapsed:.4f}s"
+        f"target={target_token!r}, tokens={tokens}, response_time={elapsed:.4f}s"
     )
 
     return {"success": True, **result}, 200

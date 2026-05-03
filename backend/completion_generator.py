@@ -78,9 +78,7 @@ def _completion_without_generate(
 
 def _print_completion_stream_delta(text: str, stream_end: bool) -> None:
     """接收 TextStreamer 切分好的增量片段，由本模块打印（与默认 TextStreamer 输出一致）。"""
-    # 仅在verbose时打印
-    if get_verbose():
-        print(text, flush=True, end="" if not stream_end else None)
+    print(text, flush=True, end="" if not stream_end else None)
 
 
 def _compose_stream_delta(
@@ -429,12 +427,12 @@ def core_generate_from_text(
         effective_max_new = remaining
     else:
         effective_max_new = min(max_tokens, remaining)
-    if get_verbose():
-        print(
-            f"📌 completion: 推理原文 (tokens={input_len}, ctx_limit={ctx_limit}, max_new={effective_max_new}):\n"
-            f"{formatted_text}",
-            end="", # 不换行, 用于和后续打印推理结果拼在一起
-        )
+
+    print(
+        f"📌 completion: 推理原文 (tokens={input_len}, ctx_limit={ctx_limit}, max_new={effective_max_new}):\n"
+        f"{formatted_text}",
+        end="", # 不换行, 用于和后续打印推理结果拼在一起
+    )
 
     prompt_tokens = int(input_len)
     # 主要防止：排队等推理锁期间用户已取消，拿到锁后在此短路，避免无意义进入 generate。

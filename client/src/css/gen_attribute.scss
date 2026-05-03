@@ -345,6 +345,29 @@
   text-align: right;
 }
 
+.gen-attr-dag-replay-speed-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+select.gen-attr-dag-replay-mode-select {
+  width: auto;
+  min-width: 7.5rem;
+  text-align: left;
+}
+
+.gen-attr-dag-replay-value-wrap {
+  align-items: center;
+  gap: 4px;
+
+  // 仅非 hidden 时设 flex，否则会覆盖浏览器对 [hidden] 的 display:none（两列输入会同时出现）
+  &:not([hidden]) {
+    display: inline-flex;
+  }
+}
+
 .attribution-exclude-prompt-patterns-input {
   width: 100%;
   box-sizing: border-box;

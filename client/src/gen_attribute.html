@@ -211,13 +211,28 @@
                         </span>
                     </div>
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
-                        <span class="semantic-submode-group">
-                            <label class="semantic-submode-label" for="gen_attr_dag_playback_step_ms">DAG play step</label>
-                            <input type="number" id="gen_attr_dag_playback_step_ms" class="gen-attr-dag-measure-width-input"
-                                value="200" min="0" max="10000" step="10"
-                                title="Delay in milliseconds between steps during DAG playback. Stored locally; the value is read when you press play—changing it mid-playback does not affect the current run."
+                        <span class="semantic-submode-group gen-attr-dag-replay-speed-row">
+                            <label class="semantic-submode-label" for="gen_attr_dag_replay_mode" data-i18n>DAG replay speed</label>
+                            <select id="gen_attr_dag_replay_mode" class="gen-attr-dag-replay-mode-select gen-attr-dag-measure-width-input"
+                                title="Total duration vs. fixed delay per step. Waits shrink if a step is slow; long idle realigns the beat."
                                 data-i18n="title">
-                            <span class="semantic-submode-label">ms</span>
+                                <option value="total" data-i18n>Total time</option>
+                                <option value="step" data-i18n>Step time</option>
+                            </select>
+                            <span id="gen_attr_dag_replay_total_wrap" class="gen-attr-dag-replay-value-wrap">
+                                <input type="number" id="gen_attr_dag_playback_total_s" class="gen-attr-dag-measure-width-input"
+                                    value="7" min="1" max="3600" step="1"
+                                    title="Nominal delay = total seconds ÷ (steps − 1). Saved locally; applied when you press play."
+                                    data-i18n="title">
+                                <span class="semantic-submode-label">s</span>
+                            </span>
+                            <span id="gen_attr_dag_replay_step_wrap" class="gen-attr-dag-replay-value-wrap" hidden>
+                                <input type="number" id="gen_attr_dag_playback_step_ms" class="gen-attr-dag-measure-width-input"
+                                    value="200" min="0" max="10000" step="10"
+                                    title="Nominal ms between steps. Saved locally; applied when you press play (not mid-run)."
+                                    data-i18n="title">
+                                <span class="semantic-submode-label">ms</span>
+                            </span>
                         </span>
                     </div>
                 </section>

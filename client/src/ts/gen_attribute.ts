@@ -78,7 +78,12 @@ const GEN_ATTR_MAX_TOKENS_STORAGE_KEY = 'info_radar_gen_attr_max_tokens';
 const GEN_ATTR_MAX_TOKENS_DEFAULT = 100;
 const GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY = 'info_radar_gen_attr_dag_measure_width';
 const GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_step_ms';
+const GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_replay_pacing_mode';
+const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_total_s';
 const GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY = 'info_radar_gen_attr_dag_hide_inactive_edges';
+
+/** 步进回放节奏：`total`＝整段剩余回放总时长内均分间隔；`step`＝固定每步间隔（ms）。 */
+type DagReplayPacingMode = 'total' | 'step';
 
 const GEN_ATTR_DAG_MEASURE_WIDTH_DEFAULT = 500;
 const GEN_ATTR_DAG_MEASURE_WIDTH_MIN = 200;
@@ -87,6 +92,10 @@ const GEN_ATTR_DAG_MEASURE_WIDTH_MAX = 4000;
 const GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT = 200;
 const GEN_ATTR_DAG_PLAYBACK_STEP_MS_MIN = 0;
 const GEN_ATTR_DAG_PLAYBACK_STEP_MS_MAX = 10000;
+
+const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT = 7;
+const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MIN = 1;
+const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MAX = 3600;
 
 const GENERATE_BTN_LABEL = 'Start';
 const STOP_BTN_LABEL = 'Stop';
@@ -148,6 +157,34 @@ function readStoredDagPlaybackStepMs(): number {
     return GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT;
 }
 
+function clampDagPlaybackTotalS(n: number): number {
+    return Math.max(
+        GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MIN,
+        Math.min(GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MAX, Math.round(n))
+    );
+}
+
+function readStoredDagPlaybackTotalS(): number {
+    try {
+        const v = localStorage.getItem(GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY);
+        const n = v !== null ? parseInt(v, 10) : NaN;
+        if (Number.isFinite(n)) return clampDagPlaybackTotalS(n);
+    } catch {
+        // ignore
+    }
+    return GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT;
+}
+
+function readStoredDagReplayPacingMode(): DagReplayPacingMode {
+    try {
+        const v = localStorage.getItem(GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY);
+        if (v === 'total' || v === 'step') return v;
+    } catch {
+        // ignore
+    }
+    return 'total';
+}
+
 const apiPrefix = URLHandler.parameters['api'] || '';
 const bodyElement = d3.select('body').node() as Element;
 const { totalSurprisalFormat, api } = initializeCommonApp(apiPrefix, bodyElement);
@@ -203,9 +240,31 @@ const maxTokensInput = document.getElementById('gen_attr_max_tokens') as HTMLInp
 const dagMeasureWidthInput = document.getElementById(
     'gen_attr_dag_measure_width'
 ) as HTMLInputElement | null;
+/** 步进回放：固定间隔（ms）或总时长（s），由 {@link DagReplayPacingMode} 选择。 */
 const dagPlaybackStepMsInput = document.getElementById(
     'gen_attr_dag_playback_step_ms'
 ) as HTMLInputElement | null;
+const dagReplayModeSelect = document.getElementById(
+    'gen_attr_dag_replay_mode'
+) as HTMLSelectElement | null;
+const dagPlaybackTotalSInput = document.getElementById(
+    'gen_attr_dag_playback_total_s'
+) as HTMLInputElement | null;
+const dagReplayTotalWrap = document.getElementById('gen_attr_dag_replay_total_wrap');
+const dagReplayStepWrap = document.getElementById('gen_attr_dag_replay_step_wrap');
+
+/** 与 `#gen_attr_dag_replay_mode` 同步；非法或缺失时视为 `total`。 */
+function currentDagReplayPacingMode(): DagReplayPacingMode {
+    return dagReplayModeSelect?.value === 'step' ? 'step' : 'total';
+}
+
+/** 切换下拉时更新 `hidden`；样式见 `.gen-attr-dag-replay-value-wrap:not([hidden])`。 */
+function applyDagReplaySpeedUi(): void {
+    const mode = currentDagReplayPacingMode();
+    if (dagReplayTotalWrap) dagReplayTotalWrap.hidden = mode !== 'total';
+    if (dagReplayStepWrap) dagReplayStepWrap.hidden = mode !== 'step';
+}
+
 const dagHideInactiveEdgesInput = document.getElementById(
     'gen_attr_dag_hide_inactive_edges'
 ) as HTMLInputElement | null;
@@ -215,8 +274,15 @@ if (modelVariantSelect) modelVariantSelect.value = readStoredModelVariant();
 if (maxTokensInput) maxTokensInput.value = String(readStoredMaxTokens());
 const initialDagMeasureWidth = readStoredDagMeasureWidth();
 if (dagMeasureWidthInput) dagMeasureWidthInput.value = String(initialDagMeasureWidth);
+
+// DAG 回放节奏：步长 / 总时长 / 模式下拉 — 自 localStorage 恢复后再同步展示哪块输入
 const initialDagPlaybackStepMs = readStoredDagPlaybackStepMs();
 if (dagPlaybackStepMsInput) dagPlaybackStepMsInput.value = String(initialDagPlaybackStepMs);
+const initialDagReplayPacingMode = readStoredDagReplayPacingMode();
+if (dagReplayModeSelect) dagReplayModeSelect.value = initialDagReplayPacingMode;
+const initialDagPlaybackTotalS = readStoredDagPlaybackTotalS();
+if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = String(initialDagPlaybackTotalS);
+applyDagReplaySpeedUi();
 
 const genAttrResultsNode = genAttrResultsEl.node() as HTMLElement | null;
 function applyDagHideInactiveEdges(hide: boolean): void {
@@ -265,6 +331,7 @@ maxTokensInput?.addEventListener('change', () => {
     syncSubmitButtonState();
 });
 
+// DAG 回放节奏（与上节「DAG 测量宽度」无关；宽度 listener 在后文）
 dagPlaybackStepMsInput?.addEventListener('change', () => {
     const raw = parseInt(dagPlaybackStepMsInput.value, 10);
     const ms = Number.isFinite(raw)
@@ -273,6 +340,29 @@ dagPlaybackStepMsInput?.addEventListener('change', () => {
     dagPlaybackStepMsInput.value = String(ms);
     try {
         localStorage.setItem(GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY, String(ms));
+    } catch {
+        /* ignore */
+    }
+});
+
+dagReplayModeSelect?.addEventListener('change', () => {
+    const mode = currentDagReplayPacingMode();
+    try {
+        localStorage.setItem(GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY, mode);
+    } catch {
+        /* ignore */
+    }
+    applyDagReplaySpeedUi();
+});
+
+dagPlaybackTotalSInput?.addEventListener('change', () => {
+    const raw = parseInt(dagPlaybackTotalSInput.value, 10);
+    const s = Number.isFinite(raw)
+        ? clampDagPlaybackTotalS(raw)
+        : GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT;
+    dagPlaybackTotalSInput.value = String(s);
+    try {
+        localStorage.setItem(GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY, String(s));
     } catch {
         /* ignore */
     }
@@ -419,14 +509,30 @@ function scheduleDagLastTokenDwell(action: () => void, dwellMs: number = DAG_LAS
     }, dwellMs);
 }
 
-/** 仅在点击播放时调用：读当前输入、写回规范化值，返回本轮重放使用的步进间隔。 */
-function sampleDagPlaybackStepMsOnPlay(): number {
-    const raw = parseInt(dagPlaybackStepMsInput?.value ?? '', 10);
-    const ms = Number.isFinite(raw)
-        ? clampDagPlaybackStepMs(raw)
-        : readStoredDagPlaybackStepMs();
-    if (dagPlaybackStepMsInput) dagPlaybackStepMsInput.value = String(ms);
-    return ms;
+/**
+ * 点击播放时：读界面值并写回规范化结果，得到本轮「相邻两步 DAG 更新」之间的延时（ms）。
+ * - `step`：固定间隔。
+ * - `total`：`totalS` 按**整段 DAG 步数**均分间隔，与「从头回放」相同（`fullStepCount - 1` 段）；不管当前 `dagPlaybackNextIndex`。首步立即执行，与末 token dwell 无关。
+ */
+function resolveDagPlaybackStepDelayMsOnPlay(fullStepCount: number): number {
+    if (currentDagReplayPacingMode() === 'step') {
+        const raw = parseInt(dagPlaybackStepMsInput?.value ?? '', 10);
+        const ms = Number.isFinite(raw)
+            ? clampDagPlaybackStepMs(raw)
+            : readStoredDagPlaybackStepMs();
+        if (dagPlaybackStepMsInput) dagPlaybackStepMsInput.value = String(ms);
+        return ms;
+    }
+
+    const rawS = parseInt(dagPlaybackTotalSInput?.value ?? '', 10);
+    const totalS = Number.isFinite(rawS)
+        ? clampDagPlaybackTotalS(rawS)
+        : readStoredDagPlaybackTotalS();
+    if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = String(totalS);
+
+    const transitionCount = Math.max(0, fullStepCount - 1);
+    if (transitionCount <= 0) return 0;
+    return Math.round((totalS * 1000) / transitionCount);
 }
 
 function stopDagPlayback(): void {
@@ -456,8 +562,11 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
         dagHandle.reset(true);
         dagPlaybackNextIndex = 0;
     }
-    const playbackStepMs = sampleDagPlaybackStepMsOnPlay();
+    const stepDelayMs = resolveDagPlaybackStepDelayMsOnPlay(steps.length);
     dagHandle.setDagPlaybackPlaying(true);
+
+    /** 相邻两步「理想触发」之间的名义间隔；与 {@link resolveDagPlaybackStepDelayMsOnPlay} 一致。 */
+    let nextDue = performance.now();
 
     const isStalePlaybackHandle = (): boolean => {
         if (runnerHandle === h) return false;
@@ -473,12 +582,22 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
         dagHandle.setDagPlaybackPlaying(false);
     };
 
-    const afterPlaybackDelay = (fn: () => void): void => {
+    /**
+     * 步间节拍：理想时刻 `nextDue` 每次前进 `stepDelayMs`，实际等待 `max(0, nextDue - now)`。
+     * 若已迟到（`delay === 0`），则 `nextDue = now + stepDelayMs` 重锚，避免长时间暂停 / 后台节流后连发多步。
+     */
+    const scheduleNextPlaybackTick = (): void => {
+        const now = performance.now();
+        nextDue += stepDelayMs;
+        let delay = Math.max(0, nextDue - now);
+        if (delay === 0) {
+            nextDue = now + stepDelayMs;
+        }
         dagPlaybackTimer = setTimeout(() => {
             dagPlaybackTimer = null;
             if (isStalePlaybackHandle()) return;
-            fn();
-        }, playbackStepMs);
+            tick();
+        }, delay);
     };
 
     const tick = (): void => {
@@ -503,7 +622,7 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
             });
             return;
         }
-        afterPlaybackDelay(tick);
+        scheduleNextPlaybackTick();
     };
     tick();
 }
