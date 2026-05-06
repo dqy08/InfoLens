@@ -61,9 +61,14 @@ def log_page_load(path: str):
     _log_request("📄 页面访问", f"path={combined!r}")
 
 
-def log_demo_file(path: str):
-    """记录demo文件请求"""
-    _log_request("🎯 demo文件", f"file='{path}'")
+def log_json_demo(path: str):
+    """记录从 client/dist 拉取的 .json（如打包的 gen_attribute demo）"""
+    _log_request("🎯 json demo", f"file='{path}'")
+
+
+def log_cached_demo(path: str):
+    """记录从数据目录 /demo/ 拉取的服务端 demo"""
+    _log_request("🎯 cached demo", f"file='{path}'")
 
 
 def log_analyze_request(text: str, stream_mode: bool = False, client_ip: str = None):

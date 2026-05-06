@@ -10,6 +10,7 @@ import { initI18n, tr, trf } from './lang/i18n-lite';
 import { AdminManager } from './utils/adminManager';
 import { SettingsMenuManager } from './utils/settingsMenuManager';
 import { initChatPanelLayout } from './chat/chatPanelLayout';
+import { PANEL_SPLIT_STORAGE_KEY_ATTRIBUTION } from './utils/panelSplitStorage';
 import { TextInputController } from './controllers/textInputController';
 import { initializeCommonApp } from './appInitializer';
 import { showAlertDialog } from './ui/dialog';
@@ -378,7 +379,7 @@ void runContentUrlHydrate({
     },
 });
 
-initChatPanelLayout();
+initChatPanelLayout({ storageKey: PANEL_SPLIT_STORAGE_KEY_ATTRIBUTION });
 
 const themeManager = initThemeManager(
     {

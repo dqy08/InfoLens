@@ -1,17 +1,24 @@
 import * as d3 from 'd3';
 import { isNarrowScreen } from '../utils/responsive';
+import { readPanelSplitRatio, writePanelSplitRatio } from '../utils/panelSplitStorage';
+
+export type ChatPanelLayoutOptions = {
+    /** 各页面独立 key，用于 localStorage 持久化分栏比例 */
+    storageKey: string;
+};
 
 /**
- * Chat 页专用：左右分栏拖拽与窗口尺寸同步，不含侧栏逻辑，不影响首页 LayoutController。
+ * Chat / 归因 / gen_attribute 等：左右分栏拖拽与窗口尺寸同步，不含侧栏逻辑。
  */
-export function initChatPanelLayout(): void {
+export function initChatPanelLayout(options: ChatPanelLayoutOptions): void {
     const resizer = d3.select('#resizer');
     const leftPanel = d3.select('.left_panel');
     if (resizer.empty() || leftPanel.empty()) {
         return;
     }
 
-    let leftPanelRatio = 0.5;
+    const { storageKey } = options;
+    let leftPanelRatio = readPanelSplitRatio(storageKey);
     let isResizing = false;
     let startX = 0;
     let startWidth = 0;
@@ -85,6 +92,8 @@ export function initChatPanelLayout(): void {
             return;
         }
         isResizing = false;
+
+        writePanelSplitRatio(storageKey, leftPanelRatio);
 
         d3.select('body').style('cursor', null).style('user-select', null);
 

@@ -77,9 +77,8 @@
   // 初始 d3.zoom 缩放为 1/本变量，抵消 display-scale 在屏上的整体缩小感（见 genAttributeDagView）
   // 边色：`--dag-normal-line-color`、`--dag-highlight-line-color-in` / `out` 与节点描边 `--token-hover-outline` 同在 start.scss（见 genAttributeDagView）。
   #results.gen-attr-results-surface.LMF .gen-attr-dag-stack {
-    // compactness：dag界面紧凑程度，范围 [0, 1]；1时和普通文本排版一致，最紧凑；0.5为默认。
-    --gen-attr-dag-compactness: 0.5;
-    --gen-attr-dag-display-scale: var(--gen-attr-dag-compactness);
+    // compactness：dag界面紧凑程度，范围 [0.05, 1]；1时和普通文本排版一致；由 JS 写入 inline style，0.5 为纯 CSS 降级兜底。
+    --gen-attr-dag-display-scale: var(--gen-attr-dag-compactness, 0.5);
     --gen-attr-dag-node-text-font-scale: 0.9;
     --gen-attr-dag-link-stroke-width: calc(2px * var(--gen-attr-dag-compactness));
     // --gen-attr-dag-prompt-node-fill: rgba(221, 179, 120, 0.29);
@@ -133,11 +132,22 @@
     stroke-width: calc(2 * var(--gen-attr-dag-display-scale, 1));
   }
 
-  // 与 genAttributeDagView 中「仅选中节点可拖」一致：可拖时提示 grab
+  // 与 genAttributeDagView 中「仅 default(text-flow) 且选中时可拖」一致：可拖时提示 grab
   #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node--selected {
     cursor: grab;
     &:active {
       cursor: grabbing;
+    }
+  }
+
+  // linear-arc 布局禁拖：不显示 grab（由 .gen-attr-dag-stack 上的 class 标记）
+  #results.gen-attr-results-surface.LMF
+    .gen-attr-dag-stack.gen-attr-dag-linear-arc-layout
+    .gen-attr-dag-svg
+    .gen-attr-dag-node--selected {
+    cursor: default;
+    &:active {
+      cursor: default;
     }
   }
 
@@ -270,9 +280,12 @@
   opacity: 1;
 }
 
-// Max tokens 输入框：紧凑数字输入
-.gen-attr-max-tokens-input {
-  width: 64px;
+// 紧凑数字输入（Max tokens、DAG Text width / compactness / 回放时长等共用）
+.gen-attr-max-tokens-input,
+.gen-attr-dag-measure-width-input {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  min-width: 0;
   padding: 3px 6px;
   font-size: inherit;
   border: 1px solid var(--input-border);
@@ -280,6 +293,9 @@
   background: var(--input-bg);
   color: var(--text-color);
   text-align: right;
+  // 沿用原先约 4.5–4.75rem 目标，但以 border-box 计满宽（先前 content-box + padding/border 会额外变宽）
+  inline-size: 4rem;
+  max-inline-size: 100%;
 }
 
 // 与 Chat 共用的 .generation-status-slot 见 _generation-status.scss
@@ -329,20 +345,14 @@
   }
 }
 
-// DAG 测量层宽度：与 .gen-attr-max-tokens-input 同形
+// DAG 参数行（Text width / compactness 等）；允许换行，避免单行被撑得过宽
 .gen-attr-dag-measure-width-row {
   margin-top: 8px;
+  flex-wrap: wrap;
 }
 
-.gen-attr-dag-measure-width-input {
-  width: 72px;
-  padding: 3px 6px;
-  font-size: inherit;
-  border: 1px solid var(--input-border);
-  border-radius: 4px;
-  background: var(--input-bg);
-  color: var(--text-color);
-  text-align: right;
+.gen-attr-dag-measure-width-row .gen-attr-dag-layout-mode-group {
+  margin-right: 12px;
 }
 
 .gen-attr-dag-replay-speed-row {
@@ -352,9 +362,12 @@
   gap: 6px 10px;
 }
 
-select.gen-attr-dag-replay-mode-select {
-  width: auto;
-  min-width: 7.5rem;
+// DAG 两行下拉：仅按英文选项收合宽度（不专门为译文留宽）。
+.semantic-submode-row select.gen-attr-dag-layout-mode-select,
+.semantic-submode-row select.gen-attr-dag-replay-mode-select {
+  width: fit-content;
+  min-width: unset;
+  max-width: none;
   text-align: left;
 }
 

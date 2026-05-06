@@ -193,6 +193,16 @@
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
                         <span class="semantic-submode-group">
                             <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_hide_excluded_tokens"
+                                    title="When checked, tokens fully covered by an exclude pattern are hidden from the DAG (linear-arc: also excluded from layout)."
+                                    data-i18n="title">
+                                <span data-i18n>Hide excluded tokens</span>
+                            </label>
+                        </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_hide_inactive_edges"
                                     title="When checked, gray DAG edges not adjacent to the hovered or selected node are hidden."
                                     data-i18n="title">
@@ -202,6 +212,32 @@
                     </div>
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
                         <span class="semantic-submode-group">
+                            <label class="semantic-submode-label" for="gen_attr_dag_edge_top_p_coverage" data-i18n>Edge top-p coverage</label>
+                            <input type="number" id="gen_attr_dag_edge_top_p_coverage" class="gen-attr-dag-measure-width-input"
+                                value="0.7" min="0.05" max="1" step="0.05"
+                                title="Coverage is the cumulative mass share within each generation step's Top-N candidate pool (after sorting candidates into the pool and normalizing mass inside that pool). Higher values keep more incoming edges. The denominator is this pool only, not every token-attribution entry returned for the step."
+                                data-i18n="title">
+                        </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
+                        <span class="semantic-submode-group gen-attr-dag-layout-mode-group">
+                            <label class="semantic-submode-label" for="gen_attr_dag_layout_mode">DAG layout mode</label>
+                            <select id="gen_attr_dag_layout_mode"
+                                class="semantic-submode-select gen-attr-dag-layout-mode-select"
+                                title="Choose DAG layout mode. 'text-flow' follows text layout geometry; 'linear-arc' uses fixed-order linear nodes with arc links."
+                                data-i18n="title">
+                                <option value="text-flow">text-flow</option>
+                                <option value="linear-arc">linear-arc</option>
+                            </select>
+                        </span>
+                        <span class="semantic-submode-group" id="gen_attr_dag_compactness_group">
+                            <label class="semantic-submode-label" for="gen_attr_dag_compactness" data-i18n>Compactness</label>
+                            <input type="number" id="gen_attr_dag_compactness" class="gen-attr-dag-measure-width-input"
+                                value="0.5" min="0.05" max="1" step="0.05"
+                                title="Scales DAG node boxes and labels relative to the measurement layer; 1 matches full readout scale. When idle, changes replay and fit automatically; during generation or DAG playback, the setting updates for the next run or refresh."
+                                data-i18n="title">
+                        </span>
+                        <span class="semantic-submode-group" id="gen_attr_dag_measure_width_group">
                             <label class="semantic-submode-label" for="gen_attr_dag_measure_width">Text width</label>
                             <input type="number" id="gen_attr_dag_measure_width" class="gen-attr-dag-measure-width-input"
                                 value="500" min="200" max="4000" step="10"
@@ -209,15 +245,24 @@
                                 data-i18n="title">
                             <span class="semantic-submode-label">px</span>
                         </span>
+                        <span class="semantic-submode-group" id="gen_attr_dag_linear_arc_interval_group" hidden>
+                            <label class="semantic-submode-label" for="gen_attr_dag_linear_arc_interval" data-i18n>Token distance</label>
+                            <input type="number" id="gen_attr_dag_linear_arc_interval" class="gen-attr-dag-measure-width-input"
+                                value="0" min="0" max="400" step="1"
+                                title="Horizontal gap (px) between the outer left/right edges of adjacent token nodes in linear-arc layout only. When idle, the DAG refits; during generation or DAG playback, the value is stored and applied on the next sync."
+                                data-i18n="title">
+                            <span class="semantic-submode-label">px</span>
+                        </span>
                     </div>
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
                         <span class="semantic-submode-group gen-attr-dag-replay-speed-row">
                             <label class="semantic-submode-label" for="gen_attr_dag_replay_mode" data-i18n>DAG replay speed</label>
-                            <select id="gen_attr_dag_replay_mode" class="gen-attr-dag-replay-mode-select gen-attr-dag-measure-width-input"
+                            <select id="gen_attr_dag_replay_mode"
+                                class="semantic-submode-select gen-attr-dag-replay-mode-select"
                                 title="Total duration vs. fixed delay per step. Waits shrink if a step is slow; long idle realigns the beat."
                                 data-i18n="title">
-                                <option value="total" data-i18n>Total time</option>
-                                <option value="step" data-i18n>Step time</option>
+                                <option value="total" data-i18n>total time</option>
+                                <option value="step" data-i18n>step time</option>
                             </select>
                             <span id="gen_attr_dag_replay_total_wrap" class="gen-attr-dag-replay-value-wrap">
                                 <input type="number" id="gen_attr_dag_playback_total_s" class="gen-attr-dag-measure-width-input"

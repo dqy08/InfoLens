@@ -6,7 +6,7 @@ from urllib.parse import unquote
 from flask import Response, redirect, abort, request
 from werkzeug.utils import safe_join
 
-from backend.access_log import log_page_load, log_demo_file
+from backend.access_log import log_cached_demo, log_json_demo, log_page_load
 
 
 def _read_static_file(directory: str, path: str) -> Response:
@@ -42,7 +42,7 @@ def register_static_routes(app):
         if path.endswith('.html'):
             log_page_load(path)
         if path.endswith('.json'):
-            log_demo_file(path)
+            log_json_demo(path)
         return _read_static_file('client/dist', path)
 
     @app.route('/demo/<path:path>')
@@ -50,7 +50,7 @@ def register_static_routes(app):
         """serves all demo files from the demo dir to ``/demo/<path:path>``"""
         from backend.app_context import get_data_dir
         data_dir = get_data_dir()
-        log_demo_file(path)
+        log_cached_demo(path)
         try:
             decoded_path = unquote(path)
             return _read_static_file(str(data_dir), decoded_path)

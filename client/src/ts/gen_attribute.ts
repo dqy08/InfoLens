@@ -10,14 +10,26 @@ import { initI18n, tr } from './lang/i18n-lite';
 import { AdminManager } from './utils/adminManager';
 import { SettingsMenuManager } from './utils/settingsMenuManager';
 import { initChatPanelLayout } from './chat/chatPanelLayout';
+import { PANEL_SPLIT_STORAGE_KEY_GEN_ATTRIBUTE } from './utils/panelSplitStorage';
 import { TextInputController } from './controllers/textInputController';
 import { initializeCommonApp } from './appInitializer';
 import { showAlertDialog } from './ui/dialog';
 import URLHandler from './utils/URLHandler';
 import { createToast } from './ui/toast';
 import type { PredictionAttributeModelVariant } from './attribution/attributionResultCache';
-import { extractPromptTokenSpans } from './attribution/genAttributeDagPreprocess';
-import { initGenAttributeDagView } from './attribution/genAttributeDagView';
+import {
+    clampDagEdgeTopPCoverage,
+    DAG_EDGE_TOP_P_COVERAGE_DEFAULT,
+    extractPromptTokenSpans,
+} from './attribution/genAttributeDagPreprocess';
+import {
+    initGenAttributeDagView,
+    type DagLayoutMode,
+    clampDagCompactness,
+    clampLinearArcAdjacentGap,
+    DAG_COMPACTNESS_DEFAULT,
+    LINEAR_ARC_ADJACENT_GAP_DEFAULT,
+} from './attribution/genAttributeDagView';
 import {
     createHydratedTokenGenHandle,
     startTokenGenAttribution,
@@ -77,10 +89,16 @@ const GEN_ATTR_MODEL_VARIANT_STORAGE_KEY = 'info_radar_gen_attr_model_variant';
 const GEN_ATTR_MAX_TOKENS_STORAGE_KEY = 'info_radar_gen_attr_max_tokens';
 const GEN_ATTR_MAX_TOKENS_DEFAULT = 100;
 const GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY = 'info_radar_gen_attr_dag_measure_width';
+const GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_mode';
 const GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_step_ms';
 const GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_replay_pacing_mode';
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_total_s';
 const GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY = 'info_radar_gen_attr_dag_hide_inactive_edges';
+const GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY = 'info_radar_gen_attr_dag_hide_excluded_tokens';
+const GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY =
+    'info_radar_gen_attr_dag_linear_arc_adjacent_gap';
+const GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY = 'info_radar_gen_attr_dag_compactness';
+const GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY = 'info_radar_gen_attr_dag_edge_top_p_coverage';
 
 /** 步进回放节奏：`total`＝整段剩余回放总时长内均分间隔；`step`＝固定每步间隔（ms）。 */
 type DagReplayPacingMode = 'total' | 'step';
@@ -139,6 +157,39 @@ function readStoredDagMeasureWidth(): number {
     return GEN_ATTR_DAG_MEASURE_WIDTH_DEFAULT;
 }
 
+function readStoredDagCompactness(): number {
+    try {
+        const v = localStorage.getItem(GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY);
+        const n = v !== null ? parseFloat(v) : NaN;
+        if (Number.isFinite(n)) return clampDagCompactness(n);
+    } catch {
+        // ignore
+    }
+    return DAG_COMPACTNESS_DEFAULT;
+}
+
+function readStoredDagEdgeTopPCoverage(): number {
+    try {
+        const v = localStorage.getItem(GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY);
+        const n = v !== null ? parseFloat(v) : NaN;
+        if (Number.isFinite(n)) return clampDagEdgeTopPCoverage(n);
+    } catch {
+        // ignore
+    }
+    return DAG_EDGE_TOP_P_COVERAGE_DEFAULT;
+}
+
+function readStoredDagLinearArcAdjacentGap(): number {
+    try {
+        const v = localStorage.getItem(GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY);
+        const n = v !== null ? parseInt(v, 10) : NaN;
+        if (Number.isFinite(n)) return clampLinearArcAdjacentGap(n);
+    } catch {
+        // ignore
+    }
+    return LINEAR_ARC_ADJACENT_GAP_DEFAULT;
+}
+
 function clampDagPlaybackStepMs(n: number): number {
     return Math.max(
         GEN_ATTR_DAG_PLAYBACK_STEP_MS_MIN,
@@ -183,6 +234,16 @@ function readStoredDagReplayPacingMode(): DagReplayPacingMode {
         // ignore
     }
     return 'total';
+}
+
+function readStoredDagLayoutMode(): DagLayoutMode {
+    try {
+        const v = localStorage.getItem(GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY);
+        if (v === 'text-flow' || v === 'linear-arc') return v;
+    } catch {
+        // ignore
+    }
+    return 'text-flow';
 }
 
 const apiPrefix = URLHandler.parameters['api'] || '';
@@ -237,8 +298,21 @@ const genAttrResultsEl = d3.select('#results.gen-attr-results-surface');
 
 const modelVariantSelect = document.getElementById('gen_attr_model_variant') as HTMLSelectElement | null;
 const maxTokensInput = document.getElementById('gen_attr_max_tokens') as HTMLInputElement | null;
+const dagLayoutModeSelect = document.getElementById('gen_attr_dag_layout_mode') as HTMLSelectElement | null;
+const dagMeasureWidthGroup = document.getElementById('gen_attr_dag_measure_width_group');
+const dagCompactnessGroup = document.getElementById('gen_attr_dag_compactness_group');
 const dagMeasureWidthInput = document.getElementById(
     'gen_attr_dag_measure_width'
+) as HTMLInputElement | null;
+const dagLinearArcIntervalGroup = document.getElementById('gen_attr_dag_linear_arc_interval_group');
+const dagLinearArcIntervalInput = document.getElementById(
+    'gen_attr_dag_linear_arc_interval'
+) as HTMLInputElement | null;
+const dagCompactnessInput = document.getElementById(
+    'gen_attr_dag_compactness'
+) as HTMLInputElement | null;
+const dagEdgeTopPCoverageInput = document.getElementById(
+    'gen_attr_dag_edge_top_p_coverage'
 ) as HTMLInputElement | null;
 /** 步进回放：固定间隔（ms）或总时长（s），由 {@link DagReplayPacingMode} 选择。 */
 const dagPlaybackStepMsInput = document.getElementById(
@@ -265,6 +339,26 @@ function applyDagReplaySpeedUi(): void {
     if (dagReplayStepWrap) dagReplayStepWrap.hidden = mode !== 'step';
 }
 
+function currentDagLayoutMode(): DagLayoutMode {
+    return dagLayoutModeSelect?.value === 'linear-arc' ? 'linear-arc' : 'text-flow';
+}
+
+function applyDagLayoutModeUi(): void {
+    const textFlow = currentDagLayoutMode() === 'text-flow';
+    if (dagCompactnessGroup) {
+        dagCompactnessGroup.hidden = !textFlow;
+    }
+    if (dagMeasureWidthGroup) {
+        dagMeasureWidthGroup.hidden = !textFlow;
+    }
+    if (dagLinearArcIntervalGroup) {
+        dagLinearArcIntervalGroup.hidden = textFlow;
+    }
+}
+
+const dagHideExcludedTokensInput = document.getElementById(
+    'gen_attr_dag_hide_excluded_tokens'
+) as HTMLInputElement | null;
 const dagHideInactiveEdgesInput = document.getElementById(
     'gen_attr_dag_hide_inactive_edges'
 ) as HTMLInputElement | null;
@@ -272,8 +366,17 @@ const completeReasonEl = d3.select('#gen_attr_complete_reason');
 
 if (modelVariantSelect) modelVariantSelect.value = readStoredModelVariant();
 if (maxTokensInput) maxTokensInput.value = String(readStoredMaxTokens());
+const initialDagLayoutMode = readStoredDagLayoutMode();
+if (dagLayoutModeSelect) dagLayoutModeSelect.value = initialDagLayoutMode;
+applyDagLayoutModeUi();
 const initialDagMeasureWidth = readStoredDagMeasureWidth();
 if (dagMeasureWidthInput) dagMeasureWidthInput.value = String(initialDagMeasureWidth);
+const initialDagCompactness = readStoredDagCompactness();
+if (dagCompactnessInput) dagCompactnessInput.value = String(initialDagCompactness);
+const initialDagEdgeTopPCoverage = readStoredDagEdgeTopPCoverage();
+if (dagEdgeTopPCoverageInput) dagEdgeTopPCoverageInput.value = String(initialDagEdgeTopPCoverage);
+const initialDagLinearArcGap = readStoredDagLinearArcAdjacentGap();
+if (dagLinearArcIntervalInput) dagLinearArcIntervalInput.value = String(initialDagLinearArcGap);
 
 // DAG 回放节奏：步长 / 总时长 / 模式下拉 — 自 localStorage 恢复后再同步展示哪块输入
 const initialDagPlaybackStepMs = readStoredDagPlaybackStepMs();
@@ -307,6 +410,25 @@ dagHideInactiveEdgesInput?.addEventListener('change', () => {
         /* ignore */
     }
     applyDagHideInactiveEdges(hide);
+});
+
+function readStoredDagHideExcludedTokens(): boolean {
+    try {
+        return localStorage.getItem(GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY) === '1';
+    } catch {
+        return false;
+    }
+}
+const initialDagHideExcludedTokens = readStoredDagHideExcludedTokens();
+if (dagHideExcludedTokensInput) dagHideExcludedTokensInput.checked = initialDagHideExcludedTokens;
+dagHideExcludedTokensInput?.addEventListener('change', () => {
+    const hide = dagHideExcludedTokensInput.checked;
+    try {
+        localStorage.setItem(GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY, hide ? '1' : '0');
+    } catch {
+        /* ignore */
+    }
+    dagHandle.setHideExcludedTokens(hide);
 });
 
 modelVariantSelect?.addEventListener('change', () => {
@@ -635,8 +757,24 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
         if (!h) return;
         replayRunnerStepsIntoDag(h);
     },
+    layoutMode: initialDagLayoutMode,
     measureWidthPx: initialDagMeasureWidth,
+    dagCompactness: initialDagCompactness,
+    linearArcAdjacentGapPx: initialDagLinearArcGap,
+    hideExcludedTokens: initialDagHideExcludedTokens,
+    edgeTopPCoverage: initialDagEdgeTopPCoverage,
     onFullscreenError: (message) => showToast(message, 'error'),
+});
+
+dagLayoutModeSelect?.addEventListener('change', () => {
+    const mode = currentDagLayoutMode();
+    try {
+        localStorage.setItem(GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY, mode);
+    } catch {
+        /* ignore */
+    }
+    applyDagLayoutModeUi();
+    dagHandle.setLayoutMode(mode);
 });
 
 /**
@@ -669,6 +807,63 @@ dagMeasureWidthInput?.addEventListener('change', () => {
     dagHandle.fitViewportToContent();
     dagHandle.clearNodeSelection();
 });
+
+dagCompactnessInput?.addEventListener('change', () => {
+    const raw = parseFloat(dagCompactnessInput.value);
+    const c = Number.isFinite(raw) ? clampDagCompactness(raw) : DAG_COMPACTNESS_DEFAULT;
+    dagCompactnessInput.value = String(c);
+    try {
+        localStorage.setItem(GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY, String(c));
+    } catch {
+        /* ignore */
+    }
+    dagHandle.setDagCompactness(c);
+    if (isDagBusy()) return;
+    const h = runnerHandle;
+    dagHandle.reset();
+    if (h && h.tokenCount > 0) {
+        replayRunnerStepsIntoDag(h);
+    }
+    dagHandle.fitViewportToContent();
+    dagHandle.clearNodeSelection();
+});
+
+dagEdgeTopPCoverageInput?.addEventListener('change', () => {
+    const raw = parseFloat(dagEdgeTopPCoverageInput.value);
+    const c = Number.isFinite(raw)
+        ? clampDagEdgeTopPCoverage(raw)
+        : DAG_EDGE_TOP_P_COVERAGE_DEFAULT;
+    dagEdgeTopPCoverageInput.value = String(c);
+    try {
+        localStorage.setItem(GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY, String(c));
+    } catch {
+        /* ignore */
+    }
+    dagHandle.setEdgeTopPCoverage(c);
+    if (isDagBusy()) return;
+    const h = runnerHandle;
+    dagHandle.reset();
+    if (h && h.tokenCount > 0) {
+        replayRunnerStepsIntoDag(h);
+    }
+    dagHandle.fitViewportToContent();
+    dagHandle.clearNodeSelection();
+});
+
+dagLinearArcIntervalInput?.addEventListener('change', () => {
+    const raw = parseInt(dagLinearArcIntervalInput.value, 10);
+    const n = Number.isFinite(raw)
+        ? clampLinearArcAdjacentGap(raw)
+        : LINEAR_ARC_ADJACENT_GAP_DEFAULT;
+    dagLinearArcIntervalInput.value = String(n);
+    try {
+        localStorage.setItem(GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY, String(n));
+    } catch {
+        /* ignore */
+    }
+    dagHandle.setLinearArcAdjacentGapPx(n, { skipRefit: isDagBusy() });
+});
+
 window.addEventListener('pagehide', (ev) => {
     if (ev.persisted) return;
     dagHandle.detach();
@@ -1296,4 +1491,4 @@ exportDemoBtn?.addEventListener('click', () => {
     void exportJsonFile(payload, `genattr-${Date.now()}.json`);
 });
 
-initChatPanelLayout();
+initChatPanelLayout({ storageKey: PANEL_SPLIT_STORAGE_KEY_GEN_ATTRIBUTE });

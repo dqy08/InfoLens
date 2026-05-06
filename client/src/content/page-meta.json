@@ -4,6 +4,7 @@
     "home": {
       "title": "Info Lens",
       "subtitle": "A toolbox for exploring the informational nature of LLMs and language",
+      "heartline": "A ❤️ would mean a lot!",
       "formula": "LLM × Linguistics × Information Theory"
     },
     "analysis": {

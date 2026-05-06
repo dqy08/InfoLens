@@ -16,6 +16,12 @@
     align-items: center;
     gap: 6px;
 
+    // `.semantic-submode-row .semantic-submode-group`（两档类）特异性高于 UA 里单独的 `[hidden]`，
+    // 会把本应隐藏的组仍排成 flex；配合 TS 的 element.hidden 需强制盖住自身 flex。
+    &[hidden] {
+      display: none !important;
+    }
+
     &.semantic-submode-group-right {
       margin-left: auto;
     }

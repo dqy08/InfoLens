@@ -1,5 +1,6 @@
 import * as d3 from 'd3';
 import { isNarrowScreen } from '../utils/responsive';
+import { readPanelSplitRatio, writePanelSplitRatio } from '../utils/panelSplitStorage';
 
 export type LayoutState = {
     sidebar: {
@@ -14,6 +15,8 @@ export type LayoutControllerOptions = {
     sidebarBtn: d3.Selection<any, unknown, any, any>;
     onSidebarToggle?: (visible: boolean) => void;
     onLayoutChange?: () => void;
+    /** 若设置，则从 localStorage 恢复分栏比例，并在用户拖动分割条结束后写回 */
+    panelSplitStorageKey?: string;
 };
 
 export class LayoutController {
@@ -21,10 +24,14 @@ export class LayoutController {
     private isResizing = false;
     private startX = 0;
     private startWidth = 0;
-    private leftPanelRatio = 0.5; // 左侧面板的比例，默认50%
+    private leftPanelRatio = 0.5;
 
     constructor(options: LayoutControllerOptions) {
         this.options = options;
+        const sk = options.panelSplitStorageKey;
+        if (sk) {
+            this.leftPanelRatio = readPanelSplitRatio(sk);
+        }
         this.initialize();
     }
 
@@ -169,9 +176,14 @@ export class LayoutController {
 
     private handleMouseUp(): void {
         if (!this.isResizing) return;
-        
+
         this.isResizing = false;
-        
+
+        const sk = this.options.panelSplitStorageKey;
+        if (sk) {
+            writePanelSplitRatio(sk, this.leftPanelRatio);
+        }
+
         d3.select('body')
             .style('cursor', 'default')
             .style('user-select', 'auto');

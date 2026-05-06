@@ -10,6 +10,7 @@ import { AdminManager } from './utils/adminManager';
 import { SettingsMenuManager } from './utils/settingsMenuManager';
 import { initCachedHistoryQueryDropdown, type CachedHistorySelectContext } from './utils/cachedHistoryUi';
 import { initChatPanelLayout } from './chat/chatPanelLayout';
+import { PANEL_SPLIT_STORAGE_KEY_CHAT } from './utils/panelSplitStorage';
 import { TextInputController } from './controllers/textInputController';
 import { initializeCommonApp } from './appInitializer';
 import { showAlertDialog } from './ui/dialog';
@@ -684,7 +685,7 @@ initQueryHistoryDropdown({
     applyHistoryOnHover: true
 });
 
-initChatPanelLayout();
+initChatPanelLayout({ storageKey: PANEL_SPLIT_STORAGE_KEY_CHAT });
 
 const chatCopyFulltextBtn = document.getElementById('chat_copy_fulltext_btn');
 if (chatCopyFulltextBtn) {

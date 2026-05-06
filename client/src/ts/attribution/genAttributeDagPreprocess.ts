@@ -19,9 +19,17 @@ export type PromptTokenSpan = {
 /** 每步在 exclude 之后按 `score` 降序取前 N 条作为候选池，避免长上下文长尾稀释。 */
 // 经验值，最后能筛选出大概一半的归因数
 const DAG_EDGE_TOP_N = 10;
-// todo: 用户配置归因力度
-/** 候选池内累计份额阈值（Top-P），用于保留主要解释力。 */
-const DAG_EDGE_CUMULATIVE_SHARE = 0.7;
+
+/** DAG 边 Top-P：候选池内累计份额默认上限（{@link phase2RankAndSparsify}）。 */
+export const DAG_EDGE_TOP_P_COVERAGE_DEFAULT = 0.7;
+const DAG_EDGE_TOP_P_COVERAGE_MIN = 0.05;
+const DAG_EDGE_TOP_P_COVERAGE_MAX = 1;
+
+export function clampDagEdgeTopPCoverage(n: number): number {
+    if (!Number.isFinite(n)) return DAG_EDGE_TOP_P_COVERAGE_DEFAULT;
+    return Math.min(DAG_EDGE_TOP_P_COVERAGE_MAX, Math.max(DAG_EDGE_TOP_P_COVERAGE_MIN, n));
+}
+
 /** 候选池内相对最强条目的下限系数：池内 L1 份额小于该比例×首条份额时停止。 */
 // topShare 的线有最大的透明度，所以这里对应的是最小的透明度是最大透明度的比例
 const DAG_EDGE_RELATIVE_TOP_SHARE_FLOOR_BETA = 0.1;
@@ -57,11 +65,12 @@ function normalizeTopNPoolForDagSparse<T extends { score: number }>(tokens: T[])
 /**
  * 在候选池已按 `score` 降序、池内归一保持该顺序的前提下，按遍历顺序取前缀，直到：
  * - 池内 L1 份额小于 β×首条份额（分布形状截断），或
- * - 累计达到 {@link DAG_EDGE_CUMULATIVE_SHARE}（候选池内 Top-P，非整步全量 token 的分母）。
+ * - 累计达到给定阈值（默认 {@link DAG_EDGE_TOP_P_COVERAGE_DEFAULT}；候选池内 Top-P，非整步全量 token 的分母）。
  * （池内份额与 `score` 单调一致，无需再排序。）
  */
 function selectTokenAttributionByCumulativeShare<T extends { poolMassFrac: number }>(
     normalized: Array<T>,
+    cumulativeShareThreshold: number,
 ): Array<T> {
     if (normalized.length === 0) return [];
 
@@ -81,7 +90,7 @@ function selectTokenAttributionByCumulativeShare<T extends { poolMassFrac: numbe
         }
         picked.push(t);
         cum += frac;
-        if (cum >= DAG_EDGE_CUMULATIVE_SHARE) {
+        if (cum >= cumulativeShareThreshold) {
             break;
         }
     }
@@ -152,16 +161,17 @@ export function excludeNodeAggregatedEntries(
     });
 }
 
-/**
- * 预处理阶段 2（展示单元级，纯函数）：Top-N 候选池 → 池内 max 归一 & L1 份额 → β 截断 & cumulative Top-P。
- * 输入为「按节点聚合后的条目」（带 `nodeId`）；所有额外字段会透传到输出，
- * 输出 `score` 为池内 max 归一后的强度，`poolMassFrac` 为池内 L1 份额（供下游 `scoreShare`）。
- */
+/** Top-N 候选池 → 池内归一 → β 截断与累计 Top-P；`cumulativeShare` 未传用 {@link DAG_EDGE_TOP_P_COVERAGE_DEFAULT}。 */
 export function phase2RankAndSparsify<T extends { score: number }>(
     entries: T[],
+    options?: { cumulativeShare?: number },
 ): Array<T & { score: number; rawScore: number; poolMassFrac: number }> {
     if (!entries.length) return [];
     const topNPool = selectTopNByScore(entries, DAG_EDGE_TOP_N);
     const normalized = normalizeTopNPoolForDagSparse(topNPool);
-    return selectTokenAttributionByCumulativeShare(normalized);
+    const threshold =
+        options?.cumulativeShare !== undefined
+            ? clampDagEdgeTopPCoverage(options.cumulativeShare)
+            : DAG_EDGE_TOP_P_COVERAGE_DEFAULT;
+    return selectTokenAttributionByCumulativeShare(normalized, threshold);
 }

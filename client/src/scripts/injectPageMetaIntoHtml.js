@@ -50,7 +50,7 @@ function injectDataPageBlock(html, attrToken, text) {
 /**
  * @param {string} html
  * @param {string} pageKey
- * @param {{ pages: Record<string, { title: string, subtitle: string, href?: string, formula?: string }>, navPageKeys: string[] }} doc
+ * @param {{ pages: Record<string, { title: string, subtitle: string, href?: string, heartline?: string, formula?: string }>, navPageKeys: string[] }} doc
  * @returns {string}
  */
 function injectPageMeta(html, pageKey, doc) {
@@ -64,6 +64,13 @@ function injectPageMeta(html, pageKey, doc) {
 
     html = injectDataPageBlock(html, 'data-page-title', meta.title);
     html = injectDataPageBlock(html, 'data-page-subtitle', meta.subtitle);
+
+    const heartlineElRe = /<([a-z][a-z0-9]*)([^>]*\bdata-page-heartline\b[^>]*)>([\s\S]*?)<\/\1>/gi;
+    if (meta.heartline) {
+        html = html.replace(heartlineElRe, (_m, tag, attrs) => `<${tag}${attrs}>${escapeHtmlText(meta.heartline)}</${tag}>`);
+    } else {
+        html = html.replace(heartlineElRe, '');
+    }
 
     const formulaElRe = /<([a-z][a-z0-9]*)([^>]*\bdata-page-formula\b[^>]*)>([\s\S]*?)<\/\1>/gi;
     if (meta.formula) {

@@ -3,7 +3,9 @@ import { DirectedGraph } from 'graphology';
 import type { D3Sel } from '../utils/Util';
 import { visualizeSpecialChars } from '../utils/tokenDisplayUtils';
 import {
+    clampDagEdgeTopPCoverage,
     collectGenAttrDagExcludeIntervals,
+    DAG_EDGE_TOP_P_COVERAGE_DEFAULT,
     excludeNodeAggregatedEntries,
     phase2RankAndSparsify,
     type PromptTokenSpan,
@@ -23,10 +25,40 @@ import {
     detachDagPseudoFullscreenIfPresent,
     runDagFullscreenToggleWithPseudoWorkaround,
 } from './genAttributeDagFullscreenWorkaround';
+import {
+    clampLinearArcAdjacentGap,
+    LINEAR_ARC_ADJACENT_GAP_DEFAULT,
+    LINEAR_ARC_ADJACENT_GAP_MAX,
+    LINEAR_ARC_ADJACENT_GAP_MIN,
+    LINEAR_ARC_BEZIER_HANDLE_INSET_FRACTION,
+    paintLinearArcLayout,
+} from './genAttributeDagViewLinearArcMode';
+import { paintTextFlowLayout } from './genAttributeDagViewTextFlowMode';
 import { tr } from '../lang/i18n-lite';
 
 /** 再次挂载前执行上一轮 detach（当前为空操作，保留扩展点） */
 const detachGenAttributeDagPanel = new WeakMap<HTMLElement, () => void>();
+
+/** 节点布局模式：`text-flow` 按文字排版层几何；`linear-arc` 按节点插入序线性排布 + 弧线连边。 */
+export type DagLayoutMode = 'text-flow' | 'linear-arc';
+
+export const DAG_COMPACTNESS_DEFAULT = 0.5;
+/** 下限取小正数以满足 {@link readDisplayScaleFromCss}「必须为正」且不出现零宽度边线。 */
+export const DAG_COMPACTNESS_MIN = 0.05;
+export const DAG_COMPACTNESS_MAX = 1;
+
+export function clampDagCompactness(n: number): number {
+    if (!Number.isFinite(n)) return DAG_COMPACTNESS_DEFAULT;
+    return Math.min(DAG_COMPACTNESS_MAX, Math.max(DAG_COMPACTNESS_MIN, n));
+}
+
+export {
+    clampLinearArcAdjacentGap,
+    LINEAR_ARC_ADJACENT_GAP_DEFAULT,
+    LINEAR_ARC_ADJACENT_GAP_MAX,
+    LINEAR_ARC_ADJACENT_GAP_MIN,
+    LINEAR_ARC_BEZIER_HANDLE_INSET_FRACTION,
+};
 
 /** 图中节点业务字段（与 graphology 节点 attributes 为同一对象） */
 type DagNodeAttrs = {
@@ -127,6 +159,8 @@ function stackLayoutViewportPx(stackEl: HTMLElement): { w: number; h: number } {
 /** 在「抵消 display-scale」的基准上再放大，作为 DAG 默认初始视图（d3 zoom 的 k） */
 const DAG_INITIAL_ZOOM_BOOST = 1.5;
 
+/** 与 {@link gen_attribute.scss} `.gen-attr-dag-stack` 中 `--gen-attr-dag-compactness` 一致（display-scale/link 线粗等同源派生） */
+const CSS_VAR_DAG_COMPACTNESS = '--gen-attr-dag-compactness';
 /** 与 {@link gen_attribute.scss} `.gen-attr-dag-stack` 中 `--gen-attr-dag-display-scale` 一致 */
 const CSS_VAR_DISPLAY_SCALE = '--gen-attr-dag-display-scale';
 /** 与 {@link gen_attribute.scss} `.gen-attr-dag-stack` 中 `--gen-attr-dag-link-stroke-width` 一致 */
@@ -152,6 +186,13 @@ const DISABLE_DAG_NODE_TOOLTIPS = true;
  * 测量层与节点几何同源（lmf-readout-text），故随字号/CSS 变化而变。
  */
 const LINK_END_INSET_PER_EM = 0.1;
+
+/** 箭头 marker 的 viewBox 半高（viewBox = `0 -H W 2H`） */
+const MARKER_HALF_H = 5;
+/** 箭头 marker 的 viewBox 宽（同时是 path 尖端 x 坐标） */
+const MARKER_VW = 10;
+/** 箭头 marker 渲染尺寸（markerWidth = markerHeight，单位为 markerUnits=strokeWidth） */
+const MARKER_SIZE = 4;
 
 /** 每条边独立 marker 的 document id（节点 id 为 `start_end`，与另一节点组合唯一） */
 function dagLinkMarkerElementId(source: string, target: string): string {
@@ -219,7 +260,9 @@ export type GenAttributeDagHandle = {
      */
     reset(preserveUserViewport?: boolean): void;
     /**
-     * zoom identity 后对 `rootG` 做 `getBBox()` 适配视口；空图走默认缩放；`k` 上限 `k₀`。
+     * zoom identity 后按内容适配视口；空图走默认缩放；`k` 上限 `k₀`。
+     * - `text-flow`：`rootG.getBBox()`（含边）等比落入内框。
+     * - `linear-arc`：仅按 `gen-attr-dag-nodes` 行宽定比，token 行相对内框竖直居中（弧不参与）。
      * 若 `layoutDirty` 为真则 no-op（仅已执行的 `syncSvgSize` 生效，不改 pan/zoom），但 `force` 为真时仍
      * fit 并清 dirty（例如刷新按钮的强制适配）。
      */
@@ -235,6 +278,26 @@ export type GenAttributeDagHandle = {
      * 传 `null` 恢复样式表默认（`100%`，跟随容器）。
      */
     setMeasureWidthPx(widthPx: number | null): void;
+    /** 切换 DAG 节点布局模式并立即重排现有节点/边。 */
+    setLayoutMode(mode: DagLayoutMode): void;
+    /**
+     * linear-arc 下相邻节点矩形外侧边的水平间隙（px）。仅影响 linear-arc 几何；若在生成/播放中途调用且
+     * `skipRefit` 为真，仅写入值，下一轮 `syncGraphToSvg`/空闲后再反映（与测量宽度语义一致）。
+     */
+    setLinearArcAdjacentGapPx(px: number, opts?: { skipRefit?: boolean }): void;
+    /**
+     * 写入 `--gen-attr-dag-compactness`（与样式表中 display-scale / 边线粗等同源派生）。
+     * 已有节点的 `nodeW`/`nodeH` 仍为建点时的缩放结果；调用方在需要一致几何时应 `reset` 后重放。
+     */
+    setDagCompactness(c: number): void;
+    /** 更新边 Top-P 覆盖阈值；要重算当前 DAG 须 reset 后重放。 */
+    setEdgeTopPCoverage(coverage: number): void;
+    /**
+     * 切换 excluded 节点的隐藏模式：
+     * - `true`：完全隐藏（`display:none`）；linear-arc 下同时不参与布局。
+     * - `false`（默认）：保留为低透明度（{@link DAG_NODE_HIDDEN_OPACITY}）占位。
+     */
+    setHideExcludedTokens(hide: boolean): void;
     /** 移除 DAG 栈与刷新按钮（离开页面时调用） */
     detach(): void;
 };
@@ -371,8 +434,12 @@ export type InitGenAttributeDagViewOptions = {
     /** 点击 DAG 刷新时：在内部先按需 `fitViewportToContent`、再 `reset` 之后调用，用于重放（视口沿用 fit 结果）。 */
     onDagRefresh?: () => void;
     /**
-     * 写入 `.gen-attr-dag-stack` 的 `--gen-attr-dag-display-scale`（矩形与节点文字同时缩放）。
-     * 未设置时沿用样式表（`--gen-attr-dag-display-scale` 与 `--gen-attr-dag-compactness` 同源）。
+     * 写入 `.gen-attr-dag-stack` 的 `--gen-attr-dag-compactness`（矩形与节点文字、边线粗等同源缩放基准）。
+     * 未设置时沿用样式表默认值（见 {@link DAG_COMPACTNESS_DEFAULT}）。
+     */
+    dagCompactness?: number;
+    /**
+     * @deprecated 与 {@link dagCompactness} 同义；二者择一，若同时传入则抛错。
      */
     displayScale?: number;
     /**
@@ -381,6 +448,17 @@ export type InitGenAttributeDagViewOptions = {
      * 「resize 只 refit 旧几何、刷新才重测几何」的结构性不一致。未设置时沿用样式表 `100%`（跟随容器）。
      */
     measureWidthPx?: number;
+    /** DAG 节点布局模式；默认 `text-flow`。 */
+    layoutMode?: DagLayoutMode;
+    /**
+     * linear-arc：相邻节点矩形外侧边的水平间隙（px），决定水平方向疏密；
+     * 默认 {@link LINEAR_ARC_ADJACENT_GAP_DEFAULT}。
+     */
+    linearArcAdjacentGapPx?: number;
+    /** 被 exclude 规则命中的节点是否完全隐藏（true）还是仅降至 {@link DAG_NODE_HIDDEN_OPACITY}（false，默认）。 */
+    hideExcludedTokens?: boolean;
+    /** 边 Top-P 覆盖阈值（候选池内累计份额）；默认 {@link DAG_EDGE_TOP_P_COVERAGE_DEFAULT}。 */
+    edgeTopPCoverage?: number;
     /** 进入/退出/切换全屏失败时（常见于移动端不支持元素全屏等）。不传则无提示。 */
     onFullscreenError?: (message: string) => void;
 };
@@ -392,6 +470,19 @@ export function initGenAttributeDagView(
     const onDagRefresh = options?.onDagRefresh;
     const onDagPlaybackToggle = options?.onDagPlaybackToggle;
     const onFullscreenError = options?.onFullscreenError;
+    let layoutMode: DagLayoutMode = options?.layoutMode ?? 'text-flow';
+    let linearArcAdjacentGapPx = LINEAR_ARC_ADJACENT_GAP_DEFAULT;
+    if (options?.linearArcAdjacentGapPx !== undefined) {
+        const iv = options.linearArcAdjacentGapPx;
+        if (!Number.isFinite(iv)) {
+            throw new Error('genAttributeDagView: linearArcAdjacentGapPx must be finite');
+        }
+        linearArcAdjacentGapPx = clampLinearArcAdjacentGap(iv);
+    }
+    let hideExcludedTokens: boolean = options?.hideExcludedTokens ?? false;
+    let edgeTopPCoverage = clampDagEdgeTopPCoverage(
+        options?.edgeTopPCoverage ?? DAG_EDGE_TOP_P_COVERAGE_DEFAULT,
+    );
 
     function reportFullscreenFailure(err: unknown): void {
         if (!onFullscreenError) return;
@@ -419,6 +510,11 @@ export function initGenAttributeDagView(
             clearNodeSelection: noop,
             setDagPlaybackPlaying: noop,
             setMeasureWidthPx: noop,
+            setLayoutMode: noop,
+            setLinearArcAdjacentGapPx: noop,
+            setDagCompactness: noop,
+            setEdgeTopPCoverage: noop,
+            setHideExcludedTokens: noop,
             detach: noop,
         };
     }
@@ -433,13 +529,21 @@ export function initGenAttributeDagView(
     const stack = resultsRoot.append('div').attr('class', 'gen-attr-dag-stack');
     const stackEl = stack.node() as HTMLElement;
 
-    if (options?.displayScale !== undefined) {
-        const s = options.displayScale;
-        if (!Number.isFinite(s) || s <= 0) {
-            throw new Error('genAttributeDagView: displayScale must be a finite positive number');
-        }
-        stackEl.style.setProperty(CSS_VAR_DISPLAY_SCALE, String(s));
+    /** linear-arc 下禁用节点拖拽；同时用该类覆盖「选中 grab」光标。 */
+    function syncStackLayoutDragUi(): void {
+        stackEl.classList.toggle('gen-attr-dag-linear-arc-layout', layoutMode === 'linear-arc');
     }
+    syncStackLayoutDragUi();
+
+    if (options?.dagCompactness !== undefined && options?.displayScale !== undefined) {
+        throw new Error('genAttributeDagView: pass only one of dagCompactness or displayScale');
+    }
+    const compactnessInit = options?.dagCompactness ?? options?.displayScale;
+    if (compactnessInit !== undefined) {
+        const c = clampDagCompactness(compactnessInit);
+        stackEl.style.setProperty(CSS_VAR_DAG_COMPACTNESS, String(c));
+    }
+
 
     const measureRoot = stack
         .append('div')
@@ -464,11 +568,26 @@ export function initGenAttributeDagView(
     const textMeasure = createGenAttributeDagTextMeasure(measureRoot);
 
     /**
-     * 一次 session 内 `--gen-attr-dag-display-scale` 与测量层字号不会变（外部未提供运行时改写入口），
-     * 故 init 时读一次即可，热路径不再触发 `getComputedStyle`（否则 `paint`/每步 `update` 都会强制样式计算）。
+     * 与 `--gen-attr-dag-display-scale` 一致；`setDagCompactness` 会更新（并同步 `linkEndInsetPx`）。
+     * 热路径不读 `getComputedStyle`，仅在该 setter 与 init 时刷新。
      */
-    const displayScale = readDisplayScaleFromCss(stackEl);
-    const linkEndInsetPx = linkEndInsetBaseAtUnitScalePx(measureRoot) * displayScale;
+    let displayScale = readDisplayScaleFromCss(stackEl);
+    let linkEndInsetPx = linkEndInsetBaseAtUnitScalePx(measureRoot) * displayScale;
+
+    function refreshDagScaleDerivedFromCss(): void {
+        displayScale = readDisplayScaleFromCss(stackEl);
+        linkEndInsetPx = linkEndInsetBaseAtUnitScalePx(measureRoot) * displayScale;
+    }
+
+    function setDagCompactness(c: number): void {
+        const v = clampDagCompactness(c);
+        stackEl.style.setProperty(CSS_VAR_DAG_COMPACTNESS, String(v));
+        refreshDagScaleDerivedFromCss();
+    }
+
+    function setEdgeTopPCoverage(coverage: number): void {
+        edgeTopPCoverage = clampDagEdgeTopPCoverage(coverage);
+    }
 
     const svg = stack.append('svg').attr('class', 'gen-attr-dag-svg');
 
@@ -553,72 +672,45 @@ export function initGenAttributeDagView(
         svg.attr('width', w).attr('height', h);
     }
 
-    function nodeCenter(n: DagNode): { cx: number; cy: number } {
-        return { cx: n.x + n.nodeW / 2, cy: n.y + n.nodeH / 2 };
-    }
-
-    /** 轴对齐矩形（半宽 hw、半高 hh）中心沿单位向量 (ux,uy) 到边界的距离 */
-    function distCenterToRectEdgeAlongRay(hw: number, hh: number, ux: number, uy: number): number {
-        const ax = Math.abs(ux);
-        const ay = Math.abs(uy);
-        let t = Infinity;
-        if (ax > 1e-12) t = Math.min(t, hw / ax);
-        if (ay > 1e-12) t = Math.min(t, hh / ay);
-        return Number.isFinite(t) ? t : 0;
-    }
-
-    /**
-     * 沿两节点中心连线画边：端点从各中心沿该线走到矩形边界，再可选向外 `outsideInset`。
-     * 若边界交点越过彼此（重叠/极近），退化为两中心直连且不加外向留白。
-     */
-    function linkSegmentThroughNodeRects(
-        src: DagNode,
-        tgt: DagNode,
-        outsideInset: number
-    ): { x1: number; y1: number; x2: number; y2: number } {
-        const a = nodeCenter(src);
-        const b = nodeCenter(tgt);
-        const dx = b.cx - a.cx;
-        const dy = b.cy - a.cy;
-        const L = Math.hypot(dx, dy);
-        if (L < 1e-9) return { x1: a.cx, y1: a.cy, x2: b.cx, y2: b.cy };
-        const ux = dx / L;
-        const uy = dy / L;
-        const tA = distCenterToRectEdgeAlongRay(src.nodeW / 2, src.nodeH / 2, ux, uy);
-        const tB = distCenterToRectEdgeAlongRay(tgt.nodeW / 2, tgt.nodeH / 2, ux, uy);
-        const eps = 1e-6;
-        let g = outsideInset;
-        if (tA + tB + 2 * g >= L - eps) g = 0;
-        if (tA + tB + 2 * g >= L - eps) {
-            return { x1: a.cx, y1: a.cy, x2: b.cx, y2: b.cy };
-        }
-        return {
-            x1: a.cx + (tA + g) * ux,
-            y1: a.cy + (tA + g) * uy,
-            x2: b.cx - (tB + g) * ux,
-            y2: b.cy - (tB + g) * uy,
-        };
-    }
-
     function paint(): void {
-        linkSel.each(function(d) {
-            const src = endpointNode(d.source, graph);
-            const tgt = endpointNode(d.target, graph);
-            const seg = linkSegmentThroughNodeRects(src, tgt, linkEndInsetPx);
-            d3.select(this)
-                .selectAll('line')
-                .attr('x1', seg.x1)
-                .attr('y1', seg.y1)
-                .attr('x2', seg.x2)
-                .attr('y2', seg.y2);
+        if (layoutMode === 'linear-arc') {
+            const layoutNodes = hideExcludedTokens
+                ? nodes.filter((n) => !isOffsetSpanFullyExcluded(n.start, n.end, dagExcludeIntervals))
+                : nodes;
+            paintLinearArcLayout({
+                linkSel,
+                nodeSel,
+                nodes: layoutNodes,
+                adjacentGapPx: linearArcAdjacentGapPx,
+                getLinkNodes: (d) => ({
+                    src: endpointNode(d.source, graph),
+                    tgt: endpointNode(d.target, graph),
+                }),
+            });
+            return;
+        }
+        paintTextFlowLayout({
+            linkSel,
+            nodeSel,
+            linkEndInsetPx,
+            getLinkNodes: (d) => ({
+                src: endpointNode(d.source, graph),
+                tgt: endpointNode(d.target, graph),
+            }),
         });
-        nodeSel.attr('transform', (d) => `translate(${d.x},${d.y})`);
     }
 
     const drag = d3
         .drag<SVGGElement, DagNode>()
         // 与 d3 默认 filter 一致，并仅在「当前节点已单击选中」时允许拖动手势生效，减少误拖
-        .filter((event, d) => !event.ctrlKey && !event.button && selectedId === d.id)
+        // 仅 text-flow（UI 的 default）支持拖拽；linear-arc 下禁拖
+        .filter(
+            (event, d) =>
+                !event.ctrlKey &&
+                !event.button &&
+                selectedId === d.id &&
+                layoutMode === 'text-flow'
+        )
         .on('start', (event) => {
             event.sourceEvent?.stopPropagation();
         })
@@ -645,11 +737,15 @@ export function initGenAttributeDagView(
         nodeSel
             .classed('gen-attr-dag-node--hover', (d) => hoveredId === d.id)
             .classed('gen-attr-dag-node--selected', (d) => selectedId === d.id)
+            .style('display', (d) =>
+                hideExcludedTokens && isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)
+                    ? 'none' : null
+            )
             .attr('opacity', (d) => {
                 if (selectedNbhd?.has(d.id)) return 1;
                 if (hoveredNbhd?.has(d.id)) return 1;
                 if (isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)) {
-                    return DAG_NODE_HIDDEN_OPACITY;
+                    return hideExcludedTokens ? 0 : DAG_NODE_HIDDEN_OPACITY;
                 }
                 const isPromptLeaf = d.step === -1 && graph.outDegree(d.id) === 0;
                 if (focusId || isPromptLeaf) return DAG_NODE_WEAKEN_OPACITY;
@@ -662,7 +758,7 @@ export function initGenAttributeDagView(
             const stroke =
                 dagLinkHighlightStroke(graph, focusId, d) ?? `var(${CSS_VAR_DAG_NORMAL_LINE_COLOR})`;
             const g = d3.select(this);
-            g.select('line.gen-attr-dag-link-visible').attr('stroke', stroke).attr('stroke-opacity', op);
+            g.select('path.gen-attr-dag-link-visible').attr('stroke', stroke).attr('stroke-opacity', op);
             linkMarkersDefs
                 .select<SVGPathElement>(`#${dagLinkMarkerElementId(d.source, d.target)} path`)
                 .attr('stroke', stroke)
@@ -704,18 +800,18 @@ export function initGenAttributeDagView(
                 const m = enter
                     .append('marker')
                     .attr('id', (d) => dagLinkMarkerElementId(d.source, d.target))
-                    .attr('viewBox', '0 -5 10 10')
-                    .attr('refX', 8)
+                    .attr('viewBox', `0 -${MARKER_HALF_H} ${MARKER_VW} ${MARKER_HALF_H * 2}`)
+                    .attr('refX', MARKER_VW * 0.8)
                     .attr('refY', 0)
-                    .attr('markerWidth', 4)
-                    .attr('markerHeight', 4)
+                    .attr('markerWidth', MARKER_SIZE)
+                    .attr('markerHeight', MARKER_SIZE)
                     .attr('orient', 'auto');
                 m.append('path')
-                    .attr('d', 'M0,-5 L10,0 L0,5')
+                    .attr('d', `M0,-${MARKER_HALF_H} L${MARKER_VW},0 L0,${MARKER_HALF_H}`)
                     .attr('fill', 'none')
                     .attr('stroke', `var(${CSS_VAR_DAG_NORMAL_LINE_COLOR})`)
-                    .attr('stroke-width', `var(${CSS_VAR_DAG_LINK_STROKE_WIDTH})`)
-                    .attr('vector-effect', 'non-scaling-stroke')
+                    // markerUnits=strokeWidth 坐标系下，viewBox宽/marker尺寸 = 1× 线宽
+                    .attr('stroke-width', MARKER_VW / MARKER_SIZE)
                     .attr('stroke-linecap', 'round')
                     .attr('stroke-linejoin', 'round');
                 return m;
@@ -730,8 +826,9 @@ export function initGenAttributeDagView(
                     const el = d3.select(this);
                     const mkId = dagLinkMarkerElementId(d.source, d.target);
                     el.append('title').text(d.titleText);
-                    el.append('line')
+                    el.append('path')
                         .attr('class', 'gen-attr-dag-link-visible')
+                        .attr('fill', 'none')
                         .attr('stroke', `var(${CSS_VAR_DAG_NORMAL_LINE_COLOR})`)
                         .attr('stroke-width', `var(${CSS_VAR_DAG_LINK_STROKE_WIDTH})`)
                         .attr('pointer-events', 'stroke')
@@ -914,7 +1011,7 @@ export function initGenAttributeDagView(
             targetToken: token,
         });
         const afterExclude = excludeNodeAggregatedEntries(step, aggregated, excludeIntervalContext);
-        const selected = phase2RankAndSparsify(afterExclude);
+        const selected = phase2RankAndSparsify(afterExclude, { cumulativeShare: edgeTopPCoverage });
 
         const massSum = selected.reduce((acc, t) => acc + Math.max(0, t.poolMassFrac), 0);
         for (const item of selected) {
@@ -998,18 +1095,34 @@ export function initGenAttributeDagView(
             applyInitialDagZoom();
         } else {
             svg.call(zoomBehavior.transform, d3.zoomIdentity);
-            const b = rootG.node()!.getBBox();
-            const bw = Math.max(b.width, 1e-6);
-            const bh = Math.max(b.height, 1e-6);
             const pad = 12;
             const { w, h } = stackLayoutViewportPx(stackEl);
             const innerW = Math.max(w - 2 * pad, 1);
             const innerH = Math.max(h - 2 * pad, 1);
-            const kRaw = Math.min(innerW / bw, innerH / bh);
-            const k = Math.min(Number.isFinite(kRaw) && kRaw > 0 ? kRaw : k0, k0);
-            const tx = pad * 2 - k * b.x;
-            const ty = pad - k * b.y;
-            svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+            if (layoutMode === 'linear-arc') {
+                /** 仅用 token 行宽度定比；竖直按行中心居中（弧不参与 bbox → 不致上下抖） */
+                const bn = nodeG.node()!.getBBox();
+                const bw = Math.max(bn.width, 1e-6);
+                const kRaw = innerW / bw;
+                const k = Math.min(Number.isFinite(kRaw) && kRaw > 0 ? kRaw : k0, k0);
+                const tx = pad * 2 - k * bn.x;
+                const rowMidY = bn.y + bn.height / 2;
+                const ty = pad + innerH / 2 - k * rowMidY;
+                svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+            } else if (layoutMode === 'text-flow') {
+                /** 与原实现一致：`rootG` 整包 bbox + 宽高双约束顶对齐 */
+                const b = rootG.node()!.getBBox();
+                const bw = Math.max(b.width, 1e-6);
+                const bh = Math.max(b.height, 1e-6);
+                const kRaw = Math.min(innerW / bw, innerH / bh);
+                const k = Math.min(Number.isFinite(kRaw) && kRaw > 0 ? kRaw : k0, k0);
+                const tx = pad * 2 - k * b.x;
+                const ty = pad - k * b.y;
+                svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+            } else {
+                const _: never = layoutMode;
+                throw new Error(`genAttributeDagView: unsupported layoutMode for fit (${String(_)})`);
+            }
         }
         // 任何成功 fit（含 RO 自动 fit、refresh）都回到默认视图语义，下个 dirty 周期重新起算。
         layoutDirty = false;
@@ -1050,6 +1163,37 @@ export function initGenAttributeDagView(
     function setDagPlaybackPlaying(playing: boolean): void {
         dagPlaybackPlaying = playing;
         playBtn.text(playing ? '⏸' : '▶').attr('title', playing ? 'Pause' : 'Play');
+    }
+
+    function setLayoutMode(mode: DagLayoutMode): void {
+        if (layoutMode === mode) return;
+        layoutMode = mode;
+        syncStackLayoutDragUi();
+        if (batchDepth > 0) return;
+        syncGraphToSvg();
+        fitViewportToContent(true);
+    }
+
+    function setLinearArcAdjacentGapPx(px: number, opts?: { skipRefit?: boolean }): void {
+        if (!Number.isFinite(px)) {
+            throw new Error('genAttributeDagView: linear arc adjacent node gap must be finite');
+        }
+        const next = clampLinearArcAdjacentGap(px);
+        if (linearArcAdjacentGapPx === next) return;
+        linearArcAdjacentGapPx = next;
+        if (opts?.skipRefit || batchDepth > 0) return;
+        if (layoutMode !== 'linear-arc' || nodes.length === 0) return;
+        paint();
+        fitViewportToContent(true);
+    }
+
+    function setHideExcludedTokens(hide: boolean): void {
+        if (hideExcludedTokens === hide) return;
+        hideExcludedTokens = hide;
+        if (batchDepth > 0 || nodes.length === 0) return;
+        paint();
+        refreshNodeLinkHighlight();
+        fitViewportToContent(true);
     }
 
     const fullscreenBtn = resultsRoot
@@ -1142,6 +1286,11 @@ export function initGenAttributeDagView(
         clearNodeSelection,
         setDagPlaybackPlaying,
         setMeasureWidthPx,
+        setLayoutMode,
+        setLinearArcAdjacentGapPx,
+        setDagCompactness,
+        setEdgeTopPCoverage,
+        setHideExcludedTokens,
         detach,
     };
 }

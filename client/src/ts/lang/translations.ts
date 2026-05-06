@@ -46,10 +46,18 @@ export const translations: Translations = {
         'One regex per line (generated continuation only)': '每行一条正则（仅已生成 continuation）',
         'One regex per line (global flag), matched only within the generated suffix; if a token offset lies fully inside a match, its score is treated as 0.':
             '每行一条正则，`g`，仅在已生成后缀内匹配；token 的 offset 完全落在某次匹配区间内则 score 视为 0。',
+        'Coverage is the cumulative mass share within each generation step\'s Top-N candidate pool (after sorting candidates into the pool and normalizing mass inside that pool). Higher values keep more incoming edges. The denominator is this pool only, not every token-attribution entry returned for the step.':
+            'Coverage 指每一步在 Top-N 候选池内的累计质量份额（先入池、池内归一后按强度排序再累加）。数值越大保留的 DAG 入边越多；分母仅为该候选池，不是该步 API 返回的全部归因 token。',
         'When checked, gray DAG edges not adjacent to the hovered or selected node are hidden.':
             '勾选后，DAG 中未与当前悬浮/选中节点相邻的灰色边将被隐藏。',
         'Width (px) of the invisible measurement layer used for DAG layout. Only this width affects wrapping and node positions. When idle, changes replay and fit automatically; during generation or DAG playback, the setting updates for the next run or refresh.':
             'DAG 节点几何所基于的不可见测量层宽度（px）。只有测量层宽度会影响节点折行/位置。修改后：稳态下自动按新宽度重放并 fit；若正在生成或 DAG 播放中，仅更新设置，下次刷新/生成时生效。',
+        'Token distance': 'Token distance 间距',
+        'Horizontal gap (px) between the outer left/right edges of adjacent token nodes in linear-arc layout only. When idle, the DAG refits; during generation or DAG playback, the value is stored and applied on the next sync.':
+            '仅 linear-arc 布局下生效：相邻 token 节点矩形外侧边之间的水平间隙（px）。修改后：稳态下立即重绘并 fit；若正在生成或 DAG 播放中，仅写入存储，下一轮同步时再反映。',
+        'Compactness': 'DAG 紧凑度',
+        'Scales DAG node boxes and labels relative to the measurement layer; 1 matches full readout scale. When idle, changes replay and fit automatically; during generation or DAG playback, the setting updates for the next run or refresh.':
+            '相对测量层缩放 DAG 节点框与标签；1 与正文阅读比例一致。修改后：稳态下自动重放并 fit；若正在生成或 DAG 播放中，仅更新设置，下次运行或刷新时生效。',
         'Delay in milliseconds between steps during DAG playback. Stored locally; the value is read when you press play—changing it mid-playback does not affect the current run.':
             'DAG 步进重放时相邻两步之间的间隔（ms）。写入本地存储；每次点击播放时读取当前输入，播放中途改数值不影响本轮。',
         'Perform gradient attribution on the target token below.': '对以下target token做梯度归因。',
@@ -67,6 +75,7 @@ export const translations: Translations = {
             '每行一条正则，`g`，仅在 context 全文上匹配；token 的 offset 完全落在某次匹配区间内则 score 视为 0。',
         'For threshold x∈(0,1]: map normalized scores in [0,x] linearly to display intensities [0,1]; scores above x saturate at maximum intensity. At x=1, equivalent to disabling mapping.':
             '阈值 x∈(0,1]：将已归一的分数在 [0,x] 上线性映射到显示强度 [0,1]；高于 x 的分数饱和为最高强度。x=1 时与关闭映射等价。',
+        'A ❤️ would mean a lot!': '喜欢就点个❤️吧！',
         'LLM × Linguistics × Information Theory': '大模型 × 语言学 × 信息论',
         
         // ========== 通用按钮和操作 ==========

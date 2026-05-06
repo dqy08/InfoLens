@@ -88,13 +88,24 @@ html[data-theme='dark'] body.nav-landing-page {
   line-height: var(--nav-landing-subtitle-line-height);
 }
 
+.nav-landing-heartline {
+  margin: 2rem 0 0.35rem;
+  text-align: center;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--text-color, #1a1a1a);
+  opacity: 0.88;
+  letter-spacing: 0.02em;
+}
+
 .nav-landing-hint {
-  margin: 2rem 0 0;
+  margin: 0;
   text-align: center;
   font-size: 0.8125rem;
+  font-style: italic;
   line-height: 1.45;
   color: var(--text-muted, #666);
-  opacity: 0.82;
+  opacity: 0.72;
   letter-spacing: 0.02em;
 }
 

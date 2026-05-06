@@ -28,6 +28,7 @@ import { DemoResourceLoader } from './storage/demoResourceLoader';
 import {TextInputController, calculateTextStatsForController, type ExtendedInputEvent} from './controllers/textInputController';
 import {HighlightController, initHighlightClearListeners} from './controllers/highlightController';
 import {LayoutController} from './controllers/layoutController';
+import {PANEL_SPLIT_STORAGE_KEY_START} from './utils/panelSplitStorage';
 import {handleServerDemoSave} from './controllers/serverDemoController';
 // 公共初始化模块
 import {initializeCommonApp} from './appInitializer';
@@ -1033,7 +1034,8 @@ window.onload = () => {
     const layoutController = new LayoutController({
         sidebarState: current.sidebar,
         sideBar: side_bar,
-        sidebarBtn: d3.select('#sidebar_btn')
+        sidebarBtn: d3.select('#sidebar_btn'),
+        panelSplitStorageKey: PANEL_SPLIT_STORAGE_KEY_START,
     });
 };
 

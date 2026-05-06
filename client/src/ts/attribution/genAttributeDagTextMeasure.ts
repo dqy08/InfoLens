@@ -2,6 +2,7 @@ import type { FrontendAnalyzeResult, FrontendToken } from '../api/GLTR_API';
 import { TokenPositionCalculator } from '../vis/TokenPositionCalculator';
 import { ZERO_WIDTH_FRAGMENT_PLACEHOLDER_PX } from '../vis/types';
 import type { TokenFragmentRect } from '../vis/types';
+import { visualizeSpecialChars } from '../utils/tokenDisplayUtils';
 import type { PromptTokenSpan } from './genAttributeDagPreprocess';
 
 export type GenAttrDagTokenGeom = {
@@ -23,6 +24,27 @@ function fragmentsForToken(
     const parts = positions.filter((p) => p.tokenIndex === tokenIndex);
     parts.sort((a, b) => a.fragmentIndex - b.fragmentIndex);
     return parts;
+}
+
+/**
+ * raw 中含有在 visualizeSpecialChars 里会展开成更长标签的特殊字符
+ * （控制字符 / 全角空格等），此时 displayLabel 比 raw 宽，需要最小宽保底。
+ */
+function hasExpandingSpecialChar(raw: string): boolean {
+    return /[\x00-\x1f\x7f\u0085\u2028\u2029\u3000]/.test(raw);
+}
+
+/**
+ * 估算 visualizeSpecialChars 后的标签宽度下限：
+ * 直接按「显示字符数 × 常数」估算，简单稳定。
+ */
+function estimateExpandedLabelWidthFloorPx(raw: string): number {
+    const APPROX_CHAR_WIDTH_PX = 10;
+    const displayLabel = visualizeSpecialChars(raw, {
+        spaceDotExceptBeforeAsciiLetterOrNumber: true,
+    });
+    const displayLen = Array.from(displayLabel).length;
+    return Math.max(displayLen * APPROX_CHAR_WIDTH_PX, 1);
 }
 
 /** 纯换行 token 的零宽/占位 fragment 本身就是它的几何语义。 */
@@ -65,10 +87,11 @@ function geomFromTokenFragments(frags: TokenFragmentRect[], raw: string): GenAtt
     const geomFrags = fragmentsForDagGeom(frags, raw);
     const first = geomFrags[0]!;
     const hFirst = Math.max(first.height, 1);
-    const widthSum = Math.max(
-        geomFrags.reduce((s, f) => s + widthForDagGeom(f), 0),
-        1
-    );
+    const geomWidthSum = geomFrags.reduce((s, f) => s + widthForDagGeom(f), 0);
+    const expandedFloor = hasExpandingSpecialChar(raw)
+        ? estimateExpandedLabelWidthFloorPx(raw)
+        : 1;
+    const widthSum = Math.max(geomWidthSum, expandedFloor);
     return {
         originX: first.x,
         originY: first.y,
