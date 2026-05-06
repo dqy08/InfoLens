@@ -36,7 +36,8 @@ ENV HOME=/home/user \
 
 WORKDIR $HOME/app
 
-# Python deps (installed to user site-packages when system site is not writable)
+# pip 依赖是本镜像体积与 HF 冷启动（拉取/解压 layer）的主要瓶颈：site-packages 可达数 GB，
+# 其中 torch 依赖的 site-packages/nvidia & triton 占了大部分。
 COPY --chown=user:users requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt

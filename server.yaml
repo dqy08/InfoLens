@@ -759,8 +759,44 @@ paths:
                 type: boolean
 
 
-definitions:
+  /visit_stats:
+    get:
+      tags:
+        - all
+      summary: get visit statistics (admin only)
+      operationId: server.get_visit_stats
+      responses:
+        200:
+          description: |
+            返回当前累计快照（_base + 本进程内存增量）。
+            窗口内未提交的增量仅以与 stats_total.json 相同字段结构的记录写入 Dataset 的 stats_delta/*.json。
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              totals:
+                type: object
+                description: |
+                  page_loads（GET /client/*.html，一次实际 HTML 响应计一次，与访问日志「📄 页面访问」一致）；active_visits（至少有一次有效活跃心跳的页面访问数，每页以 delta_active_sec == total_active_sec 的首轮上报计一次）。
+              os:
+                type: object
+              page_sec:
+                type: object
+              api:
+                type: object
+              saved_at:
+                type: string
+              startup_base:
+                type: object
+                description: |
+                  进程启动时（_load_base 完成后）_base 的深拷贝；前端用 totals − startup_base 计算自启动以来的增量。
+              process_start_at:
+                type: string
+                description: |
+                  统计线程完成 _load_base 并拍下 startup_base 时的 UTC 时间（与 saved_at 相同格式）。
 
+definitions:
   # 与 client generatedSchemas TokenWithOffset 一致；信息密度 analyze 与 completions info_radar 共用
   TokenWithOffset:
     type: object

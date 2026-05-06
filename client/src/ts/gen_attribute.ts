@@ -956,7 +956,6 @@ function syncSubmitButtonState(): void {
         submitBtn.classed('inactive', false);
         return;
     }
-    submitBtn.text(GENERATE_BTN_LABEL);
     const raw = getActivePromptValue();
     const hasDisplayedRun =
         runnerHandle !== null &&
@@ -965,9 +964,22 @@ function syncSubmitButtonState(): void {
         lastRunInputSnapshot !== null;
     const inputMatchesDisplayed =
         hasDisplayedRun && getInputSnapshotForRun() === lastRunInputSnapshot;
-    const enable = raw.length > 0 && !inputMatchesDisplayed;
-    submitBtn.property('disabled', !enable);
-    submitBtn.classed('inactive', !enable);
+
+    if (raw.length === 0) {
+        submitBtn.text(GENERATE_BTN_LABEL);
+        submitBtn.property('disabled', true);
+        submitBtn.classed('inactive', true);
+        return;
+    }
+    if (inputMatchesDisplayed) {
+        submitBtn.text(tr('Retry'));
+        submitBtn.property('disabled', false);
+        submitBtn.classed('inactive', false);
+        return;
+    }
+    submitBtn.text(GENERATE_BTN_LABEL);
+    submitBtn.property('disabled', false);
+    submitBtn.classed('inactive', false);
 }
 
 function bindInputsForSync(): void {

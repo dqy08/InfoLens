@@ -1,7 +1,7 @@
 from urllib.parse import unquote
 
-from backend.access_log import _log_request, get_client_ip
-from backend.visit_stats import record_page_active
+from backend.access_log import _log_request
+from backend.visit_stats import record_activity_report
 
 
 def _sparse_page_activity_log_cum(cum: int) -> bool:
@@ -37,8 +37,7 @@ def client_activity_report(activity_body=None):
     raw_os = d.get("client_os")
     client_os = str(raw_os).strip() if raw_os is not None else None
 
-    ip = get_client_ip()
-    record_page_active(ip, page_key, dlt, cum, client_os)
+    record_activity_report(page_key, dlt, cum, client_os)
     if _sparse_page_activity_log_cum(cum):
         _log_request(
             "📄 页面活跃",

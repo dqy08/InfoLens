@@ -15,7 +15,6 @@ from backend.api.utils import (
     validate_admin_token,
 )
 from backend.access_log import log_check_admin
-from backend.visit_stats import print_visit_summary
 
 
 def list_demos(path: str = ""):
@@ -166,7 +165,6 @@ def check_admin(check_request):
     log_check_admin(is_valid, token=request_token)
 
     if is_valid:
-        print_visit_summary()
         return {"success": True}
     else:
         return {

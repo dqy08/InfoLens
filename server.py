@@ -43,6 +43,7 @@ from backend.api.model_switch import (  # noqa: F401
     get_current_model,
     switch_model,
 )
+from backend.api.visit_stats_api import get_visit_stats  # noqa: F401
 from backend.api.openai_completions import (  # noqa: F401
     completions,
     completions_prompt,

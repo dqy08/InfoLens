@@ -42,7 +42,7 @@ def register_static_routes(app):
         if path.endswith('.html'):
             log_page_load(path)
         if path.endswith('.json'):
-            log_json_demo(path)
+            log_cached_demo(path)
         return _read_static_file('client/dist', path)
 
     @app.route('/demo/<path:path>')
@@ -50,7 +50,7 @@ def register_static_routes(app):
         """serves all demo files from the demo dir to ``/demo/<path:path>``"""
         from backend.app_context import get_data_dir
         data_dir = get_data_dir()
-        log_cached_demo(path)
+        log_json_demo(path)
         try:
             decoded_path = unquote(path)
             return _read_static_file(str(data_dir), decoded_path)

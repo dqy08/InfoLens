@@ -30,6 +30,7 @@ export class SettingsMenuManager {
     private settingsMenu: d3.Selection<Element, unknown, HTMLElement, any>;
     private adminModeBtn: d3.Selection<Element, unknown, HTMLElement, any>;
     private modelManageBtn: d3.Selection<Element, unknown, HTMLElement, any>;
+    private visitStatsBtn: d3.Selection<Element, unknown, HTMLElement, any>;
     private tokenRenderStyleDropdown: { updateCurrent: (v: TokenRenderStyle) => void } | null = null;
     private minimapToggle: d3.Selection<HTMLInputElement, unknown, HTMLElement, any>;
     private semanticAnalysisToggle: d3.Selection<HTMLInputElement, unknown, HTMLElement, any>;
@@ -65,6 +66,7 @@ export class SettingsMenuManager {
         this.settingsMenu = d3.select(settingsMenuSelector);
         this.adminModeBtn = d3.select(adminModeBtnSelector);
         this.modelManageBtn = d3.select('#model_manage_btn');
+        this.visitStatsBtn = d3.select('#visit_stats_btn');
         this.tokenRenderStyleDropdown =
             menuContext === 'analysis' ? this.initTokenRenderStyleDropdown() : null;
         this.minimapToggle = d3.select<HTMLInputElement, any>('#enable_minimap_toggle');
@@ -171,6 +173,13 @@ export class SettingsMenuManager {
             this.modelManageBtn.on('click', () => {
                 this.closeMenu();
                 this.handleModelManageClick();
+            });
+        }
+
+        if (this.visitStatsBtn.node()) {
+            this.visitStatsBtn.on('click', () => {
+                this.closeMenu();
+                this.handleVisitStatsClick();
             });
         }
 
@@ -361,6 +370,111 @@ export class SettingsMenuManager {
             confirmText: 'Enter',
             cancelText: tr('Cancel'),
             width: 'clamp(300px, 90vw, 420px)'
+        });
+    }
+
+    private async handleVisitStatsClick(): Promise<void> {
+        /** Visit stats 弹窗专用：主序列与 webpack 顶层页 / access_log 归类一致 */
+        const PAGE_ORDER = [
+            'index.html',
+            'analysis.html',
+            'compare.html',
+            'chat.html',
+            'attribution.html',
+            'gen_attribute.html',
+        ] as const;
+        const API_ORDER = ['analyze', 'analyze_semantic', 'chat', 'prediction_attribute'] as const;
+        const OS_ORDER = ['ios', 'android', 'windows', 'macos', 'linux', 'unknown'] as const;
+
+        type VisitStatsRow = NonNullable<Awaited<ReturnType<TextAnalysisAPI['getVisitStats']>>>;
+        const orderedKeysGt0 = (primary: readonly string[], rec: Record<string, number>): string[] => {
+            const primarySet = new Set(primary);
+            const pos = Object.keys(rec).filter((k) => (rec[k] ?? 0) > 0);
+            const posSet = new Set(pos);
+            const head = primary.filter((k) => posSet.has(k));
+            const tail = pos.filter((k) => !primarySet.has(k)).sort();
+            return [...head, ...tail];
+        };
+        const visitStatsHtml = (data: VisitStatsRow): string => {
+            const GREEN = '#22c55e';
+            const g = (s: string) => `<span style="color:${GREEN}">${s}</span>`;
+            const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const sb = data.startup_base ?? {};
+
+            const deltaSuffix = (d: number) => d !== 0 ? ` ${g(`(${d > 0 ? '+' : ''}${d})`)}` : '';
+            const t = data.totals;
+            const pg = data.page_sec ?? {};
+            const ap = data.api ?? {};
+            const os = data.os ?? {};
+            // startup_base 为空说明历史总量未持久化，无从得知累计值；此时显示 unknown
+            const fmtTotal = (v: number) => Object.keys(sb).length > 0 ? String(v) : 'unknown';
+            const linesJoined = (keys: string[], cur: Record<string, number>, base: Record<string, number>): string[] => {
+                if (!keys.length) return ['(none)'];
+                return keys.map((k) => {
+                    const v = cur[k] ?? 0;
+                    return `${esc(k)}: ${fmtTotal(v)}${deltaSuffix(v - (base[k] ?? 0))}`;
+                });
+            };
+
+            return [
+                `Process start: ${esc(data.process_start_at ? new Date(data.process_start_at).toLocaleString() : 'unknown')}`,
+                `Last persisted: ${esc(data.saved_at ? new Date(data.saved_at).toLocaleString() : 'unknown')}`,
+                '',
+                `[All-time (${g('+ delta since process start')})]`,
+                `Page loads: ${fmtTotal(t.page_loads)}${deltaSuffix(t.page_loads - (sb.page_loads ?? 0))}`,
+                `Active visits: ${fmtTotal(t.active_visits)}${deltaSuffix(t.active_visits - (sb.active_visits ?? 0))}`,
+                '',
+                '[OS]',
+                ...linesJoined(orderedKeysGt0(OS_ORDER, os), os, sb.os ?? {}),
+                '',
+                '[Page active time / s]',
+                ...linesJoined(orderedKeysGt0(PAGE_ORDER, pg), pg, sb.page_sec ?? {}),
+                '',
+                '[API]',
+                ...linesJoined(orderedKeysGt0(API_ORDER, ap), ap, sb.api ?? {}),
+            ].join('\n');
+        };
+
+        const fetchAndRender = async (container: d3.Selection<HTMLDivElement, unknown, HTMLElement, any>) => {
+            container.selectAll('*').remove();
+            const block = container
+                .append('div')
+                .attr('class', 'visit-stats-body')
+                .style('margin', '0')
+                .style('white-space', 'pre-wrap')
+                .style('font', 'inherit')
+                .style('font-size', '13px');
+            try {
+                const data = await this.api.getVisitStats();
+                if (!data?.success) throw new Error('bad');
+                block.html(visitStatsHtml(data));
+            } catch {
+                block.text('Failed to load stats.');
+            }
+        };
+
+        showDialog({
+            title: 'Visit Stats',
+            content: (dialog) => {
+                const wrap = dialog.append('div').attr('class', 'dialog-form-container');
+                const body = wrap.append('div');
+                wrap.append('button')
+                    .attr('type', 'button')
+                    .attr('class', 'refresh-btn')
+                    .attr('title', 'Refresh')
+                    .text('↻')
+                    .on('click', async function () {
+                        const btn = d3.select(this);
+                        btn.property('disabled', true).text('…');
+                        await fetchAndRender(body);
+                        btn.property('disabled', false).text('↻');
+                    });
+                fetchAndRender(body);
+                return { focus: () => {} };
+            },
+            cancelText: tr('Exit'),
+            confirmText: null,
+            width: 'clamp(340px, 90vw, 460px)',
         });
     }
 

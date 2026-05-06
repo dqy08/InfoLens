@@ -18,10 +18,12 @@ export type DialogContentBuilder = (
 export interface DialogOptions {
     title: string;
     content: DialogContentBuilder;
-    onConfirm: (value: any) => boolean | void | Promise<boolean | void>;  // 返回 false 表示不关闭弹窗（用于排队场景），支持异步
+    /** 确定按钮存在时点击会调用；省略时等价于未定义返回值（仍会在用户点击确定后关闭弹窗） */
+    onConfirm?: (value: any) => boolean | void | Promise<boolean | void>;
     onCancel?: () => void;
-    confirmText?: string;
-    cancelText?: string | undefined;  // undefined 表示不显示取消按钮
+    /** null 表示不显示确定按钮 */
+    confirmText?: string | null;
+    cancelText?: string | null;  // undefined/null 表示不显示取消按钮
     /** 确定按钮处于加载/排队状态时显示的文案，默认「排队中...」 */
     loadingConfirmText?: string;
     width?: string;
@@ -40,14 +42,16 @@ export function showDialog(options: DialogOptions): {
     const {
         title,
         content,
-        onConfirm,
+        onConfirm: onConfirmUser,
         onCancel,
         confirmText = tr('Confirm'),
-        cancelText,  // 不设置默认值，undefined 表示不显示取消按钮
+        cancelText,  // 不设置默认值，undefined/null 表示不显示取消按钮
         loadingConfirmText = tr('Queuing...'),
         width = 'clamp(300px, 90vw, 500px)',
         height
     } = options;
+
+    const onConfirm = onConfirmUser ?? (() => undefined);
 
     // 创建遮罩层
     // 简单直接：上下各多500px余量，确保完全覆盖屏幕
@@ -96,32 +100,31 @@ export function showDialog(options: DialogOptions): {
             });
     }
 
-    const confirmBtn = buttonContainer.append('button')
-        .attr('class', 'dialog-button confirm')
-        .text(confirmText);
+    const confirmBtn = confirmText != null
+        ? buttonContainer.append('button')
+            .attr('class', 'dialog-button confirm')
+            .text(confirmText)
+        : null;
 
     // 保存原始按钮文本，确保不依赖按钮内容
-    const originalButtonText = confirmText;
+    const originalButtonText = confirmText ?? '';
 
     // 创建确定按钮状态更新函数（在 content 回调之前创建，避免闭包问题）
     // 使用 data 属性来存储状态，不依赖文本内容
     const setConfirmButtonState = (enabled: boolean, queuing: boolean = false) => {
-        const btnNode = confirmBtn.node() as HTMLButtonElement;
+        const btnNode = confirmBtn?.node() as HTMLButtonElement | null;
         if (btnNode) {
             btnNode.disabled = !enabled || queuing;
-            
-            // 使用 data 属性存储状态，而不是依赖文本内容
             if (queuing) {
                 btnNode.setAttribute('data-state', 'queuing');
-                confirmBtn.classed('queuing', true);
+                confirmBtn!.classed('queuing', true);
                 btnNode.innerHTML = `
                     <span class="queuing-text">${loadingConfirmText}</span>
                     <span class="queuing-spinner"></span>
                 `;
             } else {
                 btnNode.setAttribute('data-state', enabled ? 'enabled' : 'disabled');
-                confirmBtn.classed('queuing', false);
-                // 恢复原始文本（从保存的 originalButtonText 获取，不依赖任何外部状态）
+                confirmBtn!.classed('queuing', false);
                 btnNode.textContent = originalButtonText;
             }
         }
@@ -131,13 +134,13 @@ export function showDialog(options: DialogOptions): {
     const contentControls = content(contentArea, setConfirmButtonState);
 
     // 设置确定按钮的点击事件（需要在 contentControls 创建之后）
-    confirmBtn.on('click', async () => {
+    confirmBtn?.on('click', async () => {
         // 验证
         if (contentControls.validate && !contentControls.validate()) {
             return;
         }
         // 检查是否处于排队状态
-        const btnNode = confirmBtn.node() as HTMLButtonElement;
+        const btnNode = confirmBtn?.node() as HTMLButtonElement | null;
         if (btnNode && btnNode.getAttribute('data-state') === 'queuing') {
             return; // 排队中，不处理点击
         }

@@ -53,6 +53,9 @@ def _log_request(event_type: str, details: str = "", client_ip: str = None):
 
 
 def log_page_load(path: str):
+    from backend.visit_stats import record_page_load
+
+    record_page_load()
     try:
         qs = request.query_string.decode("utf-8", errors="replace")
         combined = f"{path}?{unquote(qs)}" if qs else path

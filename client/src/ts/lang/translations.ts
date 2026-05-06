@@ -118,6 +118,7 @@ export const translations: Translations = {
         'Raw prompt mode': 'Raw prompt mode 原始提示词模式',
         'Ask': '提问',
         'Force retry': '强制重试',
+        'Retry': '重试',
         'Fetch again without using cached result': '不使用缓存，重新向服务器请求',
         'Save': '保存',
         'Search': '搜索',

@@ -9,6 +9,7 @@ Flask-Compress>=1.14
 accelerate>=0.30.0,<1.0.0
 bitsandbytes>=0.43.0
 hf-transfer>=0.1.0
+huggingface_hub>=0.23.0
 autoawq>=0.2.0  # Transformers AWQ 支持所需的后端库（已弃用但必需）
 trafilatura>=1.6.0
 requests>=2.31.0

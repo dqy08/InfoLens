@@ -1,5 +1,18 @@
 // Attribution：在 start + chat 之上仅叠本页差异（chat.scss 已含 toolbar / right-stack / cached bar / history 下拉）
 @use "attribution-inspector";
+@use "breakpoints" as *;
+
+// 桌面端：覆盖全局 min-height:100%，使 #results 按内容收缩（debug 面板紧跟其后）
+@media (min-width: $breakpoint-tablet) {
+  html:not([data-force-narrow]) .right_panel > #results.attribution-inspector-surface {
+    flex: 0 0 auto;
+    min-height: 350px;  // 覆盖 _responsive.scss 的 min-height:100%，保留兜底高度
+  }
+
+  html:not([data-force-narrow]) .right_panel > #attribution_debug_container {
+    flex: 0 0 auto;
+  }
+}
 
 // Cached history 下拉：覆盖全局 query-history（mixin 含 max-height:200px，须显式 max-height:none 才取消上限）；原生竖向 resize
 #attribution_cached_history_dropdown.semantic-search-history-dropdown {

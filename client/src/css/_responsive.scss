@@ -254,22 +254,23 @@
       background: var(--panel-bg);
       transition: background-color 0.3s ease;
       position: relative;  // 为绝对定位的子元素提供定位上下文
-    }
 
-    #results {
-      @include full-width-container;
-      overflow: visible;  // 确保发光效果不被裁剪
-      position: relative;  // 相对定位，让内容自然扩展
-      min-height: 100%;  // 至少填充整个 right_panel
-      margin: 0;  // 移除 margin-top
-    }
+      // 直接子 #results（analysis / attribution / gen_attribute）铺满面板；
+      // chat 页 #results 嵌套在 .chat-right-stack 内，不匹配此规则，由 chat.scss 自行控制。
+      > #results {
+        @include full-width-container;
+        overflow: visible;  // 确保发光效果不被裁剪
+        position: relative;  // 相对定位，让内容自然扩展
+        min-height: 100%;  // 至少填充整个 right_panel
+        margin: 0;  // 移除 margin-top
+      }
 
-    .LMF {
-      @include full-width-container;
-      min-height: 100%;  // 至少填充整个 #results 容器
-      // 添加 padding 为发光效果留出空间（drop-shadow 最大约 16px）
-      padding: 20px;  // 为发光效果留出足够空间，略大于最大阴影范围
-      overflow: visible;  // 确保发光效果不被裁剪，不使用自己的滚动条
+      > #results > .LMF {
+        @include full-width-container;
+        min-height: 100%;  // 至少填充整个 #results 容器
+        padding: 20px;  // 为发光效果留出足够空间（drop-shadow 最大约 16px）
+        overflow: visible;  // 确保发光效果不被裁剪，不使用自己的滚动条
+      }
     }
 
     .floating_content {

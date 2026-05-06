@@ -236,6 +236,30 @@ export class TextAnalysisAPI {
     }
 
     /**
+     * 获取访问统计（管理员）
+     */
+    public getVisitStats(): Promise<{
+        success: boolean,
+        totals: { page_loads: number, active_visits: number },
+        os: Record<string, number>,
+        page_sec: Record<string, number>,
+        api: Record<string, number>,
+        saved_at: string | null,
+        process_start_at?: string | null,
+        startup_base?: {
+            page_loads?: number,
+            active_visits?: number,
+            page_sec?: Record<string, number>,
+            api?: Record<string, number>,
+            os?: Record<string, number>,
+        },
+    }> {
+        return d3.json(this.baseURL + '/api/visit_stats', {
+            headers: this.getHeaders()
+        });
+    }
+
+    /**
      * 获取可用模型列表
      */
     public getAvailableModels(): Promise<{ success: boolean, models: string[] }> {

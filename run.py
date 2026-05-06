@@ -4,6 +4,10 @@
 启动 HTTP 服务并加载模型。
 """
 
+import time
+
+print(f"[inforadar] run.py start at {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+
 import argparse
 import logging
 import threading

@@ -136,6 +136,7 @@ new TextInputController({
 const attributionInspector = createAttributionInspector({
     resultsRoot: d3.select('#results'),
     eventHandler,
+    debugParentId: 'attribution_debug_container',
 });
 
 function readAttributionDisplayOptions(): AttributionDisplayOptions {
