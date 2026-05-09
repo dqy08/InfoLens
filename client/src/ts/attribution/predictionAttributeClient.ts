@@ -1,8 +1,9 @@
 /**
- * /api/prediction-attribute：统一请求、JSON 解析与归因结果缓存写入。
- * 命中缓存与 MRU 规则见 {@link ./attributionResultCache}。
+ * /api/prediction-attribute 与 /api/tokenize：统一请求与 JSON 解析。
+ * 归因缓存规则见 {@link ./attributionResultCache}。
  */
 import type { AttributionApiResponse, PredictionAttributeModelVariant } from './attributionResultCache';
+import type { PromptTokenSpan } from './genAttributeDagPreprocess';
 import {
     entryKey,
     removeCachedEntryByContentKey,
@@ -16,11 +17,15 @@ export async function fetchPredictionAttribute(
     apiBaseForRequests: string,
     context: string,
     targetPrediction: string | null,
-    model: PredictionAttributeModelVariant
+    model: PredictionAttributeModelVariant,
+    targetTokenId?: number
 ): Promise<AttributionApiResponse> {
     const bodyObj: Record<string, unknown> = { context, model };
     if (targetPrediction !== null) {
         bodyObj.target_prediction = targetPrediction;
+    }
+    if (typeof targetTokenId === 'number' && Number.isInteger(targetTokenId) && targetTokenId >= 0) {
+        bodyObj.target_token_id = targetTokenId;
     }
     const res = await fetch(`${apiBaseForRequests}/api/prediction-attribute`, {
         method: 'POST',
@@ -75,4 +80,32 @@ export async function loadPredictionAttributeWithCache(
     const json = await fetchPredictionAttribute(apiBaseForRequests, context, targetPrediction, model);
     await save({ context, targetPrediction }, json, 'complete');
     return json;
+}
+
+/**
+ * POST /api/tokenize：快速分词，返回 prompt 各 token 的 offset + raw。
+ * 不占推理锁，响应极快，用于在 DAG 模式流式生成时提前展示 prompt 节点。
+ */
+export async function fetchTokenize(
+    apiBase: string,
+    context: string,
+    model: PredictionAttributeModelVariant,
+): Promise<PromptTokenSpan[]> {
+    const res = await fetch(`${apiBase}/api/tokenize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ context, model }),
+    });
+    const text = await res.text();
+    let json: { success: boolean; spans?: PromptTokenSpan[]; message?: string };
+    try {
+        json = JSON.parse(text) as typeof json;
+    } catch {
+        const snippet = text.slice(0, 160) + (text.length > 160 ? '…' : '');
+        throw new Error(`/api/tokenize response is not JSON (HTTP ${res.status}): ${snippet}`);
+    }
+    if (!res.ok || !json.success) {
+        throw new Error(json.message ?? `HTTP ${res.status}`);
+    }
+    return json.spans ?? [];
 }

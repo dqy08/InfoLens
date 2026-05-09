@@ -21,6 +21,7 @@ import {
     clampDagEdgeTopPCoverage,
     DAG_EDGE_TOP_P_COVERAGE_DEFAULT,
     extractPromptTokenSpans,
+    type PromptTokenSpan,
 } from './attribution/genAttributeDagPreprocess';
 import {
     initGenAttributeDagView,
@@ -36,6 +37,7 @@ import {
     type TokenGenAttributionHandle,
     type TokenGenStep,
 } from './attribution/tokenGenAttributionRunner';
+import { fetchTokenize } from './attribution/predictionAttributeClient';
 import { completionFinishReasonLabel, type CompletionFinishReason } from './utils/generationEndReasonLabel';
 import {
     buildCachedContentUrlParam,
@@ -44,6 +46,7 @@ import {
     removeCachedEntryByContentKey,
     save,
     touchCachedEntryByContentKey,
+    type GenAttrCacheKey,
 } from './storage/genAttributeRunCache';
 import { bindExcludeGeneratedPatternsUi, bindExcludePromptPatternsUi } from './attribution/excludePromptPatternsUi';
 import { initCachedHistoryQueryDropdown, type CachedHistorySelectContext } from './utils/cachedHistoryUi';
@@ -63,10 +66,11 @@ import {
 } from './demos/genAttributeBundledDemos';
 import { extractErrorMessage } from './utils/errorUtils';
 import { exportJsonFile } from './storage/localFileIO';
-import type { GenAttrCachedRun } from './storage/genAttributeRunCache';
+import type { GenAttrCachedRun, GenAttrRunDraft } from './storage/genAttributeRunCache';
 import {
     GEN_ATTR_RAW_INPUT_HISTORY_KEY,
     GEN_ATTR_SYSTEM_INPUT_HISTORY_KEY,
+    GEN_ATTR_TEACHER_FORCING_INPUT_HISTORY_KEY,
     GEN_ATTR_USER_INPUT_HISTORY_KEY,
     initQueryHistoryDropdown,
     saveHistory,
@@ -76,7 +80,6 @@ import {
     writeSkipChatTemplateToStorage,
 } from './utils/chatPromptTemplateMode';
 import { postCompletionsPrompt, postCompletionsStop } from './api/completionsClient';
-import { CHAT_DEFAULT_COMPLETION_MODEL } from './chat/buildCompletionDisplayResult';
 import { updateApiUsageDisplay, updateModel, validateMetricsElements } from './utils/textMetricsUpdater';
 
 d3.selectAll('.loadersmall').style('display', 'none');
@@ -239,7 +242,7 @@ function readStoredDagReplayPacingMode(): DagReplayPacingMode {
 function readStoredDagLayoutMode(): DagLayoutMode {
     try {
         const v = localStorage.getItem(GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY);
-        if (v === 'text-flow' || v === 'linear-arc') return v;
+        if (v === 'text-flow' || v === 'linear-arc' || v === 'spiral') return v;
     } catch {
         // ignore
     }
@@ -253,12 +256,6 @@ const apiBaseForRequests = apiPrefix === '' ? '' : String(apiPrefix);
 
 const adminManager = AdminManager.getInstance();
 api.setAdminToken(adminManager.isInAdminMode() ? adminManager.getAdminToken() : null);
-
-const modelParam = URLHandler.parameters['model'];
-const completionModel =
-    typeof modelParam === 'string' && modelParam.length > 0
-        ? modelParam
-        : CHAT_DEFAULT_COMPLETION_MODEL;
 
 // --- DOM ---
 const rawTextField = d3.select('#gen_attr_raw_text');
@@ -279,6 +276,12 @@ const clearUserBtn = d3.select('#gen_attr_clear_user_btn');
 const pasteUserBtn = d3.select('#gen_attr_paste_user_btn');
 const userHistoryBtn = document.getElementById('gen_attr_user_history_btn');
 
+const teacherForcingTextField = d3.select('#gen_attr_teacher_forcing_text');
+const teacherForcingTextCountValue = d3.select('#gen_attr_teacher_forcing_text_count_value');
+const clearTeacherForcingBtn = d3.select('#gen_attr_clear_teacher_forcing_btn');
+const pasteTeacherForcingBtn = d3.select('#gen_attr_paste_teacher_forcing_btn');
+const teacherForcingHistoryBtn = document.getElementById('gen_attr_teacher_forcing_history_btn');
+
 const rawInputPanel = document.getElementById('gen_attr_raw_input_panel');
 const chatInputPanel = document.getElementById('gen_attr_chat_input_panel');
 const skipChatTemplateInput = document.getElementById(
@@ -288,6 +291,13 @@ const genAttrUseSystemPromptInput = document.getElementById(
     'gen_attr_use_system_prompt'
 ) as HTMLInputElement | null;
 const genAttrSystemPromptPanel = document.getElementById('gen_attr_system_prompt_panel');
+const genAttrTeacherForcingEnable = document.getElementById(
+    'gen_attr_teacher_forcing_enable'
+) as HTMLInputElement | null;
+const genAttrTeacherForcingBlock = document.getElementById('gen_attr_teacher_forcing_block');
+const genAttrStopAfterTeacherForcing = document.getElementById(
+    'gen_attr_stop_after_teacher_forcing'
+) as HTMLInputElement | null;
 
 const submitBtn = d3.select('#gen_attr_submit_btn');
 const loaderSmall = d3.select('.loadersmall');
@@ -340,19 +350,22 @@ function applyDagReplaySpeedUi(): void {
 }
 
 function currentDagLayoutMode(): DagLayoutMode {
-    return dagLayoutModeSelect?.value === 'linear-arc' ? 'linear-arc' : 'text-flow';
+    const v = dagLayoutModeSelect?.value;
+    if (v === 'linear-arc' || v === 'spiral') return v;
+    return 'text-flow';
 }
 
 function applyDagLayoutModeUi(): void {
-    const textFlow = currentDagLayoutMode() === 'text-flow';
+    const mode = currentDagLayoutMode();
     if (dagCompactnessGroup) {
-        dagCompactnessGroup.hidden = !textFlow;
+        /** text-flow / spiral 均使用 display-scale 驱动的节点宽高与边回缩；linear-arc 不适用。 */
+        dagCompactnessGroup.hidden = mode === 'linear-arc';
     }
     if (dagMeasureWidthGroup) {
-        dagMeasureWidthGroup.hidden = !textFlow;
+        dagMeasureWidthGroup.hidden = mode !== 'text-flow';
     }
     if (dagLinearArcIntervalGroup) {
-        dagLinearArcIntervalGroup.hidden = textFlow;
+        dagLinearArcIntervalGroup.hidden = mode !== 'linear-arc';
     }
 }
 
@@ -526,6 +539,37 @@ function getActivePromptValue(): string {
     return (userTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
 }
 
+function setActivePromptValue(value: string): void {
+    if (isSkipChatTemplate()) {
+        rawTextField.property('value', value);
+        rawTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+    }
+    userTextField.property('value', value);
+    userPromptTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function isGenAttrTeacherForcingUiOn(): boolean {
+    return genAttrTeacherForcingEnable?.checked ?? false;
+}
+
+function isStopAfterTeacherForcingOn(): boolean {
+    return genAttrStopAfterTeacherForcing?.checked ?? false;
+}
+
+/** 勾选 Teacher forcing 且续写非空时返回原文；未勾选或空串时返回 `undefined`。 */
+function teacherForcingContinuationForRun(): string | undefined {
+    if (!isGenAttrTeacherForcingUiOn()) return undefined;
+    const t = (teacherForcingTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
+    return t.length > 0 ? t : undefined;
+}
+
+function syncTeacherForcingRow(): void {
+    if (genAttrTeacherForcingBlock) {
+        genAttrTeacherForcingBlock.hidden = !isGenAttrTeacherForcingUiOn();
+    }
+}
+
 new TextInputController({
     textField: rawTextField,
     textCountValue: rawTextCountValue,
@@ -559,6 +603,17 @@ new TextInputController({
     showAlertDialog,
 });
 
+new TextInputController({
+    textField: teacherForcingTextField,
+    textCountValue: teacherForcingTextCountValue,
+    clearBtn: clearTeacherForcingBtn,
+    submitBtn,
+    saveBtn: d3.select(null),
+    pasteBtn: pasteTeacherForcingBtn,
+    totalSurprisalFormat,
+    showAlertDialog,
+});
+
 /** 与 DAG 节点 offset 同源的累积串，供跨 token 闭合后的排除区间（`excludeNodeAggregatedEntries`）。 */
 function excludeIntervalContextFromSteps(steps: TokenGenStep[]): string | undefined {
     if (steps.length === 0) return undefined;
@@ -574,7 +629,9 @@ function pushDagFromPreprocess(
     excludeIntervalContext?: string,
 ): void {
     if (stepIndex === 0) {
-        dagHandle.setPromptTokenSpans(extractPromptTokenSpans(step), step.context);
+        if (!dagHandle.hasPromptSpans()) {
+            dagHandle.setPromptTokenSpans(extractPromptTokenSpans(step), step.context);
+        }
         if (!dagHandle.isBatching() && fitOnFirstStep) {
             dagHandle.fitViewportToContent();
         }
@@ -585,18 +642,29 @@ function pushDagFromPreprocess(
 /** 下一步要 `pushDagFromPreprocess` 的步下标；与当前 DAG 前缀一致（暂停不重置） */
 let dagPlaybackNextIndex = 0;
 
-/** 将 handle 中已存步序按序重放进 DAG（调用方负责先 {@link dagHandle.reset} 等） */
-function replayRunnerStepsIntoDag(h: TokenGenAttributionHandle): void {
+/**
+ * 当前 run 的 prompt token spans：tokenize 先行写入，或 step 0 归因兜底，或历史加载时赋值。
+ * 步进回放从头开始时作为 prompt 帧数据源，独立于 token_attribution 完整性。
+ */
+let currentRunPromptSpans: PromptTokenSpan[] = [];
+
+/**
+ * 将 handle 中已存步序按序重放进 DAG（调用方负责先 {@link dagHandle.reset} 等）。
+ * @param promptSpans prompt 层节点数据；在批内最先注入，与归因裁剪无关。
+ *   未传入时从 step 0 归因降级（旧缓存 / 非生成路径兼容）。
+ */
+function replayRunnerStepsIntoDag(h: TokenGenAttributionHandle, promptSpans?: PromptTokenSpan[]): void {
     if (h.tokenCount === 0) {
         dagPlaybackNextIndex = 0;
         return;
     }
-    // 整段回放期间中间帧不可见：批处理内 `update` 只维护图数据，结束时统一刷一次 svg。
-    // 避免 N 次 `syncGraphToSvg`（含 N 次对所有边的 join / paint / refresh）造成 O(N²) 累计开销。
     const steps = h.getAllSteps();
+    const spans = promptSpans ?? extractPromptTokenSpans(steps[0]!);
     const excludeCtx = excludeIntervalContextFromSteps(steps);
+    // 整段回放期间中间帧不可见：批处理内只维护图数据，结束时统一刷一次 svg。
     dagHandle.beginBatch();
     try {
+        dagHandle.setPromptTokenSpans(spans, steps[0]!.context);
         steps.forEach((step, i) => {
             pushDagFromPreprocess(step, i, true, excludeCtx);
         });
@@ -632,9 +700,10 @@ function scheduleDagLastTokenDwell(action: () => void, dwellMs: number = DAG_LAS
 }
 
 /**
- * 点击播放时：读界面值并写回规范化结果，得到本轮「相邻两步 DAG 更新」之间的延时（ms）。
+ * 点击播放时：读界面值并写回规范化结果，得到本轮「相邻两帧 DAG 更新」之间的延时（ms）。
  * - `step`：固定间隔。
- * - `total`：`totalS` 按**整段 DAG 步数**均分间隔，与「从头回放」相同（`fullStepCount - 1` 段）；不管当前 `dagPlaybackNextIndex`。首步立即执行，与末 token dwell 无关。
+ * - `total`：`totalS` 按**整段帧数（含 prompt 帧）**均分，共 `fullStepCount` 段等权间隔。
+ *   `fullStepCount` 即生成 token 步数；prompt 帧 → step0 占一段，step0 → step1 占一段，依此类推。
  */
 function resolveDagPlaybackStepDelayMsOnPlay(fullStepCount: number): number {
     if (currentDagReplayPacingMode() === 'step') {
@@ -652,7 +721,8 @@ function resolveDagPlaybackStepDelayMsOnPlay(fullStepCount: number): number {
         : readStoredDagPlaybackTotalS();
     if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = String(totalS);
 
-    const transitionCount = Math.max(0, fullStepCount - 1);
+    // prompt 帧作为等权第一段，共 fullStepCount 段（比原来的 fullStepCount-1 多一段）
+    const transitionCount = Math.max(0, fullStepCount);
     if (transitionCount <= 0) return 0;
     return Math.round((totalS * 1000) / transitionCount);
 }
@@ -746,7 +816,15 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
         }
         scheduleNextPlaybackTick();
     };
-    tick();
+    // 从头开始（index 为 0）时先展示 prompt 帧，再等一个步进间隔后触发 step 0；
+    // 中途恢复（index > 0）则直接续播，不重复 prompt 帧。
+    if (dagPlaybackNextIndex === 0 && currentRunPromptSpans.length > 0) {
+        dagHandle.setPromptTokenSpans(currentRunPromptSpans, steps[0]!.context);
+        dagHandle.fitViewportToContent();
+        scheduleNextPlaybackTick();
+    } else {
+        tick();
+    }
 }
 
 const dagHandle = initGenAttributeDagView(d3.select('#results'), {
@@ -755,7 +833,7 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
         stopDagPlayback();
         const h = runnerHandle;
         if (!h) return;
-        replayRunnerStepsIntoDag(h);
+        replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
     },
     layoutMode: initialDagLayoutMode,
     measureWidthPx: initialDagMeasureWidth,
@@ -802,7 +880,7 @@ dagMeasureWidthInput?.addEventListener('change', () => {
     const h = runnerHandle;
     dagHandle.reset();
     if (h && h.tokenCount > 0) {
-        replayRunnerStepsIntoDag(h);
+        replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
     }
     dagHandle.fitViewportToContent();
     dagHandle.clearNodeSelection();
@@ -822,7 +900,7 @@ dagCompactnessInput?.addEventListener('change', () => {
     const h = runnerHandle;
     dagHandle.reset();
     if (h && h.tokenCount > 0) {
-        replayRunnerStepsIntoDag(h);
+        replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
     }
     dagHandle.fitViewportToContent();
     dagHandle.clearNodeSelection();
@@ -844,7 +922,7 @@ dagEdgeTopPCoverageInput?.addEventListener('change', () => {
     const h = runnerHandle;
     dagHandle.reset();
     if (h && h.tokenCount > 0) {
-        replayRunnerStepsIntoDag(h);
+        replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
     }
     dagHandle.fitViewportToContent();
     dagHandle.clearNodeSelection();
@@ -873,7 +951,7 @@ function onExcludePatternsEffectiveChange(): void {
     const h = runnerHandle;
     if (!h || h.tokenCount === 0) return;
     dagHandle.reset();
-    replayRunnerStepsIntoDag(h);
+    replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
     dagHandle.clearNodeSelection();
 }
 
@@ -922,7 +1000,13 @@ let lastRunInitialContext = '';
 let lastRunInputSnapshot: string | null = null;
 
 function getInputSnapshotForRun(): string {
-    const runOpts = { v: currentModelVariant(), max: currentMaxTokens() };
+    const runOpts = {
+        v: currentModelVariant(),
+        max: currentMaxTokens(),
+        tfOn: isGenAttrTeacherForcingUiOn(),
+        tfText: (teacherForcingTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
+        saOn: isStopAfterTeacherForcingOn(),
+    };
     if (isSkipChatTemplate()) {
         return JSON.stringify({
             mode: 'raw' as const,
@@ -949,6 +1033,15 @@ function setGenLoading(loading: boolean): void {
     syncSubmitButtonState();
 }
 
+/** 当前输入是否满足可以发起一次生成（不含 inFlight 判断）。 */
+function isInputReadyForRun(): boolean {
+    const prompt = getActivePromptValue();
+    const forcing = teacherForcingContinuationForRun();
+    if (prompt.length === 0 && forcing === undefined) return false;
+    if (prompt.length > 0 && isGenAttrTeacherForcingUiOn() && forcing === undefined) return false;
+    return true;
+}
+
 function syncSubmitButtonState(): void {
     if (inFlight) {
         submitBtn.text(STOP_BTN_LABEL);
@@ -956,7 +1049,12 @@ function syncSubmitButtonState(): void {
         submitBtn.classed('inactive', false);
         return;
     }
-    const raw = getActivePromptValue();
+    if (!isInputReadyForRun()) {
+        submitBtn.text(GENERATE_BTN_LABEL);
+        submitBtn.property('disabled', true);
+        submitBtn.classed('inactive', true);
+        return;
+    }
     const hasDisplayedRun =
         runnerHandle !== null &&
         runnerHandle.tokenCount > 0 &&
@@ -964,13 +1062,6 @@ function syncSubmitButtonState(): void {
         lastRunInputSnapshot !== null;
     const inputMatchesDisplayed =
         hasDisplayedRun && getInputSnapshotForRun() === lastRunInputSnapshot;
-
-    if (raw.length === 0) {
-        submitBtn.text(GENERATE_BTN_LABEL);
-        submitBtn.property('disabled', true);
-        submitBtn.classed('inactive', true);
-        return;
-    }
     if (inputMatchesDisplayed) {
         submitBtn.text(tr('Retry'));
         submitBtn.property('disabled', false);
@@ -987,6 +1078,7 @@ function bindInputsForSync(): void {
     (rawTextField.node() as HTMLTextAreaElement | null)?.addEventListener('input', onInput);
     (systemTextField.node() as HTMLTextAreaElement | null)?.addEventListener('input', onInput);
     (userTextField.node() as HTMLTextAreaElement | null)?.addEventListener('input', onInput);
+    (teacherForcingTextField.node() as HTMLTextAreaElement | null)?.addEventListener('input', onInput);
 }
 
 if (skipChatTemplateInput) {
@@ -1004,6 +1096,11 @@ genAttrUseSystemPromptInput?.addEventListener('change', () => {
     syncGenAttrSystemPromptSuppressedUi();
     syncSubmitButtonState();
 });
+genAttrTeacherForcingEnable?.addEventListener('change', () => {
+    syncTeacherForcingRow();
+    syncSubmitButtonState();
+});
+syncTeacherForcingRow();
 bindInputsForSync();
 syncSubmitButtonState();
 syncIdleModelMetric();
@@ -1012,6 +1109,7 @@ syncIdleModelMetric();
 const rawTextarea = rawTextField.node() as HTMLTextAreaElement | null;
 const systemPromptTextarea = systemTextField.node() as HTMLTextAreaElement | null;
 const userPromptTextarea = userTextField.node() as HTMLTextAreaElement | null;
+const teacherForcingTextarea = teacherForcingTextField.node() as HTMLTextAreaElement | null;
 
 initQueryHistoryDropdown({
     input: rawTextarea,
@@ -1046,10 +1144,22 @@ initQueryHistoryDropdown({
     applyHistoryOnHover: true,
 });
 
-function syncGenAttrContentUrl(initialContext: string): void {
+initQueryHistoryDropdown({
+    input: teacherForcingTextarea,
+    dropdownId: 'gen_attr_teacher_forcing_history_dropdown',
+    storageKey: GEN_ATTR_TEACHER_FORCING_INPUT_HISTORY_KEY,
+    openDropdownOnFocusInput: false,
+    filterHistoryByInput: false,
+    onSelect: syncSubmitButtonState,
+    historyButton: teacherForcingHistoryBtn,
+    applyHistoryOnHover: true,
+});
+
+
+function syncGenAttrContentUrl(key: GenAttrCacheKey): void {
     replaceDemoUrlParam(null, DEFAULT_DEMO_URL_PARAM, 'gen_attribute');
     replaceContentUrlParam(
-        buildCachedContentUrlParam(initialContext),
+        buildCachedContentUrlParam(key),
         DEFAULT_CONTENT_URL_PARAM,
         'gen_attribute'
     );
@@ -1078,24 +1188,61 @@ async function applyGenAttrCachedRun(
     rec: GenAttrCachedRun,
     options: {
         mru?: { shouldTouch: boolean; contentKey: string; ctx?: CachedHistorySelectContext };
-        afterUrl: { kind: 'content' } | { kind: 'demo'; slug: string };
+        afterUrl: { kind: 'content'; contentKey: string } | { kind: 'demo'; slug: string };
     },
     applyGen: number
 ): Promise<void> {
+    if (isStaleGenAttrCachedApply(applyGen)) {
+        return;
+    }
     if (rec.steps.length === 0) {
         showToast(tr('Cached run not found'), 'error');
         return;
     }
-    if (isStaleGenAttrCachedApply(applyGen)) {
-        return;
+    const { draft } = rec;
+    if (draft?.mode === 'chat') {
+        if (genAttrUseSystemPromptInput) {
+            genAttrUseSystemPromptInput.checked = draft.useSystem ?? true;
+        }
+        if (skipChatTemplateInput) {
+            skipChatTemplateInput.checked = false;
+            writeSkipChatTemplateToStorage(false);
+            syncPromptPanelVisibility();
+            syncGenAttrSystemPromptSuppressedUi();
+        }
+        systemTextField.property('value', draft.system ?? '');
+        systemPromptTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
+        userTextField.property('value', draft.user ?? '');
+        userPromptTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    } else {
+        if (skipChatTemplateInput) {
+            skipChatTemplateInput.checked = true;
+            writeSkipChatTemplateToStorage(true);
+            syncPromptPanelVisibility();
+        }
+        rawTextField.property('value', rec.initialContext);
+        rawTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
     }
-    if (skipChatTemplateInput) {
-        skipChatTemplateInput.checked = true;
-        writeSkipChatTemplateToStorage(true);
-        syncPromptPanelVisibility();
+
+    // 恢复 model / maxTokens（必须在 getInputSnapshotForRun() 之前，使快照与实际一致）
+    if (draft?.model && modelVariantSelect) {
+        modelVariantSelect.value = draft.model;
     }
-    rawTextField.property('value', rec.initialContext);
-    rawTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    if (draft?.maxTokens != null && maxTokensInput) {
+        maxTokensInput.value = String(draft.maxTokens);
+    }
+
+    // 恢复 teacher forcing 状态
+    const tfFromRec = draft?.teacherForcing ?? '';
+    if (genAttrTeacherForcingEnable) {
+        genAttrTeacherForcingEnable.checked = tfFromRec.length > 0;
+    }
+    if (genAttrStopAfterTeacherForcing) {
+        genAttrStopAfterTeacherForcing.checked = draft?.stopAfterTeacherForcing ?? false;
+    }
+    teacherForcingTextField.property('value', tfFromRec);
+    teacherForcingTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    syncTeacherForcingRow();
 
     if (rec.completionReason != null) {
         completeReasonEl.text(completionFinishReasonLabel(rec.completionReason));
@@ -1111,7 +1258,10 @@ async function applyGenAttrCachedRun(
     lastRunInitialContext = rec.initialContext;
     lastRunInputSnapshot = getInputSnapshotForRun();
     syncSubmitButtonState();
-    replayRunnerStepsIntoDag(runnerHandle);
+    // 新缓存直接用 promptSpans；旧缓存无此字段时从 step 0 归因降级
+    const replayPromptSpans = rec.promptSpans ?? extractPromptTokenSpans(rec.steps[0]!);
+    currentRunPromptSpans = replayPromptSpans;
+    replayRunnerStepsIntoDag(runnerHandle, replayPromptSpans);
     dagHandle.fitViewportToContent();
     dagHandle.clearNodeSelection();
     const n = runnerHandle.tokenCount;
@@ -1136,7 +1286,8 @@ async function applyGenAttrCachedRun(
         return;
     }
     if (options.afterUrl.kind === 'content') {
-        syncGenAttrContentUrl(rec.initialContext);
+        replaceDemoUrlParam(null, DEFAULT_DEMO_URL_PARAM, 'gen_attribute');
+        replaceContentUrlParam(options.afterUrl.contentKey, DEFAULT_CONTENT_URL_PARAM, 'gen_attribute');
     } else {
         syncGenAttrDemoUrl(options.afterUrl.slug);
     }
@@ -1161,7 +1312,7 @@ async function restoreGenAttrFromCachedRun(
         rec,
         {
             mru: shouldTouch ? { shouldTouch: true, contentKey, ctx } : undefined,
-            afterUrl: { kind: 'content' },
+            afterUrl: { kind: 'content', contentKey },
         },
         applyGen
     );
@@ -1264,6 +1415,7 @@ function showAttributionForStepIndex(idx: number): void {
 
 void (async () => {
     const demoRaw = readDemoUrlParam();
+    const contentRaw = readContentUrlParam();
     if (demoRaw) {
         const applyGen = nextGenAttrCachedApplyGen();
         let applied = false;
@@ -1311,6 +1463,13 @@ void (async () => {
             replaceContentUrlParam(null, DEFAULT_CONTENT_URL_PARAM, 'gen_attribute');
         },
     });
+    // 无任何 URL 参数时，静默恢复最近一次缓存 run（输入框与 DAG 一并还原）
+    if (!demoRaw && !contentRaw) {
+        const rows = await listCachedHistoryRows();
+        if (rows.length > 0) {
+            await restoreGenAttrFromCachedRun(rows[0]!.contentKey, false);
+        }
+    }
 })();
 
 async function resolveInitialContext(signal: AbortSignal): Promise<string> {
@@ -1321,7 +1480,7 @@ async function resolveInitialContext(signal: AbortSignal): Promise<string> {
     const useSystem = isGenAttrUseSystemPrompt();
     const systemRaw = (systemTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
     const promptReq: { model: string; prompt: string; system?: string } = {
-        model: completionModel,
+        model: currentModelVariant(),
         prompt: user,
     };
     if (useSystem) {
@@ -1331,9 +1490,34 @@ async function resolveInitialContext(signal: AbortSignal): Promise<string> {
     return assembled.prompt_used;
 }
 
+async function autoMoveFirstTeacherForcingTokenToPromptIfNeeded(): Promise<void> {
+    if (!isSkipChatTemplate()) return;
+    if (getActivePromptValue().length > 0) return;
+    const forcing = teacherForcingContinuationForRun();
+    if (forcing === undefined) return;
+
+    const spans = await fetchTokenize(apiBaseForRequests, forcing, currentModelVariant());
+    if (!spans.length) {
+        throw new Error('Teacher forcing tokenize returned empty spans.');
+    }
+    const first = spans[0]!;
+    const [start, end] = first.offset;
+    const chars = Array.from(forcing);
+    if (start < 0 || end <= start || end > chars.length) {
+        throw new Error(
+            `Teacher forcing tokenize returned invalid first span [${start}, ${end}) for continuation.`
+        );
+    }
+    const movedPrompt = chars.slice(start, end).join('');
+    const remainingForcing = chars.slice(end).join('');
+
+    setActivePromptValue(movedPrompt);
+    teacherForcingTextField.property('value', remainingForcing);
+    teacherForcingTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 async function runGeneration(): Promise<void> {
-    const prompt = getActivePromptValue();
-    if (inFlight || prompt.length === 0) return;
+    if (inFlight || !isInputReadyForRun()) return;
 
     genAbort?.abort();
     genAbort = new AbortController();
@@ -1352,6 +1536,26 @@ async function runGeneration(): Promise<void> {
     let initialContext = '';
 
     try {
+        await autoMoveFirstTeacherForcingTokenToPromptIfNeeded();
+        const teacherForcingText = teacherForcingContinuationForRun();
+        const stopAfterTF = isStopAfterTeacherForcingOn();
+        const maxTokens = currentMaxTokens();
+        const tokenizeModel = currentModelVariant();
+        const tfDraftFields = teacherForcingText !== undefined
+            ? { teacherForcing: teacherForcingText, stopAfterTeacherForcing: stopAfterTF }
+            : {};
+        const runDraft: GenAttrRunDraft = isSkipChatTemplate()
+            ? { mode: 'raw', model: tokenizeModel, maxTokens, ...tfDraftFields }
+            : {
+                mode: 'chat',
+                model: tokenizeModel,
+                maxTokens,
+                system: systemPromptTextarea?.value ?? '',
+                user: userPromptTextarea?.value ?? '',
+                useSystem: isGenAttrUseSystemPrompt(),
+                ...tfDraftFields,
+            };
+        const prompt = getActivePromptValue();
         analyzeProgressEl.text('Assembling prompt…').style('display', null);
         initialContext = await resolveInitialContext(signal);
         lastRunInitialContext = initialContext;
@@ -1369,20 +1573,38 @@ async function runGeneration(): Promise<void> {
                 }
             }
         }
+        if (teacherForcingText !== undefined) {
+            saveHistory(teacherForcingText, GEN_ATTR_TEACHER_FORCING_INPUT_HISTORY_KEY);
+        }
 
-        const maxTokens = currentMaxTokens();
         let initialPromptTokens: number | undefined;
+        currentRunPromptSpans = [];
         setGenAttrUsageMetric(undefined, 0);
         showProgress(0, maxTokens);
 
         dagHandle.reset();
+        void fetchTokenize(apiBaseForRequests, initialContext, tokenizeModel).then((spans) => {
+            currentRunPromptSpans = spans;
+            if (spans.length > 0) {
+                dagHandle.setPromptTokenSpans(spans, initialContext);
+                dagHandle.fitViewportToContent();
+            }
+        }).catch(() => { /* 失败静默，step 0 回调兜底 */ });
         runnerHandle = startTokenGenAttribution({
             initialContext,
             apiPrefix: apiBaseForRequests,
-            model: currentModelVariant(),
+            model: tokenizeModel,
             maxTokens,
+            teacherForcingContinuation: teacherForcingText,
+            stopAfterTeacherForcing: stopAfterTF,
             onStep(step, stepIndex) {
-                if (stepIndex === 0) initialPromptTokens = initialPromptTokensFromFirstStep(step);
+                if (stepIndex === 0) {
+                    initialPromptTokens = initialPromptTokensFromFirstStep(step);
+                    // tokenize 失败时兜底：从 step 0 归因派生 spans
+                    if (currentRunPromptSpans.length === 0) {
+                        currentRunPromptSpans = extractPromptTokenSpans(step);
+                    }
+                }
                 const h = runnerHandle;
                 if (!h) return;
                 const excludeCtx = excludeIntervalContextFromSteps(h.getAllSteps());
@@ -1402,9 +1624,18 @@ async function runGeneration(): Promise<void> {
                     const stepsToStore = h.getAllSteps();
                     const cacheStatus: 'partial' | 'complete' =
                         reason === 'stop' || reason === 'length' ? 'complete' : 'partial';
-                    void save({ initialContext: ic }, stepsToStore, cacheStatus, reason)
+                    const cacheKey: GenAttrCacheKey = {
+                        initialContext: ic,
+                        model: tokenizeModel,
+                        maxTokens,
+                        ...(teacherForcingText !== undefined ? {
+                            teacherForcing: teacherForcingText,
+                            stopAfterTeacherForcing: stopAfterTF,
+                        } : {}),
+                    };
+                    void save(cacheKey, stepsToStore, currentRunPromptSpans, cacheStatus, reason, runDraft)
                         .then(() => genCachedHistory.refreshList())
-                        .then(() => syncGenAttrContentUrl(ic))
+                        .then(() => syncGenAttrContentUrl(cacheKey))
                         .catch((e) => console.warn('[gen_attribute] save cached run failed:', e));
                 }
                 completeReasonEl.text(completionFinishReasonLabel(reason));
@@ -1439,7 +1670,7 @@ submitBtn.on('click', () => {
     void runGeneration();
 });
 
-[rawTextarea, userPromptTextarea].forEach((el) => {
+[rawTextarea, userPromptTextarea, teacherForcingTextarea].forEach((el) => {
     el?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void runGeneration();
     });
@@ -1452,7 +1683,7 @@ function refreshDagForThemeChange(): void {
         return;
     }
     dagHandle.reset();
-    replayRunnerStepsIntoDag(h);
+    replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
     dagHandle.fitViewportToContent();
     dagHandle.clearNodeSelection();
 }

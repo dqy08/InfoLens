@@ -562,6 +562,56 @@ paths:
         503:
           description: 服务繁忙
 
+  /tokenize:
+    post:
+      tags:
+        - all
+      summary: tokenize text
+      description: |
+        对 context 用指定 model 的 tokenizer 分词，返回各 token 的字符 offset 与原文。
+        不持有推理锁，不做前向 / 梯度计算，响应极快。
+      operationId: server.tokenize
+      parameters:
+        - in: body
+          name: tokenize_request
+          required: true
+          schema:
+            type: object
+            required:
+              - context
+              - model
+            properties:
+              context:
+                type: string
+                description: 待分词文本
+              model:
+                type: string
+                enum: [base, instruct]
+                description: base 使用主槽位 tokenizer，instruct 使用语义槽位 tokenizer
+      responses:
+        200:
+          description: 分词结果
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              spans:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    offset:
+                      type: array
+                      items:
+                        type: integer
+                      description: 字符偏移 [start, end]
+                    raw:
+                      type: string
+                      description: token 原文
+        400:
+          description: 缺少必要字段或 model 非法
+
   /analyze-semantic:
     post:
       tags:

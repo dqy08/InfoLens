@@ -140,9 +140,9 @@
     }
   }
 
-  // linear-arc 布局禁拖：不显示 grab（由 .gen-attr-dag-stack 上的 class 标记）
+  // 非 text-flow 布局禁拖：不显示 grab（由 .gen-attr-dag-stack 上的 class 标记）
   #results.gen-attr-results-surface.LMF
-    .gen-attr-dag-stack.gen-attr-dag-linear-arc-layout
+    .gen-attr-dag-stack.gen-attr-dag-no-node-drag-layout
     .gen-attr-dag-svg
     .gen-attr-dag-node--selected {
     cursor: default;
@@ -305,20 +305,91 @@
   height: 50px;
 }
 
+// Raw / User / Forced continuation：统一高度（不占 chat 默认 250px 主 prompt 区）
+.input-section .textarea-wrapper textarea#gen_attr_raw_text,
+.input-section .textarea-wrapper textarea#gen_attr_user_text,
+.input-section .textarea-wrapper textarea#gen_attr_teacher_forcing_text {
+  height: 90px;
+  min-height: 60px;
+  max-height: 250px;
+}
+
+body.gen-attribute-page .input-section {
+  span.semantic-submode-label {
+    color: var(--text-muted);
+  }
+
+  .semantic-submode-row:not(.attribution-exclude-prompt-patterns-header):not(.attribution-exclude-generated-patterns-header) {
+    label.semantic-submode-label {
+      color: var(--text-primary);
+    }
+
+    label.semantic-submode-label:has(> input[type='checkbox']:not(:checked)) {
+      color: var(--text-muted);
+    }
+  }
+
+  // Start 上方的 prompt 区标题与同系字号（非 .semantic-submode-row 后代时补齐 9pt）
+  > .semantic-submode-row.chat-raw-prompt-mode-row label.semantic-submode-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .chat-prompt-panel > .input-header > .semantic-submode-label {
+    font-size: 9pt;
+  }
+
+  // System：在 input-header 内（非 semantic-submode-row），勾选主次色与勾选行一致
+  #gen_attr_system_prompt_panel.chat-prompt-panel > .input-header label.chat-use-system-label.semantic-submode-label {
+    font-size: 9pt;
+
+    &:has(> input[type='checkbox']:not(:checked)) {
+      color: var(--text-muted);
+    }
+
+    &:has(> input[type='checkbox']:checked) {
+      color: var(--text-primary);
+    }
+  }
+}
+
 // 与 Attribution 页 Exclude prompt patterns 同形；generated 仅本页有 UI（持久化键见 attributionExclude*PatternsStorage）
 .attribution-exclude-prompt-patterns-row {
   margin-top: 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+
+  // Teacher forcing：与同页 Chat 模板的相邻面板间距（12px，见 chat.scss `#chat_input_panel`）对齐；容器默认 gap 仅 4px 会显得挤。
+  &:has(.gen-attr-teacher-forcing-toggle-row) {
+    gap: 12px;
+  }
+}
+
+// Teacher forcing / Stop after：勾选行与同页 semantic-submode 一致（字号、未勾选灰色）；勾选+文本 inline-flex 对齐
+.gen-attr-teacher-forcing-toggle-row label.semantic-submode-label,
+#gen_attr_teacher_forcing_block.chat-prompt-panel .gen-attr-stop-after-tf-row label.semantic-submode-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+// 强制续写块内 textarea 与「Stop after teacher forcing」；整块与下方 Model / Start 行的节奏（比照本列其它块 margin-top 10px）
+#gen_attr_teacher_forcing_block.chat-prompt-panel .gen-attr-stop-after-tf-row {
+  margin-top: 8px;
+}
+
+.gen-attribute-page .input-section > .textarea-wrapper.chat-prompt-actions-row {
+  margin-top: 10px;
 }
 
 .attribution-exclude-prompt-patterns-header {
   flex-wrap: wrap;
-
-  .semantic-submode-label {
-    font-size: inherit;
-  }
 
   &:not(:has(#gen_attr_exclude_prompt_patterns_enable:checked)) .semantic-submode-label {
     color: var(--text-muted);
@@ -331,10 +402,6 @@
 
 .attribution-exclude-generated-patterns-header {
   flex-wrap: wrap;
-
-  .semantic-submode-label {
-    font-size: inherit;
-  }
 
   &:not(:has(#gen_attr_exclude_generated_patterns_enable:checked)) .semantic-submode-label {
     color: var(--text-muted);
@@ -353,6 +420,18 @@
 
 .gen-attr-dag-measure-width-row .gen-attr-dag-layout-mode-group {
   margin-right: 12px;
+
+  .semantic-submode-label,
+  .gen-attr-dag-layout-mode-select {
+    font-weight: 700;
+  }
+}
+
+.gen-attr-dag-measure-width-row .gen-attr-dag-replay-speed-row {
+  > .semantic-submode-label,
+  .gen-attr-dag-replay-mode-select {
+    font-weight: 700;
+  }
 }
 
 .gen-attr-dag-replay-speed-row {

@@ -19,7 +19,7 @@ from transformers import StoppingCriteria, StoppingCriteriaList, TextStreamer
 from backend.api.utils import round_to_sig_figs
 from backend.app_context import get_verbose
 from backend.device import DeviceManager
-from backend.model_manager import ensure_semantic_slot_ready
+from backend.model_manager import ModelSlot, ensure_semantic_slot_ready, ensure_slot_weights_loaded
 from backend.pred_topk_format import pred_topk_pairs_from_probs_1d
 from backend.runtime_config import DEFAULT_TOPK
 
@@ -517,15 +517,17 @@ def core_generate_from_text(
 def apply_chat_template_for_completion(
     user_content: str,
     system: Optional[str] = None,
+    *,
+    slot: ModelSlot = ModelSlot.SEMANTIC,
 ) -> str:
     """
     将单条 user 文本套用到 tokenizer chat template，返回实际送入 core_generate_from_text 的字符串。
 
     调用方未传入 ``system``（即 ``None``）时仅拼装单条 user 消息；传入字符串时（含 ``\"\"``、仅空白）
     原样作为 chat template 的 system 段，不做裁剪或改写。长度与上下文上限由 ``core_generate_from_text``
-    在生成前校验。
+    在生成前校验。slot 控制使用哪个槽位的 tokenizer（base 传 ModelSlot.MAIN）。
     """
-    tokenizer, _, _ = ensure_semantic_slot_ready()
+    tokenizer, _, _ = ensure_slot_weights_loaded(slot)
     if system is None:
         messages = [{"role": "user", "content": user_content}]
     else:

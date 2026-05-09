@@ -18,6 +18,8 @@ export const GEN_ATTR_RAW_INPUT_HISTORY_KEY = 'info_radar_gen_attr_raw_input_his
 export const GEN_ATTR_USER_INPUT_HISTORY_KEY = 'info_radar_gen_attr_user_input_history';
 /** Generate & Attribute 页 System 输入框 */
 export const GEN_ATTR_SYSTEM_INPUT_HISTORY_KEY = 'info_radar_gen_attr_system_input_history';
+/** Generate & Attribute 页 Teacher forcing 续写框 */
+export const GEN_ATTR_TEACHER_FORCING_INPUT_HISTORY_KEY = 'info_radar_gen_attr_teacher_forcing_input_history';
 
 const MAX = 100;
 

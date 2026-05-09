@@ -10,6 +10,7 @@ import {
     phase2RankAndSparsify,
     type PromptTokenSpan,
 } from './genAttributeDagPreprocess';
+import { DAG_EDGE_MIN_DISPLAY_OPACITY } from './genAttributeDagEdgeDisplay';
 import { isOffsetSpanFullyExcluded } from './attributionDisplayModel';
 import {
     alignAndAggregateByNode,
@@ -19,6 +20,7 @@ import {
 } from './genAttributeDagIntervalResolve';
 import type { TokenGenStep } from './tokenGenAttributionRunner';
 import { createGenAttributeDagTextMeasure } from './genAttributeDagTextMeasure';
+import { formatTopkTooltipProbabilityPercent } from '../utils/topkChartUtils';
 import {
     CSS_PSEUDO_FULLSCREEN_CHANGE_EVENT,
     dagResultsSurfaceFullscreenExpanded,
@@ -34,13 +36,14 @@ import {
     paintLinearArcLayout,
 } from './genAttributeDagViewLinearArcMode';
 import { paintTextFlowLayout } from './genAttributeDagViewTextFlowMode';
+import { paintSpiralLayout } from './genAttributeDagViewSpiralMode';
 import { tr } from '../lang/i18n-lite';
 
 /** 再次挂载前执行上一轮 detach（当前为空操作，保留扩展点） */
 const detachGenAttributeDagPanel = new WeakMap<HTMLElement, () => void>();
 
-/** 节点布局模式：`text-flow` 按文字排版层几何；`linear-arc` 按节点插入序线性排布 + 弧线连边。 */
-export type DagLayoutMode = 'text-flow' | 'linear-arc';
+/** 节点布局模式：`text-flow` 按文字排版层几何；`linear-arc` 按节点插入序线性排布 + 弧线连边；`spiral` 螺旋排布。 */
+export type DagLayoutMode = 'text-flow' | 'linear-arc' | 'spiral';
 
 export const DAG_COMPACTNESS_DEFAULT = 0.5;
 /** 下限取小正数以满足 {@link readDisplayScaleFromCss}「必须为正」且不出现零宽度边线。 */
@@ -50,6 +53,40 @@ export const DAG_COMPACTNESS_MAX = 1;
 export function clampDagCompactness(n: number): number {
     if (!Number.isFinite(n)) return DAG_COMPACTNESS_DEFAULT;
     return Math.min(DAG_COMPACTNESS_MAX, Math.max(DAG_COMPACTNESS_MIN, n));
+}
+
+/**
+ * 零信心概率基准 p₀：surprisal log₂(1/p₀) 视作单 token 的绝对信息量参照（此处 20 bit）。
+ * p = p₀ 时 {@link computeMutualInformationRatio} 为 0。
+ */
+const ZERO_CONFIDENCE_PROBABILITY_BASELINE = 2 ** -20;
+
+function clamp01(n: number): number {
+    return Math.min(1, Math.max(0, n));
+}
+
+/**
+ * 互信息率 α：在参照熵 log₂(1/p₀) 下，将「前文与目标 token 的可对齐程度」
+ * (log₂(1/p₀) − log₂(1/p)) / log₂(1/p₀) = log₂(p/p₀) / log₂(1/p₀) clamp 到 [0,1]。
+ * 低 surprisal → 高 α；仅用于本步入边透明度，不参与边筛选。缺省 `target_prob` 时返回 1（兼容旧缓存）。
+ */
+function computeMutualInformationRatio(targetProb: number | undefined): number {
+    if (targetProb === undefined) return 1;
+    if (!Number.isFinite(targetProb) || targetProb <= 0) return 0;
+
+    return clamp01(
+        Math.log2(targetProb / ZERO_CONFIDENCE_PROBABILITY_BASELINE) /
+            Math.log2(1 / ZERO_CONFIDENCE_PROBABILITY_BASELINE)
+    );
+}
+
+/**
+ * 节点/边原生 `<title>` 中互信息率 α 的展示：α∈[0,1] 转为百分号字符串，
+ * 与 analysis 主视图 Tooltip 中 Top-K 概率列 {@link formatTopkTooltipProbabilityPercent} 同形。
+ */
+function formatMutualInformationRatioForTooltip(miRatio: number): string {
+    if (!Number.isFinite(miRatio)) return String(miRatio);
+    return formatTopkTooltipProbabilityPercent(miRatio);
 }
 
 export {
@@ -89,14 +126,25 @@ type DagNode = DagNodeAttrs;
 type DagLink = {
     source: string;
     target: string;
-    strength?: number;
-    /** 本步内该边在 Σ(score) 中的 L1 份额；用于原生 title「Fan in share」 */
+    /**
+     * 候选池内 max 归一后的归因分，区间约 [0, 1]；作为 `stroke-opacity` 的基项（再乘 {@link mutualInformationRatio}）。
+     * 池内稀疏化与建边前过滤均使用 {@link DAG_EDGE_MIN_DISPLAY_OPACITY}（见 genAttributeDagEdgeDisplay）；条件为 {@link dagLinkStrokeOpacity} 不低于该阈值。
+     */
+    normalizedScore?: number;
+    /** 互信息率：仅作为本步入边的视觉透明度系数，不参与归因筛选。 */
+    mutualInformationRatio?: number;
+    /** 本步内：该边池内 L1 份额在「仅可见边」（{@link DAG_EDGE_MIN_DISPLAY_OPACITY} 过滤后）上的占比；用于原生 title「Fan in share」 */
     scoreShare?: number;
     /** 与 `console.warn('[genAttributeDagView.align] …')` 正文一致（可多条，换行拼接） */
     alignmentNote?: string;
     /** 边创建时固定的 `<title>` 全文 */
     titleText: string;
 };
+
+/** 与 {@link refreshNodeLinkHighlight} 中边的 `stroke-opacity` 一致：`normalizedScore × mutualInformationRatio`。 */
+function dagLinkStrokeOpacity(d: Pick<DagLink, 'normalizedScore' | 'mutualInformationRatio'>): number {
+    return (d.normalizedScore ?? 1) * (d.mutualInformationRatio ?? 1);
+}
 
 function dagLinkEndpointKey(source: string, target: string): string {
     return `${source}->${target}`;
@@ -156,8 +204,27 @@ function stackLayoutViewportPx(stackEl: HTMLElement): { w: number; h: number } {
     };
 }
 
-/** 在「抵消 display-scale」的基准上再放大，作为 DAG 默认初始视图（d3 zoom 的 k） */
-const DAG_INITIAL_ZOOM_BOOST = 1.5;
+/** text-flow：在「抵消 display-scale」基准上的初始 zoom 倍率（d3 的 k） */
+const DAG_INITIAL_ZOOM_BOOST_TEXT_FLOW = 2;
+/** linear-arc：同上 */
+const DAG_INITIAL_ZOOM_BOOST_LINEAR_ARC = 4;
+/** spiral：同上 */
+const DAG_INITIAL_ZOOM_BOOST_SPIRAL = 2;
+
+function dagInitialZoomBoost(mode: DagLayoutMode): number {
+    switch (mode) {
+        case 'text-flow':
+            return DAG_INITIAL_ZOOM_BOOST_TEXT_FLOW;
+        case 'linear-arc':
+            return DAG_INITIAL_ZOOM_BOOST_LINEAR_ARC;
+        case 'spiral':
+            return DAG_INITIAL_ZOOM_BOOST_SPIRAL;
+        default: {
+            const _: never = mode;
+            throw new Error(`genAttributeDagView: unknown DagLayoutMode (${String(_)})`);
+        }
+    }
+}
 
 /** 与 {@link gen_attribute.scss} `.gen-attr-dag-stack` 中 `--gen-attr-dag-compactness` 一致（display-scale/link 线粗等同源派生） */
 const CSS_VAR_DAG_COMPACTNESS = '--gen-attr-dag-compactness';
@@ -179,7 +246,7 @@ const DAG_NODE_WEAKEN_OPACITY = 0.5;
 const DAG_NODE_HIDDEN_OPACITY = 0.1;
 
 /** 暂时关闭节点上的原生 `<title>` 悬浮提示；恢复时改为 `false`（边不受影响） */
-const DISABLE_DAG_NODE_TOOLTIPS = true;
+const DISABLE_DAG_NODE_TOOLTIPS = false;
 
 /**
  * 边端在矩形边界外侧的留白，相对测量层「1em」的比例（无单位）；与箭头/描边衔接用。
@@ -260,7 +327,7 @@ export type GenAttributeDagHandle = {
      */
     reset(preserveUserViewport?: boolean): void;
     /**
-     * zoom identity 后按内容适配视口；空图走默认缩放；`k` 上限 `k₀`。
+     * zoom identity 后按内容适配视口；空图走默认缩放；`k` 上限 `k₀`（随当前布局模式的初始 zoom 倍率变化）。
      * - `text-flow`：`rootG.getBBox()`（含边）等比落入内框。
      * - `linear-arc`：仅按 `gen-attr-dag-nodes` 行宽定比，token 行相对内框竖直居中（弧不参与）。
      * 若 `layoutDirty` 为真则 no-op（仅已执行的 `syncSvgSize` 生效，不改 pan/zoom），但 `force` 为真时仍
@@ -298,6 +365,8 @@ export type GenAttributeDagHandle = {
      * - `false`（默认）：保留为低透明度（{@link DAG_NODE_HIDDEN_OPACITY}）占位。
      */
     setHideExcludedTokens(hide: boolean): void;
+    /** prompt 层节点是否已注入（即 {@link setPromptTokenSpans} 至少成功添加过一个节点） */
+    hasPromptSpans(): boolean;
     /** 移除 DAG 栈与刷新按钮（离开页面时调用） */
     detach(): void;
 };
@@ -322,20 +391,38 @@ function formatNodeOffsetRange(id: string): string {
     return `[${a}, ${b})`;
 }
 
-function buildNodeNativeTitleText(d: Pick<DagNode, 'displayLabel' | 'id' | 'step'>): string {
-    return `${d.displayLabel}\nOffset: ${formatNodeOffsetRange(d.id)}\nStep: ${d.step}`;
+function buildNodeNativeTitleText(
+    d: Pick<DagNode, 'displayLabel' | 'id' | 'step'> & { targetProb?: number },
+): string {
+    const lines = [
+        d.displayLabel,
+        `Offset: ${formatNodeOffsetRange(d.id)}`,
+        `Step: ${d.step}`,
+    ];
+    const { targetProb } = d;
+    if (targetProb !== undefined && Number.isFinite(targetProb)) {
+        lines.push(`Prob: ${formatTopkTooltipProbabilityPercent(targetProb)}`);
+        lines.push(`MI ratio: ${formatMutualInformationRatioForTooltip(computeMutualInformationRatio(targetProb))}`);
+    }
+    return lines.join('\n');
 }
 
 /** 建边时调用：端点已带 {@link DagNodeAttrs.displayLabel} */
 function buildLinkTitleText(
-    d: Pick<DagLink, 'strength' | 'scoreShare' | 'alignmentNote'>,
+    d: Pick<DagLink, 'normalizedScore' | 'mutualInformationRatio' | 'scoreShare' | 'alignmentNote'>,
     src: DagNode,
     tgt: DagNode
 ): string {
-    const s = d.strength ?? 1;
-    const strengthStr = Number.isFinite(s) ? s.toFixed(3) : String(s);
+    const s = d.normalizedScore ?? 1;
+    const normStr = Number.isFinite(s) ? s.toFixed(3) : String(s);
+    const opacity = dagLinkStrokeOpacity(d);
+    const opacityStr = Number.isFinite(opacity) ? opacity.toFixed(3) : String(opacity);
 
-    const metrics = [`Strength: ${strengthStr}`];
+    const metrics = [
+        `Attribution score: ${normStr}`,
+        `Target MI ratio: ${formatMutualInformationRatioForTooltip(d.mutualInformationRatio ?? 1)}`,
+        `Link strength: ${opacityStr}`,
+    ];
     const share = d.scoreShare;
     if (typeof share === 'number' && Number.isFinite(share) && share > 0) {
         metrics.push(`Fan in share: ${(share * 100).toFixed(1)}%`);
@@ -515,6 +602,7 @@ export function initGenAttributeDagView(
             setDagCompactness: noop,
             setEdgeTopPCoverage: noop,
             setHideExcludedTokens: noop,
+            hasPromptSpans: () => false,
             detach: noop,
         };
     }
@@ -529,9 +617,9 @@ export function initGenAttributeDagView(
     const stack = resultsRoot.append('div').attr('class', 'gen-attr-dag-stack');
     const stackEl = stack.node() as HTMLElement;
 
-    /** linear-arc 下禁用节点拖拽；同时用该类覆盖「选中 grab」光标。 */
+    /** 非 text-flow 时节点不可拖；用该类覆盖选中态的 grab 光标（linear-arc / spiral 等）。 */
     function syncStackLayoutDragUi(): void {
-        stackEl.classList.toggle('gen-attr-dag-linear-arc-layout', layoutMode === 'linear-arc');
+        stackEl.classList.toggle('gen-attr-dag-no-node-drag-layout', layoutMode !== 'text-flow');
     }
     syncStackLayoutDragUi();
 
@@ -598,14 +686,14 @@ export function initGenAttributeDagView(
 
     /**
      * 基准缩放为 `1 / --gen-attr-dag-display-scale`：节点几何与 SVG 文字已按 display-scale 相对测量层缩放后，
-     * 再用其倒数做 zoom，使屏上接近未单独缩小时的阅读比例；实际初始 k 还会乘以 `DAG_INITIAL_ZOOM_BOOST`。
+     * 再用其倒数做 zoom，使屏上接近未单独缩小时的阅读比例；实际初始 k 还会乘以 {@link dagInitialZoomBoost}（按布局模式）。
      */
     function initialDagZoomK(): number {
         return 1 / displayScale;
     }
 
     function defaultDagZoomK(): number {
-        return initialDagZoomK() * DAG_INITIAL_ZOOM_BOOST;
+        return initialDagZoomK() * dagInitialZoomBoost(layoutMode);
     }
 
     const zoomBehavior = d3
@@ -659,9 +747,6 @@ export function initGenAttributeDagView(
      */
     let userDraggedNodes = false;
 
-    const strengthToOpacity = (s: number) => s; // 由于有DAG_EDGE_RELATIVE_TOP_SHARE_FLOOR_BETA的限制，所以这里不再限制透明度
-    // const strengthToOpacity = (s: number) => 0.1 + s * 0.9;
-
     let linkSel = rootG
         .selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link')
         .data<DagLink>([], dagLinkDataKey);
@@ -682,6 +767,22 @@ export function initGenAttributeDagView(
                 nodeSel,
                 nodes: layoutNodes,
                 adjacentGapPx: linearArcAdjacentGapPx,
+                getLinkNodes: (d) => ({
+                    src: endpointNode(d.source, graph),
+                    tgt: endpointNode(d.target, graph),
+                }),
+            });
+            return;
+        }
+        if (layoutMode === 'spiral') {
+            const layoutNodes = hideExcludedTokens
+                ? nodes.filter((n) => !isOffsetSpanFullyExcluded(n.start, n.end, dagExcludeIntervals))
+                : nodes;
+            paintSpiralLayout({
+                linkSel,
+                nodeSel,
+                nodes: layoutNodes,
+                linkEndInsetPx,
                 getLinkNodes: (d) => ({
                     src: endpointNode(d.source, graph),
                     tgt: endpointNode(d.target, graph),
@@ -747,14 +848,15 @@ export function initGenAttributeDagView(
                 if (isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)) {
                     return hideExcludedTokens ? 0 : DAG_NODE_HIDDEN_OPACITY;
                 }
-                const isPromptLeaf = d.step === -1 && graph.outDegree(d.id) === 0;
+                const hasGenTokens = nodes.some((n) => n.step >= 0);
+                const isPromptLeaf = hasGenTokens && d.step === -1 && graph.outDegree(d.id) === 0;
                 if (focusId || isPromptLeaf) return DAG_NODE_WEAKEN_OPACITY;
                 return 1;
             });
-        // 每条边独立 marker：线与箭头 path 同步 stroke / stroke-opacity（强度仍按边独立）
+        // 每条边独立 marker：线与箭头 path 同步 stroke / stroke-opacity。
+        // normalizedScore 决定边内相对强弱（与 opacity 基项一致）；互信息率只作为整步入边的视觉折扣。
         linkSel.each(function(d) {
-            const incidentToFocus = dagLinkIncidentToFocus(graph, focusId, d);
-            const op = strengthToOpacity(d.strength ?? 1);
+            const op = dagLinkStrokeOpacity(d);
             const stroke =
                 dagLinkHighlightStroke(graph, focusId, d) ?? `var(${CSS_VAR_DAG_NORMAL_LINE_COLOR})`;
             const g = d3.select(this);
@@ -837,7 +939,7 @@ export function initGenAttributeDagView(
                 return g;
             });
         // 不在此处全量重置 marker `stroke-opacity`：紧接着的 {@link refreshNodeLinkHighlight} 会按边
-        // 逐条写 `strengthToOpacity(d.strength)`，任何前值都会被覆盖，全量重置纯冗余。
+        // 逐条写 `dagLinkStrokeOpacity`（与 `<title>` 中 Strength 同源），任何前值都会被覆盖，全量重置纯冗余。
 
         nodeSel = nodeG
             .selectAll<SVGGElement, DagNode>('g.gen-attr-dag-node')
@@ -994,6 +1096,7 @@ export function initGenAttributeDagView(
                 displayLabel,
                 id: targetId,
                 step: stepProcessed,
+                targetProb: response.target_prob,
             }),
         };
         graph.addNode(targetId, targetNode);
@@ -1013,8 +1116,17 @@ export function initGenAttributeDagView(
         const afterExclude = excludeNodeAggregatedEntries(step, aggregated, excludeIntervalContext);
         const selected = phase2RankAndSparsify(afterExclude, { cumulativeShare: edgeTopPCoverage });
 
-        const massSum = selected.reduce((acc, t) => acc + Math.max(0, t.poolMassFrac), 0);
-        for (const item of selected) {
+        const mutualInformationRatio = computeMutualInformationRatio(response.target_prob);
+        // 仅保留可绘制的边；「Fan in share」的分母为下列可见边的池内 L1 份额之和（非完整 sparse 池）。
+        const selectedForDisplay = selected.filter(
+            (item) =>
+                dagLinkStrokeOpacity({
+                    normalizedScore: item.score,
+                    mutualInformationRatio,
+                }) >= DAG_EDGE_MIN_DISPLAY_OPACITY
+        );
+        const massSum = selectedForDisplay.reduce((acc, t) => acc + Math.max(0, t.poolMassFrac), 0);
+        for (const item of selectedForDisplay) {
             const srcId = item.nodeId;
             if (!graph.hasNode(srcId)) {
                 throw new Error(
@@ -1032,7 +1144,8 @@ export function initGenAttributeDagView(
                 );
             }
             const edgeAttrs = {
-                strength: item.score,
+                normalizedScore: item.score,
+                mutualInformationRatio,
                 scoreShare: share,
                 ...(alignmentNote ? { alignmentNote } : {}),
             };
@@ -1108,6 +1221,31 @@ export function initGenAttributeDagView(
                 const tx = pad * 2 - k * bn.x;
                 const rowMidY = bn.y + bn.height / 2;
                 const ty = pad + innerH / 2 - k * rowMidY;
+                svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+            } else if (layoutMode === 'spiral') {
+                /**
+                 * 螺旋：等比缩放 + 视口中心对齐曲线原点 (0,0)（{@link paintSpiralLayout} 坐标），
+                 * 避免按 bbox 中心 fit 时随步进增长 centroid 漂移导致播放抖动。
+                 */
+                const b = rootG.node()!.getBBox();
+                const xmin = b.x;
+                const xmax = b.x + b.width;
+                const ymin = b.y;
+                const ymax = b.y + b.height;
+                const halfW = innerW / 2;
+                const halfH = innerH / 2;
+                let kFromOrigin = Infinity;
+                if (xmax > 0) kFromOrigin = Math.min(kFromOrigin, halfW / xmax);
+                if (xmin < 0) kFromOrigin = Math.min(kFromOrigin, halfW / (-xmin));
+                if (ymax > 0) kFromOrigin = Math.min(kFromOrigin, halfH / ymax);
+                if (ymin < 0) kFromOrigin = Math.min(kFromOrigin, halfH / (-ymin));
+                const bw = Math.max(b.width, 1e-6);
+                const bh = Math.max(b.height, 1e-6);
+                const kFromSides = Math.min(innerW / bw, innerH / bh);
+                const kRaw = Number.isFinite(kFromOrigin) && kFromOrigin > 0 ? kFromOrigin : kFromSides;
+                const k = Math.min(kRaw, k0);
+                const tx = pad + halfW;
+                const ty = pad + halfH;
                 svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
             } else if (layoutMode === 'text-flow') {
                 /** 与原实现一致：`rootG` 整包 bbox + 宽高双约束顶对齐 */
@@ -1291,6 +1429,7 @@ export function initGenAttributeDagView(
         setDagCompactness,
         setEdgeTopPCoverage,
         setHideExcludedTokens,
+        hasPromptSpans: () => nodes.some((n) => n.step === -1),
         detach,
     };
 }

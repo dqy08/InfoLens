@@ -43,7 +43,7 @@
                 <section class="input-section">
                     <div class="semantic-submode-row chat-raw-prompt-mode-row">
                         <span class="semantic-submode-group">
-                            <label for="gen_attr_skip_chat_template">
+                            <label class="semantic-submode-label" for="gen_attr_skip_chat_template">
                                 <input type="checkbox" id="gen_attr_skip_chat_template" />
                                 <span data-i18n>Raw prompt mode</span>
                             </label>
@@ -52,7 +52,7 @@
 
                     <div id="gen_attr_raw_input_panel" class="chat-prompt-panel">
                         <div class="input-header">
-                            <span><span class="demo" data-i18n>Raw prompt</span></span>
+                            <span class="semantic-submode-label" data-i18n>Raw prompt</span>
                             <div class="text-action-buttons-top">
                                 <div class="textarea-counter" id="gen_attr_raw_text_count_display">
                                     <span id="gen_attr_raw_text_count_value">0</span> <span data-i18n>chars</span>
@@ -73,9 +73,9 @@
                     <div id="gen_attr_chat_input_panel" hidden>
                         <div class="chat-prompt-panel" id="gen_attr_system_prompt_panel">
                             <div class="input-header">
-                                <label class="chat-use-system-label">
+                                <label class="chat-use-system-label semantic-submode-label" for="gen_attr_use_system_prompt">
                                     <input type="checkbox" id="gen_attr_use_system_prompt" checked />
-                                    <span class="demo" data-i18n>System</span>
+                                    <span data-i18n>System</span>
                                 </label>
                                 <div class="text-action-buttons-top">
                                     <div class="textarea-counter" id="gen_attr_system_text_count_display">
@@ -95,7 +95,7 @@
                         </div>
                         <div class="chat-prompt-panel">
                             <div class="input-header">
-                                <span><span class="demo" data-i18n>User</span></span>
+                                <span class="semantic-submode-label" data-i18n>User</span>
                                 <div class="text-action-buttons-top">
                                     <div class="textarea-counter" id="gen_attr_user_text_count_display">
                                         <span id="gen_attr_user_text_count_value">0</span> <span data-i18n>chars</span>
@@ -110,6 +110,49 @@
                                     <textarea id="gen_attr_user_text"></textarea>
                                     <ul id="gen_attr_user_prompt_history_dropdown" class="semantic-search-history-dropdown"></ul>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="attribution-exclude-prompt-patterns-row">
+                        <div class="semantic-submode-row gen-attr-teacher-forcing-toggle-row">
+                            <span class="semantic-submode-group">
+                                <label class="semantic-submode-label"
+                                    title="When enabled, type the exact continuation after the assembled prompt. Each step attributes the next token toward that text (same tokenizer as Model), then stops when the continuation is consumed or EOS."
+                                    data-i18n="title">
+                                    <input type="checkbox" id="gen_attr_teacher_forcing_enable">
+                                    <span data-i18n>Teacher forcing</span>
+                                </label>
+                            </span>
+                        </div>
+                        <div id="gen_attr_teacher_forcing_block" class="chat-prompt-panel" hidden>
+                            <div class="input-header">
+                                <span class="semantic-submode-label" data-i18n>Forced continuation</span>
+                                <div class="text-action-buttons-top">
+                                    <div class="textarea-counter" id="gen_attr_teacher_forcing_text_count_display">
+                                        <span id="gen_attr_teacher_forcing_text_count_value">0</span> <span data-i18n>chars</span>
+                                    </div>
+                                    <button type="button" id="gen_attr_clear_teacher_forcing_btn" class="text-action-btn" data-i18n>Clear</button>
+                                    <button type="button" id="gen_attr_paste_teacher_forcing_btn" class="text-action-btn" data-i18n>Paste</button>
+                                    <button type="button" id="gen_attr_teacher_forcing_history_btn" class="text-action-btn" data-i18n>History</button>
+                                </div>
+                            </div>
+                            <div class="textarea-wrapper chat-prompt-textarea-block">
+                                <div class="semantic-search-input-wrapper chat-prompt-history-wrapper">
+                                    <textarea id="gen_attr_teacher_forcing_text"
+                                        spellcheck="false" autocomplete="off"
+                                        title="Expected generated text after the full prompt. Each API step uses the first token of what remains here as the attribution target."
+                                        data-i18n="title"></textarea>
+                                    <ul id="gen_attr_teacher_forcing_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                                </div>
+                            </div>
+                            <div class="semantic-submode-row gen-attr-stop-after-tf-row">
+                                <label class="semantic-submode-label"
+                                    title="When unchecked, generation continues with top-1 after teacher forcing tokens are exhausted, up to Max tokens."
+                                    data-i18n="title">
+                                    <input type="checkbox" id="gen_attr_stop_after_teacher_forcing">
+                                    <span data-i18n>Stop after teacher forcing</span>
+                                </label>
                             </div>
                         </div>
                     </div>
@@ -146,6 +189,61 @@
                         </div>
                     </div>
 
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
+                        <span class="semantic-submode-group gen-attr-dag-layout-mode-group">
+                            <label class="semantic-submode-label" for="gen_attr_dag_layout_mode">DAG layout mode</label>
+                            <select id="gen_attr_dag_layout_mode"
+                                class="semantic-submode-select gen-attr-dag-layout-mode-select"
+                                title="Choose DAG layout mode. 'text-flow' follows text layout geometry; 'linear-arc' uses fixed-order linear nodes with arc links; 'spiral' lays nodes on an Archimedean spiral (for fun)."
+                                data-i18n="title">
+                                <option value="text-flow">text-flow</option>
+                                <option value="linear-arc">linear-arc</option>
+                                <option value="spiral">spiral (for fun)</option>
+                            </select>
+                        </span>
+                        <span class="semantic-submode-group" id="gen_attr_dag_compactness_group">
+                            <label class="semantic-submode-label" for="gen_attr_dag_compactness" data-i18n>Compactness</label>
+                            <input type="number" id="gen_attr_dag_compactness" class="gen-attr-dag-measure-width-input"
+                                value="0.5" min="0.05" max="1" step="0.05"
+                                title="Scales DAG node boxes and labels relative to the measurement layer; 1 matches full readout scale. Applies in text-flow and spiral layouts. When idle, changes replay and fit automatically; during generation or DAG playback, the setting updates for the next run or refresh."
+                                data-i18n="title">
+                        </span>
+                        <span class="semantic-submode-group" id="gen_attr_dag_measure_width_group">
+                            <label class="semantic-submode-label" for="gen_attr_dag_measure_width">Text width</label>
+                            <input type="number" id="gen_attr_dag_measure_width" class="gen-attr-dag-measure-width-input"
+                                value="500" min="200" max="4000" step="10"
+                                title="Width (px) of the invisible measurement layer used for DAG layout. Only this width affects wrapping and node positions. When idle, changes replay and fit automatically; during generation or DAG playback, the setting updates for the next run or refresh."
+                                data-i18n="title">
+                            <span class="semantic-submode-label">px</span>
+                        </span>
+                        <span class="semantic-submode-group" id="gen_attr_dag_linear_arc_interval_group" hidden>
+                            <label class="semantic-submode-label" for="gen_attr_dag_linear_arc_interval" data-i18n>Token distance</label>
+                            <input type="number" id="gen_attr_dag_linear_arc_interval" class="gen-attr-dag-measure-width-input"
+                                value="0" min="0" max="400" step="1"
+                                title="Horizontal gap (px) between the outer left/right edges of adjacent token nodes in linear-arc layout only. When idle, the DAG refits; during generation or DAG playback, the value is stored and applied on the next sync."
+                                data-i18n="title">
+                            <span class="semantic-submode-label">px</span>
+                        </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_hide_inactive_edges"
+                                    title="When checked, gray DAG edges not adjacent to the hovered or selected node are hidden."
+                                    data-i18n="title">
+                                Hide inactive edges
+                            </label>
+                        </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label" for="gen_attr_dag_edge_top_p_coverage" data-i18n>Edge top-p coverage</label>
+                            <input type="number" id="gen_attr_dag_edge_top_p_coverage" class="gen-attr-dag-measure-width-input"
+                                value="0.7" min="0.05" max="1" step="0.05"
+                                title="Coverage is the cumulative mass share within each generation step's Top-N candidate pool (after sorting candidates into the pool and normalizing mass inside that pool). Higher values keep more incoming edges. The denominator is this pool only, not every token-attribution entry returned for the step."
+                                data-i18n="title">
+                        </span>
+                    </div>
                     <div class="attribution-exclude-prompt-patterns-row">
                         <div class="semantic-submode-row attribution-exclude-prompt-patterns-header">
                             <span class="semantic-submode-group">
@@ -198,60 +296,6 @@
                                     data-i18n="title">
                                 <span data-i18n>Hide excluded tokens</span>
                             </label>
-                        </span>
-                    </div>
-                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
-                        <span class="semantic-submode-group">
-                            <label class="semantic-submode-label">
-                                <input type="checkbox" id="gen_attr_dag_hide_inactive_edges"
-                                    title="When checked, gray DAG edges not adjacent to the hovered or selected node are hidden."
-                                    data-i18n="title">
-                                Hide inactive edges
-                            </label>
-                        </span>
-                    </div>
-                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
-                        <span class="semantic-submode-group">
-                            <label class="semantic-submode-label" for="gen_attr_dag_edge_top_p_coverage" data-i18n>Edge top-p coverage</label>
-                            <input type="number" id="gen_attr_dag_edge_top_p_coverage" class="gen-attr-dag-measure-width-input"
-                                value="0.7" min="0.05" max="1" step="0.05"
-                                title="Coverage is the cumulative mass share within each generation step's Top-N candidate pool (after sorting candidates into the pool and normalizing mass inside that pool). Higher values keep more incoming edges. The denominator is this pool only, not every token-attribution entry returned for the step."
-                                data-i18n="title">
-                        </span>
-                    </div>
-                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
-                        <span class="semantic-submode-group gen-attr-dag-layout-mode-group">
-                            <label class="semantic-submode-label" for="gen_attr_dag_layout_mode">DAG layout mode</label>
-                            <select id="gen_attr_dag_layout_mode"
-                                class="semantic-submode-select gen-attr-dag-layout-mode-select"
-                                title="Choose DAG layout mode. 'text-flow' follows text layout geometry; 'linear-arc' uses fixed-order linear nodes with arc links."
-                                data-i18n="title">
-                                <option value="text-flow">text-flow</option>
-                                <option value="linear-arc">linear-arc</option>
-                            </select>
-                        </span>
-                        <span class="semantic-submode-group" id="gen_attr_dag_compactness_group">
-                            <label class="semantic-submode-label" for="gen_attr_dag_compactness" data-i18n>Compactness</label>
-                            <input type="number" id="gen_attr_dag_compactness" class="gen-attr-dag-measure-width-input"
-                                value="0.5" min="0.05" max="1" step="0.05"
-                                title="Scales DAG node boxes and labels relative to the measurement layer; 1 matches full readout scale. When idle, changes replay and fit automatically; during generation or DAG playback, the setting updates for the next run or refresh."
-                                data-i18n="title">
-                        </span>
-                        <span class="semantic-submode-group" id="gen_attr_dag_measure_width_group">
-                            <label class="semantic-submode-label" for="gen_attr_dag_measure_width">Text width</label>
-                            <input type="number" id="gen_attr_dag_measure_width" class="gen-attr-dag-measure-width-input"
-                                value="500" min="200" max="4000" step="10"
-                                title="Width (px) of the invisible measurement layer used for DAG layout. Only this width affects wrapping and node positions. When idle, changes replay and fit automatically; during generation or DAG playback, the setting updates for the next run or refresh."
-                                data-i18n="title">
-                            <span class="semantic-submode-label">px</span>
-                        </span>
-                        <span class="semantic-submode-group" id="gen_attr_dag_linear_arc_interval_group" hidden>
-                            <label class="semantic-submode-label" for="gen_attr_dag_linear_arc_interval" data-i18n>Token distance</label>
-                            <input type="number" id="gen_attr_dag_linear_arc_interval" class="gen-attr-dag-measure-width-input"
-                                value="0" min="0" max="400" step="1"
-                                title="Horizontal gap (px) between the outer left/right edges of adjacent token nodes in linear-arc layout only. When idle, the DAG refits; during generation or DAG playback, the value is stored and applied on the next sync."
-                                data-i18n="title">
-                            <span class="semantic-submode-label">px</span>
                         </span>
                     </div>
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">

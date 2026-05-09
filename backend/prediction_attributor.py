@@ -51,7 +51,11 @@ def _slot_for_prediction_attr_model(model: str) -> ModelSlot:
 
 
 def analyze_prediction_attribution(
-    context: str, target_prediction: Optional[str] = None, *, model: str
+    context: str,
+    target_prediction: Optional[str] = None,
+    *,
+    model: str,
+    target_token_id: Optional[int] = None,
 ) -> Dict:
     """
     计算 context 中各 token 对 target_prediction 首 token 预测的归因分。
@@ -59,7 +63,8 @@ def analyze_prediction_attribution(
     Args:
         context: 输入上下文文本（token 数不得超过 ATTRIBUTION_MAX_TOKEN_LENGTH，否则抛 ValueError）
         target_prediction: 目标预测文本；tokenize 后取第一个 token 作为归因目标。
-                           省略或传 None 时自动使用 top-1（贪心解码）。
+        target_token_id: 目标 token id；用于 teacher forcing 按 tokenizer 词表精确指定目标。
+        target_prediction 与 target_token_id 仅可二选一；两者均省略时自动使用 top-1（贪心解码）。
         model: ``base`` 为主槽位权重，``instruct`` 为语义槽位权重（与 API 请求体一致）
 
     Returns:
@@ -78,8 +83,12 @@ def analyze_prediction_attribution(
         get_main_model_display_name() if slot == ModelSlot.MAIN else get_semantic_model_display_name()
     )
 
-    # 归因目标 id 仅在前向得到 logits 后解析：top-1 用 argmax；显式 target 用 encode（可与 argmax 不同）。
-    use_top1 = target_prediction is None
+    if target_prediction is not None and target_token_id is not None:
+        raise ValueError("target_prediction and target_token_id are mutually exclusive")
+
+    # 归因目标 id 仅在前向得到 logits 后解析：
+    # top-1 用 argmax；显式 target 用 encode；显式 token id 直接使用请求值。
+    use_top1 = target_prediction is None and target_token_id is None
 
     # 对 context 编码，保留 offset_mapping 用于还原字符位置
     enc = tokenizer(context, return_tensors="pt", return_offsets_mapping=True)
@@ -121,6 +130,12 @@ def analyze_prediction_attribution(
         if use_top1:
             target_token_id = int(topk_ids[0].item())
             target_token = tokenizer.decode([target_token_id])
+        elif target_token_id is not None:
+            if target_token_id < 0 or target_token_id >= logits.shape[-1]:
+                raise ValueError(
+                    f"target_token_id out of range: {target_token_id} (vocab_size={int(logits.shape[-1])})"
+                )
+            target_token = tokenizer.decode([int(target_token_id)])
         else:
             assert target_prediction is not None
             target_ids = tokenizer.encode(target_prediction, add_special_tokens=False)
@@ -129,10 +144,11 @@ def analyze_prediction_attribution(
             target_token_id = target_ids[0]
             target_token = tokenizer.decode([target_token_id])
 
-        target_prob = round_to_sig_figs(probs[target_token_id].item())
+        assert target_token_id is not None
+        target_prob = round_to_sig_figs(probs[int(target_token_id)].item())
 
         # 对目标 token 的 raw logit 反传（不经 softmax，避免饱和与竞争污染）
-        logits[target_token_id].backward()
+        logits[int(target_token_id)].backward()
 
         grad = embeds.grad
         if grad is None:
@@ -168,7 +184,7 @@ def analyze_prediction_attribution(
             print(f"⚠️ token_attribution 中有 {nan_count} 个 score 为 NaN/Inf，已替换为 0。")
 
         eos_id = tokenizer.eos_token_id
-        is_eos = eos_id is not None and target_token_id == int(eos_id)
+        is_eos = eos_id is not None and int(target_token_id) == int(eos_id)
 
         return {
             "model": model_display,

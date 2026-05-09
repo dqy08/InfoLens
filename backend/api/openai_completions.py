@@ -8,6 +8,7 @@ import traceback
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from backend.model_manager import _inference_lock, get_semantic_model_display_name
+from backend.prediction_attributor import _slot_for_prediction_attr_model
 from backend.oom import exit_if_oom, is_oom_error
 from backend.completion_generator import (
     PromptTooLongError,
@@ -332,7 +333,12 @@ def completions_prompt(completions_prompt_request):
     )
 
     try:
-        prompt_used = apply_chat_template_for_completion(prompt, system_opt)
+        slot = _slot_for_prediction_attr_model(model)
+    except ValueError as e:
+        return {"success": False, "message": str(e)}, 400
+
+    try:
+        prompt_used = apply_chat_template_for_completion(prompt, system_opt, slot=slot)
     except PromptTooLongError as e:
         return {"success": False, "message": str(e)}, 400
 

@@ -13,6 +13,14 @@
 import * as d3 from 'd3';
 import { processCandidateText } from './tokenDisplayUtils';
 
+/**
+ * 与 analysis.html 主视图 Tooltip 中 Top-K 条形图概率列一致（{@link renderTopkChartHtml} 默认格式）。
+ * @param v 模型给出的概率，区间 [0, 1]
+ */
+export function formatTopkTooltipProbabilityPercent(v: number): string {
+    return d3.format('.3g')(v * 100) + '%';
+}
+
 /** Tooltip 默认条形宽度 */
 const MAX_BAR_WIDTH = 60;
 /** Semantic debug 专用：更大条形与列宽，tooltip 不受影响 */
@@ -113,7 +121,7 @@ export function renderTopkChartHtml(
     if (!data.length) return '';
 
     const maxBar = options?.maxBarWidth ?? MAX_BAR_WIDTH;
-    const numF = options?.numFormat ?? ((v: number) => d3.format('.3g')(v * 100) + '%');
+    const numF = options?.numFormat ?? formatTopkTooltipProbabilityPercent;
 
     const maxProb = data[0]?.prob ?? 1;
     const scale = d3.scaleLinear().domain([0, maxProb]).range([0, maxBar]);

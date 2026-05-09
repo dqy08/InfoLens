@@ -52,6 +52,20 @@ def _log_request(event_type: str, details: str = "", client_ip: str = None):
     print(log_msg)
 
 
+def _log_str_preview(s: str, max_visible: int) -> str:
+    """
+    访问日志中的字符串预览：超过 max_visible 时省略中间，前后各保留约一半原文，
+    中间统一为 ……（与旧版「仅前缀」使用相同的 max_visible 取值）。
+    """
+    if max_visible < 1:
+        return s
+    if len(s) <= max_visible:
+        return s
+    head = max_visible // 2
+    tail = max_visible - head
+    return s[:head] + "……" + s[-tail:]
+
+
 def log_page_load(path: str):
     from backend.visit_stats import record_page_load
 
@@ -89,7 +103,8 @@ def log_analyze_request(text: str, stream_mode: bool = False, client_ip: str = N
         request_id = _request_counter
     
     preview_length = 100
-    text_preview = text[:preview_length] + '......' if text and len(text) > preview_length else (text if text else '')
+    raw = text if text else ""
+    text_preview = _log_str_preview(raw, preview_length)
     char_count = len(text) if text else 0
     byte_count = len(text.encode('utf-8')) if text else 0
     mode_str = "(stream)" if stream_mode else ""
@@ -150,8 +165,8 @@ def log_analyze_semantic_request(query: str, text: str, client_ip: str = None):
         request_id = _request_counter
 
     preview = 50
-    q_preview = query[:preview] + "..." if len(query) > preview else query
-    t_preview = text[:preview] + "..." if len(text) > preview else text
+    q_preview = _log_str_preview(query, preview)
+    t_preview = _log_str_preview(text, preview)
     details = f"req_id={request_id}, query='{q_preview}', text='{t_preview}', chars={len(text)}"
     _log_request("📥 semantic 分析请求", details, client_ip)
 
@@ -183,7 +198,7 @@ def log_openai_completions_request(
         request_id = _request_counter
 
     preview = 100
-    p_preview = prompt[:preview] + "..." if len(prompt) > preview else prompt
+    p_preview = _log_str_preview(prompt, preview)
     details = (
         f"req_id={request_id}, model='{model}', "
         f"prompt='{p_preview}', chars={len(prompt)}"
@@ -196,6 +211,7 @@ def log_openai_completions_request(
 def log_prediction_attribute_request(
     context: str,
     target_prediction: Optional[str],
+    target_token_id: Optional[int],
     model: str,
     client_ip: str = None,
 ) -> int:
@@ -212,12 +228,11 @@ def log_prediction_attribute_request(
         request_id = _request_counter
 
     context_preview = 150
-    c_preview = (
-        context[:context_preview] + "..."
-        if len(context) > context_preview
-        else context
-    )
-    target_show = "<top-1>" if target_prediction is None else target_prediction
+    c_preview = _log_str_preview(context, context_preview)
+    if target_token_id is not None:
+        target_show = f"<token_id:{target_token_id}>"
+    else:
+        target_show = "<top-1>" if target_prediction is None else target_prediction
     details = (
         f"req_id={request_id}, model={model!r}, context='{c_preview}', target='{target_show}', "
         f"context_chars={len(context)}"
@@ -237,13 +252,10 @@ def log_openai_completions_prompt_request(
     """记录 POST /v1/completions/prompt（仅拼装 chat template，不分配 req_id）。"""
     preview = 50
 
-    def _pv(s: str) -> str:
-        return s[:preview] + "..." if len(s) > preview else s
-
-    up = _pv(user_prompt)
+    up = _log_str_preview(user_prompt, preview)
     if system is None:
         details = f"model='{model}', user_prompt='{up}'"
     else:
-        details = f"model='{model}', system='{_pv(system)}', user_prompt='{up}'"
+        details = f"model='{model}', system='{_log_str_preview(system, preview)}', user_prompt='{up}'"
     _log_request("📥 openai completions/prompt 请求", details, client_ip)
 

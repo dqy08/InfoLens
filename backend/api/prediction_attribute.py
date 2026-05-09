@@ -14,13 +14,17 @@ def prediction_attribute(attribution_request):
     对上下文文本的下一 token 预测做归因分析。
 
     Args:
-        attribution_request: 包含 context 和 target_prediction 的字典
+        attribution_request: 须含 ``context``、``model``。归因目标二选一：
+            省略 ``target_prediction`` 且省略 ``target_token_id`` 时为 top-1；
+            或传非空 ``target_prediction``（字符串首 token）；
+            或传 ``target_token_id``（非负整数词表 id）；二者不可同时出现。
 
     Returns:
         (响应字典, 状态码) 元组
     """
     context = attribution_request.get("context")
     target_prediction = attribution_request.get("target_prediction")
+    target_token_id = attribution_request.get("target_token_id")
     model = attribution_request.get("model")
 
     if context is None:
@@ -34,6 +38,12 @@ def prediction_attribute(attribution_request):
         return {"success": False, "message": "target_prediction must be a string"}, 400
     if target_prediction == "":
         return {"success": False, "message": "target_prediction must not be empty"}, 400
+    if target_token_id is not None and not isinstance(target_token_id, int):
+        return {"success": False, "message": "target_token_id must be an integer"}, 400
+    if target_token_id is not None and target_token_id < 0:
+        return {"success": False, "message": "target_token_id must be >= 0"}, 400
+    if target_prediction is not None and target_token_id is not None:
+        return {"success": False, "message": "target_prediction and target_token_id are mutually exclusive"}, 400
 
     if model is None:
         return {"success": False, "message": "Missing required field: model"}, 400
@@ -44,7 +54,13 @@ def prediction_attribute(attribution_request):
 
     client_ip = get_client_ip()
     start_time = time.perf_counter()
-    request_id = log_prediction_attribute_request(context, target_prediction, model, client_ip)
+    request_id = log_prediction_attribute_request(
+        context=context,
+        target_prediction=target_prediction,
+        target_token_id=target_token_id,
+        model=model,
+        client_ip=client_ip,
+    )
 
     lock_acquired = _inference_lock.acquire(timeout=LOCK_WAIT_TIMEOUT)
     if not lock_acquired:
@@ -57,7 +73,12 @@ def prediction_attribute(attribution_request):
         }, 503
 
     try:
-        result = analyze_prediction_attribution(context, target_prediction, model=model)
+        result = analyze_prediction_attribution(
+            context,
+            target_prediction,
+            model=model,
+            target_token_id=target_token_id,
+        )
     except ValueError as e:
         return {"success": False, "message": str(e)}, 400
     except Exception as e:

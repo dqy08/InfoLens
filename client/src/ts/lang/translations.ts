@@ -116,6 +116,15 @@ export const translations: Translations = {
         'History': '输入历史',
         'Raw prompt': 'Raw prompt 原始提示词',
         'Raw prompt mode': 'Raw prompt mode 原始提示词模式',
+        'Teacher forcing': 'Teacher forcing 强制续写归因',
+        'Forced continuation': 'Forced continuation 期望续写',
+        'Stop after teacher forcing': '续写结束后停止（不继续 top-1 生成）',
+        'When enabled, type the exact continuation after the assembled prompt. Each step attributes the next token toward that text (same tokenizer as Model), then stops when the continuation is consumed or EOS.':
+            '启用后，在下方填写接在「完整 prompt」之后的期望续写文本。每一步用该串剩余部分的第一个 token 作为归因目标（与所选 Model 槽位分词器一致）；续写消费完或遇到 EOS 时结束。',
+        'Expected generated text after the full prompt. Each API step uses the first token of what remains here as the attribution target.':
+            '期望模型在完整 prompt 之后生成的文字；每一步对当前剩余串的第一个 token 做归因目标。',
+        'When unchecked, generation continues with top-1 after teacher forcing tokens are exhausted, up to Max tokens.':
+            '未勾选时，teacher forcing 续写用完后将继续以 top-1 贪心生成，直到 Max tokens 或 EOS。',
         'Ask': '提问',
         'Force retry': '强制重试',
         'Retry': '重试',

@@ -9,11 +9,14 @@ import {
 import type { NodeAggregatedEntry } from './genAttributeDagIntervalResolve';
 import type { TokenGenStep } from './tokenGenAttributionRunner';
 import { getAttentionRawScore } from '../utils/semanticUtils';
+import { DAG_EDGE_MIN_DISPLAY_OPACITY } from './genAttributeDagEdgeDisplay';
 
 /** 与 DAG 节点 id 一致：来自 API `token_attribution` 几何（按 offset 去重，独立于 exclude/归一化）。 */
 export type PromptTokenSpan = {
     offset: [number, number];
     raw: string;
+    /** tokenizer 词表 id（/api/tokenize 返回）；DAG 几何不依赖此字段。 */
+    token_id?: number;
 };
 
 /** 每步在 exclude 之后按 `score` 降序取前 N 条作为候选池，避免长上下文长尾稀释。 */
@@ -29,10 +32,6 @@ export function clampDagEdgeTopPCoverage(n: number): number {
     if (!Number.isFinite(n)) return DAG_EDGE_TOP_P_COVERAGE_DEFAULT;
     return Math.min(DAG_EDGE_TOP_P_COVERAGE_MAX, Math.max(DAG_EDGE_TOP_P_COVERAGE_MIN, n));
 }
-
-/** 候选池内相对最强条目的下限系数：池内 L1 份额小于该比例×首条份额时停止。 */
-// topShare 的线有最大的透明度，所以这里对应的是最小的透明度是最大透明度的比例
-const DAG_EDGE_RELATIVE_TOP_SHARE_FLOOR_BETA = 0.1;
 
 /**
  * 按 `score` 降序排序后取前 min(N, length) 项。
@@ -64,9 +63,14 @@ function normalizeTopNPoolForDagSparse<T extends { score: number }>(tokens: T[])
 
 /**
  * 在候选池已按 `score` 降序、池内归一保持该顺序的前提下，按遍历顺序取前缀，直到：
- * - 池内 L1 份额小于 β×首条份额（分布形状截断），或
+ * - 池内 L1 份额小于 {@link DAG_EDGE_MIN_DISPLAY_OPACITY}×首条份额（`relativeFloor`，系数与最小展示透明度同值），或
  * - 累计达到给定阈值（默认 {@link DAG_EDGE_TOP_P_COVERAGE_DEFAULT}；候选池内 Top-P，非整步全量 token 的分母）。
  * （池内份额与 `score` 单调一致，无需再排序。）
+ *
+ * `relativeFloor`：{@link normalizeTopNPoolForDagSparse} 后首条 `normalizedScore === 1`，且对正分条目有
+ * `poolMassFrac_i / topFrac === normalizedScore_i`。故 `frac < β×topFrac` ⇔ `normalizedScore < β`；
+ * 再乘互信息率（≤1）后不可能达到视图层最小 `stroke-opacity`，等于提前剔除注定画不出的边，与
+ * {@link DAG_EDGE_MIN_DISPLAY_OPACITY} 在视图中的含义对齐。
  */
 function selectTokenAttributionByCumulativeShare<T extends { poolMassFrac: number }>(
     normalized: Array<T>,
@@ -76,7 +80,7 @@ function selectTokenAttributionByCumulativeShare<T extends { poolMassFrac: numbe
 
     const topFrac = normalized[0]?.poolMassFrac ?? 0;
     if (!(topFrac > 0)) return [];
-    const relativeFloor = DAG_EDGE_RELATIVE_TOP_SHARE_FLOOR_BETA * topFrac;
+    const relativeFloor = DAG_EDGE_MIN_DISPLAY_OPACITY * topFrac;
 
     let cum = 0;
     const picked: Array<T> = [];

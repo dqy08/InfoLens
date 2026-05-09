@@ -104,10 +104,6 @@
 .attribution-exclude-prompt-patterns-header {
   flex-wrap: wrap;
 
-  .semantic-submode-label {
-    font-size: inherit;
-  }
-
   &:not(:has(#attribution_exclude_prompt_patterns_enable:checked)) .semantic-submode-label {
     color: var(--text-muted);
   }
