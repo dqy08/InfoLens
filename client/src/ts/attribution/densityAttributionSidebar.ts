@@ -72,6 +72,7 @@ export type DensityAttributionSidebarOptions = {
     getContextPrefix?: () => string;
     /** 首页 base；Chat instruct */
     predictionModelVariant: PredictionAttributeModelVariant;
+    sourcePage: 'analysis.html' | 'chat.html';
 };
 
 /**
@@ -299,6 +300,7 @@ export function initDensityAttributionSidebar(options: DensityAttributionSidebar
                             context,
                             targetPrediction: selectedTarget,
                             model: options.predictionModelVariant,
+                            sourcePage: options.sourcePage,
                             forceRefresh: false,
                         });
                         finish(json);

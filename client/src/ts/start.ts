@@ -1007,6 +1007,7 @@ window.onload = () => {
         apiPrefix: api_prefix,
         showToast,
         predictionModelVariant: 'base',
+        sourcePage: 'analysis.html',
     });
 
     // 高亮清除事件监听已由 initHighlightClearListeners 处理

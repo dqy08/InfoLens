@@ -12,20 +12,34 @@ import {
 } from './attributionResultCache';
 
 const JSON_ERROR_SNIPPET_MAX = 160;
+export type PredictionAttributeSourcePage =
+    | 'analysis.html'
+    | 'chat.html'
+    | 'attribution.html'
+    | 'gen_attribute.html';
 
 export async function fetchPredictionAttribute(
     apiBaseForRequests: string,
     context: string,
     targetPrediction: string | null,
     model: PredictionAttributeModelVariant,
-    targetTokenId?: number
+    sourcePage: PredictionAttributeSourcePage,
+    targetTokenId?: number,
+    flowId?: string,
+    flowStep?: number,
 ): Promise<AttributionApiResponse> {
-    const bodyObj: Record<string, unknown> = { context, model };
+    const bodyObj: Record<string, unknown> = { context, model, source_page: sourcePage };
     if (targetPrediction !== null) {
         bodyObj.target_prediction = targetPrediction;
     }
     if (typeof targetTokenId === 'number' && Number.isInteger(targetTokenId) && targetTokenId >= 0) {
         bodyObj.target_token_id = targetTokenId;
+    }
+    if (typeof flowId === 'string' && flowId.length > 0) {
+        bodyObj.flow_id = flowId;
+    }
+    if (typeof flowStep === 'number' && Number.isInteger(flowStep) && flowStep >= 0) {
+        bodyObj.flow_step = flowStep;
     }
     const res = await fetch(`${apiBaseForRequests}/api/prediction-attribute`, {
         method: 'POST',
@@ -57,6 +71,7 @@ export type LoadPredictionAttributeWithCacheOptions = {
     context: string;
     targetPrediction: string;
     model: PredictionAttributeModelVariant;
+    sourcePage: PredictionAttributeSourcePage;
     /** 与归因页「Force retry」一致：先按 entry 删缓存再请求 */
     forceRefresh?: boolean;
 };
@@ -67,7 +82,7 @@ export type LoadPredictionAttributeWithCacheOptions = {
 export async function loadPredictionAttributeWithCache(
     options: LoadPredictionAttributeWithCacheOptions
 ): Promise<AttributionApiResponse> {
-    const { apiBaseForRequests, context, targetPrediction, model, forceRefresh } = options;
+    const { apiBaseForRequests, context, targetPrediction, model, sourcePage, forceRefresh } = options;
     if (forceRefresh) {
         await removeCachedEntryByContentKey(entryKey(context, targetPrediction));
     }
@@ -77,7 +92,7 @@ export async function loadPredictionAttributeWithCache(
             return hit;
         }
     }
-    const json = await fetchPredictionAttribute(apiBaseForRequests, context, targetPrediction, model);
+    const json = await fetchPredictionAttribute(apiBaseForRequests, context, targetPrediction, model, sourcePage);
     await save({ context, targetPrediction }, json, 'complete');
     return json;
 }

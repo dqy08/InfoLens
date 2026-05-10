@@ -505,9 +505,19 @@ paths:
                 type: string
                 enum: [base, instruct]
                 description: base 使用主槽位（--model），instruct 使用语义槽位（--semantic_model）
+              source_page:
+                type: string
+                description: 发起页面名（analysis.html / chat.html / attribution.html / gen_attribute.html）
+              flow_id:
+                type: string
+                description: 连续生成归因会话 ID；仅 source_page=gen_attribute.html 时允许
+              flow_step:
+                type: integer
+                description: 连续生成归因步骤（从 0 开始）；仅 source_page=gen_attribute.html 时允许
             required:
               - context
               - model
+              - source_page
       responses:
         200:
           description: 返回各输入 token 对目标预测的归因分

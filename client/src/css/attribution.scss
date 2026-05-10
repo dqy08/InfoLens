@@ -14,11 +14,9 @@
   }
 }
 
-// Cached history 下拉：覆盖全局 query-history（mixin 含 max-height:200px，须显式 max-height:none 才取消上限）；原生竖向 resize
+// Cached history 下拉：覆盖 mixin 的 max-height:200px；高度随条目、封顶 min(32vh,360px)，并可竖向 resize
 #attribution_cached_history_dropdown.semantic-search-history-dropdown {
-  height: min(32vh, 360px);
-  min-height: 120px;
-  max-height: none;
+  max-height: min(32vh, 360px);
   resize: vertical;
   overflow-y: auto;
 }

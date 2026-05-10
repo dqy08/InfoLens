@@ -383,7 +383,16 @@ export class SettingsMenuManager {
             'attribution.html',
             'gen_attribute.html',
         ] as const;
-        const API_ORDER = ['analyze', 'analyze_semantic', 'chat', 'prediction_attribute'] as const;
+        const API_ORDER = [
+            'analyze',
+            'analyze_semantic',
+            'chat',
+            'causal_flow',
+            'prediction_attribute',
+            'prediction_attribute__attribution.html',
+            'prediction_attribute__chat.html',
+            'prediction_attribute__analysis.html',
+        ] as const;
         const OS_ORDER = ['ios', 'android', 'windows', 'macos', 'linux', 'unknown'] as const;
 
         type VisitStatsRow = NonNullable<Awaited<ReturnType<TextAnalysisAPI['getVisitStats']>>>;

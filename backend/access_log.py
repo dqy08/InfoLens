@@ -213,6 +213,9 @@ def log_prediction_attribute_request(
     target_prediction: Optional[str],
     target_token_id: Optional[int],
     model: str,
+    source_page: str,
+    flow_id: Optional[str] = None,
+    flow_step: Optional[int] = None,
     client_ip: str = None,
 ) -> int:
     """
@@ -227,19 +230,30 @@ def log_prediction_attribute_request(
         _request_counter += 1
         request_id = _request_counter
 
-    context_preview = 150
+    context_preview = 200
     c_preview = _log_str_preview(context, context_preview)
     if target_token_id is not None:
         target_show = f"<token_id:{target_token_id}>"
     else:
         target_show = "<top-1>" if target_prediction is None else target_prediction
     details = (
-        f"req_id={request_id}, model={model!r}, context='{c_preview}', target='{target_show}', "
-        f"context_chars={len(context)}"
+        f"req_id={request_id}, model={model!r}, source_page={source_page!r}, "
+        f"context='{c_preview}', target='{target_show}', context_chars={len(context)}"
     )
-    _log_request("📥 prediction_attribute 请求", details, client_ip)
+    if flow_id is not None:
+        details += f", flow_id={flow_id!r}, flow_step={flow_step}"
 
-    _hit_api("prediction_attribute")
+    # 连续 flow 第 1 步后不再打印入站请求，避免日志噪声。
+    if flow_id is None or flow_step == 0:
+        _log_request("📥 prediction_attribute 请求", details, client_ip)
+
+    is_flow_request = source_page == "gen_attribute.html"
+    if is_flow_request:
+        if flow_step == 0:
+            _hit_api("causal_flow")
+        _hit_api("prediction_attribute")
+    else:
+        _hit_api(f"prediction_attribute__{source_page}")
     return request_id
 
 

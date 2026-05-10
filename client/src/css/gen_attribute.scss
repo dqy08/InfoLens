@@ -32,11 +32,10 @@
   position: static;
 }
 
+// Cached history / demos：随内容变高，封顶 min(32vh, 360px)，竖向 resize；覆盖 chat mixin 的 max-height:200px
 #gen_attr_cached_history_dropdown.semantic-search-history-dropdown,
 #gen_attr_cached_demos_dropdown.semantic-search-history-dropdown {
-  height: min(32vh, 360px);
-  min-height: 120px;
-  max-height: none;
+  max-height: min(32vh, 360px);
   resize: vertical;
   overflow-y: auto;
 }

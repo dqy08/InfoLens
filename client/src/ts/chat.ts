@@ -701,4 +701,5 @@ initDensityAttributionSidebar({
     showToast,
     getContextPrefix: () => currentPromptUsed,
     predictionModelVariant: 'instruct',
+    sourcePage: 'chat.html',
 });

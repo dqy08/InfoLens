@@ -7,6 +7,9 @@ import type { PromptTokenSpan } from './genAttributeDagPreprocess';
 import type { CompletionFinishReason } from '../utils/generationEndReasonLabel';
 import { fetchPredictionAttribute, fetchTokenize } from './predictionAttributeClient';
 
+/** 与生成归因页（含 DAG）「Max tokens」输入框默认值一致 */
+export const TOKEN_GEN_MAX_TOKENS_DEFAULT = 100;
+
 function splitCodePointPrefix(text: string, prefixLength: number): { prefix: string; rest: string } | null {
     if (prefixLength < 0) return null;
     const chars = Array.from(text);
@@ -45,12 +48,14 @@ export type TokenGenAttributionOptions = {
      * `true`：停止；`false`（默认）：切换为 top-1 继续生成，直到 maxTokens 或 EOS。
      */
     stopAfterTeacherForcing?: boolean;
-    /** 最大生成 token 数，默认 200 */
+    /** 最大生成 token 数，默认 {@link TOKEN_GEN_MAX_TOKENS_DEFAULT} */
     maxTokens?: number;
     /** 每生成一个 token 后的回调；`stepIndex` 从 0 起，与 {@link TokenGenAttributionHandle.getAllSteps} 下标一致 */
     onStep: (step: TokenGenStep, stepIndex: number) => void;
     onComplete: (reason: CompletionFinishReason) => void;
     onError: (err: Error) => void;
+    /** 单次连续生成归因会话 ID；用于后端日志压缩与统计归类。 */
+    flowId: string;
 };
 
 export type TokenGenAttributionHandle = {
@@ -62,7 +67,14 @@ export type TokenGenAttributionHandle = {
 };
 
 export function startTokenGenAttribution(opts: TokenGenAttributionOptions): TokenGenAttributionHandle {
-    const { initialContext, apiPrefix, model, maxTokens = 200, stopAfterTeacherForcing = false } = opts;
+    const {
+        initialContext,
+        apiPrefix,
+        model,
+        maxTokens = TOKEN_GEN_MAX_TOKENS_DEFAULT,
+        stopAfterTeacherForcing = false,
+        flowId,
+    } = opts;
     const tfOpt = opts.teacherForcingContinuation;
     const forcingEnabled = typeof tfOpt === 'string' && tfOpt.length > 0;
     const promptRegionEnd = initialContext.length;
@@ -164,7 +176,16 @@ export function startTokenGenAttribution(opts: TokenGenAttributionOptions): Toke
 
             let response: AttributionApiResponse;
             try {
-                response = await fetchPredictionAttribute(apiPrefix, context, null, model, targetTokenId);
+                response = await fetchPredictionAttribute(
+                    apiPrefix,
+                    context,
+                    null,
+                    model,
+                    'gen_attribute.html',
+                    targetTokenId,
+                    flowId,
+                    steps.length,
+                );
             } catch (err) {
                 const error = err instanceof Error ? err : new Error(String(err));
                 opts.onError(error);

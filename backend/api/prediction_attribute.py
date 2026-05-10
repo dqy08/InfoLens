@@ -26,6 +26,9 @@ def prediction_attribute(attribution_request):
     target_prediction = attribution_request.get("target_prediction")
     target_token_id = attribution_request.get("target_token_id")
     model = attribution_request.get("model")
+    source_page = attribution_request.get("source_page")
+    flow_id = attribution_request.get("flow_id")
+    flow_step = attribution_request.get("flow_step")
 
     if context is None:
         return {"success": False, "message": "Missing required field: context"}, 400
@@ -52,6 +55,46 @@ def prediction_attribute(attribution_request):
     if model not in ("base", "instruct"):
         return {"success": False, "message": 'model must be "base" or "instruct"'}, 400
 
+    allowed_source_pages = {
+        "analysis.html",
+        "chat.html",
+        "attribution.html",
+        "gen_attribute.html",
+    }
+
+    if source_page is None:
+        return {"success": False, "message": "Missing required field: source_page"}, 400
+    if not isinstance(source_page, str):
+        return {"success": False, "message": "source_page must be a string"}, 400
+    if source_page == "":
+        return {"success": False, "message": "source_page must not be empty"}, 400
+    if source_page not in allowed_source_pages:
+        return {
+            "success": False,
+            "message": "source_page must be one of: analysis.html, chat.html, attribution.html, gen_attribute.html",
+        }, 400
+
+    if flow_id is not None and not isinstance(flow_id, str):
+        return {"success": False, "message": "flow_id must be a string"}, 400
+    if flow_id == "":
+        return {"success": False, "message": "flow_id must not be empty"}, 400
+    if flow_step is not None and not isinstance(flow_step, int):
+        return {"success": False, "message": "flow_step must be an integer"}, 400
+    if flow_step is not None and flow_step < 0:
+        return {"success": False, "message": "flow_step must be >= 0"}, 400
+
+    is_causal_flow = source_page == "gen_attribute.html"
+    if is_causal_flow:
+        if flow_id is None:
+            return {"success": False, "message": "Missing required field: flow_id for causal flow"}, 400
+        if flow_step is None:
+            return {"success": False, "message": "Missing required field: flow_step for causal flow"}, 400
+    elif flow_id is not None or flow_step is not None:
+        return {
+            "success": False,
+            "message": "flow_id/flow_step are only allowed when source_page is gen_attribute.html",
+        }, 400
+
     client_ip = get_client_ip()
     start_time = time.perf_counter()
     request_id = log_prediction_attribute_request(
@@ -59,6 +102,9 @@ def prediction_attribute(attribution_request):
         target_prediction=target_prediction,
         target_token_id=target_token_id,
         model=model,
+        source_page=source_page,
+        flow_id=flow_id,
+        flow_step=flow_step,
         client_ip=client_ip,
     )
 
@@ -93,9 +139,16 @@ def prediction_attribute(attribution_request):
     elapsed = time.perf_counter() - start_time
     tokens = len(result.get("token_attribution", []))
     target_token = result.get("target_token")
-    print(
-        f"\t📤 API prediction_attribute response: req_id={request_id}, "
-        f"target={target_token!r}, tokens={tokens}, response_time={elapsed:.4f}s"
-    )
+    if flow_id is None:
+        print(
+            f"\t📤 API prediction_attribute response: req_id={request_id}, "
+            f"target={target_token!r}, tokens={tokens}, response_time={elapsed:.4f}s"
+        )
+    else:
+        print(
+            f"\t📤 API prediction_attribute response: req_id={request_id}, "
+            f"flow_id={flow_id!r}, flow_step={flow_step}, "
+            f"target={target_token!r}, tokens={tokens}, response_time={elapsed:.4f}s"
+        )
 
     return {"success": True, **result}, 200

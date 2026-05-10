@@ -272,6 +272,7 @@ async function runAnalyze(options?: { forceRefresh?: boolean }): Promise<void> {
             context,
             targetPrediction: target,
             model: currentAttributionModelVariant(),
+            sourcePage: 'attribution.html',
             forceRefresh,
         });
         applyAttributionResponse(context, json);

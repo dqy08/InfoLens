@@ -34,6 +34,7 @@ import {
 import {
     createHydratedTokenGenHandle,
     startTokenGenAttribution,
+    TOKEN_GEN_MAX_TOKENS_DEFAULT,
     type TokenGenAttributionHandle,
     type TokenGenStep,
 } from './attribution/tokenGenAttributionRunner';
@@ -90,7 +91,7 @@ const showToast = createToast('#toast').show;
 
 const GEN_ATTR_MODEL_VARIANT_STORAGE_KEY = 'info_radar_gen_attr_model_variant';
 const GEN_ATTR_MAX_TOKENS_STORAGE_KEY = 'info_radar_gen_attr_max_tokens';
-const GEN_ATTR_MAX_TOKENS_DEFAULT = 100;
+const GEN_ATTR_MAX_TOKENS_DEFAULT = TOKEN_GEN_MAX_TOKENS_DEFAULT;
 const GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY = 'info_radar_gen_attr_dag_measure_width';
 const GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_mode';
 const GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_step_ms';
@@ -120,6 +121,12 @@ const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MAX = 3600;
 
 const GENERATE_BTN_LABEL = 'Start';
 const STOP_BTN_LABEL = 'Stop';
+
+function createFlowId(): string {
+    const timePart = Date.now().toString(36).slice(-6);
+    const randPart = Math.random().toString(36).slice(2, 6);
+    return `${timePart}-${randPart}`;
+}
 
 function readStoredModelVariant(): PredictionAttributeModelVariant {
     try {
@@ -1595,6 +1602,7 @@ async function runGeneration(): Promise<void> {
             apiPrefix: apiBaseForRequests,
             model: tokenizeModel,
             maxTokens,
+            flowId: createFlowId(),
             teacherForcingContinuation: teacherForcingText,
             stopAfterTeacherForcing: stopAfterTF,
             onStep(step, stepIndex) {
