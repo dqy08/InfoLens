@@ -22,6 +22,7 @@ const GEN_ATTRIBUTE_HOME_DEMO_SLUG: Record<'en' | 'zh', string> = {
     en: 'Write a sonnet about love',
     zh: '写一首绝句，主题是春天',
 };
+const GEN_ATTRIBUTE_BADGE_LINK = 'http://xhslink.com/o/A7VLi99aBvG';
 
 function applyGenAttributeNavCardHref(): void {
     const a = document.querySelector<HTMLAnchorElement>('a.nav-landing-card[data-nav-page="genAttribute"]');
@@ -43,7 +44,20 @@ function syncGenAttributeCardPreviewVideo(theme: Theme): void {
     v.src = DAG_PREVIEW_BY_THEME[theme];
 }
 
+function bindGenAttributeBadgeLink(): void {
+    const badge = document.querySelector<HTMLElement>(
+        'a.nav-landing-card[data-nav-page="genAttribute"] .nav-landing-card-badge'
+    );
+    if (!badge) return;
+    badge.addEventListener('click', (event: MouseEvent) => {
+        event.preventDefault();
+        event.stopPropagation();
+        window.open(GEN_ATTRIBUTE_BADGE_LINK, '_blank', 'noopener');
+    });
+}
+
 applyGenAttributeNavCardHref();
+bindGenAttributeBadgeLink();
 
 const apiPrefix = URLHandler.parameters['api'] || '';
 const { api } = initializeCommonApp(apiPrefix);

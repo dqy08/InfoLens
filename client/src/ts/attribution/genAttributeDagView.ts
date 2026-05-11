@@ -1,6 +1,6 @@
 import * as d3 from 'd3';
 import { DirectedGraph } from 'graphology';
-import type { D3Sel } from '../utils/Util';
+import { calculateSurprisal, type D3Sel } from '../utils/Util';
 import { visualizeSpecialChars } from '../utils/tokenDisplayUtils';
 import {
     clampDagEdgeTopPCoverage,
@@ -11,6 +11,11 @@ import {
     type PromptTokenSpan,
 } from './genAttributeDagPreprocess';
 import { DAG_EDGE_MIN_DISPLAY_OPACITY } from './genAttributeDagEdgeDisplay';
+import {
+    computeMutualInformationRatio,
+    computeConditionalInformationRatio,
+    FULL_CONFIDENCE_PROBABILITY_BASELINE,
+} from '../utils/surprisalMath';
 import { isOffsetSpanFullyExcluded } from './attributionDisplayModel';
 import {
     alignAndAggregateByNode,
@@ -39,6 +44,9 @@ import { paintTextFlowLayout } from './genAttributeDagViewTextFlowMode';
 import { paintSpiralLayout } from './genAttributeDagViewSpiralMode';
 import { tr } from '../lang/i18n-lite';
 
+/** 与 {@link ToolTip} 中 surprisal 数值格式一致（`.3g`） */
+const DAG_TITLE_SURPRISAL_FMT = d3.format('.3g');
+
 /** 再次挂载前执行上一轮 detach（当前为空操作，保留扩展点） */
 const detachGenAttributeDagPanel = new WeakMap<HTMLElement, () => void>();
 
@@ -55,35 +63,39 @@ export function clampDagCompactness(n: number): number {
     return Math.min(DAG_COMPACTNESS_MAX, Math.max(DAG_COMPACTNESS_MIN, n));
 }
 
-/**
- * 零信心概率基准 p₀：surprisal log₂(1/p₀) 视作单 token 的绝对信息量参照（此处 20 bit）。
- * p = p₀ 时 {@link computeMutualInformationRatio} 为 0。
- */
-const ZERO_CONFIDENCE_PROBABILITY_BASELINE = 2 ** -20;
 
-function clamp01(n: number): number {
-    return Math.min(1, Math.max(0, n));
+
+/** 节点 CI 视觉放大开关；`false` 时所有生成节点 ciVisualScale 恒为 1×，下次 update() 起生效。 */
+let dagNodeCiVisualScaleEnabled = true;
+export function setDagNodeCiVisualScaleEnabled(enabled: boolean): void {
+    dagNodeCiVisualScaleEnabled = enabled;
+}
+
+/** 高惊讶度目标边弱化开关；`false` 时 mutualInformationRatio 恒为 1（不弱化），下次 update() 起生效。 */
+let dagEdgeWeakenHighSurprisalEnabled = true;
+export function setDagEdgeWeakenHighSurprisalEnabled(enabled: boolean): void {
+    dagEdgeWeakenHighSurprisalEnabled = enabled;
 }
 
 /**
- * 互信息率 α：在参照熵 log₂(1/p₀) 下，将「前文与目标 token 的可对齐程度」
- * (log₂(1/p₀) − log₂(1/p)) / log₂(1/p₀) = log₂(p/p₀) / log₂(1/p₀) clamp 到 [0,1]。
- * 低 surprisal → 高 α；仅用于本步入边透明度，不参与边筛选。缺省 `target_prob` 时返回 1（兼容旧缓存）。
+ * DAG 生成节点矩形/标签缩放：CI=0→1×，CI=1→2×（prompt 节点恒用 1，见建点处）。
+ * p > {@link FULL_CONFIDENCE_PROBABILITY_BASELINE}（surprisal < 3 bit）时截断为 1×，不放大。
+ * {@link dagNodeCiVisualScaleEnabled} 为 false 时恒返回 1。
  */
-function computeMutualInformationRatio(targetProb: number | undefined): number {
-    if (targetProb === undefined) return 1;
-    if (!Number.isFinite(targetProb) || targetProb <= 0) return 0;
-
-    return clamp01(
-        Math.log2(targetProb / ZERO_CONFIDENCE_PROBABILITY_BASELINE) /
-            Math.log2(1 / ZERO_CONFIDENCE_PROBABILITY_BASELINE)
-    );
+function dagGeneratedNodeCiVisualScale(targetProb: number | undefined): number {
+    if (!dagNodeCiVisualScaleEnabled) return 1;
+    if (targetProb !== undefined && Number.isFinite(targetProb) && targetProb > FULL_CONFIDENCE_PROBABILITY_BASELINE) return 1;
+    return 1 + computeConditionalInformationRatio(targetProb);
 }
 
-/**
- * 节点/边原生 `<title>` 中互信息率 α 的展示：α∈[0,1] 转为百分号字符串，
- * 与 analysis 主视图 Tooltip 中 Top-K 概率列 {@link formatTopkTooltipProbabilityPercent} 同形。
- */
+/** 原生 `<title>` 中 CI/MI 百分号展示，与 Top-K 概率列 {@link formatTopkTooltipProbabilityPercent} 同形。 */
+function formatCiMiRatiosLineForTooltip(ciRatio: number, miRatio: number): string {
+    const ci = Number.isFinite(ciRatio) ? formatTopkTooltipProbabilityPercent(ciRatio) : String(ciRatio);
+    const mi = Number.isFinite(miRatio) ? formatTopkTooltipProbabilityPercent(miRatio) : String(miRatio);
+    return `CI/MI: ${ci} / ${mi}`;
+}
+
+/** 边原生 `<title>` 中互信息率 α 的展示（节点 title 改用 {@link formatCiMiRatiosLineForTooltip}）。 */
 function formatMutualInformationRatioForTooltip(miRatio: number): string {
     if (!Number.isFinite(miRatio)) return String(miRatio);
     return formatTopkTooltipProbabilityPercent(miRatio);
@@ -109,12 +121,17 @@ type DagNodeAttrs = {
      */
     start: number;
     end: number;
-    /** 节点框左上角（与测量层 origin 同坐标系） */
-    x: number;
-    y: number;
-    /** 测量层几何 × display-scale 后的宽、高 */
+    /**
+     * 节点矩形中心坐标。center 不随 CI 缩放变化，故同行 token 的 cy 始终相等，
+     * 可直接用于 {@link snapSubwordNode} 同行检测，无需额外 baseY 字段。
+     */
+    cx: number;
+    cy: number;
+    /** 测量层几何 × display-scale × CI 缩放 后的宽、高 */
     nodeW: number;
     nodeH: number;
+    /** CI 视觉缩放倍数 `1 + CI` ∈ [1, 2]；prompt 节点为 `1`。供 CSS 字号变量使用。 */
+    ciVisualScale: number;
     /** {@link visualizeSpecialChars}（DAG：仅「空格后是 [A-Za-z0-9]」保留空格，其余空格为 ·），建点后不变 */
     displayLabel: string;
     /** 原生 `<title>` 全文（与 `DISABLE_DAG_NODE_TOOLTIPS` 无关，便于切换时不必重算） */
@@ -141,9 +158,10 @@ type DagLink = {
     titleText: string;
 };
 
-/** 与 {@link refreshNodeLinkHighlight} 中边的 `stroke-opacity` 一致：`normalizedScore × mutualInformationRatio`。 */
+/** 与 {@link refreshNodeLinkHighlight} 中边的 `stroke-opacity` 一致：`normalizedScore × mutualInformationRatio`（开关关闭时 MI 系数恒为 1）。 */
 function dagLinkStrokeOpacity(d: Pick<DagLink, 'normalizedScore' | 'mutualInformationRatio'>): number {
-    return (d.normalizedScore ?? 1) * (d.mutualInformationRatio ?? 1);
+    const mi = dagEdgeWeakenHighSurprisalEnabled ? (d.mutualInformationRatio ?? 1) : 1;
+    return (d.normalizedScore ?? 1) * mi;
 }
 
 function dagLinkEndpointKey(source: string, target: string): string {
@@ -295,7 +313,7 @@ function linkEndInsetBaseAtUnitScalePx(measureLayerEl: HTMLElement): number {
 }
 
 function nodeRx(d: DagNode): number {
-    return Math.min(9, d.nodeW / 2, d.nodeH / 2);
+    return Math.min(d.nodeW / 2, d.nodeH / 2);
 }
 
 export type GenAttributeDagHandle = {
@@ -401,8 +419,14 @@ function buildNodeNativeTitleText(
     ];
     const { targetProb } = d;
     if (targetProb !== undefined && Number.isFinite(targetProb)) {
-        lines.push(`Prob: ${formatTopkTooltipProbabilityPercent(targetProb)}`);
-        lines.push(`MI ratio: ${formatMutualInformationRatioForTooltip(computeMutualInformationRatio(targetProb))}`);
+        lines.push(`\nProb: ${formatTopkTooltipProbabilityPercent(targetProb)}`);
+        lines.push(`Information: ${DAG_TITLE_SURPRISAL_FMT(calculateSurprisal(targetProb))} bits`);
+        lines.push(
+            formatCiMiRatiosLineForTooltip(
+                computeConditionalInformationRatio(targetProb),
+                computeMutualInformationRatio(targetProb),
+            ),
+        );
     }
     return lines.join('\n');
 }
@@ -445,15 +469,15 @@ function buildLinkTitleText(
 const GLUE_EDGE_CHAR = /^(?:(?!\p{Script=Han})\p{L}|['\-_])$/u;
 
 /**
- * 子词拼接：offset 紧贴、同行、prev 末码点与当前首码点均满足 {@link GLUE_EDGE_CHAR}
- * → 左移到 prev 右缘（链式调用时 prev.x 已调整，自动支持多段续片）。
+ * 子词拼接：offset 紧贴、同行（cy 相等）、prev 末码点与当前首码点均满足 {@link GLUE_EDGE_CHAR}
+ * → 将当前节点中心 cx 紧贴 prev 右缘（链式调用时 prev.cx 已调整，自动支持多段续片）。
  */
 function snapSubwordNode(node: DagNode, prev: DagNode | null): void {
-    if (!prev || prev.end !== node.start || node.y !== prev.y) return;
+    if (!prev || prev.end !== node.start || node.cy !== prev.cy) return;
     const last = [...prev.label].at(-1) ?? '';
     const first = [...node.label][0] ?? '';
     if (!GLUE_EDGE_CHAR.test(last) || !GLUE_EDGE_CHAR.test(first)) return;
-    node.x = prev.x + prev.nodeW;
+    node.cx = prev.cx + (prev.nodeW + node.nodeW) / 2;
 }
 
 /** 焦点 + 一层入邻（直接祖先）+ 一层出邻（直接后代），用于选中/悬停高亮范围 */
@@ -801,6 +825,7 @@ export function initGenAttributeDagView(
         });
     }
 
+    let dragPointerOffset: { x: number; y: number } | null = null;
     const drag = d3
         .drag<SVGGElement, DagNode>()
         // 与 d3 默认 filter 一致，并仅在「当前节点已单击选中」时允许拖动手势生效，减少误拖
@@ -812,16 +837,22 @@ export function initGenAttributeDagView(
                 selectedId === d.id &&
                 layoutMode === 'text-flow'
         )
-        .on('start', (event) => {
+        .on('start', (event, d) => {
             event.sourceEvent?.stopPropagation();
+            const [x, y] = d3.pointer(event, rootG.node());
+            dragPointerOffset = { x: x - d.cx, y: y - d.cy };
         })
         .on('drag', (event, d) => {
             layoutDirty = true;
             userDraggedNodes = true;
             const [x, y] = d3.pointer(event, rootG.node());
-            d.x = x;
-            d.y = y;
+            const offset = dragPointerOffset ?? { x: 0, y: 0 };
+            d.cx = x - offset.x;
+            d.cy = y - offset.y;
             paint();
+        })
+        .on('end', () => {
+            dragPointerOffset = null;
         });
 
     /**
@@ -949,7 +980,10 @@ export function initGenAttributeDagView(
                     // 节点身份 append-only、几何（nodeW/nodeH）一旦建立不再变化（drag 仅改 x/y，
                     // 由 paint 通过 transform 处理），故与几何相关的属性仅在 enter 写一次即可；
                     // 同理 `--prompt` class 依据 step === -1，step 初始化后不变。
-                    const g = enter.append('g').attr('class', 'gen-attr-dag-node');
+                    const g = enter
+                        .append('g')
+                        .attr('class', 'gen-attr-dag-node')
+                        .style('--gen-attr-dag-node-ci-visual-scale', (d: DagNode) => String(d.ciVisualScale));
                     g.classed('gen-attr-dag-node--prompt', (d: DagNode) => d.step === -1);
                     if (!DISABLE_DAG_NODE_TOOLTIPS) {
                         g.append('title').text((d: DagNode) => d.nativeTitleText);
@@ -1034,10 +1068,11 @@ export function initGenAttributeDagView(
                 step: -1,
                 start: ns,
                 end: ne,
-                x: g.originX,
-                y: g.originY,
+                cx: g.cx,
+                cy: g.cy,
                 nodeW: g.width * displayScale,
                 nodeH: g.height * displayScale,
+                ciVisualScale: 1,
                 displayLabel,
                 nativeTitleText: buildNodeNativeTitleText({
                     displayLabel,
@@ -1081,16 +1116,18 @@ export function initGenAttributeDagView(
         const displayLabel = visualizeSpecialChars(token, {
             spaceDotExceptBeforeAsciiLetterOrNumber: true,
         });
+        const ciVisualScale = dagGeneratedNodeCiVisualScale(response.target_prob);
         const targetNode: DagNode = {
             id: targetId,
             label: token,
             step: stepProcessed,
             start: targetStart,
             end: targetEnd,
-            x: g.originX,
-            y: g.originY,
-            nodeW: g.width * displayScale,
-            nodeH: g.height * displayScale,
+            cx: g.cx,
+            cy: g.cy,
+            nodeW: g.width * displayScale * ciVisualScale,
+            nodeH: g.height * displayScale * ciVisualScale,
+            ciVisualScale,
             displayLabel,
             nativeTitleText: buildNodeNativeTitleText({
                 displayLabel,

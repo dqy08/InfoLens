@@ -374,7 +374,7 @@ export class SettingsMenuManager {
     }
 
     private async handleVisitStatsClick(): Promise<void> {
-        /** Visit stats 弹窗专用：主序列与 webpack 顶层页 / access_log 归类一致 */
+        // backend/visit_stats.py：_STATS_PAGE_ORDER / _STATS_API_ORDER / _STATS_OS_ORDER
         const PAGE_ORDER = [
             'index.html',
             'analysis.html',
@@ -445,14 +445,19 @@ export class SettingsMenuManager {
         };
 
         const fetchAndRender = async (container: d3.Selection<HTMLDivElement, unknown, HTMLElement, any>) => {
-            container.selectAll('*').remove();
-            const block = container
-                .append('div')
-                .attr('class', 'visit-stats-body')
-                .style('margin', '0')
-                .style('white-space', 'pre-wrap')
-                .style('font', 'inherit')
-                .style('font-size', '13px');
+            let block = container.select<HTMLDivElement>('div.visit-stats-body');
+            if (block.empty()) {
+                block = container
+                    .append('div')
+                    .attr('class', 'visit-stats-body')
+                    .style('margin', '0')
+                    .style('white-space', 'pre-wrap')
+                    .style('font', 'inherit')
+                    .style('font-size', '13px');
+            } else {
+                // 与 Model Management 一致：用透明度保留占位，避免清空 DOM 导致弹窗高度塌陷抖动
+                block.style('opacity', '0');
+            }
             try {
                 const data = await this.api.getVisitStats();
                 if (!data?.success) throw new Error('bad');
@@ -460,6 +465,7 @@ export class SettingsMenuManager {
             } catch {
                 block.text('Failed to load stats.');
             }
+            block.style('opacity', '1');
         };
 
         showDialog({

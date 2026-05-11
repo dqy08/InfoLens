@@ -25,7 +25,7 @@ export function clampLinearArcAdjacentGap(px: number): number {
     );
 }
 
-type LinearArcNodeLike = { nodeW: number };
+type LinearArcNodeLike = { nodeW: number; nodeH: number; ciVisualScale: number };
 
 /** `step === -1` 表示 prompt（与 `genAttributeDagView` 中 `DagNode.step` 约定一致） */
 type LinearArcSteppedNode = LinearArcNodeLike & { step: number };
@@ -76,7 +76,8 @@ export function paintLinearArcLayout<
         if (srcCx === undefined || tgtCx === undefined) {
             throw new Error('paintLinearArcLayout: link endpoint not in linear node list');
         }
-        const y = LINEAR_ARC_BASELINE_Y;
+        // 用未放大的半高（nodeH / ciVisualScale / 2）定位弧端点，使所有节点顶部对齐同一 y 基线。
+        const y = LINEAR_ARC_BASELINE_Y - src.nodeH / (2 * src.ciVisualScale);
         const dx = Math.abs(tgtCx - srcCx);
         const arcH = dx * 0.4;
         const upY = y - arcH;
@@ -98,6 +99,6 @@ export function paintLinearArcLayout<
     nodeSel.attr('transform', (d) => {
         const cx = centerXByNode.get(d);
         if (cx === undefined) return null; // 不在布局列表中（已 display:none），不更新 transform
-        return `translate(${cx - d.nodeW / 2},${LINEAR_ARC_BASELINE_Y})`;
+        return `translate(${cx - d.nodeW / 2},${LINEAR_ARC_BASELINE_Y - d.nodeH / 2})`;
     });
 }

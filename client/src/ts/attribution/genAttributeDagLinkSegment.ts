@@ -1,13 +1,13 @@
-/** 轴对齐矩形节点：用于连线从边界起止（与 layout 所用的 x,y 左上角一致）。 */
+/** 轴对齐矩形节点：用于连线从边界起止，以矩形中心坐标表示。 */
 export type DagLinkRectNode = {
-    x: number;
-    y: number;
+    cx: number;
+    cy: number;
     nodeW: number;
     nodeH: number;
 };
 
 function nodeCenter(n: DagLinkRectNode): { cx: number; cy: number } {
-    return { cx: n.x + n.nodeW / 2, cy: n.y + n.nodeH / 2 };
+    return { cx: n.cx, cy: n.cy };
 }
 
 /** 轴对齐矩形（半宽 hw、半高 hh）中心沿单位向量 (ux,uy) 到边界的距离。 */

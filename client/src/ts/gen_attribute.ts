@@ -25,6 +25,8 @@ import {
 } from './attribution/genAttributeDagPreprocess';
 import {
     initGenAttributeDagView,
+    setDagNodeCiVisualScaleEnabled,
+    setDagEdgeWeakenHighSurprisalEnabled,
     type DagLayoutMode,
     clampDagCompactness,
     clampLinearArcAdjacentGap,
@@ -97,6 +99,8 @@ const GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_mod
 const GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_step_ms';
 const GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_replay_pacing_mode';
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_total_s';
+const GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY = 'info_radar_gen_attr_dag_node_ci_visual_scale';
+const GEN_ATTR_DAG_EDGE_WEAKEN_HIGH_SURPRISAL_STORAGE_KEY = 'info_radar_gen_attr_dag_edge_weaken_high_surprisal';
 const GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY = 'info_radar_gen_attr_dag_hide_inactive_edges';
 const GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY = 'info_radar_gen_attr_dag_hide_excluded_tokens';
 const GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY =
@@ -379,6 +383,12 @@ function applyDagLayoutModeUi(): void {
 const dagHideExcludedTokensInput = document.getElementById(
     'gen_attr_dag_hide_excluded_tokens'
 ) as HTMLInputElement | null;
+const dagNodeCiVisualScaleInput = document.getElementById(
+    'gen_attr_dag_node_ci_visual_scale'
+) as HTMLInputElement | null;
+const dagEdgeWeakenHighSurprisalInput = document.getElementById(
+    'gen_attr_dag_edge_weaken_high_surprisal'
+) as HTMLInputElement | null;
 const dagHideInactiveEdgesInput = document.getElementById(
     'gen_attr_dag_hide_inactive_edges'
 ) as HTMLInputElement | null;
@@ -408,6 +418,50 @@ if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = String(initialDagPlay
 applyDagReplaySpeedUi();
 
 const genAttrResultsNode = genAttrResultsEl.node() as HTMLElement | null;
+function readStoredDagNodeCiVisualScale(): boolean {
+    try {
+        const v = localStorage.getItem(GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY);
+        return v === null ? true : v === '1';
+    } catch {
+        return true;
+    }
+}
+const initialDagNodeCiVisualScale = readStoredDagNodeCiVisualScale();
+if (dagNodeCiVisualScaleInput) dagNodeCiVisualScaleInput.checked = initialDagNodeCiVisualScale;
+setDagNodeCiVisualScaleEnabled(initialDagNodeCiVisualScale);
+dagNodeCiVisualScaleInput?.addEventListener('change', () => {
+    const enabled = dagNodeCiVisualScaleInput.checked;
+    try {
+        localStorage.setItem(GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY, enabled ? '1' : '0');
+    } catch {
+        /* ignore */
+    }
+    setDagNodeCiVisualScaleEnabled(enabled);
+    tryResetAndReplayDag();
+});
+
+function readStoredDagEdgeWeakenHighSurprisal(): boolean {
+    try {
+        const v = localStorage.getItem(GEN_ATTR_DAG_EDGE_WEAKEN_HIGH_SURPRISAL_STORAGE_KEY);
+        return v === null ? true : v === '1';
+    } catch {
+        return true;
+    }
+}
+const initialDagEdgeWeakenHighSurprisal = readStoredDagEdgeWeakenHighSurprisal();
+if (dagEdgeWeakenHighSurprisalInput) dagEdgeWeakenHighSurprisalInput.checked = initialDagEdgeWeakenHighSurprisal;
+setDagEdgeWeakenHighSurprisalEnabled(initialDagEdgeWeakenHighSurprisal);
+dagEdgeWeakenHighSurprisalInput?.addEventListener('change', () => {
+    const enabled = dagEdgeWeakenHighSurprisalInput.checked;
+    try {
+        localStorage.setItem(GEN_ATTR_DAG_EDGE_WEAKEN_HIGH_SURPRISAL_STORAGE_KEY, enabled ? '1' : '0');
+    } catch {
+        /* ignore */
+    }
+    setDagEdgeWeakenHighSurprisalEnabled(enabled);
+    tryResetAndReplayDag();
+});
+
 function applyDagHideInactiveEdges(hide: boolean): void {
     if (!genAttrResultsNode) return;
     genAttrResultsNode.classList.toggle('gen-attr-dag-hide-inactive-edges', hide);
@@ -871,6 +925,18 @@ function isDagBusy(): boolean {
     return inFlight || dagPlaybackTimer !== null || dagLastTokenDwellTimer !== null;
 }
 
+/** 非忙状态下 reset + replay + fit，供各设置项切换后复用。忙时为 no-op。 */
+function tryResetAndReplayDag(): void {
+    if (isDagBusy()) return;
+    const h = runnerHandle;
+    dagHandle.reset();
+    if (h && h.tokenCount > 0) {
+        replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
+    }
+    dagHandle.fitViewportToContent();
+    dagHandle.clearNodeSelection();
+}
+
 dagMeasureWidthInput?.addEventListener('change', () => {
     const raw = parseInt(dagMeasureWidthInput.value, 10);
     const w = Number.isFinite(raw)
@@ -883,14 +949,7 @@ dagMeasureWidthInput?.addEventListener('change', () => {
         /* ignore */
     }
     dagHandle.setMeasureWidthPx(w);
-    if (isDagBusy()) return;
-    const h = runnerHandle;
-    dagHandle.reset();
-    if (h && h.tokenCount > 0) {
-        replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
-    }
-    dagHandle.fitViewportToContent();
-    dagHandle.clearNodeSelection();
+    tryResetAndReplayDag();
 });
 
 dagCompactnessInput?.addEventListener('change', () => {
@@ -903,14 +962,7 @@ dagCompactnessInput?.addEventListener('change', () => {
         /* ignore */
     }
     dagHandle.setDagCompactness(c);
-    if (isDagBusy()) return;
-    const h = runnerHandle;
-    dagHandle.reset();
-    if (h && h.tokenCount > 0) {
-        replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
-    }
-    dagHandle.fitViewportToContent();
-    dagHandle.clearNodeSelection();
+    tryResetAndReplayDag();
 });
 
 dagEdgeTopPCoverageInput?.addEventListener('change', () => {
@@ -925,14 +977,7 @@ dagEdgeTopPCoverageInput?.addEventListener('change', () => {
         /* ignore */
     }
     dagHandle.setEdgeTopPCoverage(c);
-    if (isDagBusy()) return;
-    const h = runnerHandle;
-    dagHandle.reset();
-    if (h && h.tokenCount > 0) {
-        replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
-    }
-    dagHandle.fitViewportToContent();
-    dagHandle.clearNodeSelection();
+    tryResetAndReplayDag();
 });
 
 dagLinearArcIntervalInput?.addEventListener('change', () => {
@@ -1300,7 +1345,7 @@ async function applyGenAttrCachedRun(
     }
 }
 
-/** Cached history 与 `?content=` 共用；`shouldTouch` 为 true 时 touch MRU 并刷新下拉镜像。 */
+/** 从缓存恢复运行；`shouldTouch` 为 true 时 touch MRU（下拉选中恒为 false，↑ 置顶走单独路径）。 */
 async function restoreGenAttrFromCachedRun(
     contentKey: string,
     shouldTouch: boolean,

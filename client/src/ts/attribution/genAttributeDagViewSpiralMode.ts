@@ -10,6 +10,8 @@ const SPIRAL_SPACING = 60;
 const SPIRAL_ARC_STEP = 40;
 /** 螺旋旋转相位（弧度）：控制螺旋臂展开方向。0 = 向右，-Math.PI/2 = 向上。 */
 const SPIRAL_PHASE = Math.PI * 0.6;
+/** 螺旋上第一个（起始位置）token 的相对视觉放大倍数（仅 spiral 布局）。 */
+const SPIRAL_FIRST_TOKEN_SCALE = 2;
 // ────────────────────────────────────────────────────────────────────────────
 
 type SpiralNodeLike = { nodeW: number; nodeH: number };
@@ -63,10 +65,19 @@ export function paintSpiralLayout<
         positionByNode.set(nodes[i]!, rawPos[i]!);
     }
 
+    const firstSpiralNode = nodes.length > 0 ? nodes[0]! : null;
+    const effNodeSize = (n: NodeDatum) =>
+        firstSpiralNode !== null && n === firstSpiralNode
+            ? { nodeW: n.nodeW * SPIRAL_FIRST_TOKEN_SCALE, nodeH: n.nodeH * SPIRAL_FIRST_TOKEN_SCALE }
+            : { nodeW: n.nodeW, nodeH: n.nodeH };
+
     // 节点：中心落在螺旋点，矩形保持水平
     nodeSel.attr('transform', (d) => {
         const pos = positionByNode.get(d);
         if (pos === undefined) return null;
+        if (firstSpiralNode !== null && d === firstSpiralNode) {
+            return `translate(${pos.cx},${pos.cy}) scale(${SPIRAL_FIRST_TOKEN_SCALE}) translate(${-d.nodeW / 2},${-d.nodeH / 2})`;
+        }
         return `translate(${pos.cx - d.nodeW / 2},${pos.cy - d.nodeH / 2})`;
     });
 
@@ -76,18 +87,10 @@ export function paintSpiralLayout<
         const pa = positionByNode.get(src);
         const pb = positionByNode.get(tgt);
         if (pa === undefined || pb === undefined) return;
-        const srcRect = {
-            x: pa.cx - src.nodeW / 2,
-            y: pa.cy - src.nodeH / 2,
-            nodeW: src.nodeW,
-            nodeH: src.nodeH,
-        };
-        const tgtRect = {
-            x: pb.cx - tgt.nodeW / 2,
-            y: pb.cy - tgt.nodeH / 2,
-            nodeW: tgt.nodeW,
-            nodeH: tgt.nodeH,
-        };
+        const sw = effNodeSize(src);
+        const tw = effNodeSize(tgt);
+        const srcRect = { cx: pa.cx, cy: pa.cy, nodeW: sw.nodeW, nodeH: sw.nodeH };
+        const tgtRect = { cx: pb.cx, cy: pb.cy, nodeW: tw.nodeW, nodeH: tw.nodeH };
         const seg = linkSegmentThroughNodeRects(srcRect, tgtRect, linkEndInsetPx);
         d3.select(this)
             .selectAll('path.gen-attr-dag-link-visible')

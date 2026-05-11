@@ -1,5 +1,6 @@
 import * as d3 from "d3";
 import { isFiniteNumber } from "./Util";
+import { REFERENCE_MAX_SURPRISAL_BITS } from "./surprisalMath";
 
 /**
  * 惊讶度颜色配置模块
@@ -11,7 +12,7 @@ import { isFiniteNumber } from "./Util";
 // ==========================================
 
 /** Token surprisal 的最大值，用于颜色映射（默认上限，可被调用方传入的可选 max 覆盖） */
-const TOKEN_SURPRISAL_MAX = 18;
+const TOKEN_SURPRISAL_MAX = REFERENCE_MAX_SURPRISAL_BITS;
 
 /** Byte surprisal 的最大值，用于颜色映射 */
 const BYTE_SURPRISAL_MAX = 6;

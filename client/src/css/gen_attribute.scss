@@ -103,7 +103,8 @@
   // 节点标签：与测量层同源 1em × display-scale × node-text-font-scale（后者略小于 1 替代固定 padding）
   #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node-text {
     font-size: calc(
-      1em * var(--gen-attr-dag-display-scale, 1) * var(--gen-attr-dag-node-text-font-scale, 0.9)
+      1em * var(--gen-attr-dag-display-scale, 1) *
+        var(--gen-attr-dag-node-text-font-scale, 0.9) * var(--gen-attr-dag-node-ci-visual-scale, 1)
     );
     font-family: inherit;
     font-weight: inherit;
@@ -385,6 +386,14 @@ body.gen-attribute-page .input-section {
 
 .gen-attribute-page .input-section > .textarea-wrapper.chat-prompt-actions-row {
   margin-top: 10px;
+}
+
+// Start / Model 行与首行 DAG 参数（含 layout mode）之间略加大，避免与按钮挤在一起
+.gen-attribute-page
+  .input-section
+  > .textarea-wrapper.chat-prompt-actions-row
+  + .gen-attr-dag-measure-width-row {
+  margin-top: 30px;
 }
 
 .attribution-exclude-prompt-patterns-header {

@@ -27,8 +27,7 @@ export type InitCachedHistoryQueryDropdownOptions = {
     listMru: () => Promise<CachedHistoryListRow[]>;
     /**
      * 第一参为 {@link CachedHistoryListRow.contentKey}（与 `?content=` 一致）。
-     * 第二参 `shouldTouch` 与 {@link initQueryHistoryDropdown} 的 `onHistorySelect` 一致：
-     * 是否应对关联 MRU 执行 touch（悬停为 false）。
+     * 第二参恒为 false：列表点击或悬停预览均不 bump MRU，仅 {@link onPromote}（↑）会 touch。
      */
     onSelectEntry: (
         contentKey: string,
@@ -40,7 +39,7 @@ export type InitCachedHistoryQueryDropdownOptions = {
 };
 
 /**
- * 三页 Cached history 共用的「无 input + MRU 异步刷新 + 悬停预览」接线。
+ * 三页 Cached history 共用的「无 input + MRU 异步刷新 + 悬停预览」接线；选中条目不写 MRU。
  * 返回 `refreshList` 供 URL hydrate 等与下拉无关的路径刷新内存列表。
  */
 export function initCachedHistoryQueryDropdown(
@@ -60,8 +59,8 @@ export function initCachedHistoryQueryDropdown(
         filterHistoryByInput: false,
         onSelect: () => {},
         fillInputOnSelect: false,
-        onHistorySelect: (contentKey, shouldTouch) => {
-            void Promise.resolve(options.onSelectEntry(contentKey, shouldTouch, ctx));
+        onHistorySelect: (contentKey) => {
+            void Promise.resolve(options.onSelectEntry(contentKey, false, ctx));
         },
         onRemove: options.onRemove,
         onPromote: options.onPromote,

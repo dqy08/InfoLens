@@ -114,7 +114,12 @@ function injectPageMeta(html, pageKey, doc) {
                 navKey === 'genAttribute'
                     ? `<video class="nav-landing-card-shot" muted loop playsinline autoplay preload="metadata" aria-hidden="true"></video>`
                     : `<div class="nav-landing-card-shot" aria-hidden="true"></div>`;
+            const badge =
+                navKey === 'genAttribute'
+                    ? `<span class="nav-landing-card-badge" title="Go to demo on RedNote: xhslink.com/o/A7VLi99aBvG" data-i18n="text,title">100K+ plays on RedNote</span>`
+                    : '';
             const inner =
+                badge +
                 `<div class="nav-landing-card-text">` +
                 `<span class="nav-landing-card-title" data-i18n>${escapeHtmlText(navMeta.title)}</span>` +
                 `<span class="nav-landing-card-subtitle" data-i18n>${escapeHtmlText(navMeta.subtitle)}</span>` +

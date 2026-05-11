@@ -6,9 +6,9 @@ import { visualizeSpecialChars } from '../utils/tokenDisplayUtils';
 import type { PromptTokenSpan } from './genAttributeDagPreprocess';
 
 export type GenAttrDagTokenGeom = {
-    /** 锚点 fragment 左上角（见 {@link geomFromTokenFragments}），DAG 节点框同点对齐 */
-    originX: number;
-    originY: number;
+    /** token 基础矩形（1× 尺寸）的中心坐标；同行 token 的 cy 相同，与 CI 缩放无关。 */
+    cx: number;
+    cy: number;
     width: number;
     height: number;
 };
@@ -93,8 +93,8 @@ function geomFromTokenFragments(frags: TokenFragmentRect[], raw: string): GenAtt
         : 1;
     const widthSum = Math.max(geomWidthSum, expandedFloor);
     return {
-        originX: first.x,
-        originY: first.y,
+        cx: first.x + widthSum / 2,
+        cy: first.y + hFirst / 2,
         width: widthSum,
         height: hFirst,
     };

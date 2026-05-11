@@ -16,6 +16,27 @@ _API = defaultdict(int)
 _OS_REPORTS = defaultdict(int)  # 与同页「首轮心跳」(delta_active_sec == total_active_sec) 对齐，仅凭该包附带 client_os 计一次
 _VALID_CLIENT_OS = frozenset({"ios", "android", "windows", "macos", "linux", "unknown"})
 
+# client/src/ts/utils/settingsMenuManager.ts handleVisitStatsClick：PAGE_ORDER / API_ORDER / OS_ORDER
+_STATS_PAGE_ORDER = (
+    "index.html",
+    "analysis.html",
+    "compare.html",
+    "chat.html",
+    "attribution.html",
+    "gen_attribute.html",
+)
+_STATS_API_ORDER = (
+    "analyze",
+    "analyze_semantic",
+    "chat",
+    "causal_flow",
+    "prediction_attribute",
+    "prediction_attribute__attribution.html",
+    "prediction_attribute__chat.html",
+    "prediction_attribute__analysis.html",
+)
+_STATS_OS_ORDER = ("ios", "android", "windows", "macos", "linux", "unknown")
+
 # RLock：_persist_tick 在已持锁时调用 _sample_locked_counters，同线程需可重入。
 _LOCK = threading.RLock()
 
@@ -32,6 +53,8 @@ _HF_REPO = "dqy08/info-lens-stats"
 _HF_TOKEN = os.environ.get("HF_TOKEN_stats_write")
 _HF_TOTAL_FILE = "stats_total.json"
 _HF_DELTA_DIR = "stats_delta"
+
+
 def _stats_record(saved_at: str, body: dict) -> dict:
     """total / delta 磁盘与仓库共用：saved_at + 计数字段 + server_platform（若有）"""
     return {"saved_at": saved_at, **body}
@@ -71,6 +94,13 @@ def _delta_repo_path(saved_at: str) -> str:
 
 def _restart_log_repo_path() -> str:
     return f"{_HF_DELTA_DIR}/{_delta_time_slug()}.restart.log"
+
+
+def _ordered_str_int_map(primary: tuple[str, ...], m: Mapping[str, object]) -> dict[str, int]:
+    primary_set = frozenset(primary)
+    head = [k for k in primary if k in m]
+    tail = sorted(k for k in m if k not in primary_set)
+    return {k: int(m[k]) for k in (*head, *tail)}
 
 
 def _download_stats_total() -> dict | None:
@@ -310,6 +340,13 @@ def _merge_from_sample(s: dict) -> tuple[dict, dict, dict]:
         for k in set(bpo) | set(so)
     }
 
+    total_page_sec = _ordered_str_int_map(_STATS_PAGE_ORDER, total_page_sec)
+    total_api = _ordered_str_int_map(_STATS_API_ORDER, total_api)
+    total_os = _ordered_str_int_map(_STATS_OS_ORDER, total_os)
+    ord_pg = _ordered_str_int_map(_STATS_PAGE_ORDER, sp)
+    ord_api = _ordered_str_int_map(_STATS_API_ORDER, sa)
+    ord_os = _ordered_str_int_map(_STATS_OS_ORDER, so)
+
     tpl, tav = s["bp"] + s["sw_pl"], s["bav"] + s["sw_av"]
 
     public = {
@@ -323,16 +360,16 @@ def _merge_from_sample(s: dict) -> tuple[dict, dict, dict]:
     stats_body = {
         "page_loads": tpl,
         "active_visits": tav,
+        "os": total_os,
         "page_sec": total_page_sec,
         "api": total_api,
-        "os": total_os,
     }
     delta_body = {
         "page_loads": s["sw_pl"],
         "active_visits": s["sw_av"],
-        "page_sec": sp,
-        "api": sa,
-        "os": so,
+        "os": ord_os,
+        "page_sec": ord_pg,
+        "api": ord_api,
     }
     return public, stats_body, delta_body
 

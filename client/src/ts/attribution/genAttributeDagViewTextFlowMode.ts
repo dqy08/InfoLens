@@ -2,8 +2,8 @@ import * as d3 from 'd3';
 import { linkSegmentThroughNodeRects } from './genAttributeDagLinkSegment';
 
 type TextFlowNodeLike = {
-    x: number;
-    y: number;
+    cx: number;
+    cy: number;
     nodeW: number;
     nodeH: number;
 };
@@ -23,5 +23,5 @@ export function paintTextFlowLayout<LinkDatum, NodeDatum extends TextFlowNodeLik
             .selectAll('path.gen-attr-dag-link-visible')
             .attr('d', `M ${seg.x1} ${seg.y1} L ${seg.x2} ${seg.y2}`);
     });
-    nodeSel.attr('transform', (d) => `translate(${d.x},${d.y})`);
+    nodeSel.attr('transform', (d) => `translate(${d.cx - d.nodeW / 2},${d.cy - d.nodeH / 2})`);
 }

@@ -29,6 +29,8 @@ export const translations: Translations = {
         '- attribute a predicted token to its context': '- 将预测 token 归因到上下文',
         'LLM Causal Flow': 'LLM Causal Flow 因果流',
         '- explore the context-attribution DAG': '- 探索上下文归因的 DAG 关系图',
+        '100K+ plays on RedNote': '小红书 10万+次播放',
+        'Go to demo on RedNote: xhslink.com/o/A7VLi99aBvG': '在小红书打开demo：xhslink.com/o/A7VLi99aBvG）',
         // 合成标题串（<title>）：英文 key 与 injectPageMeta documentTitleEn 拼接一致
         'Info Lens - A toolbox for exploring the informational nature of LLMs and language': 'Info Lens 信息透镜 - 用于探索 LLM 与语言的信息本质的工具箱',
         "Info Highlight - highlight the 'informative' parts": 'Info Highlight 信息高亮 - 高亮“信息量大”的地方',

@@ -185,6 +185,7 @@ html[data-theme='dark'] body.nav-landing-page {
 .nav-landing-card {
   display: flex;
   flex-direction: column;
+  position: relative;
   gap: $nav-card-gap;
   padding: $nav-card-pad-block $nav-card-pad-inline;
   border-radius: $nav-card-radius;
@@ -196,9 +197,50 @@ html[data-theme='dark'] body.nav-landing-page {
   transition: background 0.15s ease, border-color 0.15s ease;
   box-sizing: border-box;
 
-  &:hover {
+  &:hover:not(:has(.nav-landing-card-badge:hover, .nav-landing-card-badge:focus-visible)) {
     background: var(--nav-landing-card-bg-hover, #dcdcdc);
   }
+}
+
+.nav-landing-card-badge {
+  position: absolute;
+  top: -10px;
+  right: 12px;
+  z-index: 2;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  border: 1px solid rgba(212, 107, 8, 0.35);
+  background: rgba(255, 247, 230, 0.78);
+  color: rgba(141, 73, 0, 0.86);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 22px;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.82;
+  transition: opacity 0.16s ease, background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.nav-landing-card-badge:hover,
+.nav-landing-card-badge:focus-visible {
+  opacity: 1;
+  border-color: #ffb86b;
+  background: #fff2d9;
+  color: #ad4e00;
+}
+
+html[data-theme='dark'] .nav-landing-card-badge {
+  border-color: rgba(212, 107, 8, 0.42);
+  background: #383028;
+  color: rgba(237, 214, 192, 0.95);
+}
+
+html[data-theme='dark'] .nav-landing-card-badge:hover,
+html[data-theme='dark'] .nav-landing-card-badge:focus-visible {
+  border-color: #ffb86b;
+  background: #4a4034;
+  color: #fff2e8;
 }
 
 html[data-theme='dark'] .nav-landing-card {

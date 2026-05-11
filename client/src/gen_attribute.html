@@ -228,6 +228,26 @@
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
                         <span class="semantic-submode-group">
                             <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_node_ci_visual_scale" checked
+                                    title="When checked, generated nodes are visually enlarged based on their conditional information (surprisal). Takes effect on next generation."
+                                    data-i18n="title">
+                                Enlarge high-surprisal nodes
+                            </label>
+                        </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_edge_weaken_high_surprisal" checked
+                                    title="When checked, edges leading to high-surprisal (uncertain) target tokens are visually weakened by the mutual information ratio. Takes effect on next generation."
+                                    data-i18n="title">
+                                Weaken attribution to high-surprisal target
+                            </label>
+                        </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_hide_inactive_edges"
                                     title="When checked, gray DAG edges not adjacent to the hovered or selected node are hidden."
                                     data-i18n="title">
