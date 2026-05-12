@@ -408,7 +408,8 @@ export class SettingsMenuManager {
             const GREEN = '#22c55e';
             const g = (s: string) => `<span style="color:${GREEN}">${s}</span>`;
             const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            const sb = data.startup_base ?? {};
+            // 优先用 reset_base，否则回退到 startup_base
+            const sb = (Object.keys(data.reset_base ?? {}).length > 0 ? data.reset_base : data.startup_base) ?? {};
 
             const deltaSuffix = (d: number) => d !== 0 ? ` ${g(`(${d > 0 ? '+' : ''}${d})`)}` : '';
             const t = data.totals;
@@ -426,10 +427,10 @@ export class SettingsMenuManager {
             };
 
             return [
-                `Process start: ${esc(data.process_start_at ? new Date(data.process_start_at).toLocaleString() : 'unknown')}`,
+                `Last delta reset: ${esc(data.reset_at ? new Date(data.reset_at).toLocaleString() : 'unknown')}`,
                 `Last persisted: ${esc(data.saved_at ? new Date(data.saved_at).toLocaleString() : 'unknown')}`,
                 '',
-                `[All-time (${g('+ delta since process start')})]`,
+                `[All-time (${g('+ delta since reset')})]`,
                 `Page loads: ${fmtTotal(t.page_loads)}${deltaSuffix(t.page_loads - (sb.page_loads ?? 0))}`,
                 `Active visits: ${fmtTotal(t.active_visits)}${deltaSuffix(t.active_visits - (sb.active_visits ?? 0))}`,
                 '',
@@ -472,8 +473,32 @@ export class SettingsMenuManager {
             title: 'Visit Stats',
             content: (dialog) => {
                 const wrap = dialog.append('div').attr('class', 'dialog-form-container');
+                const headerRow = wrap.append('div')
+                    .style('display', 'flex')
+                    .style('justify-content', 'flex-end')
+                    .style('align-items', 'center')
+                    .style('gap', '6px')
+                    .style('margin-bottom', '6px');
                 const body = wrap.append('div');
-                wrap.append('button')
+                headerRow.append('button')
+                    .attr('type', 'button')
+                    .attr('class', 'refresh-btn')
+                    .style('font-size', '13px')
+                    .attr('title', 'Persist current increments then reset delta base')
+                    .text('Persist and reset delta')
+                    .on('click', async function () {
+                        const btn = d3.select(this);
+                        btn.property('disabled', true).text('…');
+                        try {
+                            const res = await this.api.resetVisitStats();
+                            if (!res?.success) throw new Error(res?.error ?? 'failed');
+                            await fetchAndRender(body);
+                        } catch (e) {
+                            alert(`Reset failed: ${e}`);
+                        }
+                        btn.property('disabled', false).text('Persist and reset delta');
+                    }.bind(this));
+                headerRow.append('button')
                     .attr('type', 'button')
                     .attr('class', 'refresh-btn')
                     .attr('title', 'Refresh')

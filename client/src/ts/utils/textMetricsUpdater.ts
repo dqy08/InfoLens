@@ -9,19 +9,16 @@ export type ApiTokenUsage = {
     total_tokens?: number;
 };
 
+function usageTokenLabel(n: unknown): string {
+    return typeof n === 'number' && Number.isFinite(n) ? String(n) : 'unknown';
+}
+
 function formatApiUsageLine(usage: ApiTokenUsage | null | undefined): string | null {
     if (!usage) return null;
-    const parts: string[] = [];
-    if (typeof usage.prompt_tokens === 'number' && Number.isFinite(usage.prompt_tokens)) {
-        parts.push(`prompt ${usage.prompt_tokens} tokens`);
-    }
-    if (typeof usage.completion_tokens === 'number' && Number.isFinite(usage.completion_tokens)) {
-        parts.push(`completion ${usage.completion_tokens} tokens`);
-    }
-    if (typeof usage.total_tokens === 'number' && Number.isFinite(usage.total_tokens)) {
-        parts.push(`total ${usage.total_tokens} tokens`);
-    }
-    return parts.length > 0 ? parts.join('<br/>') : null;
+    const total = usageTokenLabel(usage.total_tokens);
+    const p = usageTokenLabel(usage.prompt_tokens);
+    const c = usageTokenLabel(usage.completion_tokens);
+    return `${total} tokens<br/>prompt | completion = ${p} | ${c} tokens`;
 }
 
 /** 仅展示后端返回的 usage（如 Chat 页，无 bytes/chars/tokens/surprisal） */

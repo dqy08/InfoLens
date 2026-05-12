@@ -47,11 +47,16 @@ _base: dict = {}
 _startup_base: dict = {}
 _process_start_at: str | None = None
 
+# 手动 reset 后的快照基线与时间，持久化到 HF，重启后保留。
+_reset_base: dict = {}
+_reset_at: str | None = None
+
 _cached_server_platform: str | None = None
 
 _HF_REPO = "dqy08/info-lens-stats"
 _HF_TOKEN = os.environ.get("HF_TOKEN_stats_write")
 _HF_TOTAL_FILE = "stats_total.json"
+_HF_RESET_BASE_FILE = "stats_reset_base.json"
 _HF_DELTA_DIR = "stats_delta"
 
 
@@ -226,6 +231,47 @@ def _load_base():
     print(f"[访问统计] 历史已加载 page_loads={pl} active_visits={av}", flush=True)
 
 
+def _load_reset_base():
+    global _reset_base, _reset_at
+    if not _HF_TOKEN:
+        return
+    try:
+        from huggingface_hub import hf_hub_download
+        path = hf_hub_download(
+            repo_id=_HF_REPO,
+            filename=_HF_RESET_BASE_FILE,
+            repo_type="dataset",
+            token=_HF_TOKEN,
+            force_download=True,
+        )
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        with _LOCK:
+            _reset_base = copy.deepcopy(data)
+            _reset_at = data.get("reset_at")
+        print(f"[访问统计] delta reset base 已加载 reset_at={_reset_at}", flush=True)
+    except Exception as e:
+        print(f"[访问统计] 读取 {_HF_RESET_BASE_FILE} 失败（首次或未设置）: {e}", flush=True)
+
+
+def reset_delta_base() -> bool:
+    """先 persist 当前增量，再将落盘后的累计快照保存为 delta reset base。"""
+    global _reset_base, _reset_at
+    _persist_tick()
+    sample = _sample_locked_counters()
+    _, stats_body, _ = _merge_from_sample(sample)
+    reset_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    reset_rec = {"reset_at": reset_at, **stats_body}
+    if _HF_TOKEN and not _upload_dataset_record(_HF_RESET_BASE_FILE, reset_rec):
+        print("[访问统计] reset base 持久化失败。", flush=True)
+        return False
+    with _LOCK:
+        _reset_base = copy.deepcopy(reset_rec)
+        _reset_at = reset_at
+    print(f"[访问统计] delta reset base 已更新 reset_at={reset_at}", flush=True)
+    return True
+
+
 def _persist_tick():
     """先读 stats_total 再写：delta 与 total 为同一 record 形状；两次上传均成功后提交 _base，并减去本周期对应会话快照。"""
     global _base
@@ -381,12 +427,15 @@ def get_stats_snapshot() -> dict:
     public["startup_base"] = _startup_base
     if _process_start_at is not None:
         public["process_start_at"] = _process_start_at
+    public["reset_base"] = _reset_base
+    public["reset_at"] = _reset_at
     return public
 
 
 def _daemon_persist_hourly():
     global _startup_base, _process_start_at
     _load_base()
+    _load_reset_base()
     _startup_base = copy.deepcopy(_base)
     _process_start_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     _report_restart_event()

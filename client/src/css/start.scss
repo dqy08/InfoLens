@@ -62,6 +62,7 @@
   --primary-color: #2196F3;  // 主题色（链接、当前模型标题等）
   --text-disabled: #999;  // 禁用态文本
   --text-area-bg: #fff;  // 文本显示区域背景色
+  --textarea-actions-button-row-min-height: 3.5rem; // textarea 下「按钮 + stats」行最小高度（analysis / chat / attribution / gen_attribute）
   --minimap-width: 8px;  // minimap 宽度
   --tooltip-text-normal: #333;  // tooltip普通文本颜色
   --tooltip-text-selected: #933;  // tooltip选中文本颜色
@@ -205,6 +206,7 @@ textarea{
     justify-content: space-between;  // Analyze在左，Save在右
     align-items: center;
     width: 100%;
+    min-height: var(--textarea-actions-button-row-min-height);
     margin-top: 5px;
     gap: 10px;
     box-sizing: border-box;  // 确保宽度计算正确

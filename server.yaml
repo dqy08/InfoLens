@@ -855,6 +855,38 @@ paths:
                 type: string
                 description: |
                   统计线程完成 _load_base 并拍下 startup_base 时的 UTC 时间（与 saved_at 相同格式）。
+              reset_base:
+                type: object
+                description: |
+                  最近一次手动 reset 时的全量快照；前端用 totals − reset_base 计算自 reset 以来的增量。
+              reset_at:
+                type: string
+                description: |
+                  最近一次手动 reset 的 UTC 时间；从未 reset 时为 null。
+
+  /visit_stats/reset:
+    post:
+      tags:
+        - all
+      summary: reset delta base (admin only)
+      operationId: server.post_visit_stats_reset
+      responses:
+        200:
+          description: reset base saved
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+        500:
+          description: persist failed
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              error:
+                type: string
 
 definitions:
   # 与 client generatedSchemas TokenWithOffset 一致；信息密度 analyze 与 completions info_radar 共用

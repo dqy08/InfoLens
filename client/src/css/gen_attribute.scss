@@ -3,6 +3,8 @@
 @use "generation-status";
 @use "lmf-readout" as lmf;
 
+$gen-attr-option-row-gap: 12px;
+
 // 单行右对齐：Cached history 最右、下拉相对整行 bar 全宽；Cached demos 靠其左侧、下拉随按钮宽（同 query-history 默认 left/right 于窄 wrapper）
 .chat-cached-history-bar.chat-cached-history-bar--dual {
   position: relative;
@@ -354,6 +356,10 @@ body.gen-attribute-page .input-section {
       color: var(--text-primary);
     }
   }
+
+  .textarea-wrapper.chat-prompt-actions-row > .chat-completion-options-row.semantic-submode-row {
+    gap: $gen-attr-option-row-gap;
+  }
 }
 
 // 与 Attribution 页 Exclude prompt patterns 同形；generated 仅本页有 UI（持久化键见 attributionExclude*PatternsStorage）
@@ -363,9 +369,9 @@ body.gen-attribute-page .input-section {
   flex-direction: column;
   gap: 4px;
 
-  // Teacher forcing：与同页 Chat 模板的相邻面板间距（12px，见 chat.scss `#chat_input_panel`）对齐；容器默认 gap 仅 4px 会显得挤。
+  // 勾选行 ↔ Forced continuation：间距仅来自 .input-header padding-top（避免与本行 gap 叠成双份）
   &:has(.gen-attr-teacher-forcing-toggle-row) {
-    gap: 12px;
+    gap: 0;
   }
 }
 
@@ -424,11 +430,18 @@ body.gen-attribute-page .input-section {
 .gen-attr-dag-measure-width-row {
   margin-top: 8px;
   flex-wrap: wrap;
+
+  &.semantic-submode-row {
+    gap: $gen-attr-option-row-gap;
+  }
+}
+
+// 高 surprisal 两项勾选项：固定同一行，避免与其它 DAG 行一致的 wrap 把两项拆成两行
+.gen-attr-dag-measure-width-row.gen-attr-dag-surprisal-toggles-row {
+  flex-wrap: nowrap;
 }
 
 .gen-attr-dag-measure-width-row .gen-attr-dag-layout-mode-group {
-  margin-right: 12px;
-
   .semantic-submode-label,
   .gen-attr-dag-layout-mode-select {
     font-weight: 700;

@@ -253,9 +253,24 @@ export class TextAnalysisAPI {
             api?: Record<string, number>,
             os?: Record<string, number>,
         },
+        reset_base?: {
+            page_loads?: number,
+            active_visits?: number,
+            page_sec?: Record<string, number>,
+            api?: Record<string, number>,
+            os?: Record<string, number>,
+        },
+        reset_at?: string | null,
     }> {
         return d3.json(this.baseURL + '/api/visit_stats', {
             headers: this.getHeaders()
+        });
+    }
+
+    public resetVisitStats(): Promise<{ success: boolean, error?: string }> {
+        return d3.json(this.baseURL + '/api/visit_stats/reset', {
+            method: 'POST',
+            headers: this.getHeaders(),
         });
     }
 

@@ -5,9 +5,9 @@
 @use "lmf-readout" as lmf;
 @use "query-history-dropdown" as qh;
 
-// Raw prompt mode 行在输入区上方，与下方面板留出间距
+// 与下方面板的间距由 .input-header { padding-top } 承担，避免与本行 margin-bottom 叠成双倍
 .input-section > .chat-raw-prompt-mode-row {
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 // 与 Raw prompt 行同结构：Ask 行上方单独配置（max new tokens）

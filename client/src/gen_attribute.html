@@ -225,7 +225,7 @@
                             <span class="semantic-submode-label">px</span>
                         </span>
                     </div>
-                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
+                    <div class="gen-attr-dag-measure-width-row gen-attr-dag-surprisal-toggles-row semantic-submode-row">
                         <span class="semantic-submode-group">
                             <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_node_ci_visual_scale" checked
@@ -234,8 +234,6 @@
                                 Enlarge high-surprisal nodes
                             </label>
                         </span>
-                    </div>
-                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
                         <span class="semantic-submode-group">
                             <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_edge_weaken_high_surprisal" checked
@@ -247,21 +245,19 @@
                     </div>
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
                         <span class="semantic-submode-group">
+                            <label class="semantic-submode-label" for="gen_attr_dag_edge_top_p_coverage" data-i18n>Edge top-p coverage</label>
+                            <input type="number" id="gen_attr_dag_edge_top_p_coverage" class="gen-attr-dag-measure-width-input"
+                                value="0.7" min="0.05" max="1" step="0.05"
+                                title="Coverage is the cumulative mass share within each generation step's Top-N candidate pool (after sorting candidates into the pool and normalizing mass inside that pool). Higher values keep more incoming edges. The denominator is this pool only, not every token-attribution entry returned for the step."
+                                data-i18n="title">
+                        </span>
+                        <span class="semantic-submode-group">
                             <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_hide_inactive_edges"
                                     title="When checked, gray DAG edges not adjacent to the hovered or selected node are hidden."
                                     data-i18n="title">
                                 Hide inactive edges
                             </label>
-                        </span>
-                    </div>
-                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
-                        <span class="semantic-submode-group">
-                            <label class="semantic-submode-label" for="gen_attr_dag_edge_top_p_coverage" data-i18n>Edge top-p coverage</label>
-                            <input type="number" id="gen_attr_dag_edge_top_p_coverage" class="gen-attr-dag-measure-width-input"
-                                value="0.7" min="0.05" max="1" step="0.05"
-                                title="Coverage is the cumulative mass share within each generation step's Top-N candidate pool (after sorting candidates into the pool and normalizing mass inside that pool). Higher values keep more incoming edges. The denominator is this pool only, not every token-attribution entry returned for the step."
-                                data-i18n="title">
                         </span>
                     </div>
                     <div class="attribution-exclude-prompt-patterns-row">
