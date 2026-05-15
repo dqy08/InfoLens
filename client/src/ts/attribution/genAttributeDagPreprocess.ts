@@ -1,8 +1,4 @@
 import {
-    readStoredEffectiveExcludeGeneratedPatternsText,
-    readStoredEffectiveExcludePromptPatternsText,
-} from './attributionExcludePromptPatternsStorage';
-import {
     collectExcludeRegexMatchIntervals,
     isOffsetSpanFullyExcluded,
 } from './attributionDisplayModel';
@@ -120,18 +116,23 @@ export function extractPromptTokenSpans(step: TokenGenStep): PromptTokenSpan[] {
     return [...byKey.values()];
 }
 
-/** 与 {@link excludeNodeAggregatedEntries} 使用同一套 prompt / 生成区与 storage 文本，在 `intervalCtx` 上收集排除区间（全串下标）。 */
+/**
+ * 在 `intervalCtx` 上收集排除区间（全串下标）；正则全文由调用方提供（Gen Attribute 页与控件一致）。
+ * 与 {@link excludeNodeAggregatedEntries} 须传入同一套 `excludePromptPatternsText` / `excludeGeneratedPatternsText`。
+ */
 export function collectGenAttrDagExcludeIntervals(
     intervalCtx: string,
     promptRegionEnd: number,
+    excludePromptPatternsText: string,
+    excludeGeneratedPatternsText: string,
 ): [number, number][] {
     const pe = promptRegionEnd;
     return [
-        ...collectExcludeRegexMatchIntervals(intervalCtx, readStoredEffectiveExcludePromptPatternsText(), {
+        ...collectExcludeRegexMatchIntervals(intervalCtx, excludePromptPatternsText, {
             start: 0,
             end: pe,
         }),
-        ...collectExcludeRegexMatchIntervals(intervalCtx, readStoredEffectiveExcludeGeneratedPatternsText(), {
+        ...collectExcludeRegexMatchIntervals(intervalCtx, excludeGeneratedPatternsText, {
             start: pe,
             end: intervalCtx.length,
         }),
@@ -144,17 +145,26 @@ export function collectGenAttrDagExcludeIntervals(
  *
  * @param excludeIntervalContext 取匹配区间所用的全文（与 DAG 节点 offset 同源）。流式场景传**当前已写出的累积串**
  *（如 `steps[last].context + steps[last].token`），使跨多 token 才闭合的正则与下标一致；缺省为 `step.context`。
+ * @param excludePromptPatternsText prompt 区 `[0, promptRegionEnd)` 上使用的排除正则全文（勾选关时传 `''`）。
+ * @param excludeGeneratedPatternsText 已生成后缀区上使用的排除正则全文（勾选关时传 `''`）。
  */
 export function excludeNodeAggregatedEntries(
     step: TokenGenStep,
     entries: NodeAggregatedEntry[],
-    excludeIntervalContext?: string,
+    excludeIntervalContext: string | undefined,
+    excludePromptPatternsText: string,
+    excludeGeneratedPatternsText: string,
 ): NodeAggregatedEntry[] {
     if (!entries.length) return [];
 
     const pe = step.promptRegionEnd;
     const intervalCtx = excludeIntervalContext ?? step.context;
-    const excludeIntervals = collectGenAttrDagExcludeIntervals(intervalCtx, pe);
+    const excludeIntervals = collectGenAttrDagExcludeIntervals(
+        intervalCtx,
+        pe,
+        excludePromptPatternsText,
+        excludeGeneratedPatternsText,
+    );
     return entries.map((t) => {
         const [ts, te] = t.offset;
         const excluded = isOffsetSpanFullyExcluded(ts, te, excludeIntervals);

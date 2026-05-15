@@ -580,6 +580,34 @@ export function createNamePathTextContent(
 }
 
 /**
+ * 将地址栏风格的输入转为绝对 URL：缺协议时补 `https://`；`//host/path` 先去掉协议相对前缀再补全。
+ * 若无法解析则返回 null。
+ */
+function normalizeUserFetchUrl(raw: string): string | null {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+        return null;
+    }
+    try {
+        new URL(trimmed);
+        return trimmed;
+    } catch {
+        if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed)) {
+            return null;
+        }
+        const rest = trimmed.replace(/^\/+/, '');
+        if (!rest) {
+            return null;
+        }
+        try {
+            return new URL(`https://${rest}`).href;
+        } catch {
+            return null;
+        }
+    }
+}
+
+/**
  * 创建 URL 输入弹窗内容（URL 输入框）
  */
 export function createUrlInputContent(
@@ -596,7 +624,8 @@ export function createUrlInputContent(
             .text(label);
 
         const input = container.append('input')
-            .attr('type', 'url')
+            .attr('type', 'text')
+            .attr('inputmode', 'url')
             .attr('class', 'dialog-input')
             .attr('value', defaultValue)
             .attr('placeholder', placeholder || 'https://example.com');
@@ -626,21 +655,21 @@ export function createUrlInputContent(
         return {
             getValue: () => {
                 const inputNode = input.node() as HTMLInputElement;
-                return inputNode?.value?.trim() || '';
+                const raw = inputNode?.value?.trim() || '';
+                return normalizeUserFetchUrl(raw) ?? '';
             },
             validate: () => {
                 const inputNode = input.node() as HTMLInputElement;
-                const value = inputNode?.value?.trim() || '';
-                // 基本的 URL 验证
-                if (value.length === 0) {
+                const raw = inputNode?.value?.trim() || '';
+                if (raw.length === 0) {
+                    showAlertDialog(tr('Invalid input'), tr('Please enter a URL.'));
                     return false;
                 }
-                try {
-                    new URL(value);
+                if (normalizeUserFetchUrl(raw)) {
                     return true;
-                } catch {
-                    return false;
                 }
+                showAlertDialog(tr('Invalid URL'), tr('This does not look like a valid URL. Check for typos.'));
+                return false;
             },
             focus: () => {
                 const inputNode = input.node() as HTMLInputElement;

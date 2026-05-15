@@ -1,8 +1,5 @@
 import {
-    DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT,
     DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT,
-    EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY,
-    EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY,
     EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
     EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY,
 } from './attributionExcludePromptPatternsStorage';
@@ -92,7 +89,8 @@ function bindExcludePatternsUi(options: BindExcludePatternsUiOptions): void {
 }
 
 /**
- * Exclude prompt patterns：Attribution 与 Generate & Attribute 页共用，storage 见 {@link attributionExcludePromptPatternsStorage}。
+ * Exclude prompt patterns：归因页绑定；键名见 {@link ./attributionExcludePromptPatternsStorage}。
+ * Generate & Attribute 页的排除在 `gen_attribute.ts` 内单独绑定（`info_radar_gen_attr_exclude_*`）。
  */
 export function bindExcludePromptPatternsUi(options: BindExcludePromptPatternsUiOptions): void {
     bindExcludePatternsUi({
@@ -102,17 +100,5 @@ export function bindExcludePromptPatternsUi(options: BindExcludePromptPatternsUi
         },
         ...options,
         defaultTextWhenKeyAbsent: DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT,
-    });
-}
-
-/** Exclude generated patterns：仅 Generate & Attribute 页绑定；storage 键见 {@link attributionExcludePromptPatternsStorage}。 */
-export function bindExcludeGeneratedPatternsUi(options: BindExcludePromptPatternsUiOptions): void {
-    bindExcludePatternsUi({
-        storageKeys: {
-            textKey: EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY,
-            enabledKey: EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY,
-        },
-        ...options,
-        defaultTextWhenKeyAbsent: DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT,
     });
 }

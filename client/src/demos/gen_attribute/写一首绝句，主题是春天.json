@@ -15733,5 +15733,254 @@
       "token": "<|im_end|>",
       "currentText": "春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新晴日，  \n一缕芬芳入梦时。<|im_end|>"
     }
-  ]
+  ],
+  "promptSpans": [
+    {
+      "offset": [
+        0,
+        12
+      ],
+      "raw": "<|im_start|>"
+    },
+    {
+      "offset": [
+        12,
+        18
+      ],
+      "raw": "system"
+    },
+    {
+      "offset": [
+        18,
+        19
+      ],
+      "raw": "\n"
+    },
+    {
+      "offset": [
+        19,
+        22
+      ],
+      "raw": "You"
+    },
+    {
+      "offset": [
+        22,
+        26
+      ],
+      "raw": " are"
+    },
+    {
+      "offset": [
+        26,
+        28
+      ],
+      "raw": " a"
+    },
+    {
+      "offset": [
+        28,
+        36
+      ],
+      "raw": " helpful"
+    },
+    {
+      "offset": [
+        36,
+        46
+      ],
+      "raw": " assistant"
+    },
+    {
+      "offset": [
+        46,
+        47
+      ],
+      "raw": "."
+    },
+    {
+      "offset": [
+        47,
+        57
+      ],
+      "raw": "<|im_end|>"
+    },
+    {
+      "offset": [
+        57,
+        58
+      ],
+      "raw": "\n"
+    },
+    {
+      "offset": [
+        58,
+        70
+      ],
+      "raw": "<|im_start|>"
+    },
+    {
+      "offset": [
+        70,
+        74
+      ],
+      "raw": "user"
+    },
+    {
+      "offset": [
+        74,
+        75
+      ],
+      "raw": "\n"
+    },
+    {
+      "offset": [
+        75,
+        76
+      ],
+      "raw": "写"
+    },
+    {
+      "offset": [
+        76,
+        78
+      ],
+      "raw": "一首"
+    },
+    {
+      "offset": [
+        78,
+        79
+      ],
+      "raw": "绝"
+    },
+    {
+      "offset": [
+        79,
+        80
+      ],
+      "raw": "句"
+    },
+    {
+      "offset": [
+        80,
+        81
+      ],
+      "raw": "，"
+    },
+    {
+      "offset": [
+        81,
+        83
+      ],
+      "raw": "主题"
+    },
+    {
+      "offset": [
+        83,
+        84
+      ],
+      "raw": "是"
+    },
+    {
+      "offset": [
+        84,
+        86
+      ],
+      "raw": "春天"
+    },
+    {
+      "offset": [
+        86,
+        87
+      ],
+      "raw": "。"
+    },
+    {
+      "offset": [
+        87,
+        97
+      ],
+      "raw": "<|im_end|>"
+    },
+    {
+      "offset": [
+        97,
+        98
+      ],
+      "raw": "\n"
+    },
+    {
+      "offset": [
+        98,
+        110
+      ],
+      "raw": "<|im_start|>"
+    },
+    {
+      "offset": [
+        110,
+        119
+      ],
+      "raw": "assistant"
+    },
+    {
+      "offset": [
+        119,
+        120
+      ],
+      "raw": "\n"
+    },
+    {
+      "offset": [
+        120,
+        127
+      ],
+      "raw": "<think>"
+    },
+    {
+      "offset": [
+        127,
+        129
+      ],
+      "raw": "\n\n"
+    },
+    {
+      "offset": [
+        129,
+        137
+      ],
+      "raw": "</think>"
+    },
+    {
+      "offset": [
+        137,
+        139
+      ],
+      "raw": "\n\n"
+    }
+  ],
+  "draft": {
+    "mode": "raw",
+    "model": "base",
+    "maxTokens": 200
+  },
+  "demoUiOptions": {
+    "layoutMode": "text-flow",
+    "measureWidthPx": 400,
+    "dagCompactness": 0.5,
+    "linearArcAdjacentGapPx": 0,
+    "hideExcludedTokens": false,
+    "edgeTopPCoverage": 0.7,
+    "nodeCiVisualScaleEnabled": true,
+    "edgeWeakenHighSurprisalEnabled": true,
+    "hideInactiveEdges": false,
+    "replayPacingMode": "step",
+    "playbackTotalS": 7,
+    "playbackStepMs": 200,
+    "excludePromptPatternsEnabled": true,
+    "excludePromptPatternsText": "#comment# use '#comment#' to comment lines; support regex\n<\\|im_start\\|>system\\n\n<\\|im_start\\|>user\\n\n<\\|im_start\\|>assistant\\n\n<\\|im_start\\|>assistant\\n\\n\n<\\|im_end\\|>\\n\n<think>\\n\\n\n</think>\\n\\n\n<\\|im_start\\|>system\\n[\\s\\S]*?<\\|im_end\\|>#comment# all system prompt",
+    "excludeGeneratedPatternsEnabled": true,
+    "excludeGeneratedPatternsText": "<think>\\n\n</think>\\n\\n"
+  }
 }

@@ -44,14 +44,21 @@ import { fetchTokenize } from './attribution/predictionAttributeClient';
 import { completionFinishReasonLabel, type CompletionFinishReason } from './utils/generationEndReasonLabel';
 import {
     buildCachedContentUrlParam,
+    buildGenAttrExportedDemoPayload,
     getCachedEntryByContentKey,
     listCachedHistoryRows,
     removeCachedEntryByContentKey,
     save,
     touchCachedEntryByContentKey,
+    type GenAttrCachedRun,
+    type GenAttrDemoUiOptions,
     type GenAttrCacheKey,
+    type GenAttrRunDraft,
 } from './storage/genAttributeRunCache';
-import { bindExcludeGeneratedPatternsUi, bindExcludePromptPatternsUi } from './attribution/excludePromptPatternsUi';
+import {
+    DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT,
+    DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT,
+} from './attribution/attributionExcludePromptPatternsStorage';
 import { initCachedHistoryQueryDropdown, type CachedHistorySelectContext } from './utils/cachedHistoryUi';
 import {
     DEFAULT_CONTENT_URL_PARAM,
@@ -69,7 +76,6 @@ import {
 } from './demos/genAttributeBundledDemos';
 import { extractErrorMessage } from './utils/errorUtils';
 import { exportJsonFile } from './storage/localFileIO';
-import type { GenAttrCachedRun, GenAttrRunDraft } from './storage/genAttributeRunCache';
 import {
     GEN_ATTR_RAW_INPUT_HISTORY_KEY,
     GEN_ATTR_SYSTEM_INPUT_HISTORY_KEY,
@@ -107,6 +113,13 @@ const GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY =
     'info_radar_gen_attr_dag_linear_arc_adjacent_gap';
 const GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY = 'info_radar_gen_attr_dag_compactness';
 const GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY = 'info_radar_gen_attr_dag_edge_top_p_coverage';
+/** 仅此页：与 Attribution 的 `exclude_tokens` 无关。 */
+const GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY = 'info_radar_gen_attr_exclude_prompt_patterns';
+const GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY =
+    'info_radar_gen_attr_exclude_prompt_patterns_enabled';
+const GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY = 'info_radar_gen_attr_exclude_generated_patterns';
+const GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY =
+    'info_radar_gen_attr_exclude_generated_patterns_enabled';
 
 /** 步进回放节奏：`total`＝整段剩余回放总时长内均分间隔；`step`＝固定每步间隔（ms）。 */
 type DagReplayPacingMode = 'total' | 'step';
@@ -392,7 +405,68 @@ const dagEdgeWeakenHighSurprisalInput = document.getElementById(
 const dagHideInactiveEdgesInput = document.getElementById(
     'gen_attr_dag_hide_inactive_edges'
 ) as HTMLInputElement | null;
+const genAttrExcludePromptPatternsTa = document.getElementById(
+    'gen_attr_exclude_prompt_patterns'
+) as HTMLTextAreaElement | null;
+const genAttrExcludePromptPatternsEnable = document.getElementById(
+    'gen_attr_exclude_prompt_patterns_enable'
+) as HTMLInputElement | null;
+const genAttrExcludeGeneratedPatternsTa = document.getElementById(
+    'gen_attr_exclude_generated_patterns'
+) as HTMLTextAreaElement | null;
+const genAttrExcludeGeneratedPatternsEnable = document.getElementById(
+    'gen_attr_exclude_generated_patterns_enable'
+) as HTMLInputElement | null;
 const completeReasonEl = d3.select('#gen_attr_complete_reason');
+
+function syncGenAttrExcludePatternTextareasDisabled(): void {
+    if (genAttrExcludePromptPatternsTa) {
+        genAttrExcludePromptPatternsTa.disabled = !genAttrExcludePromptPatternsEnable?.checked;
+    }
+    if (genAttrExcludeGeneratedPatternsTa) {
+        genAttrExcludeGeneratedPatternsTa.disabled = !genAttrExcludeGeneratedPatternsEnable?.checked;
+    }
+}
+
+function hydrateGenAttrExcludePatternsFromGenAttrStorage(): void {
+    try {
+        const savedPrompt = localStorage.getItem(GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY);
+        if (genAttrExcludePromptPatternsTa) {
+            genAttrExcludePromptPatternsTa.value =
+                savedPrompt !== null ? savedPrompt : DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT;
+        }
+        const promptEnRaw = localStorage.getItem(GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY);
+        if (genAttrExcludePromptPatternsEnable) {
+            genAttrExcludePromptPatternsEnable.checked = promptEnRaw === null ? true : promptEnRaw === '1';
+        }
+
+        const savedGen = localStorage.getItem(GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY);
+        if (genAttrExcludeGeneratedPatternsTa) {
+            genAttrExcludeGeneratedPatternsTa.value =
+                savedGen !== null ? savedGen : DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT;
+        }
+        const genEnRaw = localStorage.getItem(GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY);
+        if (genAttrExcludeGeneratedPatternsEnable) {
+            genAttrExcludeGeneratedPatternsEnable.checked = genEnRaw === null ? true : genEnRaw === '1';
+        }
+    } catch {
+        /* ignore */
+    }
+    syncGenAttrExcludePatternTextareasDisabled();
+}
+
+hydrateGenAttrExcludePatternsFromGenAttrStorage();
+
+/** 与 DAG 同源：DAG 预处理按当前控件即时读取，不读 Attribution 的 localStorage。 */
+function genAttrEffectiveExcludePromptPatternsText(): string {
+    if (!genAttrExcludePromptPatternsEnable?.checked) return '';
+    return genAttrExcludePromptPatternsTa?.value ?? '';
+}
+
+function genAttrEffectiveExcludeGeneratedPatternsText(): string {
+    if (!genAttrExcludeGeneratedPatternsEnable?.checked) return '';
+    return genAttrExcludeGeneratedPatternsTa?.value ?? '';
+}
 
 if (modelVariantSelect) modelVariantSelect.value = readStoredModelVariant();
 if (maxTokensInput) maxTokensInput.value = String(readStoredMaxTokens());
@@ -623,6 +697,29 @@ function teacherForcingContinuationForRun(): string | undefined {
     if (!isGenAttrTeacherForcingUiOn()) return undefined;
     const t = (teacherForcingTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
     return t.length > 0 ? t : undefined;
+}
+
+/** 与 IndexedDB `save` 使用同一快照逻辑（须在 `autoMoveFirstTeacherForcingTokenToPromptIfNeeded` 之后调用）。 */
+function buildGenAttrRunDraftForCache(): GenAttrRunDraft {
+    const teacherForcingText = teacherForcingContinuationForRun();
+    const stopAfterTF = isStopAfterTeacherForcingOn();
+    const maxTokens = currentMaxTokens();
+    const tokenizeModel = currentModelVariant();
+    const tfDraftFields =
+        teacherForcingText !== undefined
+            ? { teacherForcing: teacherForcingText, stopAfterTeacherForcing: stopAfterTF }
+            : {};
+    return isSkipChatTemplate()
+        ? { mode: 'raw', model: tokenizeModel, maxTokens, ...tfDraftFields }
+        : {
+              mode: 'chat',
+              model: tokenizeModel,
+              maxTokens,
+              system: systemPromptTextarea?.value ?? '',
+              user: userPromptTextarea?.value ?? '',
+              useSystem: isGenAttrUseSystemPrompt(),
+              ...tfDraftFields,
+          };
 }
 
 function syncTeacherForcingRow(): void {
@@ -903,6 +1000,8 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
     hideExcludedTokens: initialDagHideExcludedTokens,
     edgeTopPCoverage: initialDagEdgeTopPCoverage,
     onFullscreenError: (message) => showToast(message, 'error'),
+    getEffectiveExcludePromptPatternsText: genAttrEffectiveExcludePromptPatternsText,
+    getEffectiveExcludeGeneratedPatternsText: genAttrEffectiveExcludeGeneratedPatternsText,
 });
 
 dagLayoutModeSelect?.addEventListener('change', () => {
@@ -994,6 +1093,152 @@ dagLinearArcIntervalInput?.addEventListener('change', () => {
     dagHandle.setLinearArcAdjacentGapPx(n, { skipRefit: isDagBusy() });
 });
 
+/** 读取当前演示用 UI（DAG 与排除正则等），供 Export demo 写入 `demoUiOptions`。 */
+function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
+    const rawW = parseInt(dagMeasureWidthInput?.value ?? '', 10);
+    const measureWidthPx = Number.isFinite(rawW)
+        ? clampDagMeasureWidth(rawW)
+        : GEN_ATTR_DAG_MEASURE_WIDTH_DEFAULT;
+    const rawC = parseFloat(dagCompactnessInput?.value ?? '');
+    const dagCompactness = Number.isFinite(rawC)
+        ? clampDagCompactness(rawC)
+        : DAG_COMPACTNESS_DEFAULT;
+    const rawGap = parseInt(dagLinearArcIntervalInput?.value ?? '', 10);
+    const linearArcAdjacentGapPx = Number.isFinite(rawGap)
+        ? clampLinearArcAdjacentGap(rawGap)
+        : LINEAR_ARC_ADJACENT_GAP_DEFAULT;
+    const rawTop = parseFloat(dagEdgeTopPCoverageInput?.value ?? '');
+    const edgeTopPCoverage = Number.isFinite(rawTop)
+        ? clampDagEdgeTopPCoverage(rawTop)
+        : DAG_EDGE_TOP_P_COVERAGE_DEFAULT;
+    const rawTotal = parseInt(dagPlaybackTotalSInput?.value ?? '', 10);
+    const playbackTotalS = Number.isFinite(rawTotal)
+        ? clampDagPlaybackTotalS(rawTotal)
+        : GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT;
+    const rawStep = parseInt(dagPlaybackStepMsInput?.value ?? '', 10);
+    const playbackStepMs = Number.isFinite(rawStep)
+        ? clampDagPlaybackStepMs(rawStep)
+        : GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT;
+    return {
+        layoutMode: currentDagLayoutMode(),
+        measureWidthPx,
+        dagCompactness,
+        linearArcAdjacentGapPx,
+        hideExcludedTokens: dagHideExcludedTokensInput?.checked ?? false,
+        edgeTopPCoverage,
+        nodeCiVisualScaleEnabled: dagNodeCiVisualScaleInput?.checked ?? true,
+        edgeWeakenHighSurprisalEnabled: dagEdgeWeakenHighSurprisalInput?.checked ?? true,
+        hideInactiveEdges: dagHideInactiveEdgesInput?.checked ?? false,
+        replayPacingMode: currentDagReplayPacingMode(),
+        playbackTotalS,
+        playbackStepMs,
+        excludePromptPatternsEnabled: genAttrExcludePromptPatternsEnable?.checked ?? true,
+        excludePromptPatternsText: genAttrExcludePromptPatternsTa?.value ?? '',
+        excludeGeneratedPatternsEnabled: genAttrExcludeGeneratedPatternsEnable?.checked ?? true,
+        excludeGeneratedPatternsText: genAttrExcludeGeneratedPatternsTa?.value ?? '',
+    };
+}
+
+/**
+ * 从 `demoUiOptions` 还原排除控件（仅 DOM）；与施加 DAG demo 不回写 GEN_ATTR_LS 的策略一致，`replay` 读当前控件生效。
+ */
+function applyGenAttrExcludePatternsFromDemoUiSnap(snap: Partial<GenAttrDemoUiOptions>): void {
+    const {
+        excludePromptPatternsEnabled,
+        excludePromptPatternsText,
+        excludeGeneratedPatternsEnabled,
+        excludeGeneratedPatternsText,
+    } = snap;
+    if (
+        excludePromptPatternsEnabled === undefined &&
+        excludePromptPatternsText === undefined &&
+        excludeGeneratedPatternsEnabled === undefined &&
+        excludeGeneratedPatternsText === undefined
+    ) {
+        return;
+    }
+    if (excludePromptPatternsEnabled !== undefined && genAttrExcludePromptPatternsEnable) {
+        genAttrExcludePromptPatternsEnable.checked = excludePromptPatternsEnabled;
+    }
+    if (excludePromptPatternsText !== undefined && genAttrExcludePromptPatternsTa) {
+        genAttrExcludePromptPatternsTa.value = excludePromptPatternsText;
+    }
+    if (excludeGeneratedPatternsEnabled !== undefined && genAttrExcludeGeneratedPatternsEnable) {
+        genAttrExcludeGeneratedPatternsEnable.checked = excludeGeneratedPatternsEnabled;
+    }
+    if (excludeGeneratedPatternsText !== undefined && genAttrExcludeGeneratedPatternsTa) {
+        genAttrExcludeGeneratedPatternsTa.value = excludeGeneratedPatternsText;
+    }
+    syncGenAttrExcludePatternTextareasDisabled();
+}
+
+/**
+ * 按记录中的 `demoUiOptions` 还原 DAG 面板与排除控件（后者仅 DOM）。
+ */
+function applyGenAttrDemoUiOptionsFromRecord(rec: GenAttrCachedRun): void {
+    const snap = rec.demoUiOptions;
+    if (!snap) return;
+    const mode = snap.layoutMode;
+    if (mode) {
+        if (dagLayoutModeSelect) {
+            dagLayoutModeSelect.value = mode;
+        }
+        applyDagLayoutModeUi();
+        dagHandle.setLayoutMode(mode);
+    }
+
+    if (snap.measureWidthPx !== undefined) {
+        const w = clampDagMeasureWidth(snap.measureWidthPx);
+        if (dagMeasureWidthInput) dagMeasureWidthInput.value = String(w);
+        dagHandle.setMeasureWidthPx(w);
+    }
+    if (snap.dagCompactness !== undefined) {
+        const c = clampDagCompactness(snap.dagCompactness);
+        if (dagCompactnessInput) dagCompactnessInput.value = String(c);
+        dagHandle.setDagCompactness(c);
+    }
+    if (snap.linearArcAdjacentGapPx !== undefined) {
+        const n = clampLinearArcAdjacentGap(snap.linearArcAdjacentGapPx);
+        if (dagLinearArcIntervalInput) dagLinearArcIntervalInput.value = String(n);
+        dagHandle.setLinearArcAdjacentGapPx(n);
+    }
+    if (snap.edgeTopPCoverage !== undefined) {
+        const c = clampDagEdgeTopPCoverage(snap.edgeTopPCoverage);
+        if (dagEdgeTopPCoverageInput) dagEdgeTopPCoverageInput.value = String(c);
+        dagHandle.setEdgeTopPCoverage(c);
+    }
+    if (snap.hideExcludedTokens !== undefined) {
+        if (dagHideExcludedTokensInput) dagHideExcludedTokensInput.checked = snap.hideExcludedTokens;
+        dagHandle.setHideExcludedTokens(snap.hideExcludedTokens);
+    }
+    if (snap.nodeCiVisualScaleEnabled !== undefined) {
+        if (dagNodeCiVisualScaleInput) dagNodeCiVisualScaleInput.checked = snap.nodeCiVisualScaleEnabled;
+        setDagNodeCiVisualScaleEnabled(snap.nodeCiVisualScaleEnabled);
+    }
+    if (snap.edgeWeakenHighSurprisalEnabled !== undefined) {
+        if (dagEdgeWeakenHighSurprisalInput) dagEdgeWeakenHighSurprisalInput.checked = snap.edgeWeakenHighSurprisalEnabled;
+        setDagEdgeWeakenHighSurprisalEnabled(snap.edgeWeakenHighSurprisalEnabled);
+    }
+    if (snap.hideInactiveEdges !== undefined) {
+        if (dagHideInactiveEdgesInput) dagHideInactiveEdgesInput.checked = snap.hideInactiveEdges;
+        applyDagHideInactiveEdges(snap.hideInactiveEdges);
+    }
+    if (snap.replayPacingMode !== undefined) {
+        if (dagReplayModeSelect) dagReplayModeSelect.value = snap.replayPacingMode;
+        applyDagReplaySpeedUi();
+    }
+    if (snap.playbackTotalS !== undefined) {
+        const s = clampDagPlaybackTotalS(snap.playbackTotalS);
+        if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = String(s);
+    }
+    if (snap.playbackStepMs !== undefined) {
+        const ms = clampDagPlaybackStepMs(snap.playbackStepMs);
+        if (dagPlaybackStepMsInput) dagPlaybackStepMsInput.value = String(ms);
+    }
+
+    applyGenAttrExcludePatternsFromDemoUiSnap(snap);
+}
+
 window.addEventListener('pagehide', (ev) => {
     if (ev.persisted) return;
     dagHandle.detach();
@@ -1007,16 +1252,40 @@ function onExcludePatternsEffectiveChange(): void {
     dagHandle.clearNodeSelection();
 }
 
-bindExcludePromptPatternsUi({
-    textInput: document.getElementById('gen_attr_exclude_prompt_patterns') as HTMLTextAreaElement | null,
-    enableCheckbox: document.getElementById('gen_attr_exclude_prompt_patterns_enable') as HTMLInputElement | null,
-    onEffectiveChange: onExcludePatternsEffectiveChange,
-});
-bindExcludeGeneratedPatternsUi({
-    textInput: document.getElementById('gen_attr_exclude_generated_patterns') as HTMLTextAreaElement | null,
-    enableCheckbox: document.getElementById('gen_attr_exclude_generated_patterns_enable') as HTMLInputElement | null,
-    onEffectiveChange: onExcludePatternsEffectiveChange,
-});
+function bindExcludePatternControls(
+    enableEl: HTMLInputElement | null,
+    textEl: HTMLTextAreaElement | null,
+    textKey: string,
+    enabledKey: string,
+): void {
+    enableEl?.addEventListener('change', () => {
+        try {
+            if (textEl) localStorage.setItem(textKey, textEl.value);
+            localStorage.setItem(enabledKey, enableEl.checked ? '1' : '0');
+        } catch { /* ignore */ }
+        syncGenAttrExcludePatternTextareasDisabled();
+        onExcludePatternsEffectiveChange();
+    });
+    textEl?.addEventListener('blur', () => {
+        try {
+            localStorage.setItem(textKey, textEl.value);
+        } catch { /* ignore */ }
+        onExcludePatternsEffectiveChange();
+    });
+}
+
+bindExcludePatternControls(
+    genAttrExcludePromptPatternsEnable,
+    genAttrExcludePromptPatternsTa,
+    GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY,
+    GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
+);
+bindExcludePatternControls(
+    genAttrExcludeGeneratedPatternsEnable,
+    genAttrExcludeGeneratedPatternsTa,
+    GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY,
+    GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY,
+);
 
 function currentModelVariant(): PredictionAttributeModelVariant {
     const v = modelVariantSelect?.value;
@@ -1306,6 +1575,7 @@ async function applyGenAttrCachedRun(
 
     stopDagPlayback();
     dagHandle.reset();
+    applyGenAttrDemoUiOptionsFromRecord(rec);
     runnerHandle = createHydratedTokenGenHandle(rec.steps);
     lastRunInitialContext = rec.initialContext;
     lastRunInputSnapshot = getInputSnapshotForRun();
@@ -1475,7 +1745,11 @@ void (async () => {
         try {
             const rec = await fetchBundledGenAttributeDemoBySlug(demoRaw);
             if (!isStaleGenAttrCachedApply(applyGen) && rec && isGenAttrRunPayloadValidForUi(rec)) {
-                await applyGenAttrCachedRun(rec, { afterUrl: { kind: 'demo', slug: demoRaw } }, applyGen);
+                await applyGenAttrCachedRun(
+                    rec,
+                    { afterUrl: { kind: 'demo', slug: demoRaw } },
+                    applyGen
+                );
                 if (!isStaleGenAttrCachedApply(applyGen)) {
                     applied = true;
                 }
@@ -1593,20 +1867,7 @@ async function runGeneration(): Promise<void> {
         const stopAfterTF = isStopAfterTeacherForcingOn();
         const maxTokens = currentMaxTokens();
         const tokenizeModel = currentModelVariant();
-        const tfDraftFields = teacherForcingText !== undefined
-            ? { teacherForcing: teacherForcingText, stopAfterTeacherForcing: stopAfterTF }
-            : {};
-        const runDraft: GenAttrRunDraft = isSkipChatTemplate()
-            ? { mode: 'raw', model: tokenizeModel, maxTokens, ...tfDraftFields }
-            : {
-                mode: 'chat',
-                model: tokenizeModel,
-                maxTokens,
-                system: systemPromptTextarea?.value ?? '',
-                user: userPromptTextarea?.value ?? '',
-                useSystem: isGenAttrUseSystemPrompt(),
-                ...tfDraftFields,
-            };
+        const runDraft = buildGenAttrRunDraftForCache();
         const prompt = getActivePromptValue();
         analyzeProgressEl.text('Assembling prompt…').style('display', null);
         initialContext = await resolveInitialContext(signal);
@@ -1773,18 +2034,29 @@ function syncGenAttrExportDemoBtn(): void {
 syncGenAttrExportDemoBtn();
 adminManager.onAdminModeChange(() => syncGenAttrExportDemoBtn());
 exportDemoBtn?.addEventListener('click', () => {
-    const h = runnerHandle;
-    const ic = lastRunInitialContext;
-    if (!h || !ic || h.tokenCount < 1) {
-        showToast(tr('No run to export'), 'error');
-        return;
-    }
-    const payload: GenAttrCachedRun = {
-        initialContext: ic,
-        steps: h.getAllSteps(),
-        ...(lastRunCompletionReason != null ? { completionReason: lastRunCompletionReason } : {}),
-    };
-    void exportJsonFile(payload, `genattr-${Date.now()}.json`);
+    void (async () => {
+        const h = runnerHandle;
+        const ic = lastRunInitialContext;
+        if (!h || !ic || h.tokenCount < 1) {
+            showToast(tr('No run to export'), 'error');
+            return;
+        }
+        await autoMoveFirstTeacherForcingTokenToPromptIfNeeded();
+        try {
+            const payload = buildGenAttrExportedDemoPayload({
+                initialContext: ic,
+                steps: h.getAllSteps(),
+                promptSpans: currentRunPromptSpans,
+                completionReason: lastRunCompletionReason ?? undefined,
+                draft: buildGenAttrRunDraftForCache(),
+                demoUiOptions: readGenAttrDemoUiOptionsFromControls(),
+            });
+            void exportJsonFile(payload, `genattr-${Date.now()}.json`);
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            showToast(msg, 'error');
+        }
+    })();
 });
 
 initChatPanelLayout({ storageKey: PANEL_SPLIT_STORAGE_KEY_GEN_ATTRIBUTE });

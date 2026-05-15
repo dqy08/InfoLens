@@ -1,8 +1,10 @@
+import type { DagLayoutMode } from '../attribution/genAttributeDagView';
 import type { TokenGenStep } from '../attribution/tokenGenAttributionRunner';
 import type { PromptTokenSpan } from '../attribution/genAttributeDagPreprocess';
 import {
     canonicalizeCompletionFinishReason,
     isCompletionFinishReason,
+    isKnownPersistedCompletionReason,
     type CompletionFinishReason,
 } from '../utils/generationEndReasonLabel';
 import {
@@ -37,7 +39,12 @@ export type GenAttrRunDraft = {
     stopAfterTeacherForcing?: boolean;
 };
 
-export type GenAttrCachedRun = {
+/**
+ * Payload 中与 **正文 / demo UI 选项** 中的 UI 无关的内容（一次 run 的 JSON 主体）：
+ * - **Key 语义**（去重哈希）单独由 {@link GenAttrCacheKey} 表示并排他参与 `contentKey`；
+ * - UI 控件快照见可选字段 {@link GenAttrCachedRun.demoUiOptions}（仅导出 demo）。
+ */
+export type GenAttrCachedRunContentFields = {
     initialContext: string;
     steps: TokenGenStep[];
     /** 完整 prompt token spans（offset + raw），与 /api/tokenize 同源；旧缓存无此字段时由调用方从 step 0 归因降级。 */
@@ -49,7 +56,37 @@ export type GenAttrCachedRun = {
 };
 
 /**
- * 缓存业务 key：涵盖所有影响 steps 内容的生成参数。
+ * Gen Attribute 页 **演示用 UI** 快照（DAG 几何与勾选、回放节奏、归因排除正则等；与正文 key 无关）。
+ * **Export demo** 写入完整对象；加载时可为 {@link Partial}，按存在字段逐项应用。
+ */
+export type GenAttrDemoUiOptions = {
+    layoutMode: DagLayoutMode;
+    measureWidthPx: number;
+    dagCompactness: number;
+    linearArcAdjacentGapPx: number;
+    hideExcludedTokens: boolean;
+    edgeTopPCoverage: number;
+    nodeCiVisualScaleEnabled: boolean;
+    edgeWeakenHighSurprisalEnabled: boolean;
+    hideInactiveEdges: boolean;
+    replayPacingMode: 'total' | 'step';
+    playbackTotalS: number;
+    playbackStepMs: number;
+    /** 排除 prompt token 归因：使能与正则文本（仅 Gen Attribute，`info_radar_gen_attr_exclude_prompt_*`）。 */
+    excludePromptPatternsEnabled: boolean;
+    excludePromptPatternsText: string;
+    /** 排除生成 token 归因：使能与正则文本（`info_radar_gen_attr_exclude_generated_*`）。 */
+    excludeGeneratedPatternsEnabled: boolean;
+    excludeGeneratedPatternsText: string;
+};
+
+/** 单条记录 JSON：内容字段 + 可选 `demoUiOptions`（仅导出 demo 写入）。 */
+export type GenAttrCachedRun = GenAttrCachedRunContentFields & {
+    demoUiOptions?: Partial<GenAttrDemoUiOptions>;
+};
+
+/**
+ * 缓存业务 **key 字段**：涵盖所有影响 `steps` 内容的生成参数（决定 `contentKey`）。
  * 原则：draft 中存储的可变参数均纳入 key，同参数不同结果不应互相覆盖。
  */
 export type GenAttrCacheKey = {
@@ -77,6 +114,193 @@ function keyHash(key: GenAttrCacheKey): string {
     return buildContentKeyFromBusinessKey(normalizeKey(key));
 }
 
+/** 构造「内容字段」：供 IndexedDB `save` 与导出 demo 的共有主体（不含 demo UI）。 */
+export function buildGenAttrCachedRunContentPayload(params: {
+    initialContext: string;
+    steps: TokenGenStep[];
+    promptSpans: PromptTokenSpan[];
+    completionReason?: CompletionFinishReason;
+    draft?: GenAttrRunDraft;
+}): GenAttrCachedRunContentFields {
+    const { initialContext, steps, promptSpans, completionReason, draft } = params;
+    let reasonToStore: CompletionFinishReason | undefined;
+    if (completionReason !== undefined) {
+        const c = canonicalizeCompletionFinishReason(completionReason);
+        if (!isCompletionFinishReason(c)) {
+            throw new Error(`gen_attr cache: invalid completionReason: ${completionReason}`);
+        }
+        reasonToStore = c;
+    }
+    return {
+        initialContext,
+        steps,
+        ...(promptSpans.length > 0 ? { promptSpans } : {}),
+        ...(reasonToStore !== undefined ? { completionReason: reasonToStore } : {}),
+        ...(draft !== undefined ? { draft } : {}),
+    };
+}
+
+/**
+ * 仅 **Export demo** 使用：在内容字段上附加 **demoUiOptions** 全量（history 不得调用）。
+ */
+export function buildGenAttrExportedDemoPayload(
+    params: {
+        initialContext: string;
+        steps: TokenGenStep[];
+        promptSpans: PromptTokenSpan[];
+        completionReason?: CompletionFinishReason;
+        draft?: GenAttrRunDraft;
+        demoUiOptions: GenAttrDemoUiOptions;
+    }
+): GenAttrCachedRun {
+    const { demoUiOptions, ...contentParams } = params;
+    return { ...buildGenAttrCachedRunContentPayload(contentParams), demoUiOptions };
+}
+
+function isValidPromptSpansPayload(v: unknown): boolean {
+    if (!Array.isArray(v)) return false;
+    for (const item of v) {
+        if (item == null || typeof item !== 'object') return false;
+        const o = item as Record<string, unknown>;
+        const off = o.offset;
+        if (!Array.isArray(off) || off.length !== 2) return false;
+        if (typeof off[0] !== 'number' || !Number.isFinite(off[0])) return false;
+        if (typeof off[1] !== 'number' || !Number.isFinite(off[1])) return false;
+        if (typeof o.raw !== 'string') return false;
+        if (o.token_id !== undefined && (typeof o.token_id !== 'number' || !Number.isFinite(o.token_id))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function isValidGenAttrRunDraftPayload(v: unknown): boolean {
+    if (v == null || typeof v !== 'object') return false;
+    const d = v as Record<string, unknown>;
+    if (d.mode !== 'raw' && d.mode !== 'chat') return false;
+    if (d.model !== undefined && typeof d.model !== 'string') return false;
+    if (d.maxTokens !== undefined && (typeof d.maxTokens !== 'number' || !Number.isFinite(d.maxTokens))) {
+        return false;
+    }
+    if (d.system !== undefined && typeof d.system !== 'string') return false;
+    if (d.user !== undefined && typeof d.user !== 'string') return false;
+    if (d.useSystem !== undefined && typeof d.useSystem !== 'boolean') return false;
+    if (d.teacherForcing !== undefined && typeof d.teacherForcing !== 'string') return false;
+    if (d.stopAfterTeacherForcing !== undefined && typeof d.stopAfterTeacherForcing !== 'boolean') {
+        return false;
+    }
+    return true;
+}
+
+function isDagLayoutModePayload(v: unknown): v is DagLayoutMode {
+    return v === 'text-flow' || v === 'linear-arc' || v === 'spiral';
+}
+
+function isValidDemoUiOptionsPayload(v: unknown): v is Partial<GenAttrDemoUiOptions> {
+    if (v == null || typeof v !== 'object') return false;
+    const d = v as Record<string, unknown>;
+    if (d.layoutMode !== undefined && !isDagLayoutModePayload(d.layoutMode)) return false;
+    if (d.measureWidthPx !== undefined && (typeof d.measureWidthPx !== 'number' || !Number.isFinite(d.measureWidthPx))) {
+        return false;
+    }
+    if (d.dagCompactness !== undefined && (typeof d.dagCompactness !== 'number' || !Number.isFinite(d.dagCompactness))) {
+        return false;
+    }
+    if (
+        d.linearArcAdjacentGapPx !== undefined &&
+        (typeof d.linearArcAdjacentGapPx !== 'number' || !Number.isFinite(d.linearArcAdjacentGapPx))
+    ) {
+        return false;
+    }
+    if (d.hideExcludedTokens !== undefined && typeof d.hideExcludedTokens !== 'boolean') return false;
+    if (
+        d.edgeTopPCoverage !== undefined &&
+        (typeof d.edgeTopPCoverage !== 'number' || !Number.isFinite(d.edgeTopPCoverage))
+    ) {
+        return false;
+    }
+    if (d.nodeCiVisualScaleEnabled !== undefined && typeof d.nodeCiVisualScaleEnabled !== 'boolean') {
+        return false;
+    }
+    if (d.edgeWeakenHighSurprisalEnabled !== undefined && typeof d.edgeWeakenHighSurprisalEnabled !== 'boolean') {
+        return false;
+    }
+    if (d.hideInactiveEdges !== undefined && typeof d.hideInactiveEdges !== 'boolean') return false;
+    if (d.replayPacingMode !== undefined && d.replayPacingMode !== 'total' && d.replayPacingMode !== 'step') {
+        return false;
+    }
+    if (d.playbackTotalS !== undefined && (typeof d.playbackTotalS !== 'number' || !Number.isFinite(d.playbackTotalS))) {
+        return false;
+    }
+    if (d.playbackStepMs !== undefined && (typeof d.playbackStepMs !== 'number' || !Number.isFinite(d.playbackStepMs))) {
+        return false;
+    }
+    if (
+        d.excludePromptPatternsEnabled !== undefined &&
+        typeof d.excludePromptPatternsEnabled !== 'boolean'
+    ) {
+        return false;
+    }
+    if (d.excludePromptPatternsText !== undefined && typeof d.excludePromptPatternsText !== 'string') {
+        return false;
+    }
+    if (
+        d.excludeGeneratedPatternsEnabled !== undefined &&
+        typeof d.excludeGeneratedPatternsEnabled !== 'boolean'
+    ) {
+        return false;
+    }
+    if (
+        d.excludeGeneratedPatternsText !== undefined &&
+        typeof d.excludeGeneratedPatternsText !== 'string'
+    ) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * 打包 demo JSON 与 Cached history 负载对齐：`steps` 仅要求非空数组（细粒度由运行时承担）。
+ */
+export function isValidGenAttrCachedRunPayload(v: unknown): v is GenAttrCachedRun {
+    if (v == null || typeof v !== 'object') return false;
+    const o = v as Record<string, unknown>;
+    if (typeof o.initialContext !== 'string' || !Array.isArray(o.steps) || o.steps.length === 0) {
+        return false;
+    }
+    if (o.completionReason !== undefined) {
+        if (typeof o.completionReason !== 'string' || !isKnownPersistedCompletionReason(o.completionReason)) {
+            return false;
+        }
+    }
+    if (o.promptSpans !== undefined && !isValidPromptSpansPayload(o.promptSpans)) {
+        return false;
+    }
+    if (o.draft !== undefined && !isValidGenAttrRunDraftPayload(o.draft)) {
+        return false;
+    }
+    if (o.demoUiOptions !== undefined && !isValidDemoUiOptionsPayload(o.demoUiOptions)) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * 加载 demo 与加载 IndexedDB 历史共用的入口：`unknown` → 合法则返回记录，否则打日志并返回 `undefined`。
+ */
+export function parseGenAttrCachedRunPayload(
+    raw: unknown,
+    contextForLog?: string
+): GenAttrCachedRun | undefined {
+    if (!isValidGenAttrCachedRunPayload(raw)) {
+        const suffix =
+            contextForLog !== undefined && contextForLog.length > 0 ? ` (${contextForLog})` : '';
+        console.warn(`[genAttributeRunCache] invalid GenAttrCachedRun payload${suffix}`);
+        return undefined;
+    }
+    return raw;
+}
+
 export async function save(
     key: GenAttrCacheKey,
     steps: TokenGenStep[],
@@ -86,21 +310,13 @@ export async function save(
     draft?: GenAttrRunDraft
 ): Promise<void> {
     const { initialContext } = key;
-    let reasonToStore: CompletionFinishReason | undefined;
-    if (completionReason !== undefined) {
-        const c = canonicalizeCompletionFinishReason(completionReason);
-        if (!isCompletionFinishReason(c)) {
-            throw new Error(`gen_attr cache: invalid completionReason: ${completionReason}`);
-        }
-        reasonToStore = c;
-    }
-    const payload: GenAttrCachedRun = {
+    const payload = buildGenAttrCachedRunContentPayload({
         initialContext,
         steps,
-        ...(promptSpans.length > 0 ? { promptSpans } : {}),
-        ...(reasonToStore !== undefined ? { completionReason: reasonToStore } : {}),
-        ...(draft !== undefined ? { draft } : {}),
-    };
+        promptSpans,
+        completionReason,
+        draft,
+    });
     await upsertEntry({
         namespace: NAMESPACE,
         businessKeyJson: JSON.stringify(normalizeKey(key)),
@@ -113,13 +329,15 @@ export async function save(
 
 export async function get(key: GenAttrCacheKey): Promise<GenAttrCachedRun | undefined> {
     const row = await getByContentKey<GenAttrCachedRun>(NAMESPACE, keyHash(key));
-    return row?.payload;
+    if (!row) return undefined;
+    return parseGenAttrCachedRunPayload(row.payload, 'get(GenAttrCacheKey)');
 }
 
 export async function getCachedEntryByContentKey(raw: string): Promise<GenAttrCachedRun | undefined> {
     if (!raw) return undefined;
     const row = await getByContentKey<GenAttrCachedRun>(NAMESPACE, raw);
-    return row?.payload;
+    if (!row) return undefined;
+    return parseGenAttrCachedRunPayload(row.payload, `contentKey=${raw}`);
 }
 
 export function buildCachedContentUrlParam(key: GenAttrCacheKey): string {

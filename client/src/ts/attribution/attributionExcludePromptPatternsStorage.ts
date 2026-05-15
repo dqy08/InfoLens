@@ -1,13 +1,9 @@
 /**
- * 与 {@link ./excludePromptPatternsUi bindExcludePromptPatternsUi} / {@link ./excludePromptPatternsUi bindExcludeGeneratedPatternsUi} 同步持久化。
- * Prompt 键名保留历史前缀 `exclude_tokens`，避免用户已存配置失效。
+ * 归因页 Exclude prompt：`bindExcludePromptPatternsUi` / {@link readStoredEffectiveExcludePromptPatternsText} 共用键名。
+ * Prompt 键名保留历史前缀 `exclude_tokens`。Generate & Attribute 页的排除正则使用独立 `info_radar_gen_attr_exclude_*`，与此处解耦。
  */
 export const EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY = 'info_radar_attribution_exclude_tokens';
 export const EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY = 'info_radar_attribution_exclude_tokens_enabled';
-
-export const EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY = 'info_radar_attribution_exclude_generated_tokens';
-export const EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY =
-    'info_radar_attribution_exclude_generated_tokens_enabled';
 
 /**
  * 首次使用（`exclude_tokens` 键从未写入）时 UI 与生效逻辑采用的默认行；`''` 表示用户已显式清空，不再使用本默认。
@@ -26,7 +22,7 @@ export const DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT = [
 ].join('\n');
 
 /**
- * 首次使用（`exclude_generated_tokens` 键从未写入）时 Generate & Attribute「Exclude generated」的默认行。
+ * Generate & Attribute「Exclude generated」占位默认文案；该页的存储键前缀为 `info_radar_gen_attr_exclude_generated_*`。
  */
 export const DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT = [
     '<think>\\n',
@@ -44,23 +40,6 @@ export function readStoredEffectiveExcludePromptPatternsText(): string {
         if (!enabled) return '';
         const raw = localStorage.getItem(EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY);
         if (raw === null) return DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT;
-        return raw;
-    } catch {
-        return '';
-    }
-}
-
-/**
- * Generate & Attribute「Exclude generated patterns」：未持久化文本键（`null`）时用
- * {@link DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT}；已持久化空串表示用户选择排除零条模式。
- */
-export function readStoredEffectiveExcludeGeneratedPatternsText(): string {
-    try {
-        const enabledRaw = localStorage.getItem(EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY);
-        const enabled = enabledRaw === null ? true : enabledRaw === '1';
-        if (!enabled) return '';
-        const raw = localStorage.getItem(EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY);
-        if (raw === null) return DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT;
         return raw;
     } catch {
         return '';

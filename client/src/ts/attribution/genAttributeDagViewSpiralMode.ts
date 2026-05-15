@@ -7,11 +7,11 @@ const SPIRAL_R0 = 80;
 /** 相邻两圈之间的径向间距（px）。 */
 const SPIRAL_SPACING = 60;
 /** 每个 token 沿螺旋弧长占据的固定步长（px）。 */
-const SPIRAL_ARC_STEP = 40;
+const SPIRAL_ARC_STEP = 30;
 /** 螺旋旋转相位（弧度）：控制螺旋臂展开方向。0 = 向右，-Math.PI/2 = 向上。 */
 const SPIRAL_PHASE = Math.PI * 0.6;
 /** 螺旋上第一个（起始位置）token 的相对视觉放大倍数（仅 spiral 布局）。 */
-const SPIRAL_FIRST_TOKEN_SCALE = 2;
+const SPIRAL_FIRST_TOKEN_SCALE = 1.5;
 // ────────────────────────────────────────────────────────────────────────────
 
 type SpiralNodeLike = { nodeW: number; nodeH: number };

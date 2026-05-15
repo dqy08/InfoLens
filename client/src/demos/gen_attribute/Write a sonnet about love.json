@@ -117181,5 +117181,240 @@
       "token": "<|im_end|>",
       "currentText": "In twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,  \nBut in the heart, love's truest light.<|im_end|>"
     }
-  ]
+  ],
+  "promptSpans": [
+    {
+      "offset": [
+        0,
+        12
+      ],
+      "raw": "<|im_start|>"
+    },
+    {
+      "offset": [
+        12,
+        18
+      ],
+      "raw": "system"
+    },
+    {
+      "offset": [
+        18,
+        19
+      ],
+      "raw": "\n"
+    },
+    {
+      "offset": [
+        19,
+        22
+      ],
+      "raw": "You"
+    },
+    {
+      "offset": [
+        22,
+        26
+      ],
+      "raw": " are"
+    },
+    {
+      "offset": [
+        26,
+        28
+      ],
+      "raw": " a"
+    },
+    {
+      "offset": [
+        28,
+        36
+      ],
+      "raw": " helpful"
+    },
+    {
+      "offset": [
+        36,
+        46
+      ],
+      "raw": " assistant"
+    },
+    {
+      "offset": [
+        46,
+        47
+      ],
+      "raw": "."
+    },
+    {
+      "offset": [
+        47,
+        57
+      ],
+      "raw": "<|im_end|>"
+    },
+    {
+      "offset": [
+        57,
+        58
+      ],
+      "raw": "\n"
+    },
+    {
+      "offset": [
+        58,
+        70
+      ],
+      "raw": "<|im_start|>"
+    },
+    {
+      "offset": [
+        70,
+        74
+      ],
+      "raw": "user"
+    },
+    {
+      "offset": [
+        74,
+        75
+      ],
+      "raw": "\n"
+    },
+    {
+      "offset": [
+        75,
+        80
+      ],
+      "raw": "Write"
+    },
+    {
+      "offset": [
+        80,
+        82
+      ],
+      "raw": " a"
+    },
+    {
+      "offset": [
+        82,
+        86
+      ],
+      "raw": " son"
+    },
+    {
+      "offset": [
+        86,
+        89
+      ],
+      "raw": "net"
+    },
+    {
+      "offset": [
+        89,
+        95
+      ],
+      "raw": " about"
+    },
+    {
+      "offset": [
+        95,
+        100
+      ],
+      "raw": " love"
+    },
+    {
+      "offset": [
+        100,
+        101
+      ],
+      "raw": "."
+    },
+    {
+      "offset": [
+        101,
+        111
+      ],
+      "raw": "<|im_end|>"
+    },
+    {
+      "offset": [
+        111,
+        112
+      ],
+      "raw": "\n"
+    },
+    {
+      "offset": [
+        112,
+        124
+      ],
+      "raw": "<|im_start|>"
+    },
+    {
+      "offset": [
+        124,
+        133
+      ],
+      "raw": "assistant"
+    },
+    {
+      "offset": [
+        133,
+        134
+      ],
+      "raw": "\n"
+    },
+    {
+      "offset": [
+        134,
+        141
+      ],
+      "raw": "<think>"
+    },
+    {
+      "offset": [
+        141,
+        143
+      ],
+      "raw": "\n\n"
+    },
+    {
+      "offset": [
+        143,
+        151
+      ],
+      "raw": "</think>"
+    },
+    {
+      "offset": [
+        151,
+        153
+      ],
+      "raw": "\n\n"
+    }
+  ],
+  "draft": {
+    "mode": "raw",
+    "model": "base",
+    "maxTokens": 200
+  },
+  "demoUiOptions": {
+    "layoutMode": "text-flow",
+    "measureWidthPx": 400,
+    "dagCompactness": 0.6,
+    "linearArcAdjacentGapPx": 0,
+    "hideExcludedTokens": false,
+    "edgeTopPCoverage": 0.7,
+    "nodeCiVisualScaleEnabled": true,
+    "edgeWeakenHighSurprisalEnabled": true,
+    "hideInactiveEdges": false,
+    "replayPacingMode": "step",
+    "playbackTotalS": 7,
+    "playbackStepMs": 100,
+    "excludePromptPatternsEnabled": true,
+    "excludePromptPatternsText": "#comment# use '#comment#' to comment lines; support regex\n<\\|im_start\\|>system\\n\n<\\|im_start\\|>user\\n\n<\\|im_start\\|>assistant\\n\n<\\|im_start\\|>assistant\\n\\n\n<\\|im_end\\|>\\n\n<think>\\n\\n\n</think>\\n\\n\n<\\|im_start\\|>system\\n[\\s\\S]*?<\\|im_end\\|>#comment# all system prompt",
+    "excludeGeneratedPatternsEnabled": true,
+    "excludeGeneratedPatternsText": "<think>\\n\n</think>\\n\\n"
+  }
 }

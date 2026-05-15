@@ -2,8 +2,11 @@
  * Gen Attribute 打包 demo：大 JSON 在 `dist/demos/gen_attribute/`，运行时 fetch；slug 列表构建期内联自 generated 模块。
  */
 
-import type { GenAttrCachedRun } from '../storage/genAttributeRunCache';
-import { isKnownPersistedCompletionReason } from '../utils/generationEndReasonLabel';
+import {
+    isValidGenAttrCachedRunPayload,
+    parseGenAttrCachedRunPayload,
+    type GenAttrCachedRun,
+} from '../storage/genAttributeRunCache';
 import { GEN_ATTRIBUTE_BUNDLED_DEMO_SLUGS } from './genAttributeBundledDemoManifest.generated';
 
 const BASE = 'demos/gen_attribute/';
@@ -15,28 +18,6 @@ function baseUrl(): URL {
 function isSafeDemoSlug(s: string): boolean {
     if (s.length === 0 || s.length > 512) return false;
     if (s.includes('..') || s.includes('/') || s.includes('\\')) return false;
-    return true;
-}
-
-function isValidGenAttrCachedRunPayload(v: unknown): v is GenAttrCachedRun {
-    if (v == null || typeof v !== 'object') return false;
-    const o = v as {
-        initialContext?: unknown;
-        steps?: unknown;
-        completionReason?: unknown;
-    };
-    if (
-        typeof o.initialContext !== 'string' ||
-        !Array.isArray(o.steps) ||
-        o.steps.length === 0
-    ) {
-        return false;
-    }
-    if (o.completionReason !== undefined) {
-        if (typeof o.completionReason !== 'string' || !isKnownPersistedCompletionReason(o.completionReason)) {
-            return false;
-        }
-    }
     return true;
 }
 
@@ -67,12 +48,10 @@ export async function fetchBundledGenAttributeDemoBySlug(
             const r = await fetch(fileUrl);
             if (!r.ok) return undefined;
             const raw: unknown = await r.json();
-            if (!isValidGenAttrCachedRunPayload(raw)) {
-                console.warn(`[genAttributeBundledDemos] invalid demo JSON: ${s}`);
-                return undefined;
-            }
-            payloadCache.set(s, raw);
-            return raw;
+            const parsed = parseGenAttrCachedRunPayload(raw, `bundled demo slug=${s}`);
+            if (!parsed) return undefined;
+            payloadCache.set(s, parsed);
+            return parsed;
         })().finally(() => {
             payloadInflight.delete(s);
         });

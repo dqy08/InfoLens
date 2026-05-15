@@ -572,11 +572,17 @@ export type InitGenAttributeDagViewOptions = {
     edgeTopPCoverage?: number;
     /** 进入/退出/切换全屏失败时（常见于移动端不支持元素全屏等）。不传则无提示。 */
     onFullscreenError?: (message: string) => void;
+    /**
+     * DAG 归因排除：prompt 区正则的**生效**全文（勾选关则 `''`）。须与 Gen Attribute 页控件同源（仅该页使用本视图）。
+     */
+    getEffectiveExcludePromptPatternsText: () => string;
+    /** 已生成后缀区排除正则的生效全文（勾选关则 `''`）。 */
+    getEffectiveExcludeGeneratedPatternsText: () => string;
 };
 
 export function initGenAttributeDagView(
     resultsRoot: D3Sel,
-    options?: InitGenAttributeDagViewOptions
+    options: InitGenAttributeDagViewOptions
 ): GenAttributeDagHandle {
     const onDagRefresh = options?.onDagRefresh;
     const onDagPlaybackToggle = options?.onDagPlaybackToggle;
@@ -630,6 +636,8 @@ export function initGenAttributeDagView(
             detach: noop,
         };
     }
+
+    const { getEffectiveExcludePromptPatternsText, getEffectiveExcludeGeneratedPatternsText } = options;
 
     detachGenAttributeDagPanel.get(rootEl)?.();
     resultsRoot
@@ -1089,7 +1097,12 @@ export function initGenAttributeDagView(
             const prevIdx = firstNewIdx + i - 1;
             snapSubwordNode(addedNodes[i]!, prevIdx >= 0 ? nodes[prevIdx]! : null);
         }
-        dagExcludeIntervals = collectGenAttrDagExcludeIntervals(promptText, promptText.length);
+        dagExcludeIntervals = collectGenAttrDagExcludeIntervals(
+            promptText,
+            promptText.length,
+            getEffectiveExcludePromptPatternsText(),
+            getEffectiveExcludeGeneratedPatternsText(),
+        );
         if (batchDepth === 0) syncGraphToSvg();
     }
 
@@ -1150,7 +1163,13 @@ export function initGenAttributeDagView(
             step: stepProcessed,
             targetToken: token,
         });
-        const afterExclude = excludeNodeAggregatedEntries(step, aggregated, excludeIntervalContext);
+        const afterExclude = excludeNodeAggregatedEntries(
+            step,
+            aggregated,
+            excludeIntervalContext,
+            getEffectiveExcludePromptPatternsText(),
+            getEffectiveExcludeGeneratedPatternsText(),
+        );
         const selected = phase2RankAndSparsify(afterExclude, { cumulativeShare: edgeTopPCoverage });
 
         const mutualInformationRatio = computeMutualInformationRatio(response.target_prob);
@@ -1197,7 +1216,12 @@ export function initGenAttributeDagView(
             });
         }
 
-        const excludeIntervals = collectGenAttrDagExcludeIntervals(intervalCtx, step.promptRegionEnd);
+        const excludeIntervals = collectGenAttrDagExcludeIntervals(
+            intervalCtx,
+            step.promptRegionEnd,
+            getEffectiveExcludePromptPatternsText(),
+            getEffectiveExcludeGeneratedPatternsText(),
+        );
         dagExcludeIntervals = excludeIntervals;
         pruneDagLinksTouchingFullyExcludedNodes(graph, links, excludeIntervals);
 
