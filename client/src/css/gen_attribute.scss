@@ -47,7 +47,6 @@ $gen-attr-option-row-gap: 12px;
   left: auto;
   right: 0;
   width: max-content;
-  min-width: max(100%, 240px);
   max-width: min(100vw - 32px, 40rem);
   box-sizing: border-box;
 }
@@ -62,21 +61,15 @@ $gen-attr-option-row-gap: 12px;
     min-height: 0;
     width: 100%;
     box-sizing: border-box;
-    padding: 20px;
+    padding: 6px;
     background: var(--text-area-bg);
     color: var(--text-color);
     overflow: visible;
   }
 
-  @media (max-width: 767px) {
-    #results.gen-attr-results-surface.LMF {
-      padding: 15px 12px;
-    }
-  }
-
   // DAG：不可见测量层撑开高度，SVG 绝对定位叠在同栈内（坐标与 LMF 正文一致）
   // 初始 d3.zoom 缩放为 1/本变量，抵消 display-scale 在屏上的整体缩小感（见 genAttributeDagView）
-  // 边色：`--dag-normal-line-color`、`--dag-highlight-line-color-in` / `out` 与节点描边 `--token-hover-outline` 同在 start.scss（见 genAttributeDagView）。
+  // 边色与节点追因/选中描边：`--dag-highlight-line-color-in`（accent 80%），见 start.scss。
   #results.gen-attr-results-surface.LMF .gen-attr-dag-stack {
     // compactness：dag界面紧凑程度，范围 [0.05, 1]；1时和普通文本排版一致；由 JS 写入 inline style，0.5 为纯 CSS 降级兜底。
     --gen-attr-dag-display-scale: var(--gen-attr-dag-compactness, 0.5);
@@ -94,6 +87,32 @@ $gen-attr-option-row-gap: 12px;
     overflow: hidden;
     width: 100%;
     box-sizing: border-box;
+  }
+
+  // DAG Top‑K：贴在 #results 内侧右下（absolute）；固定尺寸 HUD；Top‑K 区超出则在滚动层内滚动。
+  #results.gen-attr-results-surface.LMF > .tooltip.gen-attr-dag-topk-tooltip {
+    box-sizing: border-box;
+    // 与 #major_tooltip 一致：不参与 opacity 过渡，避免 reposition 后与底层叠影
+    transition-property: background-color, color;
+    max-width: none;
+    width: 14rem;
+    height: 300px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+
+    .currentToken,
+    .myDetail {
+      flex-shrink: 0;
+    }
+
+    .gen-attr-dag-topk-tooltip-predictions-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      margin-top: 6px;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
   }
 
   // 勾选「Hide inactive edges」时隐藏未与焦点相邻的灰边（linkG 容器内的边）；
@@ -115,27 +134,54 @@ $gen-attr-option-row-gap: 12px;
     white-space: pre;
   }
 
-  // 节点框：默认无边框；悬停/选中描边与 start.scss `.token` 的 outline 2px 在屏上一致：
-  // 几何按 --gen-attr-dag-display-scale 缩小后，genAttributeDagView 用 zoom 1/scale 拉回，故用户空间描边需 ×scale，
-  // 使 2×s × (1/s) = 2（css px）。（s 可变时仍成立。）
-  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node > rect {
+  // 视觉节点不接收指针事件；命中由顶层 .gen-attr-dag-nodes-hit 承担（见 genAttributeDagView）。
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-nodes .gen-attr-dag-node {
+    pointer-events: none;
+  }
+
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node-hit-target {
+    fill: transparent;
     stroke: none;
-    stroke-width: 0;
-    fill: var(--gen-attr-dag-generated-node-fill);
+    pointer-events: all;
   }
 
-  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node--prompt > rect {
-    fill: var(--gen-attr-dag-prompt-node-fill);
+  // 节点 fill/stroke 分层：stroke rect 外扩见 syncNodeStrokeRects（屏上描边约 2px）。
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node {
+    .gen-attr-dag-node-stroke {
+      fill: none;
+      stroke: none;
+      stroke-width: 0;
+      pointer-events: none;
+    }
+
+    .gen-attr-dag-node-fill {
+      stroke: none;
+      fill: var(--gen-attr-dag-generated-node-fill);
+    }
+
+    &--prompt .gen-attr-dag-node-fill {
+      fill: var(--gen-attr-dag-prompt-node-fill);
+    }
+
+    // 递归追因链上游节点描边（直接模式仅一跳，由蓝/红边表达）；opacity 见 genAttributeDagView 中 stay→[0.3,1] 映射。
+    &--recursive-chain .gen-attr-dag-node-stroke {
+      stroke: var(--dag-highlight-line-color-in);
+      stroke-width: calc(2 * var(--gen-attr-dag-display-scale, 1));
+      stroke-opacity: var(--gen-attr-dag-node-recursive-share, 1);
+    }
+
+    // 选中/悬停 = 焦点（追因起点，nodeShare=1）；置于 recursive-chain 之后以覆盖链上节点的 stroke-opacity
+    &--hover .gen-attr-dag-node-stroke,
+    &--selected .gen-attr-dag-node-stroke {
+      stroke: var(--dag-highlight-line-color-in);
+      stroke-width: calc(2 * var(--gen-attr-dag-display-scale, 1));
+      stroke-opacity: 1;
+    }
   }
 
-  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node--hover > rect,
-  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node--selected > rect {
-    stroke: var(--token-hover-outline);
-    stroke-width: calc(2 * var(--gen-attr-dag-display-scale, 1));
-  }
-
-  // 与 genAttributeDagView 中「仅 default(text-flow) 且选中时可拖」一致：可拖时提示 grab
-  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node--selected {
+  // 与 genAttributeDagView 中「仅 default(text-flow) 且选中时可拖」一致：可拖时提示 grab（命中层与视觉层共用 class）
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node--selected,
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node-hit.gen-attr-dag-node--selected {
     cursor: grab;
     &:active {
       cursor: grabbing;
@@ -146,7 +192,11 @@ $gen-attr-option-row-gap: 12px;
   #results.gen-attr-results-surface.LMF
     .gen-attr-dag-stack.gen-attr-dag-no-node-drag-layout
     .gen-attr-dag-svg
-    .gen-attr-dag-node--selected {
+    .gen-attr-dag-node--selected,
+  #results.gen-attr-results-surface.LMF
+    .gen-attr-dag-stack.gen-attr-dag-no-node-drag-layout
+    .gen-attr-dag-svg
+    .gen-attr-dag-node-hit.gen-attr-dag-node--selected {
     cursor: default;
     &:active {
       cursor: default;
@@ -394,12 +444,20 @@ body.gen-attribute-page .input-section {
   margin-top: 10px;
 }
 
-// Start / Model 行与首行 DAG 参数（含 layout mode）之间略加大，避免与按钮挤在一起
-.gen-attribute-page
-  .input-section
-  > .textarea-wrapper.chat-prompt-actions-row
-  + .gen-attr-dag-measure-width-row {
+// Start / Model 行与 Reset UI options 之间略加大；“重置”与下方 DAG layout 一行紧凑
+.gen-attribute-page .input-section > .textarea-wrapper.chat-prompt-actions-row + .gen-attr-reset-ui-options-row {
   margin-top: 30px;
+}
+
+.gen-attr-reset-ui-options-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.gen-attr-reset-ui-options-row + .gen-attr-dag-measure-width-row {
+  margin-top: 10px;
 }
 
 .attribution-exclude-prompt-patterns-header {
@@ -439,20 +497,6 @@ body.gen-attribute-page .input-section {
 // 高 surprisal 两项勾选项：固定同一行，避免与其它 DAG 行一致的 wrap 把两项拆成两行
 .gen-attr-dag-measure-width-row.gen-attr-dag-surprisal-toggles-row {
   flex-wrap: nowrap;
-}
-
-.gen-attr-dag-measure-width-row .gen-attr-dag-layout-mode-group {
-  .semantic-submode-label,
-  .gen-attr-dag-layout-mode-select {
-    font-weight: 700;
-  }
-}
-
-.gen-attr-dag-measure-width-row .gen-attr-dag-replay-speed-row {
-  > .semantic-submode-label,
-  .gen-attr-dag-replay-mode-select {
-    font-weight: 700;
-  }
 }
 
 .gen-attr-dag-replay-speed-row {

@@ -14,12 +14,18 @@ export const ZERO_CONFIDENCE_PROBABILITY_BASELINE = 2 ** -18;
 export const REFERENCE_MAX_SURPRISAL_BITS = Math.log2(1 / ZERO_CONFIDENCE_PROBABILITY_BASELINE);
 
 /**
- * 全信心概率阈值 p₁：surprisal 低于对应 bit 数时视作模型已充分自信，视觉上不放大节点。
- * 此处为 3 bit，对应概率 > 1/8（约 12.5%）。
+ * 全信心概率阈值 p₁（3 bit，p > 1/8）：surprisal 足够低时视为充分自信、DAG 传导节点（非信息来源）。
+ *
+ * 硬截断仅经本文件三个 `dag*` 函数进入 Generate & Attribute DAG：
+ * - {@link dagCiVisualScaleFromTargetProb} → `genAttributeDagView`：生成节点框/标签不放大（1×）
+ * - {@link dagStepDownEffectiveCiRatio} → `genAttributeDagViewLinearArcMode`：`linear-arc-step-down` 无竖直台阶
+ * - {@link dagPropagationMiRatio} → `genAttributeDagView` `nodePropagationMiRatio`：递归链满额传导、无 stay 描边
+ *
+ * 不用于 tooltip 与边上的 CI/MI 展示（仍 {@link computeMutualInformationRatio} / {@link computeConditionalInformationRatio}）。
  */
 export const FULL_CONFIDENCE_PROBABILITY_BASELINE = 2 ** -3;
 
-/** 与 p₁ 对应的 surprisal 下界（bit）；低于此值的节点 ciVisualScale 截断为 1×。 */
+/** 与 p₁ 对应的 surprisal 上界（bit）；surprisal ≤ 此值即满足「充分自信」截断条件。 */
 export const REFERENCE_NO_SURPRISAL_BITS = Math.log2(1 / FULL_CONFIDENCE_PROBABILITY_BASELINE);
 
 function clamp01(n: number): number {
@@ -48,4 +54,45 @@ export function computeConditionalInformationRatio(targetProb: number | undefine
     if (targetProb === undefined) return 0;
     if (!Number.isFinite(targetProb) || targetProb <= 0) return 1;
     return clamp01(-Math.log2(targetProb) / REFERENCE_MAX_SURPRISAL_BITS);
+}
+
+/**
+ * DAG 生成节点 CI 视觉缩放倍数（约 `[1, 2]`）：语义为 `1 +` 有效 CI。
+ * `ciVisualScaleEnabled === false` 或 `p > {@link FULL_CONFIDENCE_PROBABILITY_BASELINE}` 时为 `1×`；
+ * 否则为 `1 + {@link computeConditionalInformationRatio}(p)`。
+ */
+export function dagCiVisualScaleFromTargetProb(
+    targetProb: number | undefined,
+    ciVisualScaleEnabled: boolean
+): number {
+    if (!ciVisualScaleEnabled) return 1;
+    if (targetProb !== undefined && Number.isFinite(targetProb) && targetProb > FULL_CONFIDENCE_PROBABILITY_BASELINE) {
+        return 1;
+    }
+    return 1 + computeConditionalInformationRatio(targetProb);
+}
+
+/**
+ * 仅用于 DAG「下台阶」布局的有效 CI（`[0,1]`）：与 {@link computeConditionalInformationRatio} 同源，
+ * 但 `p > {@link FULL_CONFIDENCE_PROBABILITY_BASELINE}` 时为 0（与节点「高置信 1×」截断一致）。
+ *
+ * 不受「关闭 CI 视觉放大」开关影响——该开关只缩节点框，不应关掉按不确定度的竖直落差。
+ */
+export function dagStepDownEffectiveCiRatio(targetProb: number | undefined): number {
+    if (targetProb !== undefined && Number.isFinite(targetProb) && targetProb > FULL_CONFIDENCE_PROBABILITY_BASELINE) {
+        return 0;
+    }
+    return computeConditionalInformationRatio(targetProb);
+}
+
+/**
+ * DAG 递归归因链的传导系数（`[0,1]`）：与 {@link computeMutualInformationRatio} 同源，
+ * 但 `p > {@link FULL_CONFIDENCE_PROBABILITY_BASELINE}` 时截断为 1（纯传导，不衰减预算、不留 stay）。
+ * 与节点视觉（不放大）、下台阶（不下沉）的「充分自信」语义保持一致。
+ */
+export function dagPropagationMiRatio(targetProb: number | undefined): number {
+    if (targetProb !== undefined && Number.isFinite(targetProb) && targetProb > FULL_CONFIDENCE_PROBABILITY_BASELINE) {
+        return 1;
+    }
+    return computeMutualInformationRatio(targetProb);
 }

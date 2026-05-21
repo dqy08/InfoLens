@@ -117407,7 +117407,7 @@
     "hideExcludedTokens": false,
     "edgeTopPCoverage": 0.7,
     "nodeCiVisualScaleEnabled": true,
-    "edgeWeakenHighSurprisalEnabled": true,
+    "decayAttributionToHighSurprisalTargetEnabled": true,
     "hideInactiveEdges": false,
     "replayPacingMode": "step",
     "playbackTotalS": 7,

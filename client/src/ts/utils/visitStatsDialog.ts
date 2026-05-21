@@ -28,6 +28,22 @@ const API_ORDER = [
 
 const OS_ORDER = ['ios', 'android', 'windows', 'macos', 'linux', 'unknown'] as const;
 
+const GEN_ATTR_OPT_ORDER = [
+    'layout_linear_arc', 'layout_step_down', 'layout_spiral',
+    'propagated',
+    'downstream', 'token_tooltip',
+] as const;
+
+/** gen_attribute.html UI 原文；key 与上报/存储一致 */
+const GEN_ATTR_OPT_LABELS: Record<(typeof GEN_ATTR_OPT_ORDER)[number], string> = {
+    propagated: 'Propagated attribution mode',
+    layout_linear_arc: 'DAG layout mode/linear_arc',
+    layout_step_down: 'DAG layout mode/step-down',
+    layout_spiral: 'DAG layout mode/spiral',
+    downstream: 'Show downstream influence',
+    token_tooltip: 'Show token tooltip',
+};
+
 type VisitStatsRow = NonNullable<Awaited<ReturnType<TextAnalysisAPI['getVisitStats']>>>;
 
 function orderedKeysGt0(primary: readonly string[], rec: Record<string, number>): string[] {
@@ -74,7 +90,8 @@ function visitStatsHtml(data: VisitStatsRow): string {
     const pg = data.page_sec ?? {};
     const ap = data.api ?? {};
     const os = data.os ?? {};
-    const fmtTotal = (v: number) => (Object.keys(sb).length > 0 ? String(v) : 'unknown');
+    const hasBase = Object.keys(sb).length > 0;
+    const fmtTotal = (v: number) => (hasBase ? String(v) : 'unknown');
     const linesJoined = (keys: string[], cur: Record<string, number>, base: Record<string, number>): string[] => {
         if (!keys.length) return ['(none)'];
         return keys.map((k) => {
@@ -84,13 +101,26 @@ function visitStatsHtml(data: VisitStatsRow): string {
     };
     const linesJoinedPageSec = (keys: string[], cur: Record<string, number>, base: Record<string, number>): string[] => {
         if (!keys.length) return ['(none)'];
-        const hasBase = Object.keys(sb).length > 0;
         return keys.map((k) => {
             const v = cur[k] ?? 0;
             const main = hasBase ? formatDurationSec(v) : 'unknown';
             return `${esc(k)}: ${main}${deltaSuffixDuration(v - (base[k] ?? 0))}`;
         });
     };
+
+    const genAttrOpts = data.gen_attr_opt_sec ?? {};
+    const genAttrTotalSec = pg['gen_attribute.html'] ?? 0;
+    const genAttrOptKeys = orderedKeysGt0(GEN_ATTR_OPT_ORDER, genAttrOpts);
+    const genAttrOptLines: string[] = genAttrOptKeys.length > 0 && genAttrTotalSec > 0
+        ? genAttrOptKeys.map((k) => {
+            const v = genAttrOpts[k] ?? 0;
+            const pct = Math.round(v / genAttrTotalSec * 100);
+            const main = hasBase ? `${formatDurationSec(v)} (${pct}%)` : 'unknown';
+            const bv = (sb.gen_attr_opt_sec ?? {})[k] ?? 0;
+            const label = GEN_ATTR_OPT_LABELS[k as (typeof GEN_ATTR_OPT_ORDER)[number]] ?? k;
+            return `${esc(label)}: ${main}${deltaSuffixDuration(v - bv)}`;
+        })
+        : ['(none)'];
 
     return [
         `Last delta reset: ${esc(data.reset_at ? new Date(data.reset_at).toLocaleString() : 'unknown')}`,
@@ -108,6 +138,9 @@ function visitStatsHtml(data: VisitStatsRow): string {
         '',
         '[API]',
         ...linesJoined(orderedKeysGt0(API_ORDER, ap), ap, sb.api ?? {}),
+        '',
+        '[gen_attribute options (% active time)]',
+        ...genAttrOptLines,
     ].join('\n');
 }
 

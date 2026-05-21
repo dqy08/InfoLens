@@ -13,6 +13,7 @@ import { initChatPanelLayout } from './chat/chatPanelLayout';
 import { PANEL_SPLIT_STORAGE_KEY_GEN_ATTRIBUTE } from './utils/panelSplitStorage';
 import { TextInputController } from './controllers/textInputController';
 import { initializeCommonApp } from './appInitializer';
+import { setPageOptsGetter } from './utils/clientActivityPing';
 import { showAlertDialog } from './ui/dialog';
 import URLHandler from './utils/URLHandler';
 import { createToast } from './ui/toast';
@@ -26,7 +27,7 @@ import {
 import {
     initGenAttributeDagView,
     setDagNodeCiVisualScaleEnabled,
-    setDagEdgeWeakenHighSurprisalEnabled,
+    setDagDecayAttributionToHighSurprisalTargetEnabled,
     type DagLayoutMode,
     clampDagCompactness,
     clampLinearArcAdjacentGap,
@@ -106,9 +107,17 @@ const GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY = 'info_radar_gen_attr_dag_playb
 const GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_replay_pacing_mode';
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_total_s';
 const GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY = 'info_radar_gen_attr_dag_node_ci_visual_scale';
-const GEN_ATTR_DAG_EDGE_WEAKEN_HIGH_SURPRISAL_STORAGE_KEY = 'info_radar_gen_attr_dag_edge_weaken_high_surprisal';
+const GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY =
+    'info_radar_gen_attr_dag_decay_attribution_high_surprisal';
+/** @deprecated 读取迁移用 */
+const GEN_ATTR_DAG_EDGE_WEAKEN_HIGH_SURPRISAL_STORAGE_KEY_LEGACY =
+    'info_radar_gen_attr_dag_edge_weaken_high_surprisal';
 const GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY = 'info_radar_gen_attr_dag_hide_inactive_edges';
+const GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY =
+    'info_radar_gen_attr_dag_show_downstream_influence';
+const GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY = 'info_radar_gen_attr_dag_recursive_attribution';
 const GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY = 'info_radar_gen_attr_dag_hide_excluded_tokens';
+const GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY = 'info_radar_gen_attr_dag_show_topk_on_selected';
 const GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY =
     'info_radar_gen_attr_dag_linear_arc_adjacent_gap';
 const GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY = 'info_radar_gen_attr_dag_compactness';
@@ -135,6 +144,29 @@ const GEN_ATTR_DAG_PLAYBACK_STEP_MS_MAX = 10000;
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT = 7;
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MIN = 1;
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MAX = 3600;
+
+/** 与无 demoUiOptions 本地缓存时「读出默认」对齐，供重置与可读性单一的来源 */
+const DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS: GenAttrDemoUiOptions = {
+    layoutMode: 'text-flow',
+    measureWidthPx: GEN_ATTR_DAG_MEASURE_WIDTH_DEFAULT,
+    dagCompactness: DAG_COMPACTNESS_DEFAULT,
+    linearArcAdjacentGapPx: LINEAR_ARC_ADJACENT_GAP_DEFAULT,
+    hideExcludedTokens: false,
+    edgeTopPCoverage: DAG_EDGE_TOP_P_COVERAGE_DEFAULT,
+    nodeCiVisualScaleEnabled: true,
+    decayAttributionToHighSurprisalTargetEnabled: true,
+    hideInactiveEdges: false,
+    showDownstreamInfluence: false,
+    recursiveAttributionEnabled: false,
+    showTokenInfoOnSelected: false,
+    replayPacingMode: 'total',
+    playbackTotalS: GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT,
+    playbackStepMs: GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT,
+    excludePromptPatternsEnabled: true,
+    excludePromptPatternsText: DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT,
+    excludeGeneratedPatternsEnabled: true,
+    excludeGeneratedPatternsText: DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT,
+};
 
 const GENERATE_BTN_LABEL = 'Start';
 const STOP_BTN_LABEL = 'Stop';
@@ -260,17 +292,24 @@ function readStoredDagReplayPacingMode(): DagReplayPacingMode {
     } catch {
         // ignore
     }
-    return 'total';
+    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.replayPacingMode;
 }
 
 function readStoredDagLayoutMode(): DagLayoutMode {
     try {
         const v = localStorage.getItem(GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY);
-        if (v === 'text-flow' || v === 'linear-arc' || v === 'spiral') return v;
+        if (
+            v === 'text-flow' ||
+            v === 'linear-arc' ||
+            v === 'linear-arc-step-down' ||
+            v === 'spiral'
+        ) {
+            return v;
+        }
     } catch {
         // ignore
     }
-    return 'text-flow';
+    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.layoutMode;
 }
 
 const apiPrefix = URLHandler.parameters['api'] || '';
@@ -375,35 +414,47 @@ function applyDagReplaySpeedUi(): void {
 
 function currentDagLayoutMode(): DagLayoutMode {
     const v = dagLayoutModeSelect?.value;
-    if (v === 'linear-arc' || v === 'spiral') return v;
+    if (v === 'linear-arc' || v === 'linear-arc-step-down' || v === 'spiral') return v;
     return 'text-flow';
 }
 
 function applyDagLayoutModeUi(): void {
     const mode = currentDagLayoutMode();
     if (dagCompactnessGroup) {
-        /** text-flow / spiral 均使用 display-scale 驱动的节点宽高与边回缩；linear-arc 不适用。 */
-        dagCompactnessGroup.hidden = mode === 'linear-arc';
+        /** text-flow / spiral 均使用 display-scale 驱动的节点宽高与边回缩；linear-arc 家族不适用。 */
+        dagCompactnessGroup.hidden = mode === 'linear-arc' || mode === 'linear-arc-step-down';
     }
     if (dagMeasureWidthGroup) {
         dagMeasureWidthGroup.hidden = mode !== 'text-flow';
     }
     if (dagLinearArcIntervalGroup) {
-        dagLinearArcIntervalGroup.hidden = mode !== 'linear-arc';
+        dagLinearArcIntervalGroup.hidden = mode !== 'linear-arc' && mode !== 'linear-arc-step-down';
     }
 }
 
 const dagHideExcludedTokensInput = document.getElementById(
     'gen_attr_dag_hide_excluded_tokens'
 ) as HTMLInputElement | null;
+const dagShowTopkOnSelectedInput = document.getElementById(
+    'gen_attr_dag_show_topk_on_selected'
+) as HTMLInputElement | null;
 const dagNodeCiVisualScaleInput = document.getElementById(
     'gen_attr_dag_node_ci_visual_scale'
 ) as HTMLInputElement | null;
-const dagEdgeWeakenHighSurprisalInput = document.getElementById(
-    'gen_attr_dag_edge_weaken_high_surprisal'
+const dagDecayAttributionHighSurprisalInput = document.getElementById(
+    'gen_attr_dag_decay_attribution_high_surprisal'
 ) as HTMLInputElement | null;
 const dagHideInactiveEdgesInput = document.getElementById(
     'gen_attr_dag_hide_inactive_edges'
+) as HTMLInputElement | null;
+const dagShowDownstreamInfluenceInput = document.getElementById(
+    'gen_attr_dag_show_downstream_influence'
+) as HTMLInputElement | null;
+const dagShowDownstreamInfluenceGroup = document.getElementById(
+    'gen_attr_dag_show_downstream_influence_group'
+);
+const dagRecursiveAttributionInput = document.getElementById(
+    'gen_attr_dag_recursive_attribution'
 ) as HTMLInputElement | null;
 const genAttrExcludePromptPatternsTa = document.getElementById(
     'gen_attr_exclude_prompt_patterns'
@@ -417,6 +468,9 @@ const genAttrExcludeGeneratedPatternsTa = document.getElementById(
 const genAttrExcludeGeneratedPatternsEnable = document.getElementById(
     'gen_attr_exclude_generated_patterns_enable'
 ) as HTMLInputElement | null;
+const genAttrResetUiOptionsBtn = document.getElementById(
+    'gen_attr_reset_ui_options_btn',
+) as HTMLButtonElement | null;
 const completeReasonEl = d3.select('#gen_attr_complete_reason');
 
 function syncGenAttrExcludePatternTextareasDisabled(): void {
@@ -495,10 +549,11 @@ const genAttrResultsNode = genAttrResultsEl.node() as HTMLElement | null;
 function readStoredDagNodeCiVisualScale(): boolean {
     try {
         const v = localStorage.getItem(GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY);
-        return v === null ? true : v === '1';
+        if (v !== null) return v === '1';
     } catch {
-        return true;
+        // ignore
     }
+    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.nodeCiVisualScaleEnabled;
 }
 const initialDagNodeCiVisualScale = readStoredDagNodeCiVisualScale();
 if (dagNodeCiVisualScaleInput) dagNodeCiVisualScaleInput.checked = initialDagNodeCiVisualScale;
@@ -514,25 +569,30 @@ dagNodeCiVisualScaleInput?.addEventListener('change', () => {
     tryResetAndReplayDag();
 });
 
-function readStoredDagEdgeWeakenHighSurprisal(): boolean {
+function readStoredDagDecayAttributionToHighSurprisalTarget(): boolean {
     try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_EDGE_WEAKEN_HIGH_SURPRISAL_STORAGE_KEY);
-        return v === null ? true : v === '1';
+        const v = localStorage.getItem(GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY);
+        if (v !== null) return v === '1';
+        const legacy = localStorage.getItem(GEN_ATTR_DAG_EDGE_WEAKEN_HIGH_SURPRISAL_STORAGE_KEY_LEGACY);
+        if (legacy !== null) return legacy === '1';
     } catch {
-        return true;
+        // ignore
     }
+    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.decayAttributionToHighSurprisalTargetEnabled;
 }
-const initialDagEdgeWeakenHighSurprisal = readStoredDagEdgeWeakenHighSurprisal();
-if (dagEdgeWeakenHighSurprisalInput) dagEdgeWeakenHighSurprisalInput.checked = initialDagEdgeWeakenHighSurprisal;
-setDagEdgeWeakenHighSurprisalEnabled(initialDagEdgeWeakenHighSurprisal);
-dagEdgeWeakenHighSurprisalInput?.addEventListener('change', () => {
-    const enabled = dagEdgeWeakenHighSurprisalInput.checked;
+const initialDagDecayAttributionHighSurprisal = readStoredDagDecayAttributionToHighSurprisalTarget();
+if (dagDecayAttributionHighSurprisalInput) {
+    dagDecayAttributionHighSurprisalInput.checked = initialDagDecayAttributionHighSurprisal;
+}
+setDagDecayAttributionToHighSurprisalTargetEnabled(initialDagDecayAttributionHighSurprisal);
+dagDecayAttributionHighSurprisalInput?.addEventListener('change', () => {
+    const enabled = dagDecayAttributionHighSurprisalInput.checked;
     try {
-        localStorage.setItem(GEN_ATTR_DAG_EDGE_WEAKEN_HIGH_SURPRISAL_STORAGE_KEY, enabled ? '1' : '0');
+        localStorage.setItem(GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY, enabled ? '1' : '0');
     } catch {
         /* ignore */
     }
-    setDagEdgeWeakenHighSurprisalEnabled(enabled);
+    setDagDecayAttributionToHighSurprisalTargetEnabled(enabled);
     tryResetAndReplayDag();
 });
 
@@ -542,10 +602,12 @@ function applyDagHideInactiveEdges(hide: boolean): void {
 }
 function readStoredDagHideInactiveEdges(): boolean {
     try {
-        return localStorage.getItem(GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY) === '1';
+        const v = localStorage.getItem(GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY);
+        if (v !== null) return v === '1';
     } catch {
-        return false;
+        // ignore
     }
+    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.hideInactiveEdges;
 }
 const initialDagHideInactiveEdges = readStoredDagHideInactiveEdges();
 if (dagHideInactiveEdgesInput) dagHideInactiveEdgesInput.checked = initialDagHideInactiveEdges;
@@ -560,15 +622,82 @@ dagHideInactiveEdgesInput?.addEventListener('change', () => {
     applyDagHideInactiveEdges(hide);
 });
 
+function readStoredDagShowDownstreamInfluence(): boolean {
+    try {
+        const v = localStorage.getItem(GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY);
+        if (v !== null) return v === '1';
+    } catch {
+        // ignore
+    }
+    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.showDownstreamInfluence;
+}
+const initialDagShowDownstreamInfluence = readStoredDagShowDownstreamInfluence();
+if (dagShowDownstreamInfluenceInput) {
+    dagShowDownstreamInfluenceInput.checked = initialDagShowDownstreamInfluence;
+}
+dagShowDownstreamInfluenceInput?.addEventListener('change', () => {
+    const show = dagShowDownstreamInfluenceInput.checked;
+    try {
+        localStorage.setItem(GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY, show ? '1' : '0');
+    } catch {
+        /* ignore */
+    }
+    dagHandle.setShowDownstreamInfluence(show);
+});
+
+/** 传播归因（UI: Propagated attribution mode；`recursiveAttributionEnabled`）开启时隐藏 downstream influence 选项（该模式仅展示上游链）。 */
+function applyDagDownstreamInfluenceUi(): void {
+    const recursive = dagRecursiveAttributionInput?.checked ?? false;
+    if (dagShowDownstreamInfluenceGroup) {
+        dagShowDownstreamInfluenceGroup.hidden = recursive;
+    }
+}
+
+function readStoredDagRecursiveAttribution(): boolean {
+    try {
+        const v = localStorage.getItem(GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY);
+        if (v !== null) return v === '1';
+    } catch {
+        // ignore
+    }
+    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.recursiveAttributionEnabled;
+}
+const initialDagRecursiveAttribution = readStoredDagRecursiveAttribution();
+if (dagRecursiveAttributionInput) dagRecursiveAttributionInput.checked = initialDagRecursiveAttribution;
+applyDagDownstreamInfluenceUi();
+dagRecursiveAttributionInput?.addEventListener('change', () => {
+    const enabled = dagRecursiveAttributionInput.checked;
+    try {
+        localStorage.setItem(GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY, enabled ? '1' : '0');
+    } catch {
+        /* ignore */
+    }
+    applyDagDownstreamInfluenceUi();
+    dagHandle.setRecursiveAttributionEnabled(enabled);
+});
+
 function readStoredDagHideExcludedTokens(): boolean {
     try {
-        return localStorage.getItem(GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY) === '1';
+        const v = localStorage.getItem(GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY);
+        if (v !== null) return v === '1';
     } catch {
-        return false;
+        // ignore
     }
+    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.hideExcludedTokens;
 }
 const initialDagHideExcludedTokens = readStoredDagHideExcludedTokens();
 if (dagHideExcludedTokensInput) dagHideExcludedTokensInput.checked = initialDagHideExcludedTokens;
+function readStoredDagShowTopkOnSelected(): boolean {
+    try {
+        const v = localStorage.getItem(GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY);
+        if (v !== null) return v === '1';
+    } catch {
+        // ignore
+    }
+    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.showTokenInfoOnSelected;
+}
+const initialDagShowTopkOnSelected = readStoredDagShowTopkOnSelected();
+if (dagShowTopkOnSelectedInput) dagShowTopkOnSelectedInput.checked = initialDagShowTopkOnSelected;
 dagHideExcludedTokensInput?.addEventListener('change', () => {
     const hide = dagHideExcludedTokensInput.checked;
     try {
@@ -577,6 +706,28 @@ dagHideExcludedTokensInput?.addEventListener('change', () => {
         /* ignore */
     }
     dagHandle.setHideExcludedTokens(hide);
+});
+
+dagShowTopkOnSelectedInput?.addEventListener('change', () => {
+    const show = dagShowTopkOnSelectedInput.checked;
+    try {
+        localStorage.setItem(GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY, show ? '1' : '0');
+    } catch {
+        /* ignore */
+    }
+    dagHandle.setShowTokenInfoOnSelected(show);
+});
+
+setPageOptsGetter(() => {
+    const mode = currentDagLayoutMode();
+    return {
+        layout_linear_arc: mode === 'linear-arc',
+        layout_step_down: mode === 'linear-arc-step-down',
+        layout_spiral: mode === 'spiral',
+        propagated: dagRecursiveAttributionInput?.checked ?? false,
+        downstream: dagShowDownstreamInfluenceInput?.checked ?? false,
+        token_tooltip: dagShowTopkOnSelectedInput?.checked ?? false,
+    };
 });
 
 modelVariantSelect?.addEventListener('change', () => {
@@ -998,6 +1149,9 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
     dagCompactness: initialDagCompactness,
     linearArcAdjacentGapPx: initialDagLinearArcGap,
     hideExcludedTokens: initialDagHideExcludedTokens,
+    showTokenInfoOnSelected: initialDagShowTopkOnSelected,
+    showDownstreamInfluence: initialDagShowDownstreamInfluence,
+    recursiveAttributionEnabled: initialDagRecursiveAttribution,
     edgeTopPCoverage: initialDagEdgeTopPCoverage,
     onFullscreenError: (message) => showToast(message, 'error'),
     getEffectiveExcludePromptPatternsText: genAttrEffectiveExcludePromptPatternsText,
@@ -1024,16 +1178,25 @@ function isDagBusy(): boolean {
     return inFlight || dagPlaybackTimer !== null || dagLastTokenDwellTimer !== null;
 }
 
-/** 非忙状态下 reset + replay + fit，供各设置项切换后复用。忙时为 no-op。 */
-function tryResetAndReplayDag(): void {
+/**
+ * 非忙状态下 reset + replay + fit，供各设置项切换后复用。忙时为 no-op。
+ * 默认保留 DAG 选中节点；整页重置 UI 等场景传 `preserveNodeSelection: false`。
+ */
+function tryResetAndReplayDag(opts?: { preserveNodeSelection?: boolean }): void {
     if (isDagBusy()) return;
+    const preserveSelection = opts?.preserveNodeSelection !== false;
+    const preservedSelectedId = preserveSelection ? dagHandle.getSelectedNodeId() : null;
     const h = runnerHandle;
     dagHandle.reset();
     if (h && h.tokenCount > 0) {
         replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
     }
     dagHandle.fitViewportToContent();
-    dagHandle.clearNodeSelection();
+    if (preservedSelectedId != null) {
+        dagHandle.setSelectedNodeId(preservedSelectedId);
+    } else {
+        dagHandle.clearNodeSelection();
+    }
 }
 
 dagMeasureWidthInput?.addEventListener('change', () => {
@@ -1127,8 +1290,12 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
         hideExcludedTokens: dagHideExcludedTokensInput?.checked ?? false,
         edgeTopPCoverage,
         nodeCiVisualScaleEnabled: dagNodeCiVisualScaleInput?.checked ?? true,
-        edgeWeakenHighSurprisalEnabled: dagEdgeWeakenHighSurprisalInput?.checked ?? true,
+        decayAttributionToHighSurprisalTargetEnabled:
+            dagDecayAttributionHighSurprisalInput?.checked ?? true,
         hideInactiveEdges: dagHideInactiveEdgesInput?.checked ?? false,
+        showDownstreamInfluence: dagShowDownstreamInfluenceInput?.checked ?? false,
+        recursiveAttributionEnabled: dagRecursiveAttributionInput?.checked ?? false,
+        showTokenInfoOnSelected: dagShowTopkOnSelectedInput?.checked ?? false,
         replayPacingMode: currentDagReplayPacingMode(),
         playbackTotalS,
         playbackStepMs,
@@ -1136,7 +1303,29 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
         excludePromptPatternsText: genAttrExcludePromptPatternsTa?.value ?? '',
         excludeGeneratedPatternsEnabled: genAttrExcludeGeneratedPatternsEnable?.checked ?? true,
         excludeGeneratedPatternsText: genAttrExcludeGeneratedPatternsTa?.value ?? '',
+        selectedNodeId: dagHandle.getSelectedNodeId(),
     };
+}
+
+function genAttrDemoUiOptionsMatchesDefaults(current: GenAttrDemoUiOptions): boolean {
+    const base = DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS;
+    for (const key of Object.keys(base) as (keyof GenAttrDemoUiOptions)[]) {
+        const c = current[key];
+        const b = base[key];
+        if (typeof c === 'number' && typeof b === 'number') {
+            if (Math.abs(c - b) >= 1e-6) return false;
+        } else if (c !== b) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function syncGenAttrResetUiOptionsButtonState(): void {
+    if (!genAttrResetUiOptionsBtn) return;
+    genAttrResetUiOptionsBtn.disabled = genAttrDemoUiOptionsMatchesDefaults(
+        readGenAttrDemoUiOptionsFromControls(),
+    );
 }
 
 /**
@@ -1172,12 +1361,8 @@ function applyGenAttrExcludePatternsFromDemoUiSnap(snap: Partial<GenAttrDemoUiOp
     syncGenAttrExcludePatternTextareasDisabled();
 }
 
-/**
- * 按记录中的 `demoUiOptions` 还原 DAG 面板与排除控件（后者仅 DOM）。
- */
-function applyGenAttrDemoUiOptionsFromRecord(rec: GenAttrCachedRun): void {
-    const snap = rec.demoUiOptions;
-    if (!snap) return;
+/** 按 `demoUiOptions` 逐项还原 DAG 面板与排除控件（后者仅 DOM）；未覆盖字段不改变。 */
+function applyGenAttrDemoUiOptionsSnap(snap: Partial<GenAttrDemoUiOptions>): void {
     const mode = snap.layoutMode;
     if (mode) {
         if (dagLayoutModeSelect) {
@@ -1215,13 +1400,35 @@ function applyGenAttrDemoUiOptionsFromRecord(rec: GenAttrCachedRun): void {
         if (dagNodeCiVisualScaleInput) dagNodeCiVisualScaleInput.checked = snap.nodeCiVisualScaleEnabled;
         setDagNodeCiVisualScaleEnabled(snap.nodeCiVisualScaleEnabled);
     }
-    if (snap.edgeWeakenHighSurprisalEnabled !== undefined) {
-        if (dagEdgeWeakenHighSurprisalInput) dagEdgeWeakenHighSurprisalInput.checked = snap.edgeWeakenHighSurprisalEnabled;
-        setDagEdgeWeakenHighSurprisalEnabled(snap.edgeWeakenHighSurprisalEnabled);
+    const decayAttributionHighSurprisal =
+        snap.decayAttributionToHighSurprisalTargetEnabled ??
+        (snap as { edgeWeakenHighSurprisalEnabled?: boolean }).edgeWeakenHighSurprisalEnabled;
+    if (decayAttributionHighSurprisal !== undefined) {
+        if (dagDecayAttributionHighSurprisalInput) {
+            dagDecayAttributionHighSurprisalInput.checked = decayAttributionHighSurprisal;
+        }
+        setDagDecayAttributionToHighSurprisalTargetEnabled(decayAttributionHighSurprisal);
     }
     if (snap.hideInactiveEdges !== undefined) {
         if (dagHideInactiveEdgesInput) dagHideInactiveEdgesInput.checked = snap.hideInactiveEdges;
         applyDagHideInactiveEdges(snap.hideInactiveEdges);
+    }
+    if (snap.showDownstreamInfluence !== undefined) {
+        if (dagShowDownstreamInfluenceInput) {
+            dagShowDownstreamInfluenceInput.checked = snap.showDownstreamInfluence;
+        }
+        dagHandle.setShowDownstreamInfluence(snap.showDownstreamInfluence);
+    }
+    if (snap.recursiveAttributionEnabled !== undefined) {
+        if (dagRecursiveAttributionInput) {
+            dagRecursiveAttributionInput.checked = snap.recursiveAttributionEnabled;
+        }
+        applyDagDownstreamInfluenceUi();
+        dagHandle.setRecursiveAttributionEnabled(snap.recursiveAttributionEnabled);
+    }
+    if (snap.showTokenInfoOnSelected !== undefined) {
+        if (dagShowTopkOnSelectedInput) dagShowTopkOnSelectedInput.checked = snap.showTokenInfoOnSelected;
+        dagHandle.setShowTokenInfoOnSelected(snap.showTokenInfoOnSelected);
     }
     if (snap.replayPacingMode !== undefined) {
         if (dagReplayModeSelect) dagReplayModeSelect.value = snap.replayPacingMode;
@@ -1237,7 +1444,79 @@ function applyGenAttrDemoUiOptionsFromRecord(rec: GenAttrCachedRun): void {
     }
 
     applyGenAttrExcludePatternsFromDemoUiSnap(snap);
+    syncGenAttrResetUiOptionsButtonState();
 }
+
+/** replay 完成后按 `demoUiOptions.selectedNodeId` 恢复 DAG 焦点；无效或缺失则清除选中。 */
+function restoreGenAttrDagFocusFromDemoUiOptions(snap: Partial<GenAttrDemoUiOptions> | undefined): void {
+    const focusId = snap?.selectedNodeId;
+    if (typeof focusId === 'string' && focusId.length > 0) {
+        try {
+            dagHandle.setSelectedNodeId(focusId);
+            return;
+        } catch {
+            /* demo 快照与当前图不一致时忽略 */
+        }
+    }
+    dagHandle.clearNodeSelection();
+}
+
+function applyGenAttrDemoUiOptionsFromRecord(rec: GenAttrCachedRun): void {
+    if (!rec.demoUiOptions) return;
+    applyGenAttrDemoUiOptionsSnap(rec.demoUiOptions);
+}
+
+/** Gen Attribute demo-UI scope：与 {@link readGenAttrDemoUiOptionsFromControls} / IndexedDB demo 快照一致（不含 Model、Max tokens、prompt 正文）。 */
+const GEN_ATTR_DEMO_UI_LOCAL_STORAGE_KEYS: readonly string[] = [
+    GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY,
+    GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY,
+    GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY,
+    GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY,
+    GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY,
+    GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY,
+    GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY,
+    GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY,
+    GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY,
+    GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY,
+    GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY,
+    GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY,
+    GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY,
+    GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY,
+    GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY,
+    GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY,
+    GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
+    GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY,
+    GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY,
+];
+
+function removeGenAttrDemoUiOptionsFromLocalStorage(): void {
+    try {
+        for (const k of GEN_ATTR_DEMO_UI_LOCAL_STORAGE_KEYS) {
+            localStorage.removeItem(k);
+        }
+    } catch {
+        /* ignore */
+    }
+}
+
+/** 重置「DAG 演示用 UI」：清 LS 后以 {@link DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS} 全量套用。 */
+function resetGenAttrDemoUiOptionsToDefaults(): void {
+    stopDagPlayback();
+    removeGenAttrDemoUiOptionsFromLocalStorage();
+    applyGenAttrDemoUiOptionsSnap(DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS);
+    tryResetAndReplayDag({ preserveNodeSelection: false });
+}
+
+genAttrResetUiOptionsBtn?.addEventListener('click', resetGenAttrDemoUiOptionsToDefaults);
+
+(() => {
+    const panel = document.querySelector('.gen-attribute-page .input-section');
+    if (!panel) return;
+    const sync = () => syncGenAttrResetUiOptionsButtonState();
+    panel.addEventListener('change', sync);
+    panel.addEventListener('input', sync);
+    sync();
+})();
 
 window.addEventListener('pagehide', (ev) => {
     if (ev.persisted) return;
@@ -1247,9 +1526,7 @@ window.addEventListener('pagehide', (ev) => {
 function onExcludePatternsEffectiveChange(): void {
     const h = runnerHandle;
     if (!h || h.tokenCount === 0) return;
-    dagHandle.reset();
-    replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
-    dagHandle.clearNodeSelection();
+    tryResetAndReplayDag();
 }
 
 function bindExcludePatternControls(
@@ -1576,6 +1853,7 @@ async function applyGenAttrCachedRun(
     stopDagPlayback();
     dagHandle.reset();
     applyGenAttrDemoUiOptionsFromRecord(rec);
+    syncGenAttrResetUiOptionsButtonState();
     runnerHandle = createHydratedTokenGenHandle(rec.steps);
     lastRunInitialContext = rec.initialContext;
     lastRunInputSnapshot = getInputSnapshotForRun();
@@ -1585,7 +1863,7 @@ async function applyGenAttrCachedRun(
     currentRunPromptSpans = replayPromptSpans;
     replayRunnerStepsIntoDag(runnerHandle, replayPromptSpans);
     dagHandle.fitViewportToContent();
-    dagHandle.clearNodeSelection();
+    restoreGenAttrDagFocusFromDemoUiOptions(rec.demoUiOptions);
     const n = runnerHandle.tokenCount;
     setGenAttrUsageMetric(initialPromptTokensFromFirstStep(rec.steps[0]!), n);
     if (validateMetricsElements(metricModel) && n > 0) {
@@ -1993,13 +2271,8 @@ submitBtn.on('click', () => {
 function refreshDagForThemeChange(): void {
     stopDagPlayback();
     const h = runnerHandle;
-    if (!h || h.tokenCount === 0) {
-        return;
-    }
-    dagHandle.reset();
-    replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
-    dagHandle.fitViewportToContent();
-    dagHandle.clearNodeSelection();
+    if (!h || h.tokenCount === 0) return;
+    tryResetAndReplayDag();
 }
 
 const themeManager = initThemeManager(

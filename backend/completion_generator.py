@@ -24,7 +24,7 @@ from backend.pred_topk_format import pred_topk_pairs_from_probs_1d
 from backend.runtime_config import DEFAULT_TOPK
 
 # 续写路径：prompt + 续写合计不得超过该 token 数（与语义分析 runtime 无关）。
-completion_max_token_length = 1000
+completion_max_token_length = 500
 
 # 特殊 token 亦视为分析/展示内容，故不跳过。
 _COMPLETION_DECODE_SKIP_SPECIAL = False

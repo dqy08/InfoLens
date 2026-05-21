@@ -12,6 +12,7 @@
 @use "semantic-analysis";
 @use "attribution-inspector";
 @use "attribution-sidebar";
+@use "tooltip-vars";
 
 // CSS变量定义 - 日间模式（默认）
 :root {
@@ -60,6 +61,11 @@
   --bg-hover: #f5f5f5;  // 弹窗内信息块/列表项背景（日间）
   --bg-hover-light: #f8f8f8;  // 弹窗内列表项 hover（日间）
   --primary-color: #2196F3;  // 主题色（链接、当前模型标题等）
+  // 交互高亮蓝（token / bin / DAG 归因份额=1）；与 --primary-color 日间 intentionally 区分
+  --accent-color: #1e6fff;
+  --accent-glow: color-mix(in srgb, var(--accent-color) 60%, transparent);
+  --accent-shadow: color-mix(in srgb, var(--accent-color) 65%, transparent);
+  --accent-stroke: color-mix(in srgb, var(--accent-color) 90%, transparent);
   --text-disabled: #999;  // 禁用态文本
   --text-area-bg: #fff;  // 文本显示区域背景色
   --textarea-actions-button-row-min-height: 3.5rem; // textarea 下「按钮 + stats」行最小高度（analysis / chat / attribution / gen_attribute）
@@ -68,14 +74,14 @@
   --tooltip-text-selected: #933;  // tooltip选中文本颜色
   --tooltip-text-detail: #666666;  // tooltip详情文本颜色
   --tooltip-text-value: #333;  // tooltip数值文本颜色
-  --token-hover-shadow: rgba(42, 158, 255, 0.6);  // token悬浮阴影颜色（日间模式）
-  --token-hover-outline: #1e6fff;  // token悬浮边框颜色
+  --token-hover-shadow: var(--accent-glow);
+  --token-hover-outline: var(--accent-color);
   // 与 rgba(128,128,128,0.252) 叠在 var(--text-area-bg) 上等效（实心，避免多线重叠加深）
   --dag-normal-line-color: #ddd;
-  --dag-highlight-line-color-in: rgba(0, 94, 255, 0.8); // 入边：与 --token-hover-outline #1e6fff 同 hue，半透明与出边一致
+  --dag-highlight-line-color-in: color-mix(in srgb, var(--accent-color) 80%, transparent);
   --dag-highlight-line-color-out: rgba(255, 71, 64, 0.5);
-  --bin-highlight-outline: #1e6fff;  // bin高亮边框（保持与悬浮一致）
-  --bin-highlight-shadow: rgba(30, 111, 255, 0.65);  // bin高亮阴影
+  --bin-highlight-outline: var(--accent-color);
+  --bin-highlight-shadow: var(--accent-shadow);
   --avg-line-color: #8c8c8c;  // 平均值参考线颜色（日间模式）
   --text-color-light: #c3c3c3;  // 浅色文本颜色（主要用于夜间模式）
   --token-truncated-color: #888;  // 被截断 token 的文本颜色（日间模式）
@@ -124,7 +130,11 @@ html {
   --hover-bg-color: #3a3a3a;  // 菜单项悬浮背景色（夜间模式，更暗）
   --bg-hover: #2d2d2d;  // 弹窗内信息块/列表项背景（夜间）
   --bg-hover-light: #353535;  // 弹窗内列表项 hover（夜间）
-  --primary-color: #5c8dff;  // 主题色（夜间模式略亮）
+  --accent-color: #5c8dff;
+  --accent-glow: color-mix(in srgb, var(--accent-color) 80%, transparent);
+  --accent-shadow: var(--accent-glow);
+  --accent-stroke: color-mix(in srgb, var(--accent-color) 90%, transparent);
+  --primary-color: var(--accent-color);
   --text-disabled: #666;  // 禁用态文本（夜间）
   --text-area-bg: #191919;  // 夜间模式：文本显示区域背景色与主背景一致
   --tooltip-text-normal: #ccc;  // tooltip普通文本颜色（夜间模式）
@@ -132,15 +142,13 @@ html {
   --tooltip-text-detail: #888;  // tooltip详情文本颜色（夜间模式）
   --tooltip-text-value: var(--text-color-light);  // tooltip数值文本颜色（夜间模式）
   --token-truncated-color: #888;  // 被截断 token 的文本颜色（夜间模式）
-  --token-hover-shadow: rgba(66, 165, 255, 0.8);  // token悬浮阴影颜色（夜间模式，更亮更明显）
-  --token-hover-outline: #5c8dff;  // token悬浮边框颜色（夜间模式）
+  --token-hover-shadow: var(--accent-glow);
+  --token-hover-outline: var(--accent-color);
   --dag-normal-line-color: #333;
-  // 出边数是无上限的，更可能重叠，所以透明度低一些，以免过亮
-  // 入边数是有限的，所以透明度高一些，以免过暗
-  --dag-highlight-line-color-in: rgba(92, 141, 255, 0.8); // 入边：与 --token-hover-outline #5c8dff 同 hue
+  --dag-highlight-line-color-in: color-mix(in srgb, var(--accent-color) 80%, transparent);
   --dag-highlight-line-color-out: rgba(255, 71, 64, 0.5);
-  --bin-highlight-outline: #5c8dff;  // 夜间模式 bin 高亮边框
-  --bin-highlight-shadow: rgba(92, 141, 255, 0.8);  // 夜间模式 bin 高亮阴影
+  --bin-highlight-outline: var(--accent-color);
+  --bin-highlight-shadow: var(--accent-shadow);
   --avg-line-color: #b0b0b0;  // 平均值参考线颜色（夜间模式）
 
   // 夜间模式：LMF 区域使用 Light 字重（300）
@@ -213,12 +221,21 @@ textarea{
     flex-wrap: wrap;  // 允许换行
     
     .button-left {
+      flex-shrink: 0;  // 防止左侧按钮被压缩
+    }
+
+    .button-left-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 25px;  // Analyze 行与下方 Semantic Query 开关间距（略大于常规行距）
+    }
+
+    .button-left-primary {
       display: flex;
       align-items: center;
       gap: 10px;
-      flex-shrink: 0;  // 防止左侧按钮被压缩
-      position: relative;  // 为绝对定位的进度消息提供定位上下文
-      
+      position: relative;  // 为绝对定位的 loader / 进度消息提供定位上下文
     }
     
     .button-right {
@@ -645,7 +662,7 @@ select {
       //   drop-shadow(0 0 2px rgba(30, 111, 255, 1))
       //   drop-shadow(0 0 5px rgba(30, 111, 255, 0.85))
       //   drop-shadow(0 0 10px rgba(30, 111, 255, 0.7));
-      stroke: rgba(30, 111, 255, 0.9);
+      stroke: var(--accent-stroke);
       stroke-width: 2.5px;
     }
     
@@ -656,7 +673,7 @@ select {
       //   drop-shadow(0 0 2px rgba(30, 111, 255, 1))
       //   drop-shadow(0 0 5px rgba(30, 111, 255, 0.85))
       //   drop-shadow(0 0 10px rgba(30, 111, 255, 0.7));
-      stroke: rgba(30, 111, 255, 0.9);
+      stroke: var(--accent-stroke);
       stroke-width: 2.5px;
     }
   }
@@ -678,7 +695,7 @@ select {
       //   drop-shadow(0 0 10px rgba(30, 111, 255, 0.7));
       // 移动端备用方案：使用 stroke 作为发光效果（iOS Safari filter 支持不佳）
       // 使用 2.5px 区分于 bin-highlighted 的 1.5px
-      stroke: rgba(30, 111, 255, 0.9);
+      stroke: var(--accent-stroke);
       stroke-width: 2.5px;
     }
     
@@ -697,7 +714,7 @@ select {
       //   drop-shadow(0 0 5px rgba(30, 111, 255, 0.85))
       //   drop-shadow(0 0 10px rgba(30, 111, 255, 0.7));
       // 覆盖 bin-highlighted 的 stroke，使用更粗的 stroke 表示同时悬浮
-      stroke: rgba(30, 111, 255, 0.9);
+      stroke: var(--accent-stroke);
       stroke-width: 2.5px;
     }
   }
@@ -771,6 +788,7 @@ select {
   padding: 5px;
   background: var(--tooltip-bg);
   color: var(--text-color);
+  opacity: 0;
   transition-property: opacity, background-color, color;
   transition-duration: .2s;
   position: absolute;  // 相对于 #results 容器定位，与文本区域使用相同的坐标系统
@@ -783,6 +801,10 @@ select {
   max-width: min(16rem, calc(100vw - 24px));
   box-sizing: border-box;
   overflow-wrap: break-word;
+
+  &.tooltip-visible {
+    opacity: var(--tooltip-visible-opacity);
+  }
 }
 
 // 当前token显示区域，使用等宽字体以便分辨连续的␣（字号继承 .tooltip 9pt，行高与历史一致）
@@ -981,7 +1003,7 @@ select {
   white-space: nowrap;
   line-height: 1.2;
   position: absolute;  // 绝对定位，不占用正常布局空间
-  left: 100%;  // 定位在button-left的右侧
+  left: 100%;  // 定位在 button-left-primary（Analyze 行）的右侧
   margin-left: 30px;  // loader宽度(10px) + loader的margin(10px) + 额外间距(10px)
   z-index: 10;  // 确保在上层显示
   
@@ -1411,7 +1433,7 @@ select {
 // 加载器小图标容器
 .loader-small-container {
   position: absolute;  // 绝对定位，不占用正常布局空间
-  left: 100%;  // 定位在button-left的右侧
+  left: 100%;  // 定位在 button-left-primary（Analyze 行）的右侧
   margin-left: 10px;  // 与左侧元素保持间距
   z-index: 10;  // 确保在上层显示
 }
@@ -1433,7 +1455,6 @@ select {
 #major_tooltip {
   position: absolute;
   pointer-events: none;
-  opacity: 0;
   // 不参与 opacity 过渡：否则 hide 时 top/left 已归位而 opacity 仍 >0，会与 fixed 叠成视口角上鬼影
   transition-property: background-color, color;
 }

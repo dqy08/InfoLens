@@ -52,11 +52,17 @@ export const translations: Translations = {
             'Coverage 指每一步在 Top-N 候选池内的累计质量份额（先入池、池内归一后按强度排序再累加）。数值越大保留的 DAG 入边越多；分母仅为该候选池，不是该步 API 返回的全部归因 token。',
         'When checked, gray DAG edges not adjacent to the hovered or selected node are hidden.':
             '勾选后，DAG 中未与当前悬浮/选中节点相邻的灰色边将被隐藏。',
+        'Show token tooltip':
+            '显示 token 提示',
+        'When checked, selecting or hovering a token node shows token information in the results area.':
+            '勾选后，选中或悬浮 token 节点时，在右侧结果区展示该 token 的信息（信息量、预测分布、归因份额等）。',
         'Width (px) of the invisible measurement layer used for DAG layout. Only this width affects wrapping and node positions. When idle, changes replay and fit automatically; during generation or DAG playback, the setting updates for the next run or refresh.':
             'DAG 节点几何所基于的不可见测量层宽度（px）。只有测量层宽度会影响节点折行/位置。修改后：稳态下自动按新宽度重放并 fit；若正在生成或 DAG 播放中，仅更新设置，下次刷新/生成时生效。',
         'Token distance': 'Token distance 间距',
+        'Horizontal gap (px) between the outer left/right edges of adjacent token nodes in linear-arc / linear-arc-step-down layout only. When idle, the DAG refits; during generation or DAG playback, the value is stored and applied on the next sync.':
+            '仅 linear-arc / linear-arc-step-down 布局下生效：相邻 token 节点矩形外侧边之间的水平间隙（px）。修改后：稳态下立即重绘并 fit；若正在生成或 DAG 播放中，仅写入存储，下一轮同步时再反映。',
         'Horizontal gap (px) between the outer left/right edges of adjacent token nodes in linear-arc layout only. When idle, the DAG refits; during generation or DAG playback, the value is stored and applied on the next sync.':
-            '仅 linear-arc 布局下生效：相邻 token 节点矩形外侧边之间的水平间隙（px）。修改后：稳态下立即重绘并 fit；若正在生成或 DAG 播放中，仅写入存储，下一轮同步时再反映。',
+            '仅 linear-arc / linear-arc-step-down 布局下生效：相邻 token 节点矩形外侧边之间的水平间隙（px）。修改后：稳态下立即重绘并 fit；若正在生成或 DAG 播放中，仅写入存储，下一轮同步时再反映。',
         'Compactness': 'DAG 紧凑度',
         'Scales DAG node boxes and labels relative to the measurement layer; 1 matches full readout scale. When idle, changes replay and fit automatically; during generation or DAG playback, the setting updates for the next run or refresh.':
             '相对测量层缩放 DAG 节点框与标签；1 与正文阅读比例一致。修改后：稳态下自动重放并 fit；若正在生成或 DAG 播放中，仅更新设置，下次运行或刷新时生效。',
@@ -115,6 +121,9 @@ export const translations: Translations = {
         'Cached result not found (link may be expired)': '未找到该条归因缓存（分享链接可能已过期）',
         'Cached run not found': '未找到该条生成缓存，可能已被删除',
         'Cached run not found (link may be expired)': '未找到该条生成缓存（分享链接可能已过期）',
+        'Reset UI options': '重置界面选项',
+        'Restore DAG options, replay speed, exclusions, etc. to defaults and clear saved preferences for those controls.':
+            '将 DAG 参数、回放速度、排除正则等恢复为默认值，并清除这些控件的本地保存项。',
         'Cached history': '历史缓存',
         'Cached demos': '示例缓存',
         'Demo not found': '未找到该示例缓存',
@@ -305,6 +314,9 @@ export const translations: Translations = {
         'log perplexity:': '对数困惑度：',
         'Top-k data not available.': '未提供 Top-k 数据。',
         'UTF-8 size:': 'UTF-8大小：',
+        'Attribution share:': '归因份额：',
+        'Attribution share (Total):': '归因份额（总计）：',
+        'Attribution share (Self):': '归因份额（自身）：',
 
         // ========== 统计信息 ==========
         'bytes': '字节',
@@ -386,6 +398,8 @@ export const translations: Translations = {
             '无法使用加密API（crypto.subtle），保存到本地缓存功能不可用。',
         'URL text extraction failed': 'URL 文本提取失败',
         'Semantic analysis failed': '语义分析失败',
+        'Semantic Query(Beta)': '语义查询(Beta)',
+        'Enter query question or topic': '请输入查询问题或主题',
         'Tokenizer results inconsistent: semantic and info-density token boundaries differ.': 'Tokenizer 结果不一致：语义分析与信息密度的 token 边界存在差异，属预期外情况。',
         'No data to analyze, please analyze text first': '没有可分析的数据，请先分析文本',
         'User cancelled file selection': '用户取消了文件选择',

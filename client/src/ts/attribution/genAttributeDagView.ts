@@ -1,6 +1,6 @@
 import * as d3 from 'd3';
 import { DirectedGraph } from 'graphology';
-import { calculateSurprisal, type D3Sel } from '../utils/Util';
+import type { D3Sel } from '../utils/Util';
 import { visualizeSpecialChars } from '../utils/tokenDisplayUtils';
 import {
     clampDagEdgeTopPCoverage,
@@ -10,10 +10,17 @@ import {
     phase2RankAndSparsify,
     type PromptTokenSpan,
 } from './genAttributeDagPreprocess';
-import { DAG_EDGE_MIN_DISPLAY_OPACITY } from './genAttributeDagEdgeDisplay';
+import {
+    DAG_EDGE_MIN_NORMALIZED_SCORE,
+    DAG_EDGE_RENDER_OPACITY_FLOOR,
+    DAG_MIN_ATTRIBUTION_SHARE,
+    DAG_NODE_STROKE_OPACITY_BASE,
+} from './genAttributeDagEdgeDisplay';
 import {
     computeMutualInformationRatio,
     computeConditionalInformationRatio,
+    dagCiVisualScaleFromTargetProb,
+    dagPropagationMiRatio,
     FULL_CONFIDENCE_PROBABILITY_BASELINE,
 } from '../utils/surprisalMath';
 import { isOffsetSpanFullyExcluded } from './attributionDisplayModel';
@@ -23,8 +30,12 @@ import {
     type NodeInterval,
     type PieceEntry,
 } from './genAttributeDagIntervalResolve';
+import type { FrontendToken } from '../api/GLTR_API';
 import type { TokenGenStep } from './tokenGenAttributionRunner';
 import { createGenAttributeDagTextMeasure } from './genAttributeDagTextMeasure';
+import { frontendTokenFromGenAttrStep } from './genAttributeDagTopkToken';
+import { SimpleEventHandler } from '../utils/SimpleEventHandler';
+import { ToolTip, type ToolTipUpdateAugment } from '../vis/ToolTip';
 import { formatTopkTooltipProbabilityPercent } from '../utils/topkChartUtils';
 import {
     CSS_PSEUDO_FULLSCREEN_CHANGE_EVENT,
@@ -38,20 +49,22 @@ import {
     LINEAR_ARC_ADJACENT_GAP_MAX,
     LINEAR_ARC_ADJACENT_GAP_MIN,
     LINEAR_ARC_BEZIER_HANDLE_INSET_FRACTION,
+    LINEAR_ARC_STEP_DOWN_DISTANCE_SCALE,
     paintLinearArcLayout,
 } from './genAttributeDagViewLinearArcMode';
 import { paintTextFlowLayout } from './genAttributeDagViewTextFlowMode';
 import { paintSpiralLayout } from './genAttributeDagViewSpiralMode';
 import { tr } from '../lang/i18n-lite';
 
-/** 与 {@link ToolTip} 中 surprisal 数值格式一致（`.3g`） */
-const DAG_TITLE_SURPRISAL_FMT = d3.format('.3g');
-
 /** 再次挂载前执行上一轮 detach（当前为空操作，保留扩展点） */
 const detachGenAttributeDagPanel = new WeakMap<HTMLElement, () => void>();
 
-/** 节点布局模式：`text-flow` 按文字排版层几何；`linear-arc` 按节点插入序线性排布 + 弧线连边；`spiral` 螺旋排布。 */
-export type DagLayoutMode = 'text-flow' | 'linear-arc' | 'spiral';
+/** 节点布局模式：`text-flow` 按文字排版层几何；`linear-arc` / `linear-arc-step-down` 为线性序 + 弧线连边（后者按 CI 逐级下移）；`spiral` 螺旋排布。 */
+export type DagLayoutMode = 'text-flow' | 'linear-arc' | 'linear-arc-step-down' | 'spiral';
+
+function isLinearArcFamilyLayout(mode: DagLayoutMode): mode is 'linear-arc' | 'linear-arc-step-down' {
+    return mode === 'linear-arc' || mode === 'linear-arc-step-down';
+}
 
 export const DAG_COMPACTNESS_DEFAULT = 0.5;
 /** 下限取小正数以满足 {@link readDisplayScaleFromCss}「必须为正」且不出现零宽度边线。 */
@@ -71,10 +84,16 @@ export function setDagNodeCiVisualScaleEnabled(enabled: boolean): void {
     dagNodeCiVisualScaleEnabled = enabled;
 }
 
-/** 高惊讶度目标边弱化开关；`false` 时 mutualInformationRatio 恒为 1（不弱化），下次 update() 起生效。 */
-let dagEdgeWeakenHighSurprisalEnabled = true;
-export function setDagEdgeWeakenHighSurprisalEnabled(enabled: boolean): void {
-    dagEdgeWeakenHighSurprisalEnabled = enabled;
+/**
+ * 「Decay attribution to high-surprisal targets」——递归归因的配套开关。
+ * 开启：沿链向上时，在高惊讶度（低置信 / teacher forcing）的**生成 token** 处用 MI 折扣传播预算，
+ * 使它们成为与 prompt 同类的「来源」，链在此变短。
+ * 关闭：所有生成 token 视为透明管道，预算不衰减，链只止于 prompt。
+ * `false` 时 `mutualInformationRatio` 仍按目标概率存储与展示，传播/边强度计算中 MI 系数恒为 1。
+ */
+let dagDecayAttributionToHighSurprisalTargetEnabled = true;
+export function setDagDecayAttributionToHighSurprisalTargetEnabled(enabled: boolean): void {
+    dagDecayAttributionToHighSurprisalTargetEnabled = enabled;
 }
 
 /**
@@ -83,22 +102,72 @@ export function setDagEdgeWeakenHighSurprisalEnabled(enabled: boolean): void {
  * {@link dagNodeCiVisualScaleEnabled} 为 false 时恒返回 1。
  */
 function dagGeneratedNodeCiVisualScale(targetProb: number | undefined): number {
-    if (!dagNodeCiVisualScaleEnabled) return 1;
-    if (targetProb !== undefined && Number.isFinite(targetProb) && targetProb > FULL_CONFIDENCE_PROBABILITY_BASELINE) return 1;
-    return 1 + computeConditionalInformationRatio(targetProb);
+    return dagCiVisualScaleFromTargetProb(targetProb, dagNodeCiVisualScaleEnabled);
 }
 
-/** 原生 `<title>` 中 CI/MI 百分号展示，与 Top-K 概率列 {@link formatTopkTooltipProbabilityPercent} 同形。 */
-function formatCiMiRatiosLineForTooltip(ciRatio: number, miRatio: number): string {
+/** DAG Top‑K tooltip 内 CI/MI 行，数值格式与原节点原生 title 一致（{@link formatTopkTooltipProbabilityPercent}）。 */
+function dagCiMiTooltipRowForProb(targetProb: number | undefined): { label: string; value: string } | undefined {
+    if (targetProb === undefined || !Number.isFinite(targetProb)) return undefined;
+    const ciRatio = computeConditionalInformationRatio(targetProb);
+    const miRatio = computeMutualInformationRatio(targetProb);
     const ci = Number.isFinite(ciRatio) ? formatTopkTooltipProbabilityPercent(ciRatio) : String(ciRatio);
     const mi = Number.isFinite(miRatio) ? formatTopkTooltipProbabilityPercent(miRatio) : String(miRatio);
-    return `CI/MI: ${ci} / ${mi}`;
+    return { label: 'CI/MI:', value: `${ci} / ${mi}` };
 }
 
-/** 边原生 `<title>` 中互信息率 α 的展示（节点 title 改用 {@link formatCiMiRatiosLineForTooltip}）。 */
-function formatMutualInformationRatioForTooltip(miRatio: number): string {
-    if (!Number.isFinite(miRatio)) return String(miRatio);
+const TOOLTIP_NA = 'N/A';
+
+/** 边原生 `<title>` 中互信息率 α 的展示。 */
+function formatMutualInformationRatioForTooltip(miRatio: number | undefined): string {
+    if (miRatio === undefined || !Number.isFinite(miRatio)) return TOOLTIP_NA;
     return formatTopkTooltipProbabilityPercent(miRatio);
+}
+
+function isPositiveFiniteShare(share: number | undefined): share is number {
+    return typeof share === 'number' && Number.isFinite(share) && share > 0;
+}
+
+/**
+ * 边级 MI 系数（直接归因强度、无焦点灰边）。
+ * 递归链上的传播折扣在节点级 {@link nodePropagationMiRatio}，二者分工不同。
+ */
+function effectiveMiRatio(miRatio: number | undefined): number | undefined {
+    if (!dagDecayAttributionToHighSurprisalTargetEnabled) return 1;
+    if (miRatio === undefined || !Number.isFinite(miRatio)) return undefined;
+    return miRatio;
+}
+
+function formatTooltipAttributionScore(normalizedScore: number | undefined): string {
+    if (normalizedScore === undefined || !Number.isFinite(normalizedScore)) return TOOLTIP_NA;
+    return normalizedScore.toFixed(3);
+}
+
+/** 直接归因份额的展示：L1 份额 × 目标真实 MI（与弱化开关无关，仅供读数）。 */
+function formatTooltipDirectAttributionShare(
+    attributionShare: number | undefined,
+    miRatio: number | undefined,
+): string {
+    if (!isPositiveFiniteShare(attributionShare)) return TOOLTIP_NA;
+    if (miRatio === undefined || !Number.isFinite(miRatio)) return TOOLTIP_NA;
+    return formatTopkTooltipProbabilityPercent(attributionShare * miRatio);
+}
+
+function formatTooltipRecursiveAttributionShare(share: number | undefined): string {
+    if (share === undefined || !Number.isFinite(share)) return TOOLTIP_NA;
+    return formatAttributionSharePercentForTooltip(share);
+}
+
+/** 节点 tooltip 归因份额：低于 {@link DAG_MIN_ATTRIBUTION_SHARE} 时显示 `< x%`（x 为阈值，1 位有效数字）。 */
+function formatAttributionSharePercentForTooltip(share: number): string {
+    const thresholdLabel = d3.format('.1g')(DAG_MIN_ATTRIBUTION_SHARE * 100) + '%';
+    if (!Number.isFinite(share) || share < DAG_MIN_ATTRIBUTION_SHARE) {
+        return `< ${thresholdLabel}`;
+    }
+    return formatTopkTooltipProbabilityPercent(share);
+}
+
+function formatTooltipLinkStrength(strength: number): string {
+    return Number.isFinite(strength) ? strength.toFixed(3) : TOOLTIP_NA;
 }
 
 export {
@@ -107,6 +176,7 @@ export {
     LINEAR_ARC_ADJACENT_GAP_MAX,
     LINEAR_ARC_ADJACENT_GAP_MIN,
     LINEAR_ARC_BEZIER_HANDLE_INSET_FRACTION,
+    LINEAR_ARC_STEP_DOWN_DISTANCE_SCALE,
 };
 
 /** 图中节点业务字段（与 graphology 节点 attributes 为同一对象） */
@@ -132,10 +202,17 @@ type DagNodeAttrs = {
     nodeH: number;
     /** CI 视觉缩放倍数 `1 + CI` ∈ [1, 2]；prompt 节点为 `1`。供 CSS 字号变量使用。 */
     ciVisualScale: number;
+    /**
+     * 本步 {@link TokenGenStep} 的 `response.target_prob`（仅生成节点）。
+     * 下台阶等处用 {@link dagStepDownEffectiveCiRatio}(dagTargetProb)（高置信 p>p₁ 为 0；与「关闭 CI 视觉」无关）；
+     */
+    dagTargetProb?: number;
     /** {@link visualizeSpecialChars}（DAG：仅「空格后是 [A-Za-z0-9]」保留空格，其余空格为 ·），建点后不变 */
     displayLabel: string;
-    /** 原生 `<title>` 全文（与 `DISABLE_DAG_NODE_TOOLTIPS` 无关，便于切换时不必重算） */
-    nativeTitleText: string;
+    /** 悬停 / 选中焦点时 Top‑K tooltip；仅生成节点（`step >= 0`） */
+    gltrTooltipToken?: FrontendToken;
+    /** 跟在 tooltip 内 log perplexity 行之后的 CI/MI；与 {@link dagCiMiTooltipRowForProb} 同源 */
+    dagCiMiTooltipRow?: { label: string; value: string };
 };
 
 type DagNode = DagNodeAttrs;
@@ -145,27 +222,162 @@ type DagLink = {
     target: string;
     /**
      * 候选池内 max 归一后的归因分，区间约 [0, 1]；作为 `stroke-opacity` 的基项（再乘 {@link mutualInformationRatio}）。
-     * 池内稀疏化与建边前过滤均使用 {@link DAG_EDGE_MIN_DISPLAY_OPACITY}（见 genAttributeDagEdgeDisplay）；条件为 {@link dagLinkStrokeOpacity} 不低于该阈值。
+     * 池内稀疏化与建边前过滤均使用 {@link DAG_EDGE_MIN_NORMALIZED_SCORE}（见 genAttributeDagEdgeDisplay）。
      */
     normalizedScore?: number;
     /** 互信息率：仅作为本步入边的视觉透明度系数，不参与归因筛选。 */
     mutualInformationRatio?: number;
-    /** 本步内：该边池内 L1 份额在「仅可见边」（{@link DAG_EDGE_MIN_DISPLAY_OPACITY} 过滤后）上的占比；用于原生 title「Fan in share」 */
-    scoreShare?: number;
+    /** 本步内：该边在可见入边池内的 L1 份额（建边阈值过滤后归一），追因传播的基本单位。 */
+    attributionShare?: number;
     /** 与 `console.warn('[genAttributeDagView.align] …')` 正文一致（可多条，换行拼接） */
     alignmentNote?: string;
-    /** 边创建时固定的 `<title>` 全文 */
-    titleText: string;
 };
 
-/** 与 {@link refreshNodeLinkHighlight} 中边的 `stroke-opacity` 一致：`normalizedScore × mutualInformationRatio`（开关关闭时 MI 系数恒为 1）。 */
-function dagLinkStrokeOpacity(d: Pick<DagLink, 'normalizedScore' | 'mutualInformationRatio'>): number {
-    const mi = dagEdgeWeakenHighSurprisalEnabled ? (d.mutualInformationRatio ?? 1) : 1;
-    return (d.normalizedScore ?? 1) * mi;
+/**
+ * 该边的 attribution share：优先使用可见边池内的 L1 份额；无 attributionShare 时回退到 max-normalized score。
+ * max-normalized score 作为后备仅用于 attributionShare 尚未计算（如阈值过滤前）的场景。
+ */
+function edgeAttributionShare(d: Pick<DagLink, 'attributionShare' | 'normalizedScore'>): number {
+    const share = d.attributionShare;
+    if (typeof share === 'number' && Number.isFinite(share) && share > 0) return share;
+    const s = d.normalizedScore ?? 1;
+    return Number.isFinite(s) ? Math.max(0, s) : 1;
+}
+
+/**
+ * 无焦点时的边渲染强度：attribution share × {@link effectiveMiRatio}。
+ * 「Decay attribution to high-surprisal targets」关闭时 MI 系数恒为 1（展示仍见 {@link formatMutualInformationRatioForTooltip}）。
+ */
+function directAttributionStrength(
+    d: Pick<DagLink, 'attributionShare' | 'normalizedScore' | 'mutualInformationRatio'>,
+): number {
+    const mi = effectiveMiRatio(d.mutualInformationRatio) ?? 1;
+    return edgeAttributionShare(d) * mi;
 }
 
 function dagLinkEndpointKey(source: string, target: string): string {
     return `${source}->${target}`;
+}
+
+/** 节点 target 端 MI ratio（与 tooltip「Target MI ratio」同源；与 decay 开关无关）。 */
+function nodeTargetMiRatio(node: DagNode): number {
+    return computeMutualInformationRatio(node.dagTargetProb);
+}
+
+function maxHighlightEdgeShare(sharesByKey: Map<string, number>): number {
+    let max = 0;
+    for (const share of sharesByKey.values()) {
+        if (share > max) max = share;
+    }
+    return max;
+}
+
+/**
+ * 池内 max 归一后的 `stroke-opacity`；最强边刻度为 {@link maxOpacity}（默认 1）。
+ * 按实际值计算后，最终不低于 {@link DAG_EDGE_RENDER_OPACITY_FLOOR}，防止过淡不可见。
+ */
+function normalizeEdgeRenderOpacity(share: number, maxShare: number, maxOpacity = 1): number {
+    if (!Number.isFinite(share) || share <= 0) return 0;
+    const cap = Number.isFinite(maxOpacity) && maxOpacity > 0 ? maxOpacity : 1;
+    const scaled =
+        !Number.isFinite(maxShare) || maxShare <= 0
+            ? Math.min(cap, share)
+            : Math.min(cap, (share / maxShare) * cap);
+    if (scaled <= 0) return 0;
+    return Math.max(DAG_EDGE_RENDER_OPACITY_FLOOR, scaled);
+}
+
+/**
+ * 候选归因节点描边透明度：池内 `stay / max(stay)` 线性映射到 `[{@link DAG_NODE_STROKE_OPACITY_BASE}, 1]`，
+ * 避免弱节点描边过淡、在 UI 里看不出来（见 {@link DAG_NODE_STROKE_OPACITY_BASE}）。
+ */
+function normalizeNodeStrokeRenderOpacity(share: number, maxShare: number): number {
+    if (!Number.isFinite(share) || share <= 0) return 0;
+    const scaled =
+        !Number.isFinite(maxShare) || maxShare <= 0
+            ? Math.min(1, share)
+            : Math.min(1, share / maxShare);
+    if (scaled <= 0) return 0;
+    return DAG_NODE_STROKE_OPACITY_BASE + scaled * (1 - DAG_NODE_STROKE_OPACITY_BASE);
+}
+
+/** 焦点在 target 时单条入边份额（直接模式一跳；灰边与此时蓝边共用）。 */
+function perTargetIncomingEdgeShare(
+    link: Pick<DagLink, 'attributionShare' | 'normalizedScore'>,
+    targetNode: DagNode,
+): number {
+    const upstreamBudget = nodePropagationMiRatio(targetNode);
+    return Math.min(1, upstreamBudget * edgeAttributionShare(link));
+}
+
+/** 灰边 stroke-opacity：按各 target 入边池归一，与焦点在该 target 时的蓝边一致。 */
+function buildGrayRenderStrengthByEdgeKey(
+    graph: DirectedGraph<DagNodeAttrs>,
+    incomingLinksByTarget: Map<string, DagLink[]>,
+): Map<string, number> {
+    const byKey = new Map<string, number>();
+    for (const [targetId, links] of incomingLinksByTarget) {
+        if (!graph.hasNode(targetId)) continue;
+        const targetNode = graph.getNodeAttributes(targetId) as DagNode;
+        // prompt 节点（step < 0）不应出现在 incomingLinksByTarget（仅 update() 中生成节点作为 target 时写入），
+        // 此处防御：nodePropagationMiRatio 对 prompt 返回 0，全组 share=0，跳过以节省迭代。
+        if (targetNode.step < 0) continue;
+        let maxShare = 0;
+        const rows: Array<{ key: string; share: number }> = [];
+        for (const link of links) {
+            if (!graph.hasEdge(link.source, link.target)) continue;
+            const srcId = endpointNode(link.source, graph).id;
+            const share = perTargetIncomingEdgeShare(link, targetNode);
+            if (share > maxShare) maxShare = share;
+            rows.push({ key: dagLinkEndpointKey(srcId, targetId), share });
+        }
+        for (const { key, share } of rows) {
+            byKey.set(key, normalizeEdgeRenderOpacity(share, maxShare));
+        }
+    }
+    return byKey;
+}
+
+/**
+ * 递归模式：焦点链上**上游**节点的描边 raw 强度（stay；不含焦点本身）。
+ * 直接模式仅一跳，由蓝/红高亮边表达，不画来源描边。
+ * 显示判定：stay ≥ {@link DAG_MIN_ATTRIBUTION_SHARE}；描边透明度见 {@link buildNodeStrokeRenderStrengthById}。
+ */
+function computeUpstreamNodeStrokeShareById(
+    nodeShareById: Map<string, number>,
+    graph: DirectedGraph<DagNodeAttrs>,
+    focusId: string,
+): Map<string, number> {
+    const byNodeId = new Map<string, number>();
+    for (const [nodeId, nodeShare] of nodeShareById) {
+        if (nodeId === focusId) continue;
+        const stay = nodeShare * (1 - nodePropagationMiRatio(graph.getNodeAttributes(nodeId) as DagNode));
+        if (stay >= DAG_MIN_ATTRIBUTION_SHARE) byNodeId.set(nodeId, stay);
+    }
+    return byNodeId;
+}
+
+/** 池内 max 归一后的 render 强度；{@link maxOpacity} 为链内最强边刻度（蓝入边见 {@link refreshNodeLinkHighlight}，默认 1）。 */
+function buildMaxNormalizedRenderStrengthByKey(
+    sharesByKey: Map<string, number>,
+    maxOpacity = 1,
+): Map<string, number> {
+    const maxShare = maxHighlightEdgeShare(sharesByKey);
+    const byKey = new Map<string, number>();
+    for (const [key, share] of sharesByKey) {
+        byKey.set(key, normalizeEdgeRenderOpacity(share, maxShare, maxOpacity));
+    }
+    return byKey;
+}
+
+/** 递归链候选节点描边强度：stay 池内 max 归一后映射到 `[{@link DAG_NODE_STROKE_OPACITY_BASE}, 1]`。 */
+function buildNodeStrokeRenderStrengthById(stayByNodeId: Map<string, number>): Map<string, number> {
+    const maxShare = maxHighlightEdgeShare(stayByNodeId);
+    const byNodeId = new Map<string, number>();
+    for (const [nodeId, stay] of stayByNodeId) {
+        byNodeId.set(nodeId, normalizeNodeStrokeRenderOpacity(stay, maxShare));
+    }
+    return byNodeId;
 }
 
 /**
@@ -175,6 +387,7 @@ function dagLinkEndpointKey(source: string, target: string): string {
 function pruneDagLinksTouchingFullyExcludedNodes(
     graph: DirectedGraph<DagNodeAttrs>,
     links: DagLink[],
+    incomingLinksByTarget: Map<string, DagLink[]>,
     intervals: [number, number][],
 ): void {
     if (intervals.length === 0) return;
@@ -205,10 +418,35 @@ function pruneDagLinksTouchingFullyExcludedNodes(
         links[write++] = link;
     }
     links.length = write;
+
+    for (const [targetId, incoming] of incomingLinksByTarget) {
+        if (incoming.length === 0) {
+            incomingLinksByTarget.delete(targetId);
+            continue;
+        }
+        let keep = 0;
+        for (const link of incoming) {
+            if (removedLinkKeys.has(dagLinkEndpointKey(link.source, link.target))) {
+                continue;
+            }
+            incoming[keep++] = link;
+        }
+        if (keep === 0) {
+            incomingLinksByTarget.delete(targetId);
+            continue;
+        }
+        incoming.length = keep;
+        if (!graph.hasNode(targetId)) {
+            incomingLinksByTarget.delete(targetId);
+        }
+    }
 }
 
 const SVG_MIN_W = 320;
 const SVG_MIN_H = 280;
+
+/** text-flow：`fitViewportToContent` 四边对称边距（px）。 */
+const DAG_TEXT_FLOW_FIT_PAD_PX = 24;
 
 /**
  * `.gen-attr-dag-stack` 布局尺寸(px)，供 SVG width/height 与 `fitViewportToContent` 共用。
@@ -224,7 +462,7 @@ function stackLayoutViewportPx(stackEl: HTMLElement): { w: number; h: number } {
 
 /** text-flow：在「抵消 display-scale」基准上的初始 zoom 倍率（d3 的 k） */
 const DAG_INITIAL_ZOOM_BOOST_TEXT_FLOW = 2;
-/** linear-arc：同上 */
+/** linear-arc / linear-arc-step-down：同上 */
 const DAG_INITIAL_ZOOM_BOOST_LINEAR_ARC = 4;
 /** spiral：同上 */
 const DAG_INITIAL_ZOOM_BOOST_SPIRAL = 2;
@@ -234,6 +472,7 @@ function dagInitialZoomBoost(mode: DagLayoutMode): number {
         case 'text-flow':
             return DAG_INITIAL_ZOOM_BOOST_TEXT_FLOW;
         case 'linear-arc':
+        case 'linear-arc-step-down':
             return DAG_INITIAL_ZOOM_BOOST_LINEAR_ARC;
         case 'spiral':
             return DAG_INITIAL_ZOOM_BOOST_SPIRAL;
@@ -253,18 +492,17 @@ const CSS_VAR_DAG_LINK_STROKE_WIDTH = '--gen-attr-dag-link-stroke-width';
 
 /** 与 {@link start.scss} `--dag-normal-line-color` 一致（普通边：线 stroke + 箭头 marker stroke） */
 const CSS_VAR_DAG_NORMAL_LINE_COLOR = '--dag-normal-line-color';
-/** 与 {@link start.scss} `--dag-highlight-line-color-in` 一致（入边：指向焦点） */
+/** 与 {@link start.scss} `--dag-highlight-line-color-in`（`--accent-color`）一致（入边：指向焦点） */
 const CSS_VAR_DAG_HIGHLIGHT_LINE_IN = '--dag-highlight-line-color-in';
 /** 与 {@link start.scss} `--dag-highlight-line-color-out` 一致（出边：从焦点出发） */
 const CSS_VAR_DAG_HIGHLIGHT_LINE_OUT = '--dag-highlight-line-color-out';
+/** 与 {@link gen_attribute.scss} `.gen-attr-dag-node--recursive-chain` 中 `stroke-opacity` 一致（由 JS 写入 g 元素） */
+const CSS_VAR_DAG_NODE_RECURSIVE_SHARE = '--gen-attr-dag-node-recursive-share';
 
 /** 弱化：未排除的 prompt 无出边，或（prompt/生成区）邻域外且存在悬停/选中焦点时 */
 const DAG_NODE_WEAKEN_OPACITY = 0.5;
 /** 隐藏：节点 span 完全落在 exclude 规则命中区间内（prompt 与生成区各一套模式） */
 const DAG_NODE_HIDDEN_OPACITY = 0.1;
-
-/** 暂时关闭节点上的原生 `<title>` 悬浮提示；恢复时改为 `false`（边不受影响） */
-const DISABLE_DAG_NODE_TOOLTIPS = false;
 
 /**
  * 边端在矩形边界外侧的留白，相对测量层「1em」的比例（无单位）；与箭头/描边衔接用。
@@ -316,6 +554,21 @@ function nodeRx(d: DagNode): number {
     return Math.min(d.nodeW / 2, d.nodeH / 2);
 }
 
+/** stroke rect 外扩 pad=displayScale，与 scss `stroke-width: calc(2 * display-scale)` 一致，描边不压 fill。 */
+function syncNodeStrokeRects(
+    sel: d3.Selection<SVGGElement, DagNode, SVGGElement | null, unknown>,
+    displayScale: number,
+): void {
+    const p = displayScale;
+    sel.select('rect.gen-attr-dag-node-stroke')
+        .attr('x', -p)
+        .attr('y', -p)
+        .attr('width', (d) => d.nodeW + 2 * p)
+        .attr('height', (d) => d.nodeH + 2 * p)
+        .attr('rx', (d) => nodeRx(d) + p)
+        .attr('ry', (d) => nodeRx(d) + p);
+}
+
 export type GenAttributeDagHandle = {
     /**
      * 在首帧 `update`（第一步生成 token）之前调用一次：用全量 prompt token spans 建 prompt 层节点。
@@ -346,12 +599,16 @@ export type GenAttributeDagHandle = {
     reset(preserveUserViewport?: boolean): void;
     /**
      * zoom identity 后按内容适配视口；空图走默认缩放；`k` 上限 `k₀`（随当前布局模式的初始 zoom 倍率变化）。
-     * - `text-flow`：`rootG.getBBox()`（含边）等比落入内框。
-     * - `linear-arc`：仅按 `gen-attr-dag-nodes` 行宽定比，token 行相对内框竖直居中（弧不参与）。
+     * - `text-flow`：`rootG.getBBox()`（含边）等比落入内框；四边对称各 {@link DAG_TEXT_FLOW_FIT_PAD_PX}px。
+     * - `linear-arc` / `linear-arc-step-down`：仅按 `gen-attr-dag-nodes` 行宽定比，token 行相对内框竖直居中（弧不参与）。
      * 若 `layoutDirty` 为真则 no-op（仅已执行的 `syncSvgSize` 生效，不改 pan/zoom），但 `force` 为真时仍
      * fit 并清 dirty（例如刷新按钮的强制适配）。
      */
     fitViewportToContent(force?: boolean): void;
+    /** 当前选中节点 id；无选中为 `null`。 */
+    getSelectedNodeId(): string | null;
+    /** 设置选中节点（`null` 清除）；节点须已存在于图中。 */
+    setSelectedNodeId(id: string | null): void;
     /** 清除节点选中态（与点击画布空白等价）；不改变图数据，生成结束后可调用以去掉末 token 描边 */
     clearNodeSelection(): void;
     /** DAG 步进重放：更新 ▶ / ⏸ 按钮文案（由页面在播放开始/结束/暂停时调用） */
@@ -366,7 +623,7 @@ export type GenAttributeDagHandle = {
     /** 切换 DAG 节点布局模式并立即重排现有节点/边。 */
     setLayoutMode(mode: DagLayoutMode): void;
     /**
-     * linear-arc 下相邻节点矩形外侧边的水平间隙（px）。仅影响 linear-arc 几何；若在生成/播放中途调用且
+     * linear-arc 家族下相邻节点矩形外侧边的水平间隙（px）。仅影响该家族几何；若在生成/播放中途调用且
      * `skipRefit` 为真，仅写入值，下一轮 `syncGraphToSvg`/空闲后再反映（与测量宽度语义一致）。
      */
     setLinearArcAdjacentGapPx(px: number, opts?: { skipRefit?: boolean }): void;
@@ -383,6 +640,12 @@ export type GenAttributeDagHandle = {
      * - `false`（默认）：保留为低透明度（{@link DAG_NODE_HIDDEN_OPACITY}）占位。
      */
     setHideExcludedTokens(hide: boolean): void;
+    /** 是否显示 token tooltip（UI: Show token tooltip；`showTokenInfoOnSelected`）。 */
+    setShowTokenInfoOnSelected(show: boolean): void;
+    /** 是否启用传播归因（UI: Propagated attribution mode；`recursiveAttributionEnabled`）。 */
+    setRecursiveAttributionEnabled(enabled: boolean): void;
+    /** 是否在直接归因焦点上额外展示从焦点出发的下游影响出边。 */
+    setShowDownstreamInfluence(show: boolean): void;
     /** prompt 层节点是否已注入（即 {@link setPromptTokenSpans} 至少成功添加过一个节点） */
     hasPromptSpans(): boolean;
     /** 移除 DAG 栈与刷新按钮（离开页面时调用） */
@@ -409,55 +672,50 @@ function formatNodeOffsetRange(id: string): string {
     return `[${a}, ${b})`;
 }
 
-function buildNodeNativeTitleText(
-    d: Pick<DagNode, 'displayLabel' | 'id' | 'step'> & { targetProb?: number },
-): string {
-    const lines = [
-        d.displayLabel,
-        `Offset: ${formatNodeOffsetRange(d.id)}`,
-        `Step: ${d.step}`,
-    ];
-    const { targetProb } = d;
-    if (targetProb !== undefined && Number.isFinite(targetProb)) {
-        lines.push(`\nProb: ${formatTopkTooltipProbabilityPercent(targetProb)}`);
-        lines.push(`Information: ${DAG_TITLE_SURPRISAL_FMT(calculateSurprisal(targetProb))} bits`);
-        lines.push(
-            formatCiMiRatiosLineForTooltip(
-                computeConditionalInformationRatio(targetProb),
-                computeMutualInformationRatio(targetProb),
-            ),
-        );
-    }
-    return lines.join('\n');
-}
+/**
+ * 边当前显示状态；在 {@link refreshNodeLinkHighlight} 中与 stroke 一并刷新 `<title>`。
+ *
+ * {@link recursiveAttributionShare} 为当前焦点下传播归因链上的份额（UI: Propagated；仅入边链；无焦点或不在链上为 undefined）。
+ * {@link linkStrength} 为 tooltip 用的原始强度；{@link renderStrength} 为写入 stroke-opacity 的值（直接模式灰边与蓝边同刻度）。
+ * 空行以上为建边后不变的直接归因指标。不用「opacity」命名：灰边与蓝/红高亮边在相同强度下 `stroke-opacity` 数值可相同，但肉眼对比度不同，
+ * 视觉效果由 stroke 颜色与透明度共同衍生，强度才是可比较的固定量。
+ */
+type DagLinkTitleSnapshot = {
+    normalizedScore?: number;
+    mutualInformationRatio?: number;
+    attributionShare?: number;
+    alignmentNote?: string;
+    src: DagNode;
+    tgt: DagNode;
+    /** 递归链入边上的传播份额 edgeShare；不在链上时为 undefined（直接模式或无焦点）。 */
+    recursiveAttributionShare?: number;
+    linkStrength: number;
+};
 
-/** 建边时调用：端点已带 {@link DagNodeAttrs.displayLabel} */
-function buildLinkTitleText(
-    d: Pick<DagLink, 'normalizedScore' | 'mutualInformationRatio' | 'scoreShare' | 'alignmentNote'>,
-    src: DagNode,
-    tgt: DagNode
-): string {
-    const s = d.normalizedScore ?? 1;
-    const normStr = Number.isFinite(s) ? s.toFixed(3) : String(s);
-    const opacity = dagLinkStrokeOpacity(d);
-    const opacityStr = Number.isFinite(opacity) ? opacity.toFixed(3) : String(opacity);
+function buildLinkTitleText(snapshot: DagLinkTitleSnapshot): string {
+    // 建边后不变；空行以下随焦点/传播归因变化（Attribution share (Propagated)、Link strength）。
+    const staticMetrics = [
+        `Attribution score: ${formatTooltipAttributionScore(snapshot.normalizedScore)}`,
+        `Target MI ratio: ${formatMutualInformationRatioForTooltip(snapshot.mutualInformationRatio)}`,
+        `Attribution share (Adjacent): ${formatTooltipDirectAttributionShare(
+            snapshot.attributionShare,
+            snapshot.mutualInformationRatio,
+        )}`,
+    ];
+    if (snapshot.alignmentNote) {
+        staticMetrics.push(snapshot.alignmentNote);
+    }
 
     const metrics = [
-        `Attribution score: ${normStr}`,
-        `Target MI ratio: ${formatMutualInformationRatioForTooltip(d.mutualInformationRatio ?? 1)}`,
-        `Link strength: ${opacityStr}`,
+        staticMetrics.join('\n'),
+        '',
+        `Attribution share (Propagated): ${formatTooltipRecursiveAttributionShare(snapshot.recursiveAttributionShare)}`,
+        `Link strength: ${formatTooltipLinkStrength(snapshot.linkStrength)}`,
     ];
-    const share = d.scoreShare;
-    if (typeof share === 'number' && Number.isFinite(share) && share > 0) {
-        metrics.push(`Fan in share: ${(share * 100).toFixed(1)}%`);
-    }
-    if (d.alignmentNote) {
-        metrics.push(d.alignmentNote);
-    }
 
     return [
-        `From:\n${src.displayLabel}\nOffset: ${formatNodeOffsetRange(src.id)}`,
-        `To:\n${tgt.displayLabel}\nOffset: ${formatNodeOffsetRange(tgt.id)}`,
+        `From:\n${snapshot.src.displayLabel}\nOffset: ${formatNodeOffsetRange(snapshot.src.id)}`,
+        `To:\n${snapshot.tgt.displayLabel}\nOffset: ${formatNodeOffsetRange(snapshot.tgt.id)}`,
         metrics.join('\n'),
     ].join('\n\n');
 }
@@ -480,45 +738,147 @@ function snapSubwordNode(node: DagNode, prev: DagNode | null): void {
     node.cx = prev.cx + (prev.nodeW + node.nodeW) / 2;
 }
 
-/** 焦点 + 一层入邻（直接祖先）+ 一层出邻（直接后代），用于选中/悬停高亮范围 */
-function oneHopNeighborhood(graph: DirectedGraph<DagNodeAttrs>, nodeId: string): Set<string> {
-    const active = new Set<string>([nodeId]);
-    graph.forEachInNeighbor(nodeId, (n) => {
-        active.add(n);
-    });
-    graph.forEachOutNeighbor(nodeId, (n) => {
-        active.add(n);
-    });
-    return active;
-}
-
-/** 边是否与焦点节点邻接（用于高亮边样式与 SVG 中置于灰边之上） */
-function dagLinkIncidentToFocus(
-    graph: DirectedGraph<DagNodeAttrs>,
-    focusId: string | null,
-    d: DagLink
-): boolean {
-    if (!focusId) return false;
-    const s = endpointNode(d.source, graph).id;
-    const t = endpointNode(d.target, graph).id;
-    return s === focusId || t === focusId;
-}
-
 /**
- * 邻接焦点时边的描边：从焦点出发 → 红；指向焦点 → 蓝（自环视为「出发」）。
- * 非邻接返回 `null`，调用方用默认边色。
+ * 传播归因 vs 直接归因（设计理念）
+ *
+ * UI 称 Propagated attribution mode；代码标识 `recursiveAttribution*`（递归向上传播份额，二者同义）。
+ *
+ * - 直接归因：只看一跳前驱，回答“它直接依赖了谁”。
+ * - 传播归因：持续向上追溯，直到信息来源，回答“真正原因来自哪里”。
+ *
+ * 来源通常有两类：prompt，或低置信/高惊讶的生成 token（含 teacher forcing）。
+ * 高置信中间 token 更像传导节点，归因会继续穿过它。
+ *
+ * UI 语义：
+ * - 灰边：各 target 入边池内 max 归一（无焦点时的默认边）；
+ * - 焦点蓝入边：链内 max 归一，最强边刻度为焦点 target 的实际 MI ratio；最终 opacity 不低于 {@link DAG_EDGE_RENDER_OPACITY_FLOOR}；
+ * - 上游节点描边（仅传播归因）：stay 池内 max 归一，映射到 `[{@link DAG_NODE_STROKE_OPACITY_BASE}, 1]`；直接模式一跳由边色表达，不描边。
+ * - 传播模式节点提亮与描边一致：仅焦点 + stay 达阈的上游（传导节点仅保留蓝边，不提亮）。
  */
-function dagLinkHighlightStroke(
+type FocusAttributionState = {
+    activeNodeIds: Set<string>;
+    /** 传播归因链上入边的份额（用于蓝边强度；`recursiveAttributionShare`）。 */
+    incomingEdgeShareByKey: Map<string, number>;
+    /** 仅直接模式：焦点出发的下游影响边。 */
+    downstreamEdgeStrengthByKey: Map<string, number>;
+    /** 链上各节点累计份额（用于计算节点停留量）。 */
+    nodeShareById: Map<string, number>;
+};
+
+/** 节点在递归传播中的传导系数：越低越像来源，越高越像传导节点。 */
+function nodePropagationMiRatio(node: DagNode): number {
+    if (node.step < 0) return 0;
+    if (!dagDecayAttributionToHighSurprisalTargetEnabled) return 1;
+    return dagPropagationMiRatio(node.dagTargetProb);
+}
+
+type DagLinkHighlightDisplay = {
+    stroke: string;
+    /** 写入 stroke-opacity（链内 max 归一；蓝入边最强边刻度见 {@link refreshNodeLinkHighlight}，红出边/灰边为 1）。 */
+    renderStrength: number;
+    /** tooltip「Link strength」：原始强度，不做归一。 */
+    linkStrength: number;
+    recursiveAttributionShare?: number;
+};
+
+/** 焦点下边的视觉规则：传播归因看“向上原因链”，直接看“一跳关系 + 可选下游影响”。 */
+function resolveDagLinkHighlightDisplay(
+    d: DagLink,
+    edgeKey: string,
+    focusState: FocusAttributionState | null,
+    recursiveAttributionEnabled: boolean,
+    grayRenderByKey: Map<string, number>,
+    incomingHighlightRenderByKey: Map<string, number>,
+    downstreamHighlightRenderByKey: Map<string, number>,
+): DagLinkHighlightDisplay {
+    const directStrength = directAttributionStrength(d);
+    const grayRender = grayRenderByKey.get(edgeKey) ?? directStrength;
+
+    if (focusState) {
+        const downstreamStrength = focusState.downstreamEdgeStrengthByKey.get(edgeKey);
+        if (downstreamStrength != null) {
+            return {
+                stroke: `var(${CSS_VAR_DAG_HIGHLIGHT_LINE_OUT})`,
+                renderStrength: downstreamHighlightRenderByKey.get(edgeKey)!,
+                linkStrength: downstreamStrength,
+            };
+        }
+
+        const incomingShare = focusState.incomingEdgeShareByKey.get(edgeKey);
+        if (incomingShare != null) {
+            return {
+                stroke: `var(${CSS_VAR_DAG_HIGHLIGHT_LINE_IN})`,
+                renderStrength: incomingHighlightRenderByKey.get(edgeKey)!,
+                linkStrength: incomingShare,
+                recursiveAttributionShare: recursiveAttributionEnabled ? incomingShare : undefined,
+            };
+        }
+    }
+
+    return {
+        stroke: `var(${CSS_VAR_DAG_NORMAL_LINE_COLOR})`,
+        renderStrength: grayRender,
+        linkStrength: directStrength,
+    };
+}
+
+function computeFocusAttributionState(
     graph: DirectedGraph<DagNodeAttrs>,
-    focusId: string | null,
-    d: DagLink
-): string | null {
-    if (!focusId) return null;
-    const s = endpointNode(d.source, graph).id;
-    const t = endpointNode(d.target, graph).id;
-    if (s !== focusId && t !== focusId) return null;
-    if (s === focusId) return `var(${CSS_VAR_DAG_HIGHLIGHT_LINE_OUT})`;
-    return `var(${CSS_VAR_DAG_HIGHLIGHT_LINE_IN})`;
+    nodesSortedByStepDesc: DagNode[],
+    incomingLinksByTarget: Map<string, DagLink[]>,
+    focusId: string,
+    options: { maxIncomingDepth: number; includeDownstreamInfluence: boolean },
+): FocusAttributionState | null {
+    if (!graph.hasNode(focusId)) return null;
+
+    // 从焦点向上追溯：递归模式追到来源；直接模式仅保留一跳前驱。
+    const activeNodeIds = new Set<string>([focusId]);
+    const incomingEdgeShareByKey = new Map<string, number>();
+    const downstreamEdgeStrengthByKey = new Map<string, number>();
+    const nodeShareById = new Map<string, number>([[focusId, 1]]);
+    const remainingDepthByNodeId = new Map<string, number>([[focusId, options.maxIncomingDepth]]);
+
+    for (const node of nodesSortedByStepDesc) {
+        // min(1)/max(0) 仅防御，正常路径下 nodeShare ∈ (0, 1]。
+        const nodeShare = Math.min(1, Math.max(0, nodeShareById.get(node.id) ?? 0));
+        if (nodeShare <= 0) continue;
+        const remainingDepth = remainingDepthByNodeId.get(node.id) ?? 0;
+        if (remainingDepth <= 0) continue;
+
+        // 低系数节点更接近来源，高系数节点更接近传导。
+        const upstreamBudget = nodeShare * nodePropagationMiRatio(node);
+        if (upstreamBudget < DAG_MIN_ATTRIBUTION_SHARE) continue;
+
+        for (const link of incomingLinksByTarget.get(node.id) ?? []) {
+            if (!graph.hasEdge(link.source, link.target)) continue;
+            const srcId = endpointNode(link.source, graph).id;
+            // min(1) 仅防御：attributionShare L1 归一且 MI ≤ 1 保证乘积不超过 1。
+            const edgeShare = Math.min(1, upstreamBudget * edgeAttributionShare(link));
+            if (edgeShare < DAG_MIN_ATTRIBUTION_SHARE) continue;
+
+            incomingEdgeShareByKey.set(dagLinkEndpointKey(srcId, node.id), edgeShare);
+            activeNodeIds.add(srcId);
+            // min(1) 仅防御：nodeShare 从 1 出发，经 attributionShare 分配与 MI 衰减后各节点累积不超过 1。
+            nodeShareById.set(srcId, Math.min(1, (nodeShareById.get(srcId) ?? 0) + edgeShare));
+            remainingDepthByNodeId.set(
+                srcId,
+                Math.max(remainingDepthByNodeId.get(srcId) ?? 0, remainingDepth - 1),
+            );
+        }
+    }
+
+    // 直接模式可附带展示“焦点影响了谁”。
+    if (options.includeDownstreamInfluence) {
+        graph.forEachOutEdge(focusId, (_edgeId, edgeAttrs, srcId, tgtId) => {
+            const link = edgeAttrs as unknown as Pick<DagLink, 'attributionShare' | 'normalizedScore' | 'mutualInformationRatio'>;
+            const strength = directAttributionStrength(link);
+            if (strength < DAG_MIN_ATTRIBUTION_SHARE) return;
+            downstreamEdgeStrengthByKey.set(dagLinkEndpointKey(srcId, tgtId), strength);
+            activeNodeIds.add(tgtId);
+        });
+    }
+
+    return { activeNodeIds, incomingEdgeShareByKey, downstreamEdgeStrengthByKey, nodeShareById };
 }
 
 /**
@@ -562,12 +922,18 @@ export type InitGenAttributeDagViewOptions = {
     /** DAG 节点布局模式；默认 `text-flow`。 */
     layoutMode?: DagLayoutMode;
     /**
-     * linear-arc：相邻节点矩形外侧边的水平间隙（px），决定水平方向疏密；
+     * linear-arc 家族：相邻节点矩形外侧边的水平间隙（px），决定水平方向疏密；
      * 默认 {@link LINEAR_ARC_ADJACENT_GAP_DEFAULT}。
      */
     linearArcAdjacentGapPx?: number;
     /** 被 exclude 规则命中的节点是否完全隐藏（true）还是仅降至 {@link DAG_NODE_HIDDEN_OPACITY}（false，默认）。 */
     hideExcludedTokens?: boolean;
+    /** 是否显示 token tooltip（UI: Show token tooltip；`showTokenInfoOnSelected`）。 */
+    showTokenInfoOnSelected?: boolean;
+    /** 传播归因（UI: Propagated attribution mode；`recursiveAttributionEnabled`）；默认 `false`。 */
+    recursiveAttributionEnabled?: boolean;
+    /** 直接归因模式下是否展示从焦点出发的下游影响出边；默认 `false`。 */
+    showDownstreamInfluence?: boolean;
     /** 边 Top-P 覆盖阈值（候选池内累计份额）；默认 {@link DAG_EDGE_TOP_P_COVERAGE_DEFAULT}。 */
     edgeTopPCoverage?: number;
     /** 进入/退出/切换全屏失败时（常见于移动端不支持元素全屏等）。不传则无提示。 */
@@ -597,6 +963,9 @@ export function initGenAttributeDagView(
         linearArcAdjacentGapPx = clampLinearArcAdjacentGap(iv);
     }
     let hideExcludedTokens: boolean = options?.hideExcludedTokens ?? false;
+    let showTokenInfoOnSelected: boolean = options?.showTokenInfoOnSelected ?? false;
+    let recursiveAttributionEnabled: boolean = options?.recursiveAttributionEnabled ?? false;
+    let showDownstreamInfluence: boolean = options?.showDownstreamInfluence ?? false;
     let edgeTopPCoverage = clampDagEdgeTopPCoverage(
         options?.edgeTopPCoverage ?? DAG_EDGE_TOP_P_COVERAGE_DEFAULT,
     );
@@ -624,6 +993,8 @@ export function initGenAttributeDagView(
             isBatching: () => false,
             reset: noop,
             fitViewportToContent: noop,
+            getSelectedNodeId: () => null,
+            setSelectedNodeId: noop,
             clearNodeSelection: noop,
             setDagPlaybackPlaying: noop,
             setMeasureWidthPx: noop,
@@ -632,6 +1003,9 @@ export function initGenAttributeDagView(
             setDagCompactness: noop,
             setEdgeTopPCoverage: noop,
             setHideExcludedTokens: noop,
+            setShowTokenInfoOnSelected: noop,
+            setRecursiveAttributionEnabled: noop,
+            setShowDownstreamInfluence: noop,
             hasPromptSpans: () => false,
             detach: noop,
         };
@@ -642,12 +1016,32 @@ export function initGenAttributeDagView(
     detachGenAttributeDagPanel.get(rootEl)?.();
     resultsRoot
         .selectAll(
-            '.gen-attr-dag-stack, svg.gen-attr-dag-svg, button.gen-attr-dag-refresh, button.gen-attr-dag-play, button.gen-attr-dag-fullscreen'
+            '.gen-attr-dag-stack, .gen-attr-dag-topk-tooltip, svg.gen-attr-dag-svg, button.gen-attr-dag-refresh, button.gen-attr-dag-play, button.gen-attr-dag-fullscreen'
         )
         .remove();
 
     const stack = resultsRoot.append('div').attr('class', 'gen-attr-dag-stack');
     const stackEl = stack.node() as HTMLElement;
+
+    const dagTooltipEh = new SimpleEventHandler(stackEl);
+    const dagTooltipRoot = resultsRoot.append('div').attr('class', 'tooltip gen-attr-dag-topk-tooltip');
+    dagTooltipRoot.append('div').attr('class', 'currentToken');
+    dagTooltipRoot.append('div').attr('class', 'myDetail');
+    dagTooltipRoot
+        .append('div')
+        .attr('class', 'gen-attr-dag-topk-tooltip-predictions-scroll')
+        .append('div')
+        .attr('class', 'predictions predictions-table');
+    const dagTopkToolTip = new ToolTip(dagTooltipRoot, dagTooltipEh, {
+        surprisalRowLabel: tr('log perplexity:'),
+        placement: 'parent-bottom-right',
+        pointerInteractive: false,
+    });
+
+    /** DAG Top‑K tooltip：挂载初期为 stub；{@link syncGenAttrDagTopkTooltipImpl} 在 {@link refreshNodeLinkHighlight} 定义之后赋值 */
+    let syncGenAttrDagTopkTooltipImpl: () => void = () => {
+        dagTopkToolTip.hideAndReset();
+    };
 
     /** 非 text-flow 时节点不可拖；用该类覆盖选中态的 grab 光标（linear-arc / spiral 等）。 */
     function syncStackLayoutDragUi(): void {
@@ -697,6 +1091,7 @@ export function initGenAttributeDagView(
     function refreshDagScaleDerivedFromCss(): void {
         displayScale = readDisplayScaleFromCss(stackEl);
         linkEndInsetPx = linkEndInsetBaseAtUnitScalePx(measureRoot) * displayScale;
+        syncNodeStrokeRects(nodeSel, displayScale);
     }
 
     function setDagCompactness(c: number): void {
@@ -735,6 +1130,7 @@ export function initGenAttributeDagView(
             // 仅用户交互（滚轮/拖平移/双击）计入「改动布局」；程序触发的 transform
             // （init 初始缩放、`fitViewportToContent`）`sourceEvent === null`，不置 dirty。
             if (event.sourceEvent) layoutDirty = true;
+            syncGenAttrDagTopkTooltipImpl();
         });
 
     function applyInitialDagZoom(): void {
@@ -750,14 +1146,37 @@ export function initGenAttributeDagView(
     const nodeG = rootG.append('g').attr('class', 'gen-attr-dag-nodes');
     /** 邻接焦点的高亮边：在节点层之后绘制，避免被节点遮挡 */
     const linkGFront = rootG.append('g').attr('class', 'gen-attr-dag-links-front');
+    /** 与视觉节点同几何的透明命中层，置于 linkGFront 之上，避免蓝线挡住 hover/click */
+    const nodeGHit = rootG.append('g').attr('class', 'gen-attr-dag-nodes-hit');
 
     const graph = new DirectedGraph<DagNodeAttrs>();
     let nodes: DagNode[] = [];
+    /** `nodes` 按 step 降序（新→旧→prompt）排列的副本，供 {@link computeFocusAttributionState} 使用，避免每次 hover 重新排序。 */
+    let nodesSortedByStepDesc: DagNode[] = [];
     let links: DagLink[] = [];
+    /** 按 targetId 索引的入边列表，供 {@link computeFocusAttributionState} 使用，避免每次 hover O(N×E) 全扫描。 */
+    const incomingLinksByTarget = new Map<string, DagLink[]>();
+    /** 灰边渲染强度缓存；图结构变化（{@link syncGraphToSvg}）或 {@link reset} 时置 null 失效。 */
+    let grayRenderCache: Map<string, number> | null = null;
     let stepProcessed = 0;
     let selectedId: string | null = null;
-    /** 临时焦点：与选中同款子图高亮；优先于 {@link selectedId}，移出节点后回落到选中态 */
+    /** 悬浮节点 id；无选中时参与归因预览焦点，有选中时仅驱动 `--hover` 等样式，不改归因焦点 */
     let hoveredId: string | null = null;
+    /** 最近一次 {@link refreshNodeLinkHighlight} 计算出的归因状态（基于 {@link effectiveFocusId}）；tooltip 用于展示归因份额 */
+    let currentFocusState: FocusAttributionState | null = null;
+
+    /** 归因预览焦点：有选中则固定选中节点，否则随悬浮临时预览 */
+    function effectiveFocusId(): string | null {
+        return selectedId ?? hoveredId;
+    }
+
+    /** tooltip 锚点：悬浮任意节点时展示该节点；无悬浮则展示焦点节点（选中 > 无） */
+    function tooltipFocusId(): string | null {
+        if (hoveredId != null) {
+            return graph.hasNode(hoveredId) ? hoveredId : null;
+        }
+        return effectiveFocusId();
+    }
     /**
      * 与 {@link pruneDagLinksTouchingFullyExcludedNodes} / 预处理同源：全串上的 exclude 半开区间，
      * 供节点「隐藏」透明度判定（{@link isOffsetSpanFullyExcluded}）。在 {@link setPromptTokenSpans} 与每步
@@ -783,6 +1202,32 @@ export function initGenAttributeDagView(
         .selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link')
         .data<DagLink>([], dagLinkDataKey);
     let nodeSel = nodeG.selectAll<SVGGElement, DagNode>('g.gen-attr-dag-node').data<DagNode>([], (d) => d.id);
+    let nodeHitSel = nodeGHit
+        .selectAll<SVGGElement, DagNode>('g.gen-attr-dag-node-hit')
+        .data<DagNode>([], (d) => d.id);
+
+    /** 与 {@link nodeSel} 同序同 transform（paint 各布局模式之后调用） */
+    function syncNodeHitTransforms(): void {
+        const visualNodes = nodeSel.nodes();
+        nodeHitSel.attr('transform', (_d, i) => d3.select(visualNodes[i]).attr('transform'));
+    }
+
+    function bindNodePointerHandlers(
+        sel: d3.Selection<SVGGElement, DagNode, SVGGElement | null, unknown>,
+    ): void {
+        sel.on('mouseenter', (_event, d) => {
+            hoveredId = d.id;
+            refreshNodeLinkHighlight();
+        })
+            .on('mouseleave', () => {
+                hoveredId = null;
+                refreshNodeLinkHighlight();
+            })
+            .on('click', (event, d) => {
+                event.stopPropagation();
+                setSelectedNodeId(selectedId === d.id ? null : d.id);
+            });
+    }
 
     function syncSvgSize(): void {
         const { w, h } = stackLayoutViewportPx(stackEl);
@@ -790,7 +1235,8 @@ export function initGenAttributeDagView(
     }
 
     function paint(): void {
-        if (layoutMode === 'linear-arc') {
+        syncNodeStrokeRects(nodeSel, displayScale);
+        if (layoutMode === 'linear-arc' || layoutMode === 'linear-arc-step-down') {
             const layoutNodes = hideExcludedTokens
                 ? nodes.filter((n) => !isOffsetSpanFullyExcluded(n.start, n.end, dagExcludeIntervals))
                 : nodes;
@@ -799,14 +1245,13 @@ export function initGenAttributeDagView(
                 nodeSel,
                 nodes: layoutNodes,
                 adjacentGapPx: linearArcAdjacentGapPx,
+                variant: layoutMode === 'linear-arc-step-down' ? 'step-down' : 'flat',
                 getLinkNodes: (d) => ({
                     src: endpointNode(d.source, graph),
                     tgt: endpointNode(d.target, graph),
                 }),
             });
-            return;
-        }
-        if (layoutMode === 'spiral') {
+        } else if (layoutMode === 'spiral') {
             const layoutNodes = hideExcludedTokens
                 ? nodes.filter((n) => !isOffsetSpanFullyExcluded(n.start, n.end, dagExcludeIntervals))
                 : nodes;
@@ -820,17 +1265,18 @@ export function initGenAttributeDagView(
                     tgt: endpointNode(d.target, graph),
                 }),
             });
-            return;
+        } else {
+            paintTextFlowLayout({
+                linkSel,
+                nodeSel,
+                linkEndInsetPx,
+                getLinkNodes: (d) => ({
+                    src: endpointNode(d.source, graph),
+                    tgt: endpointNode(d.target, graph),
+                }),
+            });
         }
-        paintTextFlowLayout({
-            linkSel,
-            nodeSel,
-            linkEndInsetPx,
-            getLinkNodes: (d) => ({
-                src: endpointNode(d.source, graph),
-                tgt: endpointNode(d.target, graph),
-            }),
-        });
+        syncNodeHitTransforms();
     }
 
     let dragPointerOffset: { x: number; y: number } | null = null;
@@ -858,32 +1304,56 @@ export function initGenAttributeDagView(
             d.cx = x - offset.x;
             d.cy = y - offset.y;
             paint();
+            syncGenAttrDagTopkTooltipImpl();
         })
         .on('end', () => {
             dragPointerOffset = null;
         });
 
-    /**
-     * 节点透明度：先按「一跳邻域」提亮为 1（选中先于悬停，邻域内一致）；
-     * 否则被 exclude 整段命中的为「隐藏」({@link DAG_NODE_HIDDEN_OPACITY})（prompt/生成区一致）；
-     * 其余节点：prompt 无出边时弱化；存在焦点时，所有邻域外非隐藏节点弱化（与原先焦点压暗一致）。
-     * 边的高亮仍以悬停优先、否则选中为焦点（{@link dagLinkIncidentToFocus}）。
-     */
+    /** 焦点高亮：递归强调来源链，直接强调一跳关系。 */
     function refreshNodeLinkHighlight(): void {
-        const focusId = hoveredId ?? selectedId;
-        const selectedNbhd = selectedId ? oneHopNeighborhood(graph, selectedId) : null;
-        const hoveredNbhd = hoveredId ? oneHopNeighborhood(graph, hoveredId) : null;
-
+        const focusId = effectiveFocusId();
+        const focusState = focusId
+            ? computeFocusAttributionState(graph, nodesSortedByStepDesc, incomingLinksByTarget, focusId, {
+                maxIncomingDepth: recursiveAttributionEnabled ? Number.POSITIVE_INFINITY : 1,
+                includeDownstreamInfluence: !recursiveAttributionEnabled && showDownstreamInfluence,
+            })
+            : null;
+        currentFocusState = focusState;
+        const focusNodeIds = focusState?.activeNodeIds ?? null;
+        const nodeStrokeShareById =
+            !recursiveAttributionEnabled || focusState == null || focusId == null
+                ? null
+                : computeUpstreamNodeStrokeShareById(focusState.nodeShareById, graph, focusId);
+        const nodeStrokeRenderById =
+            nodeStrokeShareById == null ? null : buildNodeStrokeRenderStrengthById(nodeStrokeShareById);
+        const focusTargetMiRatio =
+            focusId != null && graph.hasNode(focusId)
+                ? nodeTargetMiRatio(graph.getNodeAttributes(focusId) as DagNode)
+                : 1;
+        const incomingHighlightRenderByKey =
+            focusState == null
+                ? new Map<string, number>()
+                : buildMaxNormalizedRenderStrengthByKey(focusState.incomingEdgeShareByKey, focusTargetMiRatio);
+        const downstreamHighlightRenderByKey =
+            focusState == null
+                ? new Map<string, number>()
+                : buildMaxNormalizedRenderStrengthByKey(focusState.downstreamEdgeStrengthByKey);
+        grayRenderCache ??= buildGrayRenderStrengthByEdgeKey(graph, incomingLinksByTarget);
+        const grayRenderByKey = grayRenderCache;
+        const nodeDisplay = (d: DagNode): string | null =>
+            hideExcludedTokens && isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)
+                ? 'none'
+                : null;
         nodeSel
             .classed('gen-attr-dag-node--hover', (d) => hoveredId === d.id)
             .classed('gen-attr-dag-node--selected', (d) => selectedId === d.id)
-            .style('display', (d) =>
-                hideExcludedTokens && isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)
-                    ? 'none' : null
-            )
+            .style('display', nodeDisplay)
             .attr('opacity', (d) => {
-                if (selectedNbhd?.has(d.id)) return 1;
-                if (hoveredNbhd?.has(d.id)) return 1;
+                const nodeFullyHighlighted = recursiveAttributionEnabled
+                    ? d.id === focusId || (nodeStrokeShareById?.has(d.id) ?? false)
+                    : (focusNodeIds?.has(d.id) ?? false);
+                if (nodeFullyHighlighted) return 1;
                 if (isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)) {
                     return hideExcludedTokens ? 0 : DAG_NODE_HIDDEN_OPACITY;
                 }
@@ -891,36 +1361,134 @@ export function initGenAttributeDagView(
                 const isPromptLeaf = hasGenTokens && d.step === -1 && graph.outDegree(d.id) === 0;
                 if (focusId || isPromptLeaf) return DAG_NODE_WEAKEN_OPACITY;
                 return 1;
+            })
+            .classed('gen-attr-dag-node--recursive-chain', (d) => nodeStrokeShareById?.has(d.id) ?? false)
+            .style(CSS_VAR_DAG_NODE_RECURSIVE_SHARE, (d) => {
+                const renderStrength = nodeStrokeRenderById?.get(d.id);
+                return renderStrength != null ? String(renderStrength) : null;
             });
-        // 每条边独立 marker：线与箭头 path 同步 stroke / stroke-opacity。
-        // normalizedScore 决定边内相对强弱（与 opacity 基项一致）；互信息率只作为整步入边的视觉折扣。
-        linkSel.each(function(d) {
-            const op = dagLinkStrokeOpacity(d);
-            const stroke =
-                dagLinkHighlightStroke(graph, focusId, d) ?? `var(${CSS_VAR_DAG_NORMAL_LINE_COLOR})`;
+        nodeHitSel
+            .classed('gen-attr-dag-node--hover', (d) => hoveredId === d.id)
+            .classed('gen-attr-dag-node--selected', (d) => selectedId === d.id)
+            .style('display', nodeDisplay);
+        // 每条边：颜色/强度（见 resolveDagLinkHighlightDisplay）、`<title>` 一并刷新（含 linkGFront 高亮边）。
+        rootG.selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link').each(function(d) {
+            const srcId = endpointNode(d.source, graph).id;
+            const tgtId = endpointNode(d.target, graph).id;
+            const edgeKey = dagLinkEndpointKey(srcId, tgtId);
+            const { stroke, renderStrength, linkStrength, recursiveAttributionShare } =
+                resolveDagLinkHighlightDisplay(
+                    d,
+                    edgeKey,
+                    focusState,
+                    recursiveAttributionEnabled,
+                    grayRenderByKey,
+                    incomingHighlightRenderByKey,
+                    downstreamHighlightRenderByKey,
+                );
             const g = d3.select(this);
-            g.select('path.gen-attr-dag-link-visible').attr('stroke', stroke).attr('stroke-opacity', op);
+            const srcAttrs = graph.getNodeAttributes(srcId) as DagNode;
+            const tgtAttrs = graph.getNodeAttributes(tgtId) as DagNode;
+            g.select('title').text(
+                buildLinkTitleText({
+                    normalizedScore: d.normalizedScore,
+                    mutualInformationRatio: d.mutualInformationRatio,
+                    attributionShare: d.attributionShare,
+                    alignmentNote: d.alignmentNote,
+                    src: srcAttrs,
+                    tgt: tgtAttrs,
+                    recursiveAttributionShare,
+                    linkStrength,
+                }),
+            );
+            g.select('path.gen-attr-dag-link-visible').attr('stroke', stroke).attr('stroke-opacity', renderStrength);
             linkMarkersDefs
                 .select<SVGPathElement>(`#${dagLinkMarkerElementId(d.source, d.target)} path`)
                 .attr('stroke', stroke)
-                .attr('stroke-opacity', op);
-        });
-        // 灰边在 linkG、高亮边在 linkGFront（位于 nodeG 之后），既不被灰边也不被节点遮挡。
-        // 同层内保持 DOM 插入顺序（= `links` push 顺序）即可，无需显式 sort：
-        // - `links` 只 push、不重排；
-        // - 新 `<g>` 由 d3 `enter().append` 追加在 `linkG` 末尾；
-        // - 下面仅在父节点不一致时才 `appendChild`，避免白搬动导致末尾顺序被打乱。
-        rootG.selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link').each(function(d) {
-            const incident = dagLinkIncidentToFocus(graph, focusId, d);
+                .attr('stroke-opacity', renderStrength);
+
+            const incident =
+                focusState != null &&
+                (focusState.incomingEdgeShareByKey.has(edgeKey) ||
+                    focusState.downstreamEdgeStrengthByKey.has(edgeKey));
             const parent = incident ? linkGFront : linkG;
             const parentNode = parent.node()!;
             if (this.parentNode !== parentNode) {
                 parentNode.appendChild(this as SVGGElement);
             }
         });
+
+        syncGenAttrDagTopkTooltipImpl();
     }
 
+    syncGenAttrDagTopkTooltipImpl = (): void => {
+        if (!showTokenInfoOnSelected) {
+            dagTopkToolTip.hideAndReset();
+            return;
+        }
+        const focusIdNext = tooltipFocusId();
+        if (!focusIdNext || !graph.hasNode(focusIdNext)) {
+            dagTopkToolTip.hideAndReset();
+            return;
+        }
+        const attrs = graph.getNodeAttributes(focusIdNext) as DagNode;
+        // 生成节点必须有 gltrTooltipToken；prompt 节点用 label 构造最简 token
+        const isPromptNode = attrs.step < 0;
+        if (!isPromptNode && !attrs.gltrTooltipToken) {
+            dagTopkToolTip.hideAndReset();
+            return;
+        }
+        const rect = nodeSel
+            .filter((d: DagNode) => d.id === focusIdNext)
+            .select<SVGRectElement>('rect.gen-attr-dag-node-fill')
+            .node();
+        if (!rect) {
+            dagTopkToolTip.hideAndReset();
+            return;
+        }
+        const tokenForTooltip: FrontendToken = attrs.gltrTooltipToken ?? {
+            raw: attrs.label,
+            offset: [attrs.start, attrs.end],
+            pred_topk: [],
+        };
+
+        // 构建 augment：归因份额行（token 下方最前）+ CI/MI 行（surprisal 之后）
+        const rowsBeforeInfo: ToolTipUpdateAugment['rowsBeforeInfo'] = [];
+        if (selectedId && hoveredId && currentFocusState && hoveredId !== selectedId && graph.hasNode(selectedId)) {
+            const selectedStep = (graph.getNodeAttributes(selectedId) as DagNode).step;
+            // 归因范围：选中 token 之前的所有 token（prompt 节点 step=-1，生成节点 step < selectedStep）
+            const inAttributionRange =
+                selectedStep >= 0 &&
+                (attrs.step === -1 || (attrs.step >= 0 && attrs.step < selectedStep));
+            if (inAttributionRange) {
+                const share = currentFocusState.nodeShareById.get(hoveredId) ?? 0;
+                if (recursiveAttributionEnabled) {
+                    const stay = share * (1 - nodePropagationMiRatio(attrs));
+                    rowsBeforeInfo.push(
+                        { label: tr('Attribution share (Total):'), value: formatAttributionSharePercentForTooltip(share) },
+                        { label: tr('Attribution share (Self):'), value: formatAttributionSharePercentForTooltip(stay) },
+                    );
+                } else {
+                    rowsBeforeInfo.push({
+                        label: tr('Attribution share:'),
+                        value: formatAttributionSharePercentForTooltip(share),
+                    });
+                }
+            }
+        }
+        const rowsAfterSurprisal: ToolTipUpdateAugment['rowsAfterSurprisal'] =
+            attrs.dagCiMiTooltipRow != null ? [attrs.dagCiMiTooltipRow] : [];
+        const augment: ToolTipUpdateAugment | undefined =
+            rowsBeforeInfo.length > 0 || rowsAfterSurprisal.length > 0
+                ? { rowsBeforeInfo, rowsAfterSurprisal }
+                : undefined;
+        dagTopkToolTip.updateData({ tokenData: tokenForTooltip }, rect, augment);
+    };
+
     function setSelectedNodeId(id: string | null): void {
+        if (id != null && !graph.hasNode(id)) {
+            throw new Error(`genAttributeDagView: unknown node id ${id}`);
+        }
         selectedId = id;
         refreshNodeLinkHighlight();
     }
@@ -931,6 +1499,7 @@ export function initGenAttributeDagView(
 
     /** 将当前 `nodes` / `links` 同步到 SVG：join 新 DOM、`paint` 几何、`refreshNodeLinkHighlight` 样式。 */
     function syncGraphToSvg(): void {
+        grayRenderCache = null;
         linkGFront.selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link').each(function() {
             linkG.node()!.appendChild(this as SVGGElement);
         });
@@ -966,7 +1535,7 @@ export function initGenAttributeDagView(
                 g.each(function(d: DagLink) {
                     const el = d3.select(this);
                     const mkId = dagLinkMarkerElementId(d.source, d.target);
-                    el.append('title').text(d.titleText);
+                    el.append('title');
                     el.append('path')
                         .attr('class', 'gen-attr-dag-link-visible')
                         .attr('fill', 'none')
@@ -978,55 +1547,53 @@ export function initGenAttributeDagView(
                 return g;
             });
         // 不在此处全量重置 marker `stroke-opacity`：紧接着的 {@link refreshNodeLinkHighlight} 会按边
-        // 逐条写 `dagLinkStrokeOpacity`（与 `<title>` 中 Strength 同源），任何前值都会被覆盖，全量重置纯冗余。
+        // 逐条写 resolveDagLinkHighlightDisplay（与 `<title>` 中 Link strength 同源），任何前值都会被覆盖，全量重置纯冗余。
 
         nodeSel = nodeG
             .selectAll<SVGGElement, DagNode>('g.gen-attr-dag-node')
             .data(nodes, (d) => d.id)
-            .join(
-                (enter) => {
-                    // 节点身份 append-only、几何（nodeW/nodeH）一旦建立不再变化（drag 仅改 x/y，
-                    // 由 paint 通过 transform 处理），故与几何相关的属性仅在 enter 写一次即可；
-                    // 同理 `--prompt` class 依据 step === -1，step 初始化后不变。
-                    const g = enter
-                        .append('g')
-                        .attr('class', 'gen-attr-dag-node')
-                        .style('--gen-attr-dag-node-ci-visual-scale', (d: DagNode) => String(d.ciVisualScale));
-                    g.classed('gen-attr-dag-node--prompt', (d: DagNode) => d.step === -1);
-                    if (!DISABLE_DAG_NODE_TOOLTIPS) {
-                        g.append('title').text((d: DagNode) => d.nativeTitleText);
-                    }
-                    g.append('rect')
-                        .attr('x', 0)
-                        .attr('y', 0)
-                        .attr('width', (d: DagNode) => d.nodeW)
-                        .attr('height', (d: DagNode) => d.nodeH)
-                        .attr('rx', (d: DagNode) => nodeRx(d))
-                        .attr('ry', (d: DagNode) => nodeRx(d));
-                    g.append('text')
-                        .attr('class', 'gen-attr-dag-node-text')
-                        .attr('xml:space', 'preserve')
-                        .attr('pointer-events', 'none')
-                        .attr('text-anchor', 'middle')
-                        .attr('dominant-baseline', 'central')
-                        .attr('x', (d: DagNode) => d.nodeW / 2)
-                        .attr('y', (d: DagNode) => d.nodeH / 2)
-                        .text((d: DagNode) => d.displayLabel);
-                    g.on('mouseenter', (_event, d) => {
-                        hoveredId = d.id;
-                        refreshNodeLinkHighlight();
-                    });
-                    g.on('mouseleave', () => {
-                        hoveredId = null;
-                        refreshNodeLinkHighlight();
-                    });
-                    g.on('click', (event, d) => {
-                        event.stopPropagation();
-                        setSelectedNodeId(selectedId === d.id ? null : d.id);
-                    });
-                    return g.call(drag);
-                }
-            );
+            .join((enter) => {
+                // 节点身份 append-only、几何（nodeW/nodeH）一旦建立不再变化（drag 仅改 x/y，
+                // 由 paint 通过 transform 处理），故与几何相关的属性仅在 enter 写一次即可；
+                // 同理 `--prompt` class 依据 step === -1，step 初始化后不变。
+                const g = enter
+                    .append('g')
+                    .attr('class', 'gen-attr-dag-node')
+                    .style('--gen-attr-dag-node-ci-visual-scale', (d: DagNode) => String(d.ciVisualScale));
+                g.classed('gen-attr-dag-node--prompt', (d: DagNode) => d.step === -1);
+                g.append('rect').attr('class', 'gen-attr-dag-node-stroke');
+                g.append('rect')
+                    .attr('class', 'gen-attr-dag-node-fill')
+                    .attr('width', (d: DagNode) => d.nodeW)
+                    .attr('height', (d: DagNode) => d.nodeH)
+                    .attr('rx', (d: DagNode) => nodeRx(d))
+                    .attr('ry', (d: DagNode) => nodeRx(d));
+                g.append('text')
+                    .attr('class', 'gen-attr-dag-node-text')
+                    .attr('xml:space', 'preserve')
+                    .attr('pointer-events', 'none')
+                    .attr('text-anchor', 'middle')
+                    .attr('dominant-baseline', 'central')
+                    .attr('x', (d: DagNode) => d.nodeW / 2)
+                    .attr('y', (d: DagNode) => d.nodeH / 2)
+                    .text((d: DagNode) => d.displayLabel);
+                return g;
+            });
+
+        nodeHitSel = nodeGHit
+            .selectAll<SVGGElement, DagNode>('g.gen-attr-dag-node-hit')
+            .data(nodes, (d) => d.id)
+            .join((enter) => {
+                const g = enter.append('g').attr('class', 'gen-attr-dag-node-hit');
+                g.append('rect')
+                    .attr('class', 'gen-attr-dag-node-hit-target')
+                    .attr('width', (d: DagNode) => d.nodeW)
+                    .attr('height', (d: DagNode) => d.nodeH)
+                    .attr('rx', (d: DagNode) => nodeRx(d))
+                    .attr('ry', (d: DagNode) => nodeRx(d));
+                bindNodePointerHandlers(g);
+                return g.call(drag);
+            });
 
         paint();
         refreshNodeLinkHighlight();
@@ -1082,11 +1649,6 @@ export function initGenAttributeDagView(
                 nodeH: g.height * displayScale,
                 ciVisualScale: 1,
                 displayLabel,
-                nativeTitleText: buildNodeNativeTitleText({
-                    displayLabel,
-                    id: srcId,
-                    step: -1,
-                }),
             };
             graph.addNode(srcId, srcNode);
             nodes.push(srcNode);
@@ -1103,6 +1665,8 @@ export function initGenAttributeDagView(
             getEffectiveExcludePromptPatternsText(),
             getEffectiveExcludeGeneratedPatternsText(),
         );
+        // prompt 节点 step=-1 始终排在末尾；重建一次即可（setPromptTokenSpans 只调一次）。
+        nodesSortedByStepDesc = [...nodes].sort((a, b) => b.step - a.step || b.start - a.start);
         if (batchDepth === 0) syncGraphToSvg();
     }
 
@@ -1130,6 +1694,8 @@ export function initGenAttributeDagView(
             spaceDotExceptBeforeAsciiLetterOrNumber: true,
         });
         const ciVisualScale = dagGeneratedNodeCiVisualScale(response.target_prob);
+        const gltrTooltipToken = frontendTokenFromGenAttrStep(step);
+        const dagCiMiTooltipRow = dagCiMiTooltipRowForProb(response.target_prob);
         const targetNode: DagNode = {
             id: targetId,
             label: token,
@@ -1141,16 +1707,15 @@ export function initGenAttributeDagView(
             nodeW: g.width * displayScale * ciVisualScale,
             nodeH: g.height * displayScale * ciVisualScale,
             ciVisualScale,
+            dagTargetProb: response.target_prob,
             displayLabel,
-            nativeTitleText: buildNodeNativeTitleText({
-                displayLabel,
-                id: targetId,
-                step: stepProcessed,
-                targetProb: response.target_prob,
-            }),
+            ...(gltrTooltipToken != null ? { gltrTooltipToken } : {}),
+            ...(dagCiMiTooltipRow != null ? { dagCiMiTooltipRow } : {}),
         };
         graph.addNode(targetId, targetNode);
         nodes.push(targetNode);
+        // 新 token 的 step 最大，直接放到排序列表最前面，无需重新全排序。
+        nodesSortedByStepDesc.unshift(targetNode);
         snapSubwordNode(targetNode, nodes.length >= 2 ? nodes[nodes.length - 2]! : null);
 
         // align → exclude → rank：Top-N / β / cumP 在节点语义上工作（合并型「如下」/ 拆分型等）。
@@ -1173,15 +1738,14 @@ export function initGenAttributeDagView(
         const selected = phase2RankAndSparsify(afterExclude, { cumulativeShare: edgeTopPCoverage });
 
         const mutualInformationRatio = computeMutualInformationRatio(response.target_prob);
-        // 仅保留可绘制的边；「Fan in share」的分母为下列可见边的池内 L1 份额之和（非完整 sparse 池）。
-        const selectedForDisplay = selected.filter(
-            (item) =>
-                dagLinkStrokeOpacity({
-                    normalizedScore: item.score,
-                    mutualInformationRatio,
-                }) >= DAG_EDGE_MIN_DISPLAY_OPACITY
-        );
+        const selectedForDisplay = selected.filter((item) => {
+            const normalizedScore = item.score;
+            const edgeVisibility =
+                (dagDecayAttributionToHighSurprisalTargetEnabled ? mutualInformationRatio : 1) * normalizedScore;
+            return edgeVisibility >= DAG_EDGE_MIN_NORMALIZED_SCORE;
+        });
         const massSum = selectedForDisplay.reduce((acc, t) => acc + Math.max(0, t.poolMassFrac), 0);
+        const linksForTarget: DagLink[] = [];
         for (const item of selectedForDisplay) {
             const srcId = item.nodeId;
             if (!graph.hasNode(srcId)) {
@@ -1202,19 +1766,19 @@ export function initGenAttributeDagView(
             const edgeAttrs = {
                 normalizedScore: item.score,
                 mutualInformationRatio,
-                scoreShare: share,
+                attributionShare: share,
                 ...(alignmentNote ? { alignmentNote } : {}),
             };
             graph.addEdge(srcId, targetId, edgeAttrs);
-            const srcAttrs = graph.getNodeAttributes(srcId) as DagNode;
-            const tgtAttrs = graph.getNodeAttributes(targetId) as DagNode;
-            links.push({
+            const newLink: DagLink = {
                 source: srcId,
                 target: targetId,
                 ...edgeAttrs,
-                titleText: buildLinkTitleText(edgeAttrs, srcAttrs, tgtAttrs),
-            });
+            };
+            links.push(newLink);
+            linksForTarget.push(newLink);
         }
+        if (linksForTarget.length > 0) incomingLinksByTarget.set(targetId, linksForTarget);
 
         const excludeIntervals = collectGenAttrDagExcludeIntervals(
             intervalCtx,
@@ -1223,10 +1787,10 @@ export function initGenAttributeDagView(
             getEffectiveExcludeGeneratedPatternsText(),
         );
         dagExcludeIntervals = excludeIntervals;
-        pruneDagLinksTouchingFullyExcludedNodes(graph, links, excludeIntervals);
+        pruneDagLinksTouchingFullyExcludedNodes(graph, links, incomingLinksByTarget, excludeIntervals);
 
         stepProcessed++;
-        // 每步生成后：默认焦点为本步新生成的 token（与悬浮同款高亮；有真实悬停时仍以 hoveredId 优先）
+        // 每步生成后：默认选中本步新生成的 token；无其它选中时悬浮仍可临时预览
         selectedId = targetId;
         if (batchDepth === 0) {
             syncGraphToSvg();
@@ -1242,19 +1806,27 @@ export function initGenAttributeDagView(
         textMeasure.reset();
         graph.clear();
         nodes = [];
+        nodesSortedByStepDesc = [];
         links = [];
+        incomingLinksByTarget.clear();
+        grayRenderCache = null;
         stepProcessed = 0;
         selectedId = null;
         hoveredId = null;
+        dagTopkToolTip.hideAndReset();
         linkMarkersDefs.selectAll('marker').remove();
         linkG.selectAll('*').remove();
         linkGFront.selectAll('*').remove();
         nodeG.selectAll('*').remove();
+        nodeGHit.selectAll('*').remove();
         dagExcludeIntervals = [];
         linkSel = rootG
             .selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link')
             .data<DagLink>([], dagLinkDataKey);
         nodeSel = nodeG.selectAll<SVGGElement, DagNode>('g.gen-attr-dag-node').data<DagNode>([], (d) => d.id);
+        nodeHitSel = nodeGHit
+            .selectAll<SVGGElement, DagNode>('g.gen-attr-dag-node-hit')
+            .data<DagNode>([], (d) => d.id);
         layoutDirty = preserveUserViewport ? wasLayoutDirty : false;
         userDraggedNodes = false;
     }
@@ -1273,7 +1845,7 @@ export function initGenAttributeDagView(
             const { w, h } = stackLayoutViewportPx(stackEl);
             const innerW = Math.max(w - 2 * pad, 1);
             const innerH = Math.max(h - 2 * pad, 1);
-            if (layoutMode === 'linear-arc') {
+            if (isLinearArcFamilyLayout(layoutMode)) {
                 /** 仅用 token 行宽度定比；竖直按行中心居中（弧不参与 bbox → 不致上下抖） */
                 const bn = nodeG.node()!.getBBox();
                 const bw = Math.max(bn.width, 1e-6);
@@ -1309,14 +1881,17 @@ export function initGenAttributeDagView(
                 const ty = pad + halfH;
                 svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
             } else if (layoutMode === 'text-flow') {
-                /** 与原实现一致：`rootG` 整包 bbox + 宽高双约束顶对齐 */
+                /** `rootG` 整包 bbox + 宽高双约束顶对齐 */
+                const padTf = DAG_TEXT_FLOW_FIT_PAD_PX;
+                const innerWTextFlow = Math.max(w - 2 * padTf, 1);
+                const innerHTextFlow = Math.max(h - 2 * padTf, 1);
                 const b = rootG.node()!.getBBox();
                 const bw = Math.max(b.width, 1e-6);
                 const bh = Math.max(b.height, 1e-6);
-                const kRaw = Math.min(innerW / bw, innerH / bh);
+                const kRaw = Math.min(innerWTextFlow / bw, innerHTextFlow / bh);
                 const k = Math.min(Number.isFinite(kRaw) && kRaw > 0 ? kRaw : k0, k0);
-                const tx = pad * 2 - k * b.x;
-                const ty = pad - k * b.y;
+                const tx = padTf - k * b.x;
+                const ty = padTf - k * b.y;
                 svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
             } else {
                 const _: never = layoutMode;
@@ -1381,7 +1956,7 @@ export function initGenAttributeDagView(
         if (linearArcAdjacentGapPx === next) return;
         linearArcAdjacentGapPx = next;
         if (opts?.skipRefit || batchDepth > 0) return;
-        if (layoutMode !== 'linear-arc' || nodes.length === 0) return;
+        if (!isLinearArcFamilyLayout(layoutMode) || nodes.length === 0) return;
         paint();
         fitViewportToContent(true);
     }
@@ -1393,6 +1968,25 @@ export function initGenAttributeDagView(
         paint();
         refreshNodeLinkHighlight();
         fitViewportToContent(true);
+    }
+
+    function setShowTokenInfoOnSelected(show: boolean): void {
+        if (showTokenInfoOnSelected === show) return;
+        showTokenInfoOnSelected = show;
+        syncGenAttrDagTopkTooltipImpl();
+    }
+
+    /** 传播归因（UI: Propagated attribution mode；`recursiveAttributionEnabled`）：向上追到来源；关闭则为直接归因（一跳）。 */
+    function setRecursiveAttributionEnabled(enabled: boolean): void {
+        if (recursiveAttributionEnabled === enabled) return;
+        recursiveAttributionEnabled = enabled;
+        refreshNodeLinkHighlight();
+    }
+
+    function setShowDownstreamInfluence(show: boolean): void {
+        if (showDownstreamInfluence === show) return;
+        showDownstreamInfluence = show;
+        refreshNodeLinkHighlight();
     }
 
     const fullscreenBtn = resultsRoot
@@ -1464,9 +2058,10 @@ export function initGenAttributeDagView(
         ro.disconnect();
         document.removeEventListener('fullscreenchange', refreshFullscreenChrome);
         document.removeEventListener(CSS_PSEUDO_FULLSCREEN_CHANGE_EVENT, refreshFullscreenChrome);
+        dagTopkToolTip.dispose();
         resultsRoot
             .selectAll(
-                '.gen-attr-dag-stack, button.gen-attr-dag-refresh, button.gen-attr-dag-play, button.gen-attr-dag-fullscreen'
+                '.gen-attr-dag-stack, .gen-attr-dag-topk-tooltip, button.gen-attr-dag-refresh, button.gen-attr-dag-play, button.gen-attr-dag-fullscreen'
             )
             .remove();
         detachGenAttributeDagPanel.delete(rootEl);
@@ -1482,6 +2077,8 @@ export function initGenAttributeDagView(
         isBatching,
         reset,
         fitViewportToContent,
+        getSelectedNodeId: () => selectedId,
+        setSelectedNodeId,
         clearNodeSelection,
         setDagPlaybackPlaying,
         setMeasureWidthPx,
@@ -1490,6 +2087,9 @@ export function initGenAttributeDagView(
         setDagCompactness,
         setEdgeTopPCoverage,
         setHideExcludedTokens,
+        setShowTokenInfoOnSelected,
+        setRecursiveAttributionEnabled,
+        setShowDownstreamInfluence,
         hasPromptSpans: () => nodes.some((n) => n.step === -1),
         detach,
     };

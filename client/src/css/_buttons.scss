@@ -62,11 +62,15 @@
     @extend %button-inactive;
   }
 
-  &:hover:not(.inactive) {
+  &:disabled {
+    @extend %button-inactive;
+  }
+
+  &:hover:not(:disabled):not(.inactive) {
     background-color: var(--text-action-btn-hover);  // hover时浅灰色背景
   }
 
-  &:active:not(.inactive) {
+  &:active:not(:disabled):not(.inactive) {
     background-color: var(--text-action-btn-hover);  // active时更深的灰色背景
     opacity: 0.8;
   }

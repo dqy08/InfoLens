@@ -35,7 +35,7 @@
   white-space: nowrap;  // 防止文字换行
   background-color: var(--button-bg);
   color: var(--text-color);
-  transition: background-color 0.3s ease, color 0.3s ease, border 0.2s ease, box-shadow 0.2s ease;
+  transition: none;
 
   &:hover {
     background-color: var(--button-hover-bg);

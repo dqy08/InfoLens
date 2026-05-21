@@ -272,16 +272,23 @@ export class VisualizationUpdater {
 
         const infoText = this.currentState.infoDensityData?.request?.text ?? '';
         const semText = this.currentState.semanticData?.text ?? '';
+        const semanticQueryOn = getSemanticAnalysisEnabled();
 
         let showInfoDensity = false;
         let showSemantic = false;
 
         if (mode === 'infoDensity') {
-            showInfoDensity = true;
-            showSemantic = hasSemanticData(this.currentState.semanticData) && semText === text;
+            /** Semantic Query 勾选时统计区不出现信息密度图占位 */
+            showInfoDensity = !semanticQueryOn;
+            showSemantic =
+                semanticQueryOn &&
+                hasSemanticData(this.currentState.semanticData) &&
+                semText === text;
         } else {
             showSemantic = true;
-            showInfoDensity = !!this.currentState.infoDensityData && infoText === text;
+            showInfoDensity =
+                !semanticQueryOn &&
+                !!(this.currentState.infoDensityData && infoText === text);
         }
 
         if (tokenHistogramItem) tokenHistogramItem.style.display = showInfoDensity ? '' : 'none';
@@ -327,18 +334,20 @@ export class VisualizationUpdater {
 
     /**
      * 重新渲染直方图（内部方法）
-     * 仅信息密度：只显示 token/surprisal progress；仅语义：只显示 raw score normed；联合：全部显示
+     * Semantic Query 勾选：仅语义相关图；未勾选：有信息密度数据时显示 token + surprisal
      * @param skipLmfUpdate 为 true 时跳过 lmf.update（主题切换时由 rerenderOnThemeChange 统一重绘，避免竞态）
      */
     private updateVisualizationInternal(skipLmfUpdate = false): void {
         const hasInfoDensity = !!this.currentState.infoDensityData;
         const displayResult = this.computeDisplayResult();
+        const sem = this.currentState.semanticData;
+        const showInfoDensityCharts = hasInfoDensity && !getSemanticAnalysisEnabled();
 
         const tokenHistogramItem = document.getElementById('token_histogram_item');
         const surprisalProgressItem = document.getElementById('surprisal_progress_item');
         const rawScoreNormedItem = document.getElementById('raw_score_normed_histogram_item');
 
-        if (hasInfoDensity) {
+        if (showInfoDensityCharts) {
             const currentSurprisals = this.currentState.currentSurprisals;
             const currentTokenAvg = this.currentState.currentTokenAvg;
             const currentTokenP90 = this.currentState.currentTokenP90;
@@ -375,7 +384,6 @@ export class VisualizationUpdater {
 
         const rawScoresNormed = displayResult?.rawScoresNormed;
         const validRawScoresNormed = rawScoresNormed?.filter((s) => typeof s === 'number' && isFinite(s));
-        const sem = this.currentState.semanticData;
         const signalFitResult = sem?.signalFitResult ?? null;
         const chunkInfos = sem?.chunkInfos;
         const isChunkMode = (chunkInfos?.length ?? 0) > 0;
@@ -614,7 +622,6 @@ export class VisualizationUpdater {
         this.deps.highlightController.updateCurrentData(null);
         d3.select('#all_result').style('opacity', 0);
         this.updateSemanticDebugInfo();
-        this.syncDigitsMergeUi();
     }
 
     /**
@@ -627,24 +634,10 @@ export class VisualizationUpdater {
         const matchScoreProgressItem = document.getElementById('match_score_progress_item');
         if (matchScoreProgressItem) matchScoreProgressItem.style.display = 'none';
         this.updateSemanticDebugInfo();
-        this.syncDigitsMergeUi();
     }
 
     /**
-     * 分块语义结果无法在客户端切换 digit 合并方式，禁用开关避免与信息密度边界不一致
-     */
-    private syncDigitsMergeUi(): void {
-        const el = document.getElementById('enable_digits_merge_toggle') as HTMLInputElement | null;
-        if (!el) return;
-        const disabled = !!this.currentState.semanticData?.chunkInfos?.length;
-        el.disabled = disabled;
-        el.title = disabled
-            ? 'Chunked semantic analysis locks digit merge; clear semantic data or use non-chunked mode to toggle.'
-            : '';
-    }
-
-    /**
-     * digit merge 开关变化时：从 originalTokens / API attention 重算合并并刷新文本与图表
+     * digit merge 用户偏好变化时：对信息密度与整段语义从可重算数据源刷新；分块语义无副本则保持当前展示不变
      */
     public applyDigitsMergeSetting(): void {
         const digitMerge = getDigitsMergeEnabled();
@@ -678,7 +671,6 @@ export class VisualizationUpdater {
             this.currentState.currentTokenAvg = computeAverage(mergedSurprisals);
             this.currentState.currentTokenP90 = computeP90(mergedSurprisals);
         }
-        this.syncDigitsMergeUi();
         let displayResult: ReturnType<VisualizationUpdater['computeDisplayResult']>;
         try {
             displayResult = this.computeDisplayResult();
@@ -707,7 +699,7 @@ export class VisualizationUpdater {
         if (el) el.style.display = enabled ? '' : 'none';
         this.deps.lmf.updateOptions({ semanticAnalysisMode: enabled }, false);
         if (!enabled) {
-            // 关闭时清除语义数据、直方图、debug 信息（不重渲染，避免重复渲染信息密度）
+            // 关闭时清除语义数据；统计图由下方 updateVisualizationInternal 统一刷新
             this.currentState.semanticData = null;
             const rawScoreNormedItem = document.getElementById('raw_score_normed_histogram_item');
             if (rawScoreNormedItem) rawScoreNormedItem.style.display = 'none';
@@ -720,10 +712,9 @@ export class VisualizationUpdater {
                 d3.select('#all_result').style('opacity', 0);
                 this.deps.appStateManager.updateState({ hasValidData: false });
             }
-            // 关闭语义模式后立刻按当前数据重绘，确保语义着色和相关图表不残留
-            this.updateVisualizationInternal(false);
         }
-        this.syncDigitsMergeUi();
+        /** 勾选 / 关闭 Semantic Query 后立即刷新统计图显隐（与 getSemanticAnalysisEnabled 一致） */
+        this.updateVisualizationInternal(false);
         // 语义分析配置影响 Upload/Save 的 dataReadyForSave 条件，需始终更新按钮状态
         this.deps.appStateManager.updateButtonStates();
     }
@@ -881,7 +872,6 @@ export class VisualizationUpdater {
         this.deps.appStateManager.updateState({ hasValidData: true });
 
         this.syncSemanticUiFromConfig();
-        this.syncDigitsMergeUi();
     }
 
     /**
@@ -986,7 +976,6 @@ export class VisualizationUpdater {
         this.updateVisualizationInternal();
 
         this.updateSemanticDebugInfo(res.debug_info);
-        this.syncDigitsMergeUi();
         return true;
     }
 

@@ -123,8 +123,8 @@ export function renderTopkChartHtml(
     const maxBar = options?.maxBarWidth ?? MAX_BAR_WIDTH;
     const numF = options?.numFormat ?? formatTopkTooltipProbabilityPercent;
 
-    const maxProb = data[0]?.prob ?? 1;
-    const scale = d3.scaleLinear().domain([0, maxProb]).range([0, maxBar]);
+    /** 条形满宽对应概率 100%（1），与显示的百分比刻度一致 */
+    const scale = d3.scaleLinear().domain([0, 1]).range([0, maxBar]);
     const barCellW = options?.barCellWidth ?? 110;
 
     const pickable = options?.interactivePickable === true;

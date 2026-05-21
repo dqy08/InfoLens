@@ -3,6 +3,12 @@ import { AdminManager } from './adminManager';
 
 const S = 10, FIRST = 2;
 
+let _pageOptsGetter: (() => Record<string, boolean>) | undefined;
+/** gen_attribute.html 等页面注册当前选项状态，供心跳上报时附带。 */
+export function setPageOptsGetter(fn: () => Record<string, boolean>): void {
+    _pageOptsGetter = fn;
+}
+
 export type ReportedClientOs = 'ios' | 'android' | 'windows' | 'macos' | 'linux' | 'unknown';
 
 /** UA 粗略归类；仅在首轮心跳（cum === FIRST）顺带上报一次。 */
@@ -39,6 +45,10 @@ export function initClientActivityPing(apiPrefix: string | null | undefined): vo
             delta_active_sec,
         };
         if (cum === FIRST) payload.client_os = detectInitialClientOs();
+        if (_pageOptsGetter) {
+            const active = Object.fromEntries(Object.entries(_pageOptsGetter()).filter(([, v]) => v));
+            if (Object.keys(active).length > 0) payload.page_opts = active;
+        }
         const body = JSON.stringify(payload);
         void fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true })
             .then((r) => { if (r.ok) reportedTotal = cum; })

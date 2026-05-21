@@ -3,6 +3,7 @@
 @use "lmf-readout" as lmf;
 @use "demo-list";
 @use "buttons";
+@use "tooltip-vars";
 
 // 夜间模式：强制使用暗色滚动条
 :root[data-theme="dark"] {
@@ -366,6 +367,7 @@
   padding: 5px;
   background: var(--tooltip-bg);
   color: var(--text-color);
+  opacity: 0;
   transition-property: opacity, background-color, color;
   transition-duration: .2s;
   position: absolute;  // 绝对定位
@@ -374,13 +376,16 @@
   cursor: pointer;  // 添加指针样式，提示可点击
   user-select: none;
   -webkit-user-select: none;
+
+  &.tooltip-visible {
+    opacity: var(--tooltip-visible-opacity);
+  }
 }
 
 // 全局tooltip容器
 #global_tooltip {
   position: fixed;  // 使用fixed定位，相对于视口
   pointer-events: none;  // 初始状态不接收事件
-  opacity: 0;
   transition-property: background-color, color;
 }
 

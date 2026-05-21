@@ -207,7 +207,8 @@
       padding: 8px 20px 20px;
       overflow-y: auto;
       overflow-x: hidden;  // 防止水平滚动，确保内容不会被遮挡
-      border-right: 1px solid var(--border-color);
+      // 竖向分隔只做在 .resizer::before，避免与拖条中线叠成双线
+      border-right: none;
       background-color: var(--bg-color);
       box-sizing: border-box;  // 确保padding包含在宽度计算中
       transition: background-color 0.3s ease, border-color 0.3s ease;
@@ -218,9 +219,11 @@
       }
     }
 
+    // 占位与命中区保持 8px（与 LayoutController / chatPanelLayout 的 −8 一致）；
+    // 底色透明，仅用 ::before 画窄线，避免「视觉上收窄」时拖累拖拽热区。
     .resizer {
       width: 8px;
-      background: var(--resizer-bg);
+      background: transparent;
       cursor: col-resize;
       position: relative;
       flex-shrink: 0;

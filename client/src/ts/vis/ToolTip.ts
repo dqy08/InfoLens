@@ -13,9 +13,30 @@ import {
 
 const SEPARATOR = '─────────────';
 
+/** 贴在定位包含块角落时的留白（px）；{@link ToolTipOptions.placement} `parent-bottom-right` 使用 */
+const CORNER_INSET_PX = 0;
+
 export type ToolTipOptions = {
     /** 真实 top-k 下 surprisal 行的标签（默认「信息量」） */
     surprisalRowLabel?: string;
+    /**
+     * `parent-bottom-right`：`position:absolute`，贴在定位包含块（`offsetParent`）右下角（DAG Top‑K 作为 `#results` 直接子节点时即为 results 内侧右下）。
+     * 该 HUD 模式不依赖锚点几何；面板应由页面 CSS（如 `.gen-attr-dag-topk-tooltip`）约束宽高与内部滚动，而非按内容 shrink-wrap。
+     * 默认 `anchor`：沿用原有相对 token rect 的定位。
+     */
+    placement?: 'anchor' | 'parent-bottom-right';
+    /**
+     * false：面板不参与命中测试（`pointer-events: none`），避免盖住底层 SVG 时在节点上反复 `mouseleave`/闪动；
+     * 同时不注册点击/触摸收起，且不接收内部滚动交互。
+     */
+    pointerInteractive?: boolean;
+};
+
+/** {@link ToolTip.updateData} 可选增补（如 DAG：CI/MI 行紧跟 surprisal 之后） */
+export type ToolTipUpdateAugment = {
+    /** 在 surprisal / 信息密度行之前渲染（紧跟 token 文字，位于所有 info 行上方） */
+    rowsBeforeInfo?: Array<{ label: string; value: string; valueColor?: boolean }>;
+    rowsAfterSurprisal?: Array<{ label: string; value: string; valueColor?: boolean }>;
 };
 
 type DetailField = { label: string; value: string; valueColor?: boolean };
@@ -43,15 +64,30 @@ export class ToolTip {
     
     // 防抖：pending 的更新任务
     private pendingUpdate: number | null = null;
-    private pendingData: { ri: GLTR_RenderItem; event?: MouseEvent } | null = null;
+    private pendingData: {
+        ri: GLTR_RenderItem;
+        anchorTarget: EventTarget | null;
+        augment?: ToolTipUpdateAugment;
+    } | null = null;
     
     // 主题监听器
     private themeObserver: MutationObserver | null = null;
 
     private readonly surprisalRowLabel: string;
+    private readonly placement: NonNullable<ToolTipOptions['placement']>;
+    private readonly pointerInteractive: boolean;
 
     constructor(private parent: D3Sel, private eh: SimpleEventHandler, options?: ToolTipOptions) {
         this.surprisalRowLabel = options?.surprisalRowLabel ?? tr('information:');
+        this.placement = options?.placement ?? 'anchor';
+        this.pointerInteractive = options?.pointerInteractive ?? true;
+        if (!this.pointerInteractive) {
+            this.parent.classed('tooltip-no-pointer-hit', true);
+        }
+        const el = this.parent.node() as HTMLElement | null;
+        if (el && this.placement === 'parent-bottom-right') {
+            el.style.position = 'absolute';
+        }
         this._init();
         this._setupThemeObserver();
         this._updateThemeColors();
@@ -62,20 +98,19 @@ export class ToolTip {
         this.predictions = this.parent.select('.predictions');
         this.myDetail = this.parent.select('.myDetail');
         this.currentToken = this.parent.select('.currentToken');
-        
-        // 添加点击事件：点击 tooltip 任意位置关闭
-        this.parent.on('click', (event) => {
-            event.stopPropagation(); // 阻止事件冒泡，避免触发下方元素
-            event.preventDefault(); // 阻止默认行为
-            this.visibility = false;
-        });
-        
-        // 移动端触摸事件
-        this.parent.on('touchstart', (event) => {
-            event.stopPropagation(); // 阻止事件冒泡，避免触发 body 的 touchstart
-            event.preventDefault(); // 阻止默认行为
-            this.visibility = false;
-        });
+
+        if (this.pointerInteractive) {
+            this.parent.on('click', (event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                this.visibility = false;
+            });
+            this.parent.on('touchstart', (event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                this.visibility = false;
+            });
+        }
     }
     
     /**
@@ -140,59 +175,23 @@ export class ToolTip {
     }
     
     /**
-     * 从event.target向上查找SVG rect元素，优先找到包含鼠标位置的rect
-     * 解决事件绑定在group上时，target可能是group而不是rect的问题
-     * @param target 事件目标元素
-     * @param mouseX 鼠标X坐标
-     * @param mouseY 鼠标Y坐标
-     * @returns 找到的SVG rect元素，如果没找到则返回null
+     * 从事件目标解析用于定位的 SVG rect（与指针坐标无关）：rect 自身、或容器 `g` 内首个 `rect`、或向上追溯。
      */
-    private _findTokenRect(target: EventTarget | null, mouseX: number, mouseY: number): SVGRectElement | null {
-        if (!target) return null;
-        
-        let element = target as Element;
-        
-        // 如果target本身就是rect，直接返回
-        if (element instanceof SVGRectElement) {
-            return element;
-        }
-        
-        // 如果target是group，查找包含鼠标位置的rect
+    private _resolveAnchorRectElement(target: EventTarget | null): SVGRectElement | null {
+        if (!target || !(target instanceof Element)) return null;
+        let element: Element | null = target;
+        if (element instanceof SVGRectElement) return element;
         if (element instanceof SVGGElement) {
-            const rects = element.querySelectorAll('rect');
-            // 优先查找包含鼠标位置的rect
-            for (const rect of rects) {
-                const rectBounds = rect.getBoundingClientRect();
-                if (mouseX >= rectBounds.left && mouseX <= rectBounds.right &&
-                    mouseY >= rectBounds.top && mouseY <= rectBounds.bottom) {
-                    return rect;
-                }
-            }
-            // 如果没找到包含鼠标的rect，返回第一个rect（fallback）
-            return rects[0] || null;
+            return element.querySelector('rect');
         }
-        
-        // 如果target是其他元素，向上查找parent
-        let parent = element.parentElement;
-        while (parent) {
-            if (parent instanceof SVGRectElement) {
-                return parent;
+        while (element) {
+            if (element instanceof SVGRectElement) return element;
+            if (element instanceof SVGGElement) {
+                const r = element.querySelector('rect');
+                if (r) return r;
             }
-            if (parent instanceof SVGGElement) {
-                // 在group中查找包含鼠标位置的rect
-                const rects = parent.querySelectorAll('rect');
-                for (const rect of rects) {
-                    const rectBounds = rect.getBoundingClientRect();
-                    if (mouseX >= rectBounds.left && mouseX <= rectBounds.right &&
-                        mouseY >= rectBounds.top && mouseY <= rectBounds.bottom) {
-                        return rect;
-                    }
-                }
-                return rects[0] || null;
-            }
-            parent = parent.parentElement;
+            element = element.parentElement;
         }
-        
         return null;
     }
     
@@ -222,37 +221,71 @@ export class ToolTip {
         this.pendingData = null;
         this.visibility = false;
         if (node) {
-            node.style.top = '0px';
-            node.style.left = '0px';
+            if (this.placement === 'parent-bottom-right') {
+                this._placeParentBottomRight(node);
+            } else {
+                node.style.top = '0px';
+                node.style.left = '0px';
+            }
         }
     }
 
+    /** 固定在 offsetParent（含隐藏态占位）右下角 */
+    private _placeParentBottomRight(node: HTMLElement): void {
+        node.style.position = 'absolute';
+        node.style.right = `${CORNER_INSET_PX}px`;
+        node.style.left = 'auto';
+        node.style.top = 'auto';
+        node.style.bottom = `${CORNER_INSET_PX}px`;
+    }
+
     set visibility(vis: boolean) {
+        const node = this.parent.node() as HTMLElement | null;
         if (vis == true) {
-            this.parent.style('opacity', 1);
-            this.parent.style('pointer-events', 'auto');  // 显示时允许点击
+            node?.classList.add('tooltip-visible');
+            node?.style.removeProperty('opacity');
+            this.parent.style('pointer-events', this.pointerInteractive ? 'auto' : 'none');
         } else {
+            node?.classList.remove('tooltip-visible');
             this.parent.style('opacity', 0);
             this.parent.style('pointer-events', 'none');  // 关闭时禁止点击，让事件穿透
         }
     }
 
 
-    updateData(ri: GLTR_RenderItem, event?: MouseEvent) {
+    /**
+     * @param eventOrAnchor 指针事件（使用 `target`）或直接传入用作锚点的元素（如 SVG `rect` / `g`）
+     */
+    updateData(
+        ri: GLTR_RenderItem,
+        eventOrAnchor?: MouseEvent | TouchEvent | Element | null,
+        augment?: ToolTipUpdateAugment
+    ) {
         // 防抖：取消之前的更新任务
         if (this.pendingUpdate !== null) {
             cancelAnimationFrame(this.pendingUpdate);
         }
 
+        const anchorTarget =
+            eventOrAnchor instanceof Element
+                ? eventOrAnchor
+                : eventOrAnchor && 'target' in eventOrAnchor
+                  ? (eventOrAnchor.target as EventTarget | null)
+                  : null;
+
         // 保存最新的数据
-        this.pendingData = { ri, event };
+        this.pendingData = { ri, anchorTarget, augment };
 
         // 先将 tooltip 移到屏幕外，避免在位置计算完成前显示在旧位置
         // 这可以解决 iOS Safari 上触摸时的抖动问题：
         // 如果旧位置在触摸点下方，会触发 tooltip 的 touchstart 导致关闭
         const node = this.parent.node() as HTMLElement;
         if (node) {
-            node.style.left = '-9999px';
+            if (this.placement === 'parent-bottom-right') {
+                this._placeParentBottomRight(node);
+            } else {
+                node.style.left = '-9999px';
+            }
         }
         this.visibility = true;
 
@@ -261,14 +294,14 @@ export class ToolTip {
             this.pendingUpdate = null;
             if (!this.pendingData) return;
 
-            const { ri: currentRi, event: currentEvent } = this.pendingData;
+            const { ri: currentRi, anchorTarget: at, augment } = this.pendingData;
             this.pendingData = null;
 
             // 更新内容
-            this._updateContent(currentRi);
+            this._updateContent(currentRi, augment);
 
             // 立即计算位置（DOM已更新，getBoundingClientRect 能获取准确值）
-            this._updatePosition(currentEvent);
+            this._updatePosition(at);
         });
     }
     
@@ -276,7 +309,7 @@ export class ToolTip {
      * 更新tooltip内容
      * 统一结构：语义区块（上） + 分隔线 + 信息密度区块（下，含汇总指标 + top-k 表格）
      */
-    private _updateContent(ri: GLTR_RenderItem): void {
+    private _updateContent(ri: GLTR_RenderItem, augment?: ToolTipUpdateAugment): void {
         const { selectedColor, detailColor, valueColor } = this.themeColors;
 
         // 更新当前token显示（第一行）
@@ -296,40 +329,47 @@ export class ToolTip {
                 (s.chunkIndex !== undefined && s.chunkMatchDegree !== undefined));
         const { hasRealTopk } = getFrontendTokenTopkState(tokenData);
 
-        // 1. 构建语义区块（pw score = raw_score_normed × P_pw × matchDegree，P_pw: x≤threshold 为 0，x>threshold 为 1；分块用 chunkMatchDegree，非分块用 full_match_degree）
-        const semanticRows: string[] = [];
+        // 1. 构建上区块：语义行 + rowsBeforeInfo（DAG 归因份额等附加行）
+        // 二者在视觉上同属"token 语义信息"，与下方信息密度区块以分隔线隔开
+        const topRows: string[] = [];
         if (hasSemantic && s) {
-            if (s.pwScore !== undefined) semanticRows.push(renderField({ label: tr('pw score:'), value: this.numF(s.pwScore) }, detailColor, valueColor));
-            if (s.signalProb !== undefined) semanticRows.push(renderField({ label: tr('signal probability:'), value: this.numF(s.signalProb) }, detailColor, valueColor));
-            if (s.rawScoreNormed !== undefined) semanticRows.push(renderField({ label: tr('raw score normed:'), value: this.numF(s.rawScoreNormed) }, detailColor, valueColor));
-            if (s.rawScore !== undefined) semanticRows.push(renderField({ label: tr('raw score:'), value: d3.format('.6f')(s.rawScore), valueColor: false }, detailColor, valueColor));
+            if (s.pwScore !== undefined) topRows.push(renderField({ label: tr('pw score:'), value: this.numF(s.pwScore) }, detailColor, valueColor));
+            if (s.signalProb !== undefined) topRows.push(renderField({ label: tr('signal probability:'), value: this.numF(s.signalProb) }, detailColor, valueColor));
+            if (s.rawScoreNormed !== undefined) topRows.push(renderField({ label: tr('raw score normed:'), value: this.numF(s.rawScoreNormed) }, detailColor, valueColor));
+            if (s.rawScore !== undefined) topRows.push(renderField({ label: tr('raw score:'), value: d3.format('.6f')(s.rawScore), valueColor: false }, detailColor, valueColor));
             if (s.chunkIndex !== undefined && s.chunkMatchDegree !== undefined) {
-                semanticRows.push(renderField({
+                topRows.push(renderField({
                     label: `chunk #${s.chunkIndex} match score:`,
                     value: (s.chunkMatchDegree * 100).toFixed(1) + '%'
                 }, detailColor, valueColor));
             }
         }
+        for (const f of augment?.rowsBeforeInfo ?? []) {
+            topRows.push(renderField(f, detailColor, valueColor));
+        }
 
-        // 2. 构建信息密度区块（汇总指标）
+        // 2. 构建信息密度区块：按明确顺序追加，避免脆弱的 unshift/splice
         const infoRows: string[] = [];
         if (hasRealTopk) {
             const prob = tokenData.real_topk![1];
             const surprisal = calculateSurprisal(prob);
             const isClassic = getTokenRenderStyle() === 'classic';
-            infoRows.push(renderField({ label: this.surprisalRowLabel, value: `${this.significantF(surprisal)} bits` }, detailColor, valueColor));
             if (!isClassic) {
                 const informationDensity = calculateSurprisalDensity(tokenData);
                 const utf8Size = new TextEncoder().encode(tokenData.raw).length;
-                infoRows.unshift(renderField({ label: tr('information density:'), value: `${this.significantF(informationDensity)} ${tr('bits/Byte')}` }, detailColor, valueColor));
-                infoRows.splice(1, 0, renderField({ label: tr('UTF-8 size:'), value: `${utf8Size} ${tr('bytes')}`, valueColor: false }, detailColor, valueColor));
+                infoRows.push(renderField({ label: tr('information density:'), value: `${this.significantF(informationDensity)} ${tr('bits/Byte')}` }, detailColor, valueColor));
+                infoRows.push(renderField({ label: tr('UTF-8 size:'), value: `${utf8Size} ${tr('bytes')}`, valueColor: false }, detailColor, valueColor));
             }
+            infoRows.push(renderField({ label: this.surprisalRowLabel, value: `${this.significantF(surprisal)} bits` }, detailColor, valueColor));
+        }
+        for (const f of augment?.rowsAfterSurprisal ?? []) {
+            infoRows.push(renderField(f, detailColor, valueColor));
         }
 
-        // 3. 合并 myDetail：语义 + 分隔线（仅当两区块都有时） + 信息
+        // 3. 合并 myDetail：上区块 + 分隔线（仅当两区块都有时） + 信息密度区块
         const detailParts: string[] = [];
-        if (semanticRows.length) detailParts.push(semanticRows.join('<br/>'));
-        if (semanticRows.length && infoRows.length) detailParts.push(`<span style="color:${detailColor}">${SEPARATOR}</span>`);
+        if (topRows.length) detailParts.push(topRows.join('<br/>'));
+        if (topRows.length && infoRows.length) detailParts.push(`<span style="color:${detailColor}">${SEPARATOR}</span>`);
         if (infoRows.length) detailParts.push(infoRows.join('<br/>'));
         this.myDetail.html(detailParts.join('<br/>'));
 
@@ -343,11 +383,16 @@ export class ToolTip {
     }
 
     /**
-     * 更新tooltip位置
+     * 更新tooltip位置（相对锚点元素几何，不依赖指针坐标）
      */
-    private _updatePosition(event?: MouseEvent): void {
+    private _updatePosition(anchorTarget: EventTarget | null): void {
         const tooltipNode = this.parent.node() as HTMLElement;
         if (!tooltipNode) return;
+
+        if (this.placement === 'parent-bottom-right') {
+            this._placeParentBottomRight(tooltipNode);
+            return;
+        }
 
         // 获取视口信息（用于边界检查）
         const viewport = this._getViewportInfo();
@@ -374,15 +419,10 @@ export class ToolTip {
             anchorRect = anchor.getBoundingClientRect();
         }
 
-        if (!event) {
-            throw new Error('[ToolTip] 更新位置需要 pointer 事件（缺少 MouseEvent）');
-        }
-        const mouseX = event.clientX;
-        const mouseY = event.clientY;
-        const tokenRectElement = this._findTokenRect(event.target, mouseX, mouseY);
+        const tokenRectElement = this._resolveAnchorRectElement(anchorTarget);
         if (!tokenRectElement) {
             throw new Error(
-                '[ToolTip] 无法从 event.target 解析到 token 的 SVG rect，请检查 GLTR 事件目标与 DOM 结构'
+                '[ToolTip] 无法从锚点解析到 SVG rect，请传入 token rect、g 或其它含 rect 的祖先元素'
             );
         }
 

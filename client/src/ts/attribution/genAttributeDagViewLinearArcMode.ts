@@ -1,4 +1,5 @@
 import * as d3 from 'd3';
+import { dagStepDownEffectiveCiRatio } from '../utils/surprisalMath';
 
 /** linear-arc：相邻节点矩形水平方向「外侧边与边之间的空隙」（px，SVG 内部坐标） */
 export const LINEAR_ARC_ADJACENT_GAP_DEFAULT = 0;
@@ -30,6 +31,40 @@ type LinearArcNodeLike = { nodeW: number; nodeH: number; ciVisualScale: number }
 /** `step === -1` 表示 prompt（与 `genAttributeDagView` 中 `DagNode.step` 约定一致） */
 type LinearArcSteppedNode = LinearArcNodeLike & { step: number };
 
+/** 下台阶布局：节点可带 `dagTargetProb`；有效 CI 为 {@link dagStepDownEffectiveCiRatio}（高置信 p>p₁ 为 0；与「关掉 CI 视觉」无关）。 */
+export type LinearArcStepDownNode = LinearArcSteppedNode & { dagTargetProb?: number };
+
+export type LinearArcPaintVariant = 'flat' | 'step-down';
+
+/**
+ * 下台阶：每档竖直落差 = `LINEAR_ARC_STEP_DOWN_DISTANCE_SCALE × linearArcUnscaledNodeHeight × CI`。
+ * 仅代码可调；不对该系数做运行时 clamp。
+ */
+export const LINEAR_ARC_STEP_DOWN_DISTANCE_SCALE = 1;
+
+/** 未做 CI 视觉放大时的节点高度（SVG 坐标），作下台阶落差的 100% CI 基准 */
+export function linearArcUnscaledNodeHeight(n: Pick<LinearArcNodeLike, 'nodeH' | 'ciVisualScale'>): number {
+    return n.nodeH / n.ciVisualScale;
+}
+
+/**
+ * 第 i 个节点相对首节点的累积下移：对每个 j≥1，加上
+ * `LINEAR_ARC_STEP_DOWN_DISTANCE_SCALE × linearArcUnscaledNodeHeight × CI`，
+ * CI 为 {@link dagStepDownEffectiveCiRatio}(dagTargetProb)。
+ */
+export function computeLinearArcStepDownOffsetYs(nodes: LinearArcStepDownNode[]): number[] {
+    const offsetY: number[] = [];
+    let acc = 0;
+    for (let i = 0; i < nodes.length; i++) {
+        offsetY.push(acc);
+        const next = nodes[i + 1];
+        if (!next) continue;
+        const ratio = dagStepDownEffectiveCiRatio(next.dagTargetProb);
+        acc += LINEAR_ARC_STEP_DOWN_DISTANCE_SCALE * linearArcUnscaledNodeHeight(next) * ratio;
+    }
+    return offsetY;
+}
+
 function computeNodeCenterXs(nodes: LinearArcSteppedNode[], adjacentGapPx: number): number[] {
     const xs: number[] = [];
     if (nodes.length === 0) return xs;
@@ -49,6 +84,8 @@ function computeNodeCenterXs(nodes: LinearArcSteppedNode[], adjacentGapPx: numbe
  *
  * `nodes` 为参与布局的可见节点子集（可能少于 `nodeSel` 绑定的全量节点）；
  * 不在 `nodes` 中的节点（如被隐藏的 excluded 节点）transform 保持不变——调用方已将它们设为 `display:none`。
+ *
+ * `variant === 'step-down'`：竖直落差 × {@link LINEAR_ARC_STEP_DOWN_DISTANCE_SCALE} × {@link linearArcUnscaledNodeHeight} × {@link dagStepDownEffectiveCiRatio}。
  */
 export function paintLinearArcLayout<
     LinkDatum,
@@ -59,8 +96,9 @@ export function paintLinearArcLayout<
     nodes: NodeDatum[];
     adjacentGapPx: number;
     getLinkNodes: (link: LinkDatum) => { src: NodeDatum; tgt: NodeDatum };
+    variant?: LinearArcPaintVariant;
 }): void {
-    const { linkSel, nodeSel, nodes, adjacentGapPx, getLinkNodes } = params;
+    const { linkSel, nodeSel, nodes, adjacentGapPx, getLinkNodes, variant = 'flat' } = params;
 
     const centerXs = computeNodeCenterXs(nodes, adjacentGapPx);
 
@@ -70,23 +108,37 @@ export function paintLinearArcLayout<
         centerXByNode.set(nodes[i]!, centerXs[i]!);
     }
 
+    const offsetYs =
+        variant === 'step-down' ? computeLinearArcStepDownOffsetYs(nodes as LinearArcStepDownNode[]) : null;
+    const offsetYByNode = new Map<NodeDatum, number>();
+    if (offsetYs) {
+        for (let i = 0; i < nodes.length; i++) {
+            offsetYByNode.set(nodes[i]!, offsetYs[i]!);
+        }
+    }
+
+    const arcTopY = (n: NodeDatum): number => {
+        const oy = offsetYByNode.get(n) ?? 0;
+        return LINEAR_ARC_BASELINE_Y - n.nodeH / (2 * n.ciVisualScale) + oy;
+    };
+
     const arcPathBetweenNodes = (src: NodeDatum, tgt: NodeDatum): string => {
         const srcCx = centerXByNode.get(src);
         const tgtCx = centerXByNode.get(tgt);
         if (srcCx === undefined || tgtCx === undefined) {
             throw new Error('paintLinearArcLayout: link endpoint not in linear node list');
         }
-        // 用未放大的半高（nodeH / ciVisualScale / 2）定位弧端点，使所有节点顶部对齐同一 y 基线。
-        const y = LINEAR_ARC_BASELINE_Y - src.nodeH / (2 * src.ciVisualScale);
+        const yStart = arcTopY(src);
+        const yEnd = arcTopY(tgt);
         const dx = Math.abs(tgtCx - srcCx);
         const arcH = dx * 0.4;
-        const upY = y - arcH;
+        const upY = Math.min(yStart, yEnd) - arcH;
         const t = Math.max(0, Math.min(1, LINEAR_ARC_BEZIER_HANDLE_INSET_FRACTION));
         const inset = t * (dx / 2);
         const dir = tgtCx >= srcCx ? 1 : -1;
         const p1x = srcCx + dir * inset;
         const p2x = tgtCx - dir * inset;
-        return `M ${srcCx} ${y} C ${p1x} ${upY}, ${p2x} ${upY}, ${tgtCx} ${y}`;
+        return `M ${srcCx} ${yStart} C ${p1x} ${upY}, ${p2x} ${upY}, ${tgtCx} ${yEnd}`;
     };
 
     linkSel.each(function(d) {
@@ -99,6 +151,7 @@ export function paintLinearArcLayout<
     nodeSel.attr('transform', (d) => {
         const cx = centerXByNode.get(d);
         if (cx === undefined) return null; // 不在布局列表中（已 display:none），不更新 transform
-        return `translate(${cx - d.nodeW / 2},${LINEAR_ARC_BASELINE_Y - d.nodeH / 2})`;
+        const oy = offsetYByNode.get(d) ?? 0;
+        return `translate(${cx - d.nodeW / 2},${LINEAR_ARC_BASELINE_Y - d.nodeH / 2 + oy})`;
     });
 }

@@ -5,7 +5,7 @@ import {
 import type { NodeAggregatedEntry } from './genAttributeDagIntervalResolve';
 import type { TokenGenStep } from './tokenGenAttributionRunner';
 import { getAttentionRawScore } from '../utils/semanticUtils';
-import { DAG_EDGE_MIN_DISPLAY_OPACITY } from './genAttributeDagEdgeDisplay';
+import { DAG_EDGE_MIN_NORMALIZED_SCORE } from './genAttributeDagEdgeDisplay';
 
 /** 与 DAG 节点 id 一致：来自 API `token_attribution` 几何（按 offset 去重，独立于 exclude/归一化）。 */
 export type PromptTokenSpan = {
@@ -58,38 +58,29 @@ function normalizeTopNPoolForDagSparse<T extends { score: number }>(tokens: T[])
 }
 
 /**
- * 在候选池已按 `score` 降序、池内归一保持该顺序的前提下，按遍历顺序取前缀，直到：
- * - 池内 L1 份额小于 {@link DAG_EDGE_MIN_DISPLAY_OPACITY}×首条份额（`relativeFloor`，系数与最小展示透明度同值），或
+ * 在候选池已按 `score` 降序、池内 max 归一（`score` 即 `normalizedScore`）的前提下，按遍历顺序取前缀，直到：
+ * - `normalizedScore < {@link DAG_EDGE_MIN_NORMALIZED_SCORE}`，或
  * - 累计达到给定阈值（默认 {@link DAG_EDGE_TOP_P_COVERAGE_DEFAULT}；候选池内 Top-P，非整步全量 token 的分母）。
- * （池内份额与 `score` 单调一致，无需再排序。）
- *
- * `relativeFloor`：{@link normalizeTopNPoolForDagSparse} 后首条 `normalizedScore === 1`，且对正分条目有
- * `poolMassFrac_i / topFrac === normalizedScore_i`。故 `frac < β×topFrac` ⇔ `normalizedScore < β`；
- * 再乘互信息率（≤1）后不可能达到视图层最小 `stroke-opacity`，等于提前剔除注定画不出的边，与
- * {@link DAG_EDGE_MIN_DISPLAY_OPACITY} 在视图中的含义对齐。
  */
-function selectTokenAttributionByCumulativeShare<T extends { poolMassFrac: number }>(
+function selectTokenAttributionByCumulativeShare<T extends { score: number; poolMassFrac: number }>(
     normalized: Array<T>,
     cumulativeShareThreshold: number,
 ): Array<T> {
     if (normalized.length === 0) return [];
-
-    const topFrac = normalized[0]?.poolMassFrac ?? 0;
-    if (!(topFrac > 0)) return [];
-    const relativeFloor = DAG_EDGE_MIN_DISPLAY_OPACITY * topFrac;
+    if (!(normalized[0]!.poolMassFrac > 0)) return [];
 
     let cum = 0;
     const picked: Array<T> = [];
     for (const t of normalized) {
-        const frac = t.poolMassFrac;
-        if (!(frac > 0)) {
+        if (!(t.poolMassFrac > 0)) {
             break;
         }
-        if (frac < relativeFloor) {
+        const normalizedScore = t.score;
+        if (normalizedScore < DAG_EDGE_MIN_NORMALIZED_SCORE) {
             break;
         }
         picked.push(t);
-        cum += frac;
+        cum += t.poolMassFrac;
         if (cum >= cumulativeShareThreshold) {
             break;
         }

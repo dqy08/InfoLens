@@ -80,7 +80,7 @@ function visualizeSpecialCharsImpl(text: string, options?: VisualizeSpecialChars
         } else if (inBracket) {
             processed.push(char);
         } else {
-            // 保留的空格不能走下方「不可打印 → U+」分支，否则会变成 [U+0020]
+            // 保留的空格不能走下方「不可打印 → 码点」分支，否则会变成 [0020]
             if (char === ' ') {
                 processed.push(char);
             } else if (isPrintableChar(char)) {
@@ -88,8 +88,8 @@ function visualizeSpecialCharsImpl(text: string, options?: VisualizeSpecialChars
             } else {
                 const codePoint = char.codePointAt(0);
                 if (codePoint !== undefined) {
-                    const hexCode = codePoint.toString(16).toUpperCase().padStart(4, '0');
-                    processed.push(`[U+${hexCode}]`);
+                    const hexCode = codePoint.toString(16).toLowerCase().padStart(4, '0');
+                    processed.push(`[${hexCode}]`);
                 } else {
                     processed.push(char);
                 }

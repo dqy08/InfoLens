@@ -72,9 +72,21 @@
                         <textarea id="test_text"></textarea>
                         <div class="button-group">
                             <div class="button-left">
-                                <button id="submit_text_btn" class="primary-btn" data-i18n>Analyze</button>
-                                <div class="loadersmall loader-small-container"></div>
-                                <span id="analyze_progress" class="analyze-progress"></span>
+                                <div class="button-left-stack">
+                                    <div class="button-left-primary">
+                                        <button id="submit_text_btn" class="primary-btn" data-i18n>Analyze</button>
+                                        <div class="loadersmall loader-small-container"></div>
+                                        <span id="analyze_progress" class="analyze-progress"></span>
+                                    </div>
+                                    <div class="semantic-submode-row semantic-analysis-enable-row">
+                                        <span class="semantic-submode-group">
+                                            <label class="semantic-submode-label" for="semantic_analysis_toggle">
+                                                <input type="checkbox" id="semantic_analysis_toggle" />
+                                                <span data-i18n>Semantic Query(Beta)</span>
+                                            </label>
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
                             <div id="text_metrics" class="text-metrics">
                                 <div class="text-metrics-primary">
@@ -101,7 +113,7 @@
                     <div class="semantic-analysis-controls">
                         <div class="semantic-search-row">
                             <div class="semantic-search-input-wrapper">
-                                <input type="text" id="semantic_search_input" class="semantic-search-input" placeholder="Enter query for semantic analysis">
+                                <input type="text" id="semantic_search_input" class="semantic-search-input" placeholder="Enter query question or topic" data-i18n="placeholder">
                                 <button type="button" id="semantic_search_clear" class="semantic-search-clear demo-delete-btn" title="Clear" aria-label="Clear" data-i18n="title,aria-label">×</button>
                                 <ul id="semantic_search_history_dropdown" class="semantic-search-history-dropdown"></ul>
                             </div>

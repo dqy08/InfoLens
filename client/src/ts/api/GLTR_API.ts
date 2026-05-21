@@ -244,6 +244,7 @@ export class TextAnalysisAPI {
         os: Record<string, number>,
         page_sec: Record<string, number>,
         api: Record<string, number>,
+        gen_attr_opt_sec?: Record<string, number>,
         saved_at: string | null,
         process_start_at?: string | null,
         startup_base?: {
@@ -252,6 +253,7 @@ export class TextAnalysisAPI {
             page_sec?: Record<string, number>,
             api?: Record<string, number>,
             os?: Record<string, number>,
+            gen_attr_opt_sec?: Record<string, number>,
         },
         reset_base?: {
             page_loads?: number,
@@ -259,6 +261,7 @@ export class TextAnalysisAPI {
             page_sec?: Record<string, number>,
             api?: Record<string, number>,
             os?: Record<string, number>,
+            gen_attr_opt_sec?: Record<string, number>,
         },
         reset_at?: string | null,
     }> {

@@ -174,12 +174,14 @@
                         </div>
                         <div class="button-group">
                             <div class="button-left">
-                                <button type="button" id="gen_attr_submit_btn" class="primary-btn inactive" disabled>Start</button>
-                                <div class="generation-status-slot loader-small-container">
-                                    <div class="loadersmall"></div>
-                                    <span id="gen_attr_complete_reason" class="generation-end-reason"></span>
+                                <div class="button-left-primary">
+                                    <button type="button" id="gen_attr_submit_btn" class="primary-btn inactive" disabled>Start</button>
+                                    <div class="generation-status-slot loader-small-container">
+                                        <div class="loadersmall"></div>
+                                        <span id="gen_attr_complete_reason" class="generation-end-reason"></span>
+                                    </div>
+                                    <span id="gen_attr_analyze_progress" class="analyze-progress"></span>
                                 </div>
-                                <span id="gen_attr_analyze_progress" class="analyze-progress"></span>
                             </div>
                             <div id="gen_attr_text_metrics" class="text-metrics text-metrics-chat">
                                 <div id="gen_attr_metric_usage" class="text-metrics-secondary"></div>
@@ -189,15 +191,24 @@
                         </div>
                     </div>
 
+                    <div class="gen-attr-reset-ui-options-row">
+                        <button type="button" id="gen_attr_reset_ui_options_btn" class="text-action-btn"
+                            title="Restore DAG options, replay speed, exclusions, etc. to defaults and clear saved preferences for those controls."
+                            data-i18n="text,title">
+                            Reset UI options
+                        </button>
+                    </div>
+
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
-                        <span class="semantic-submode-group gen-attr-dag-layout-mode-group">
+                        <span class="semantic-submode-group semantic-submode-group--emphasis">
                             <label class="semantic-submode-label" for="gen_attr_dag_layout_mode">DAG layout mode</label>
                             <select id="gen_attr_dag_layout_mode"
                                 class="semantic-submode-select gen-attr-dag-layout-mode-select"
-                                title="Choose DAG layout mode. 'text-flow' follows text layout geometry; 'linear-arc' uses fixed-order linear nodes with arc links; 'spiral' lays nodes on an Archimedean spiral (for fun)."
+                                title="Choose DAG layout mode. 'text-flow' follows text layout geometry; 'linear-arc' uses fixed-order linear nodes with arc links; 'linear-arc-step-down' is like linear-arc but drops each successive token vertically by CI (baseline = unscaled node height); 'spiral' lays nodes on an Archimedean spiral (for fun)."
                                 data-i18n="title">
                                 <option value="text-flow">text-flow</option>
                                 <option value="linear-arc">linear-arc</option>
+                                <option value="linear-arc-step-down">step-down</option>
                                 <option value="spiral">spiral (for fun)</option>
                             </select>
                         </span>
@@ -220,7 +231,7 @@
                             <label class="semantic-submode-label" for="gen_attr_dag_linear_arc_interval" data-i18n>Token distance</label>
                             <input type="number" id="gen_attr_dag_linear_arc_interval" class="gen-attr-dag-measure-width-input"
                                 value="0" min="0" max="400" step="1"
-                                title="Horizontal gap (px) between the outer left/right edges of adjacent token nodes in linear-arc layout only. When idle, the DAG refits; during generation or DAG playback, the value is stored and applied on the next sync."
+                                title="Horizontal gap (px) between the outer left/right edges of adjacent token nodes in linear-arc / linear-arc-step-down layout only. When idle, the DAG refits; during generation or DAG playback, the value is stored and applied on the next sync."
                                 data-i18n="title">
                             <span class="semantic-submode-label">px</span>
                         </span>
@@ -236,27 +247,35 @@
                         </span>
                         <span class="semantic-submode-group">
                             <label class="semantic-submode-label">
-                                <input type="checkbox" id="gen_attr_dag_edge_weaken_high_surprisal" checked
-                                    title="When checked, edges leading to high-surprisal (uncertain) target tokens are visually weakened by the mutual information ratio. Takes effect on next generation."
+                                <input type="checkbox" id="gen_attr_dag_decay_attribution_high_surprisal" checked
+                                    title="When checked, recursive trace decays propagated attribution at high-surprisal generated tokens (MI discount), so surprising or teacher-forced tokens can act as sources. Unchecked: all generated tokens are transparent conduits; trace continues to prompt only."
                                     data-i18n="title">
-                                Weaken attribution to high-surprisal target
+                                Decay attribution to high-surprisal targets
                             </label>
                         </span>
                     </div>
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
                         <span class="semantic-submode-group">
-                            <label class="semantic-submode-label" for="gen_attr_dag_edge_top_p_coverage" data-i18n>Edge top-p coverage</label>
+                            <label class="semantic-submode-label" for="gen_attr_dag_edge_top_p_coverage" data-i18n>Attribution top-p coverage</label>
                             <input type="number" id="gen_attr_dag_edge_top_p_coverage" class="gen-attr-dag-measure-width-input"
                                 value="0.7" min="0.05" max="1" step="0.05"
                                 title="Coverage is the cumulative mass share within each generation step's Top-N candidate pool (after sorting candidates into the pool and normalizing mass inside that pool). Higher values keep more incoming edges. The denominator is this pool only, not every token-attribution entry returned for the step."
                                 data-i18n="title">
                         </span>
-                        <span class="semantic-submode-group">
+                        <span class="semantic-submode-group semantic-submode-group--emphasis">
                             <label class="semantic-submode-label">
-                                <input type="checkbox" id="gen_attr_dag_hide_inactive_edges"
-                                    title="When checked, gray DAG edges not adjacent to the hovered or selected node are hidden."
+                                <input type="checkbox" id="gen_attr_dag_recursive_attribution"
+                                    title="Trace from the focused token back to information sources (not one hop). Sources: prompt; surprising or teacher-forced generated tokens (MI decay stops the chain). Conduits: high-confidence middle tokens—attribution passes through. Blue edges: propagated share; node ring: attribution stay (strong where explanation lands). Use with Decay attribution to high-surprisal targets. Off = direct mode (immediate predecessors only)."
                                     data-i18n="title">
-                                Hide inactive edges
+                                Propagated attribution mode
+                            </label>
+                        </span>
+                        <span class="semantic-submode-group" id="gen_attr_dag_show_downstream_influence_group">
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_show_downstream_influence"
+                                    title="When checked, direct attribution focus also shows outgoing edges from the selected or hovered token as downstream influence. Propagated attribution keeps showing upstream attribution chains only."
+                                    data-i18n="title">
+                                Show downstream influence
                             </label>
                         </span>
                     </div>
@@ -315,7 +334,27 @@
                         </span>
                     </div>
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
-                        <span class="semantic-submode-group gen-attr-dag-replay-speed-row">
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_hide_inactive_edges"
+                                    title="When checked, gray DAG edges not adjacent to the hovered or selected node are hidden."
+                                    data-i18n="title">
+                                Hide inactive edges
+                            </label>
+                        </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row gen-attr-dag-show-topk-on-selected-row">
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_show_topk_on_selected"
+                                    title="When checked, selecting or hovering a token node shows token information in the results area."
+                                    data-i18n="title">
+                                <span data-i18n>Show token tooltip</span>
+                            </label>
+                        </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
+                        <span class="semantic-submode-group gen-attr-dag-replay-speed-row semantic-submode-group--emphasis">
                             <label class="semantic-submode-label" for="gen_attr_dag_replay_mode" data-i18n>DAG replay speed</label>
                             <select id="gen_attr_dag_replay_mode"
                                 class="semantic-submode-select gen-attr-dag-replay-mode-select"

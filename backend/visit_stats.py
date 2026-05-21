@@ -14,6 +14,7 @@ _WIN = {"page_loads": 0, "active_visits": 0}
 _PAGE_SEC = defaultdict(int)
 _API = defaultdict(int)
 _OS_REPORTS = defaultdict(int)  # 与同页「首轮心跳」(delta_active_sec == total_active_sec) 对齐，仅凭该包附带 client_os 计一次
+_GEN_ATTR_OPT_SEC = defaultdict(int)  # gen_attribute.html 各非默认选项处于激活状态的活跃秒
 _VALID_CLIENT_OS = frozenset({"ios", "android", "windows", "macos", "linux", "unknown"})
 
 # client/src/ts/utils/settingsMenuManager.ts handleVisitStatsClick：PAGE_ORDER / API_ORDER / OS_ORDER
@@ -36,6 +37,10 @@ _STATS_API_ORDER = (
     "prediction_attribute__analysis.html",
 )
 _STATS_OS_ORDER = ("ios", "android", "windows", "macos", "linux", "unknown")
+_STATS_GEN_ATTR_OPT_ORDER = (
+    "layout_linear_arc", "layout_step_down", "layout_spiral",
+    "propagated", "downstream", "token_tooltip",
+)
 
 # RLock：_persist_tick 在已持锁时调用 _sample_locked_counters，同线程需可重入。
 _LOCK = threading.RLock()
@@ -190,7 +195,7 @@ def _increment_nonempty(h: dict) -> bool:
     """是否有尚未写入远端的任意增量。"""
     if h.get("page_loads") or h.get("active_visits"):
         return True
-    if h.get("page_sec") or h.get("api") or h.get("os"):
+    if h.get("page_sec") or h.get("api") or h.get("os") or h.get("gen_attr_opt_sec"):
         return True
     return False
 
@@ -214,6 +219,7 @@ def _apply_persist_success(total_rec: dict, committed_sample: dict) -> None:
         _subtract_defaultdict_int(_PAGE_SEC, committed_sample["session_page_sec"])
         _subtract_defaultdict_int(_API, committed_sample["session_api"])
         _subtract_defaultdict_int(_OS_REPORTS, committed_sample["session_os_reports"])
+        _subtract_defaultdict_int(_GEN_ATTR_OPT_SEC, committed_sample["session_gen_attr_opt_sec"])
 
 
 def _load_base():
@@ -355,21 +361,35 @@ def bump_api(kind: str):
         _API[kind] += 1
 
 
+def record_gen_attr_opt_sec(delta_sec: int, opts: dict[str, bool]) -> None:
+    """累计 gen_attribute.html 各非默认选项处于激活状态的活跃秒。"""
+    if delta_sec <= 0:
+        return
+    with _LOCK:
+        for k, v in opts.items():
+            if v:
+                _GEN_ATTR_OPT_SEC[k] += delta_sec
+
+
 def _sample_locked_counters() -> dict:
     with _LOCK:
         bo = _base.get("os")
         base_os = dict(bo) if isinstance(bo, dict) else {}
+        bgo = _base.get("gen_attr_opt_sec")
+        base_gen_attr_opt_sec = dict(bgo) if isinstance(bgo, dict) else {}
         return {
             "sw_pl": _WIN["page_loads"],
             "sw_av": _WIN["active_visits"],
             "session_page_sec": dict(_PAGE_SEC),
             "session_api": dict(_API),
             "session_os_reports": dict(_OS_REPORTS),
+            "session_gen_attr_opt_sec": dict(_GEN_ATTR_OPT_SEC),
             "bp": int(_base_int(_base, "page_loads")),
             "bav": _base_int(_base, "active_visits"),
             "base_page_sec": dict(_base.get("page_sec") or {}),
             "base_api": dict(_base.get("api") or {}),
             "base_os": base_os,
+            "base_gen_attr_opt_sec": base_gen_attr_opt_sec,
             "saved_at": _base.get("saved_at"),
         }
 
@@ -378,6 +398,7 @@ def _merge_from_sample(s: dict) -> tuple[dict, dict, dict]:
     """(管理员 API 快照, stats_total 的 body 不含 saved_at, stats_delta 的 body)。"""
     sp, sa, so = s["session_page_sec"], s["session_api"], s["session_os_reports"]
     bpp, bpa, bpo = s["base_page_sec"], s["base_api"], s["base_os"]
+    sg, bgo = s["session_gen_attr_opt_sec"], s["base_gen_attr_opt_sec"]
 
     total_page_sec = {k: bpp.get(k, 0) + sp.get(k, 0) for k in set(bpp) | set(sp)}
     total_api = {k: bpa.get(k, 0) + sa.get(k, 0) for k in set(bpa) | set(sa)}
@@ -385,13 +406,16 @@ def _merge_from_sample(s: dict) -> tuple[dict, dict, dict]:
         k: int(bpo.get(k, 0)) + int(so.get(k, 0))
         for k in set(bpo) | set(so)
     }
+    total_gen_attr_opt_sec = {k: bgo.get(k, 0) + sg.get(k, 0) for k in set(bgo) | set(sg)}
 
     total_page_sec = _ordered_str_int_map(_STATS_PAGE_ORDER, total_page_sec)
     total_api = _ordered_str_int_map(_STATS_API_ORDER, total_api)
     total_os = _ordered_str_int_map(_STATS_OS_ORDER, total_os)
+    total_gen_attr_opt_sec = _ordered_str_int_map(_STATS_GEN_ATTR_OPT_ORDER, total_gen_attr_opt_sec)
     ord_pg = _ordered_str_int_map(_STATS_PAGE_ORDER, sp)
     ord_api = _ordered_str_int_map(_STATS_API_ORDER, sa)
     ord_os = _ordered_str_int_map(_STATS_OS_ORDER, so)
+    ord_gen_attr_opt_sec = _ordered_str_int_map(_STATS_GEN_ATTR_OPT_ORDER, sg)
 
     tpl, tav = s["bp"] + s["sw_pl"], s["bav"] + s["sw_av"]
 
@@ -401,6 +425,7 @@ def _merge_from_sample(s: dict) -> tuple[dict, dict, dict]:
         "os": total_os,
         "page_sec": total_page_sec,
         "api": total_api,
+        "gen_attr_opt_sec": total_gen_attr_opt_sec,
         "saved_at": s["saved_at"],
     }
     stats_body = {
@@ -409,6 +434,7 @@ def _merge_from_sample(s: dict) -> tuple[dict, dict, dict]:
         "os": total_os,
         "page_sec": total_page_sec,
         "api": total_api,
+        "gen_attr_opt_sec": total_gen_attr_opt_sec,
     }
     delta_body = {
         "page_loads": s["sw_pl"],
@@ -416,6 +442,7 @@ def _merge_from_sample(s: dict) -> tuple[dict, dict, dict]:
         "os": ord_os,
         "page_sec": ord_pg,
         "api": ord_api,
+        "gen_attr_opt_sec": ord_gen_attr_opt_sec,
     }
     return public, stats_body, delta_body
 

@@ -67,8 +67,13 @@ export type GenAttrDemoUiOptions = {
     hideExcludedTokens: boolean;
     edgeTopPCoverage: number;
     nodeCiVisualScaleEnabled: boolean;
-    edgeWeakenHighSurprisalEnabled: boolean;
+    decayAttributionToHighSurprisalTargetEnabled: boolean;
     hideInactiveEdges: boolean;
+    showDownstreamInfluence: boolean;
+    /** 传播归因（UI: Propagated attribution mode；与 `recursiveAttribution*` 同义）。 */
+    recursiveAttributionEnabled: boolean;
+    /** 是否显示 token tooltip（UI: Show token tooltip；`showTokenInfoOnSelected`）。 */
+    showTokenInfoOnSelected: boolean;
     replayPacingMode: 'total' | 'step';
     playbackTotalS: number;
     playbackStepMs: number;
@@ -78,6 +83,8 @@ export type GenAttrDemoUiOptions = {
     /** 排除生成 token 归因：使能与正则文本（`info_radar_gen_attr_exclude_generated_*`）。 */
     excludeGeneratedPatternsEnabled: boolean;
     excludeGeneratedPatternsText: string;
+    /** DAG 选中节点（offset id：`"${start}_${end}"`）；无选中时为 `null`。 */
+    selectedNodeId?: string | null;
 };
 
 /** 单条记录 JSON：内容字段 + 可选 `demoUiOptions`（仅导出 demo 写入）。 */
@@ -193,7 +200,12 @@ function isValidGenAttrRunDraftPayload(v: unknown): boolean {
 }
 
 function isDagLayoutModePayload(v: unknown): v is DagLayoutMode {
-    return v === 'text-flow' || v === 'linear-arc' || v === 'spiral';
+    return (
+        v === 'text-flow' ||
+        v === 'linear-arc' ||
+        v === 'linear-arc-step-down' ||
+        v === 'spiral'
+    );
 }
 
 function isValidDemoUiOptionsPayload(v: unknown): v is Partial<GenAttrDemoUiOptions> {
@@ -222,10 +234,35 @@ function isValidDemoUiOptionsPayload(v: unknown): v is Partial<GenAttrDemoUiOpti
     if (d.nodeCiVisualScaleEnabled !== undefined && typeof d.nodeCiVisualScaleEnabled !== 'boolean') {
         return false;
     }
-    if (d.edgeWeakenHighSurprisalEnabled !== undefined && typeof d.edgeWeakenHighSurprisalEnabled !== 'boolean') {
+    if (
+        d.decayAttributionToHighSurprisalTargetEnabled !== undefined &&
+        typeof d.decayAttributionToHighSurprisalTargetEnabled !== 'boolean'
+    ) {
+        return false;
+    }
+    const legacyDecay = (d as { edgeWeakenHighSurprisalEnabled?: unknown }).edgeWeakenHighSurprisalEnabled;
+    if (legacyDecay !== undefined && typeof legacyDecay !== 'boolean') {
         return false;
     }
     if (d.hideInactiveEdges !== undefined && typeof d.hideInactiveEdges !== 'boolean') return false;
+    if (
+        d.showDownstreamInfluence !== undefined &&
+        typeof d.showDownstreamInfluence !== 'boolean'
+    ) {
+        return false;
+    }
+    if (
+        d.recursiveAttributionEnabled !== undefined &&
+        typeof d.recursiveAttributionEnabled !== 'boolean'
+    ) {
+        return false;
+    }
+    if (
+        d.showTokenInfoOnSelected !== undefined &&
+        typeof d.showTokenInfoOnSelected !== 'boolean'
+    ) {
+        return false;
+    }
     if (d.replayPacingMode !== undefined && d.replayPacingMode !== 'total' && d.replayPacingMode !== 'step') {
         return false;
     }
@@ -253,6 +290,13 @@ function isValidDemoUiOptionsPayload(v: unknown): v is Partial<GenAttrDemoUiOpti
     if (
         d.excludeGeneratedPatternsText !== undefined &&
         typeof d.excludeGeneratedPatternsText !== 'string'
+    ) {
+        return false;
+    }
+    if (
+        d.selectedNodeId !== undefined &&
+        d.selectedNodeId !== null &&
+        typeof d.selectedNodeId !== 'string'
     ) {
         return false;
     }

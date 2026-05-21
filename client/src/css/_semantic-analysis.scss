@@ -25,6 +25,14 @@
     &.semantic-submode-group-right {
       margin-left: auto;
     }
+
+    // 组内「主控」标签/下拉：比默认 submode 更醒目（仅直接子级，避免加粗单位后缀等嵌套 label）
+    &.semantic-submode-group--emphasis {
+      > .semantic-submode-label,
+      > .semantic-submode-select {
+        font-weight: 700;
+      }
+    }
   }
 
   .semantic-submode-label {
@@ -50,6 +58,28 @@
     border-radius: 4px;
     background: var(--input-bg);
     color: var(--text-color);
+  }
+}
+
+// Analyze 下方 Semantic Query 总开关：与 gen_attribute「Raw prompt mode」同款（未勾选整行灰色，勾选正文色）
+.textarea-wrapper .semantic-submode-row.semantic-analysis-enable-row {
+  label.semantic-submode-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--text-primary, var(--text-color));
+
+    &:has(> input[type='checkbox']:not(:checked)) {
+      color: var(--text-muted);
+    }
+  }
+
+  input[type='checkbox'] {
+    cursor: pointer;
+    margin: 0;
+    flex-shrink: 0;
   }
 }
 

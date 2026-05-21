@@ -13,7 +13,7 @@ export const HIGHLIGHT_CONSTANTS = {
     /** chunk 字符半开区间下划线（由 DOM Range 推算，不依赖 token rect） */
     INTERVAL_UNDERLINE_CLASS: 'chunk-interval-underline',
     /** 高亮边框颜色（CSS变量） */
-    HIGHLIGHT_COLOR: 'var(--bin-highlight-outline, #1e6fff)',
+    HIGHLIGHT_COLOR: 'var(--accent-color, #1e6fff)',
     /** 边框宽度 */
     BORDER_WIDTH: '1.5',
     /** 下划线宽度 */
