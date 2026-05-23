@@ -2,11 +2,12 @@
 import gc
 import time
 
-from backend.model_manager import _inference_lock
-from backend.oom import exit_if_oom
-from backend.prediction_attributor import analyze_prediction_attribution
+from backend.models.model_manager import inference_lock
+from backend.platform.oom import exit_if_oom
+from backend.core.prediction_attributor import analyze_prediction_attribution
 from backend.api.analyze import LOCK_WAIT_TIMEOUT
-from backend.access_log import get_client_ip, log_prediction_attribute_request
+from backend.platform.access_log import get_client_ip, log_prediction_attribute_request
+from backend.platform.source_page import ALLOWED_SOURCE_PAGES, normalize_source_page
 
 
 def prediction_attribute(attribution_request):
@@ -55,24 +56,20 @@ def prediction_attribute(attribution_request):
     if model not in ("base", "instruct"):
         return {"success": False, "message": 'model must be "base" or "instruct"'}, 400
 
-    allowed_source_pages = {
-        "analysis.html",
-        "chat.html",
-        "attribution.html",
-        "gen_attribute.html",
-    }
-
     if source_page is None:
         return {"success": False, "message": "Missing required field: source_page"}, 400
     if not isinstance(source_page, str):
         return {"success": False, "message": "source_page must be a string"}, 400
     if source_page == "":
         return {"success": False, "message": "source_page must not be empty"}, 400
-    if source_page not in allowed_source_pages:
+    normalized_source_page = normalize_source_page(source_page)
+    if normalized_source_page is None:
+        allowed = ", ".join(sorted(ALLOWED_SOURCE_PAGES))
         return {
             "success": False,
-            "message": "source_page must be one of: analysis.html, chat.html, attribution.html, gen_attribute.html",
+            "message": f"source_page must be one of: {allowed} (legacy *.html and gen_attribute accepted)",
         }, 400
+    source_page = normalized_source_page
 
     if flow_id is not None and not isinstance(flow_id, str):
         return {"success": False, "message": "flow_id must be a string"}, 400
@@ -83,7 +80,7 @@ def prediction_attribute(attribution_request):
     if flow_step is not None and flow_step < 0:
         return {"success": False, "message": "flow_step must be >= 0"}, 400
 
-    is_causal_flow = source_page == "gen_attribute.html"
+    is_causal_flow = source_page == "causal_flow"
     if is_causal_flow:
         if flow_id is None:
             return {"success": False, "message": "Missing required field: flow_id for causal flow"}, 400
@@ -92,7 +89,7 @@ def prediction_attribute(attribution_request):
     elif flow_id is not None or flow_step is not None:
         return {
             "success": False,
-            "message": "flow_id/flow_step are only allowed when source_page is gen_attribute.html",
+            "message": "flow_id/flow_step are only allowed when source_page is causal_flow",
         }, 400
 
     client_ip = get_client_ip()
@@ -108,7 +105,7 @@ def prediction_attribute(attribution_request):
         client_ip=client_ip,
     )
 
-    lock_acquired = _inference_lock.acquire(timeout=LOCK_WAIT_TIMEOUT)
+    lock_acquired = inference_lock.acquire(timeout=LOCK_WAIT_TIMEOUT)
     if not lock_acquired:
         return {
             "success": False,
@@ -133,7 +130,7 @@ def prediction_attribute(attribution_request):
         exit_if_oom(e, defer_seconds=1)
         return {"success": False, "message": str(e)}, 500
     finally:
-        _inference_lock.release()
+        inference_lock.release()
         gc.collect()
 
     elapsed = time.perf_counter() - start_time

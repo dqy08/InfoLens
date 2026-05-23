@@ -45,11 +45,11 @@ def _make_text_for_tokens(tokenizer, target_tokens: int) -> str:
 
 
 def run_benchmark(repeats: int = 3, gradient_checkpointing: bool = True) -> dict:
-    from backend.app_context import AppContext
-    from backend.data_utils import resolve_data_dir
-    from backend.device import DeviceManager
-    from backend.model_manager import ensure_semantic_slot_ready
-    from backend.semantic_analyzer import analyze_semantic
+    from backend.platform.app_context import AppContext
+    from backend.demo.data_utils import resolve_data_dir
+    from backend.models.device import DeviceManager
+    from backend.models.model_manager import ensure_semantic_slot_ready
+    from backend.core.semantic_analyzer import analyze_semantic
     from argparse import Namespace
 
     data_dir = resolve_data_dir(None)

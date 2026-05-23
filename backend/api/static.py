@@ -6,7 +6,7 @@ from urllib.parse import unquote
 from flask import Response, redirect, abort, request
 from werkzeug.utils import safe_join
 
-from backend.access_log import log_cached_demo, log_json_demo, log_page_load
+from backend.platform.access_log import log_cached_demo, log_json_demo, log_page_load
 
 
 def _read_static_file(directory: str, path: str) -> Response:
@@ -39,6 +39,11 @@ def register_static_routes(app):
     @app.route('/client/<path:path>')
     def send_static(path):
         """serves all files from ./client/dist/ to ``/client/<path:path>``"""
+        if path == 'gen_attribute.html':
+            target = 'causal_flow.html'
+            if request.query_string:
+                target += '?' + request.query_string.decode()
+            return redirect(f'/client/{target}', code=301)
         if path.endswith('.html'):
             log_page_load(path)
         if path.endswith('.json'):
@@ -48,7 +53,7 @@ def register_static_routes(app):
     @app.route('/demo/<path:path>')
     def send_demo(path):
         """serves all demo files from the demo dir to ``/demo/<path:path>``"""
-        from backend.app_context import get_data_dir
+        from backend.platform.app_context import get_data_dir
         data_dir = get_data_dir()
         log_json_demo(path)
         try:

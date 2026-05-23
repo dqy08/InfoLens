@@ -1,5 +1,5 @@
 """访问统计 API（仅管理员可用）"""
-from backend.visit_stats import get_stats_snapshot, reset_delta_base
+from backend.platform.visit_stats import get_stats_snapshot, reset_delta_base
 from backend.api.utils import require_admin
 
 

@@ -19,7 +19,10 @@
     "resolveJsonModule": true
   },
   "include": [
-    "ts/**/*.ts",
-    "ts/**/*.d.ts"
+    "pages/**/*.ts",
+    "features/**/*.ts",
+    "shared/**/*.ts",
+    "tests/**/*.ts",
+    "types/**/*.d.ts"
   ]
 }

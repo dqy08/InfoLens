@@ -7,10 +7,10 @@ import time
 import traceback
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from backend.model_manager import _inference_lock, get_semantic_model_display_name
-from backend.prediction_attributor import _slot_for_prediction_attr_model
-from backend.oom import exit_if_oom, is_oom_error
-from backend.completion_generator import (
+from backend.models.model_manager import inference_lock, get_semantic_model_display_name
+from backend.core.prediction_attributor import slot_for_prediction_attr_model
+from backend.platform.oom import exit_if_oom, is_oom_error
+from backend.core.completion_generator import (
     PromptTooLongError,
     apply_chat_template_for_completion,
     completion_cancel_requested,
@@ -25,7 +25,7 @@ from backend.api.sse_utils import (
     send_error_event,
     send_result_event,
 )
-from backend.access_log import get_client_ip
+from backend.platform.access_log import get_client_ip
 
 # 单次续写 SSE：从进入流式生成器起算的墙钟上限（含排队等推理锁 + 生成）。
 COMPLETION_WALL_CLOCK_TIMEOUT_SEC = 300.0
@@ -37,7 +37,7 @@ def _log_cmpl_issue(request_id: int, msg: str) -> None:
 
 
 def _log_request(model: str, prompt: str, client_ip=None):
-    from backend.access_log import log_openai_completions_request
+    from backend.platform.access_log import log_openai_completions_request
     return log_openai_completions_request(model, prompt, client_ip)
 
 
@@ -89,7 +89,7 @@ def _completion_inference_after_lock(
     在已持有推理锁的上下文中执行续写（旧版非流式路径的持锁体内逻辑）。
     流式可传 stream_delta；中止由 ``completion_cancel_requested()`` 统一判断。
     """
-    from backend.access_log import log_openai_completions_start
+    from backend.platform.access_log import log_openai_completions_start
 
     log_openai_completions_start(request_id, lock_wait_time)
     return generate_completion_text(prompt, stream_delta=stream_delta, max_tokens=max_tokens)
@@ -144,7 +144,7 @@ def _generate_completion_events(
     def run():
         try:
             lock_wait_start = time.perf_counter()
-            lock_acquired = _inference_lock.acquire(timeout=LOCK_WAIT_TIMEOUT)
+            lock_acquired = inference_lock.acquire(timeout=LOCK_WAIT_TIMEOUT)
             if not lock_acquired:
                 q.put(("error", QueueTimeoutError(
                     f"排队等待超过 {LOCK_WAIT_TIMEOUT} 秒，服务繁忙，请稍后重试"
@@ -165,7 +165,7 @@ def _generate_completion_events(
                     max_tokens=max_tokens,
                 )
             finally:
-                _inference_lock.release()
+                inference_lock.release()
                 gc.collect()
             q.put(("result", result))
         except Exception as e:
@@ -323,7 +323,7 @@ def completions_prompt(completions_prompt_request):
         system_opt = system_raw
 
     client_ip = get_client_ip()
-    from backend.access_log import log_openai_completions_prompt_request
+    from backend.platform.access_log import log_openai_completions_prompt_request
 
     log_openai_completions_prompt_request(
         model,
@@ -333,7 +333,7 @@ def completions_prompt(completions_prompt_request):
     )
 
     try:
-        slot = _slot_for_prediction_attr_model(model)
+        slot = slot_for_prediction_attr_model(model)
     except ValueError as e:
         return {"success": False, "message": str(e)}, 400
 

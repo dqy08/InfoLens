@@ -124,7 +124,7 @@ def fetch_url(fetch_request):
     
     # 提取文本和元数据
     try:
-        from backend.access_log import log_fetch_url
+        from backend.platform.access_log import log_fetch_url
         log_fetch_url(url)
         
         # 使用 requests 下载网页，设置浏览器 User-Agent 和请求头

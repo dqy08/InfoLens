@@ -5,10 +5,10 @@ import time
 import queue
 import threading
 from typing import Optional
-from backend.schemas import create_empty_analysis_result
-from backend.model_manager import project_registry, DEFAULT_MODEL, _inference_lock
+from backend.platform.schemas import create_empty_analysis_result
+from backend.models.model_manager import project_registry, DEFAULT_MODEL, inference_lock
 from model_paths import resolve_hf_path
-from backend.oom import exit_if_oom
+from backend.platform.oom import exit_if_oom
 from backend.api.sse_utils import (
     SSEProgressReporter,
     consume_progress_queue,
@@ -84,7 +84,7 @@ def _validate_and_prepare_request(analyze_request):
         return None, None, "缺少分析文本，请提供 text 字段", 400
     
     # 获取默认模型（使用模块级上下文以获取持久化的当前活动模型）
-    from backend.app_context import get_app_context
+    from backend.platform.app_context import get_app_context
     context = get_app_context(prefer_module_context=True)
     default_model = context.model_name if context.model_name else DEFAULT_MODEL
     
@@ -118,8 +118,8 @@ def _load_project_with_error_handling(model):
     # 检查模型是否已加载
     p = project_registry.get(model)
     if p is None:
-        from backend.app_context import get_app_context
-        from backend.model_manager import ensure_main_slot_ready
+        from backend.platform.app_context import get_app_context
+        from backend.models.model_manager import ensure_main_slot_ready
 
         context = get_app_context(prefer_module_context=True)
         if context.model_loading:
@@ -150,7 +150,7 @@ def _log_request(text, stream_mode=False, client_ip=None):
     Returns:
         int: 请求ID
     """
-    from backend.access_log import log_analyze_request
+    from backend.platform.access_log import log_analyze_request
     return log_analyze_request(text, stream_mode, client_ip)
 
 
@@ -194,13 +194,13 @@ def analyze(analyze_request):
         否则: (响应字典, 状态码) 元组
     """
     # 检查模型是否正在加载中（使用模块级上下文）
-    from backend.app_context import get_app_context
+    from backend.platform.app_context import get_app_context
     context = get_app_context(prefer_module_context=True)
     if context.model_loading:
         return _error_response('', '', '模型正在加载中，请稍后重试', 503)
 
     # 在请求上下文中获取 client_ip，流式响应时生成器内可能已失效
-    from backend.access_log import get_client_ip
+    from backend.platform.access_log import get_client_ip
     client_ip = get_client_ip()
 
     # 检查是否启用流式响应
@@ -269,7 +269,7 @@ def _generate_analyze_events(analyze_request, client_ip):
     client_ip 需在入口处获取并传入，因流式响应时生成器执行时请求上下文可能已失效。
     """
     # 再次检查模型加载状态（在生成器内部，使用模块级上下文）
-    from backend.app_context import get_app_context
+    from backend.platform.app_context import get_app_context
     context = get_app_context(prefer_module_context=True)
     if context.model_loading:
         yield send_error_event('模型正在加载中，请稍后重试', 503)
@@ -312,7 +312,7 @@ def _generate_analyze_events(analyze_request, client_ip):
                 lock_wait_start = time.perf_counter()
 
                 # 尝试获取锁，设置超时避免长时间排队
-                lock_acquired = _inference_lock.acquire(timeout=LOCK_WAIT_TIMEOUT)
+                lock_acquired = inference_lock.acquire(timeout=LOCK_WAIT_TIMEOUT)
                 if not lock_acquired:
                     # 获取锁超时，说明前面有任务在执行且耗时较长
                     analysis_error = QueueTimeoutError(
@@ -324,7 +324,7 @@ def _generate_analyze_events(analyze_request, client_ip):
                 lock_wait_time = time.perf_counter() - lock_wait_start
 
                 try:
-                    from backend.access_log import log_analyze_start
+                    from backend.platform.access_log import log_analyze_start
                     log_analyze_start(request_id, lock_wait_time, stream_mode=True)
 
                     # 在持有锁的情况下执行分析
@@ -333,7 +333,7 @@ def _generate_analyze_events(analyze_request, client_ip):
                     analysis_result = res
                 finally:
                     # 确保锁一定会被释放
-                    _inference_lock.release()
+                    inference_lock.release()
             except Exception as e:
                 analysis_error = e
             finally:

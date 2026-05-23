@@ -1,0 +1,5 @@
+// 带设置菜单等顶栏 chrome 的页面统一入口（变量 + 组件样式 + 设置菜单触发的弹窗）
+@use 'theme-vars';
+@use 'buttons';
+@use 'settings-menu';
+@use 'dialog';

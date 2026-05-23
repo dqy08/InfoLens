@@ -14,9 +14,9 @@ diagnose_and_fix_thread_env_vars()
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import connexion
-from backend.logging_config import configure_logging
+from backend.platform.logging_config import configure_logging
 from backend.api.static import register_static_routes
-from backend.visit_stats import register_visit_stats
+from backend.platform.visit_stats import register_visit_stats
 
 # 导入 API 函数供 server.yaml 使用
 from backend.api.analyze import analyze  # noqa: F401
@@ -50,7 +50,7 @@ from backend.api.openai_completions import (  # noqa: F401
     completions_prompt,
     completions_stop,
 )
-from backend.completion_generator import register_inference_shutdown_handlers
+from backend.core.completion_generator import register_inference_shutdown_handlers
 
 register_inference_shutdown_handlers()
 

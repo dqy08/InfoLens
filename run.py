@@ -76,9 +76,9 @@ def _load_and_run(args):
 
     import server
     from server import app
-    from backend.app_context import AppContext
-    from backend.data_utils import resolve_data_dir
-    from backend.model_manager import preload_all_slots
+    from backend.platform.app_context import AppContext
+    from backend.demo.data_utils import resolve_data_dir
+    from backend.models.model_manager import preload_all_slots
 
     data_dir = resolve_data_dir(args.dir)
     ctx = AppContext.init(args, data_dir)

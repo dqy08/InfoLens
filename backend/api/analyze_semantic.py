@@ -6,21 +6,21 @@ import threading
 import time
 from typing import Optional
 
-from backend.model_manager import _inference_lock
-from backend.oom import exit_if_oom
-from backend.semantic_analyzer import analyze_semantic as _analyze_semantic
+from backend.models.model_manager import inference_lock
+from backend.platform.oom import exit_if_oom
+from backend.core.semantic_analyzer import analyze_semantic as _analyze_semantic
 from backend.api.sse_utils import (
     SSEProgressReporter,
     consume_progress_queue,
     send_result_event,
     send_error_event,
 )
-from backend.access_log import get_client_ip
+from backend.platform.access_log import get_client_ip
 from backend.api.analyze import QueueTimeoutError, ANALYSIS_TIMEOUT, LOCK_WAIT_TIMEOUT
 
 
 def _log_request(query, text, client_ip=None):
-    from backend.access_log import log_analyze_semantic_request
+    from backend.platform.access_log import log_analyze_semantic_request
     return log_analyze_semantic_request(query, text, client_ip)
 
 
@@ -64,7 +64,7 @@ def _generate_semantic_events(
         nonlocal analysis_result, analysis_error, lock_wait_time
         try:
             lock_wait_start = time.perf_counter()
-            lock_acquired = _inference_lock.acquire(timeout=LOCK_WAIT_TIMEOUT)
+            lock_acquired = inference_lock.acquire(timeout=LOCK_WAIT_TIMEOUT)
             if not lock_acquired:
                 analysis_error = QueueTimeoutError(
                     f"排队等待超过 {LOCK_WAIT_TIMEOUT} 秒，服务繁忙，请稍后重试"
@@ -73,12 +73,12 @@ def _generate_semantic_events(
             lock_wait_time = time.perf_counter() - lock_wait_start
 
             try:
-                from backend.access_log import log_analyze_semantic_start
+                from backend.platform.access_log import log_analyze_semantic_start
                 log_analyze_semantic_start(request_id, lock_wait_time, stream_mode=True)
                 result = _analyze_semantic(query, text, submode_override=submode, progress_callback=progress_callback, debug_info=debug_info, full_match_degree_only=full_match_degree_only)
                 analysis_result = result
             finally:
-                _inference_lock.release()
+                inference_lock.release()
         except Exception as e:
             analysis_error = e
         finally:

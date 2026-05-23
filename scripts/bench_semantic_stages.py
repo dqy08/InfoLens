@@ -41,11 +41,11 @@ def run_benchmark(
 ) -> dict:
     from argparse import Namespace
 
-    from backend.app_context import AppContext
-    from backend.data_utils import resolve_data_dir
-    from backend.device import DeviceManager
-    from backend.model_manager import ensure_semantic_slot_ready
-    from backend.semantic_analyzer import analyze_semantic
+    from backend.platform.app_context import AppContext
+    from backend.demo.data_utils import resolve_data_dir
+    from backend.models.device import DeviceManager
+    from backend.models.model_manager import ensure_semantic_slot_ready
+    from backend.core.semantic_analyzer import analyze_semantic
 
     data_dir = resolve_data_dir(None)
     init_args = Namespace(

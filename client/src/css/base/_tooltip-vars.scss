@@ -1,0 +1,10 @@
+// ToolTip 与其它入口共用的样式（变量见 _theme-vars.scss --tooltip-visible-opacity）
+.tooltip.tooltip-no-pointer-hit {
+  pointer-events: none !important;
+  cursor: default !important;
+
+  &,
+  * {
+    pointer-events: none !important;
+  }
+}

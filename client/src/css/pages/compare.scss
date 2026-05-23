@@ -1,0 +1,403 @@
+// 对比页面样式 - app-pages 提供 chrome / demo / tooltip 等共用样式
+@use 'app-pages';
+@use "lmf-readout" as lmf;
+
+// 主框架样式
+.main_frame {
+  opacity: 1;
+  transition-property: opacity;
+  transition-duration: 1s;
+}
+
+.compare-wrapper {
+  zoom: 0.9;
+  height: 111.11vh; // 移动端补偿缩放：100vh / 0.9
+  display: grid;
+  grid-template-rows: auto 1fr; // 第一行自动高度（工具栏），第二行占据剩余空间
+  overflow: hidden; // 防止整体溢出
+  box-sizing: border-box;
+  width: 100%; // 宽度为父容器100%，通常是视口宽度
+  max-width: 100%; // 最大宽度不超过父容器
+}
+
+// 顶栏条布局见 _app-pages.scss .app-page-toolbar；此处仅 Compare 标题结构与按钮态
+
+.app-page-toolbar {
+  // 字阶/行高复用 _app-pages.scss :root；row-gap 与 .title-main-line 一致
+  .compare-toolbar-title {
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 0.4em;
+    row-gap: 2px;
+    flex: 1 1 320px;
+    min-width: 0;
+    font-size: var(--page-chrome-title-size);
+    line-height: var(--page-chrome-line-height);
+  }
+
+  .compare-toolbar-title-app {
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--text-color, #333);
+  }
+
+  .compare-toolbar-title-sep {
+    font-weight: 300;
+    opacity: 0.42;
+    user-select: none;
+  }
+
+  .compare-toolbar-title-page {
+    font-size: var(--page-chrome-subtitle-size);
+    font-weight: 800; // 较 --page-chrome-subtitle-weight 更强调
+    line-height: var(--page-chrome-line-height);
+    letter-spacing: 0.03em;
+    color: var(--primary-color, #3b82f6);
+  }
+  
+  // 完成编辑按钮样式（显示"完成编辑"时使用蓝色主色调）
+  #edit_mode_toggle.finish-edit {
+    background-color: var(--primary-color, #3b82f6);
+    color: white;
+    border-color: var(--primary-color, #3b82f6);
+    font-weight: 600;
+    
+    &:hover {
+      background-color: #2563eb;
+      border-color: #2563eb;
+    }
+    
+    &:active {
+      background-color: #1d4ed8;
+      border-color: #1d4ed8;
+    }
+  }
+}
+
+.compare-container {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  // gap: 10px; // 列之间的间距
+  overflow-x: auto; // 横向滚动（当列数过多时）
+  overflow-y: auto; // 允许垂直滚动（整个容器一起滚动）
+  box-sizing: border-box;
+  position: relative; // 为绝对定位的空状态提供定位上下文
+  // 不再需要 margin-top 和 height 计算，Grid 自动处理
+  
+  // 当有列时，隐藏空状态
+  &:has(.compare-column) .compare-empty-state {
+    display: none;
+  }
+  
+  // 当没有列时，显示空状态
+  &:not(:has(.compare-column)) .compare-empty-state {
+    display: flex;
+  }
+}
+
+.compare-column {
+  width: 420px; // 固定宽度 400px
+  flex: 0 0 420px; // 不伸缩，固定宽度
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-color);
+  padding: 0 10px 10px 10px; // 顶部 0，左右和底部 10px
+  // 移除独立滚动，让内容自然流动
+  overflow: visible; // 允许内容溢出，由父容器控制滚动
+  box-sizing: border-box;
+  
+  &:last-child {
+    border-right: none;
+  }
+}
+
+.compare-header {
+  position: sticky;
+  top: 0;
+  z-index: 10; // 确保在内容之上
+  font-size: 18px;  // 比原 16px 大一号
+  font-weight: bold;
+  margin-bottom: 15px;
+  padding: 5px 0; // 上下各 5px
+  border-bottom: 2px solid var(--border-color);
+  background-color: var(--bg-color); // 添加背景色，避免内容透过
+  color: var(--text-color);
+  text-align: center; // 内容居中
+  display: flex;
+  flex-direction: column; // 改为纵向布局
+  gap: 8px; // 按钮行和标题之间的间距
+}
+
+// 编辑按钮行
+.column-actions-row {
+  display: none; // 默认隐藏（非编辑模式）
+  justify-content: center; // 按钮居中
+  gap: 8px;
+  align-items: center;
+}
+
+// 编辑模式下显示按钮行
+.edit-mode .column-actions-row {
+  display: flex;
+}
+
+// 按钮样式
+.column-actions-row button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: all 0.2s;
+  
+  &:hover {
+    background-color: var(--button-hover-bg, rgba(0, 0, 0, 0.05));
+  }
+  
+  &.delete-btn {
+    color: var(--error-color, #f44336);
+    
+    &:hover {
+      background-color: var(--error-color, #f44336);
+      color: white;
+    }
+  }
+  
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+}
+
+// 标题样式：固定一行，超出部分显示省略号
+.column-title {
+  white-space: nowrap; // 禁止换行
+  overflow: hidden; // 隐藏溢出内容
+  text-overflow: ellipsis; // 超出部分显示省略号
+  width: 100%; // 占满父容器宽度
+  text-align: center; // 保持居中
+  line-height: 1.5; // 设置行高，确保高度一致
+}
+
+// 复用 stats 样式，支持多个实例
+.stats {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0;
+  
+  svg {
+    // 移除 max-width: 100%，保持直方图的固定宽度400px，避免被横向滚动条影响
+    box-sizing: border-box;
+  }
+}
+
+// 确保对比页面中的 text-metrics 样式正确
+.compare-column .text-metrics {
+  margin-bottom: 20px;
+  text-align: center; // 内容居中
+  display: flex;
+  flex-direction: column;
+  align-items: center; // 确保内容居中对齐
+  justify-content: center;
+}
+
+// 确保 text-metrics-secondary 有固定高度，对齐单行和两行内容
+.compare-column .text-metrics-secondary {
+  min-height: 2.5em; // 固定最小高度，确保单行和两行内容都能对齐
+}
+
+// 文本渲染区域样式
+.compare-text-render {
+  margin-top: 20px;
+  width: 100%;
+  min-height: 200px;
+  border-top: 1px solid var(--border-color);
+  padding-top: 10px;
+  position: relative; // 为 minimap canvas 提供定位上下文
+  
+  &.is-hidden {
+    display: none;
+  }
+  
+  // 对比模式下的 LMF 文本渲染区域不需要左右 padding
+  // 但需要右侧留出 minimap 的空间
+  .LMF {
+    padding-left: 5px;
+    padding-right: 5px; // 默认右侧padding，与左侧对称
+    position: relative; // 为 minimap canvas 提供定位上下文
+
+    &.minimap-enabled {
+      padding-right: calc(5px + var(--minimap-width));
+    }
+  }
+}
+
+// 弹窗中已存在demo的样式
+.demo-selector-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0; // 允许flex子元素收缩，这对滚动很重要
+  margin-bottom: 0; // 移除底部边距，让内容更紧凑
+  
+  .demo-section {
+    display: flex !important; // 确保使用flex布局
+    flex-direction: column !important;
+    flex: 1;
+    min-height: 0 !important; // 允许flex子元素收缩，这对滚动很重要
+    overflow: hidden; // 防止内容溢出，由.demos控制滚动
+  }
+  
+  .demo-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    flex-shrink: 0; // 头部不收缩
+  }
+  
+  .demo-header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  
+  // 对比页demo列表特有样式 - 公共样式已移至 _demo-list.scss
+  .demos {
+    flex: 1;
+    min-height: 0; // 允许flex子元素收缩，这对滚动很重要
+    height: auto; // 取消固定高度，使用flex自适应
+  }
+  
+  .demo-item {
+    width: 100%; // 占满容器宽度
+    min-width: 0; // 允许flex子元素收缩，防止内容溢出
+    margin-bottom: 1px; // 减少间距，使列表更紧凑
+  }
+  
+  .demo-item-disabled {
+    opacity: 0.6;
+    pointer-events: none;
+    
+    .demo-checkbox-inline {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+    
+    .demoBtn.demo-disabled {
+      color: var(--text-muted);
+      cursor: not-allowed;
+    }
+  }
+}
+
+// 空状态样式
+.compare-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  min-height: 400px;
+  padding: 40px 20px;
+  text-align: center;
+  pointer-events: none; // 不阻挡交互
+  
+  .empty-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+  }
+  
+  .empty-title {
+    font-size: 20px;  // 比原 18px 大一号
+    font-weight: 500;
+    color: var(--text-color);
+    margin-bottom: 8px;
+  }
+  
+  .empty-description {
+    font-size: 16px;  // 比原 14px 大一号
+    color: var(--text-muted);
+    line-height: 1.5;
+    max-width: 500px;
+  }
+  
+  .empty-example {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background-color: var(--button-bg, rgba(0, 0, 0, 0.05));
+    border-radius: 4px;
+    font-family: lmf.$mono-font-stack;
+    font-size: 14px;  // 比原 13px 大一号
+    color: var(--text-color);
+    display: inline-block;
+  }
+}
+
+// Tooltip 样式（用于token悬停）
+.tooltip {
+  font-size: 9pt;
+  font-weight: 500;
+  border-radius: 5px;
+  padding: 5px;
+  background: var(--tooltip-bg);
+  color: var(--text-color);
+  opacity: 0;
+  transition-property: opacity, background-color, color;
+  transition-duration: .2s;
+  position: absolute;  // 绝对定位
+  z-index: 101;  // Tooltip 层级，在模态框之上
+  pointer-events: auto;  // 允许接收点击事件
+  cursor: pointer;  // 添加指针样式，提示可点击
+  user-select: none;
+  -webkit-user-select: none;
+
+  &.tooltip-visible {
+    opacity: var(--tooltip-visible-opacity);
+  }
+}
+
+// 全局tooltip容器
+#global_tooltip {
+  position: fixed;  // 使用fixed定位，相对于视口
+  pointer-events: none;  // 初始状态不接收事件
+  transition-property: background-color, color;
+}
+
+// 预测表格样式
+.predictions-table {
+  display: table;
+}
+
+// 当前token显示区域（等宽栈与主站一致；字号继承 .tooltip 9pt）
+.currentToken {
+  font-family: lmf.$mono-font-stack;
+  font-weight: bold;
+  margin-bottom: 5px;
+}
+
+// 移动端响应式样式：仅在移动端应用缩小一级
+@media (max-width: 1023px) {
+  .compare-wrapper {
+    zoom: 0.8;
+    height: 125vh; // 移动端补偿缩放：100vh / 0.8
+  }
+}
+

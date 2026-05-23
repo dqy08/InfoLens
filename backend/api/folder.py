@@ -1,5 +1,5 @@
 """文件夹管理 API"""
-from backend.demo_folder import (
+from backend.demo.demo_folder import (
     get_all_folders,
     move_folder,
     rename_folder,

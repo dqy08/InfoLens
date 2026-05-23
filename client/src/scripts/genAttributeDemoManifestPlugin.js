@@ -1,11 +1,11 @@
 /**
- * 构建前扫描 `demos/gen_attribute/*.json`，写入 `ts/demos/genAttributeBundledDemoManifest.generated.ts`，供 bundle 内联 slug 列表。
+ * 构建前扫描 `assets/demos/causal_flow/*.json`，写入 `features/causal_flow/genAttributeBundledDemoManifest.generated.ts`，供 bundle 内联 slug 列表。
  * 并为该目录注册 contextDependencies，便于 watch 下增减 demo JSON 时触发重编。
  */
 const path = require('path');
 const fs = require('fs');
 
-const REL_DIR = 'demos/gen_attribute';
+const REL_DIR = 'assets/demos/causal_flow';
 const GENERATED_BASENAME = 'genAttributeBundledDemoManifest.generated.ts';
 
 function collectSlugs(srcDir) {
@@ -34,7 +34,7 @@ function writeGeneratedModule(srcDir, outPath) {
 class GenAttributeDemoManifestPlugin {
     apply(compiler) {
         const srcDir = path.join(__dirname, '..', REL_DIR);
-        const outPath = path.join(__dirname, '..', 'ts', 'demos', GENERATED_BASENAME);
+        const outPath = path.join(__dirname, '..', 'features', 'causal_flow', GENERATED_BASENAME);
 
         compiler.hooks.beforeCompile.tapAsync('GenAttributeDemoManifestPlugin', (_params, callback) => {
             try {

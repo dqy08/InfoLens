@@ -1,0 +1,81 @@
+// Chat / Attribution / Causal flow 共用的左栏 prompt 输入区样式
+@use 'breakpoints' as *;
+@use 'query-history-dropdown' as qh;
+
+.input-section > .chat-raw-prompt-mode-row {
+  margin-bottom: 0;
+}
+
+.input-section .textarea-wrapper.chat-prompt-actions-row .chat-completion-options-row {
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+.chat-prompt-panel + .chat-prompt-panel {
+  margin-top: 12px;
+}
+
+.chat-use-system-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+}
+
+.chat-prompt-panel.chat-system-prompt-suppressed .text-action-buttons-top,
+.chat-prompt-panel.chat-system-prompt-suppressed .textarea-wrapper.chat-prompt-textarea-block {
+  opacity: 0.55;
+}
+
+.text-metrics-chat #metric_usage .text-metrics-api-usage {
+  font-size: inherit;
+  line-height: inherit;
+  opacity: 1;
+}
+
+.chat-cached-history-bar {
+  margin-bottom: 12px;
+}
+
+.chat-cached-history-bar .chat-prompt-history-wrapper {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.chat-prompt-history-wrapper {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.chat-prompt-history-wrapper .semantic-search-history-dropdown {
+  @include qh.query-history-dropdown;
+}
+
+.input-section .textarea-wrapper textarea {
+  height: 250px;
+}
+
+.input-section .textarea-wrapper textarea#chat_system_text {
+  height: 50px;
+}
+
+@media (min-width: $breakpoint-tablet) {
+  .input-section .textarea-wrapper textarea {
+    font-size: calc(var(--font-size-base) + 2pt);
+  }
+}
+
+@media (max-width: $breakpoint-mobile) {
+  .input-section .textarea-wrapper textarea {
+    min-height: 80px;
+    max-height: none;
+    height: auto;
+    field-sizing: content;
+  }
+}

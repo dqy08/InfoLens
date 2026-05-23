@@ -10,7 +10,7 @@ const { GenAttributeDemoManifestPlugin } = require('./scripts/genAttributeDemoMa
 const SRC_ROOT = __dirname;
 
 const PAGE_META_DOC = JSON.parse(
-    fs.readFileSync(path.join(SRC_ROOT, 'content', 'page-meta.json'), 'utf8')
+    fs.readFileSync(path.join(SRC_ROOT, 'assets', 'content', 'page-meta.json'), 'utf8')
 );
 
 function copyHtmlWithIncludesAndPageMeta(from, to, pageKey) {
@@ -26,12 +26,12 @@ function copyHtmlWithIncludesAndPageMeta(from, to, pageKey) {
 
 module.exports = {
     entry: {
-        home: './ts/home.ts',
-        start: './ts/start.ts',
-        compare: './ts/compare.ts',
-        chat: './ts/chat.ts',
-        attribution: './ts/attribution.ts',
-        gen_attribute: './ts/gen_attribute.ts',
+        home: './pages/home/index.ts',
+        analysis: './pages/analysis/index.ts',
+        compare: './pages/compare/index.ts',
+        chat: './pages/chat/index.ts',
+        attribution: './pages/attribution/index.ts',
+        causal_flow: './pages/causal_flow/index.ts',
     },
     module: {
         rules: [
@@ -59,7 +59,14 @@ module.exports = {
                         loader: 'sass-loader',
                         options: {
                             sourceMap: true,
-                            api: 'modern'
+                            api: 'modern',
+                            sassOptions: {
+                                loadPaths: [
+                                    path.join(__dirname, 'css/base'),
+                                    path.join(__dirname, 'css/components'),
+                                    path.join(__dirname, 'css/pages'),
+                                ],
+                            },
                         }
                     }
                 ]
@@ -111,7 +118,7 @@ module.exports = {
             },
             {
             test: /\.html$/,
-            exclude: /index\.html|analysis\.html|compare\.html|chat\.html|attribution\.html|gen_attribute\.html/,
+            exclude: /index\.html|analysis\.html|compare\.html|chat\.html|attribution\.html|causal_flow\.html/,
             type: 'asset/source'
             }
         ]
@@ -138,8 +145,8 @@ module.exports = {
         new CopyWebpackPlugin({
             patterns: [
                 {
-                    from: 'demos/gen_attribute',
-                    to: 'demos/gen_attribute',
+                    from: 'assets/demos/causal_flow',
+                    to: 'assets/demos/causal_flow',
                     context: path.join(__dirname),
                     filter: (resourcePath) => /\.json$/i.test(resourcePath),
                     noErrorOnMissing: true,
@@ -151,7 +158,7 @@ module.exports = {
                 { from: 'compare.html', to: 'compare.html' },
                 copyHtmlWithIncludesAndPageMeta('chat.html', 'chat.html', 'chat'),
                 copyHtmlWithIncludesAndPageMeta('attribution.html', 'attribution.html', 'attribution'),
-                copyHtmlWithIncludesAndPageMeta('gen_attribute.html', 'gen_attribute.html', 'genAttribute'),
+                copyHtmlWithIncludesAndPageMeta('causal_flow.html', 'causal_flow.html', 'causalFlow'),
             ]
         }),
         new GenAttributeDemoManifestPlugin(),

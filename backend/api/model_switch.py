@@ -4,9 +4,9 @@ import os
 from typing import Optional
 
 import torch
-from backend import REGISTERED_MODELS
-from backend.model_manager import project_registry
-from backend.app_context import get_app_context
+from backend.models import REGISTERED_MODELS
+from backend.models.model_manager import project_registry
+from backend.platform.app_context import get_app_context
 from backend.api.utils import require_admin
 
 

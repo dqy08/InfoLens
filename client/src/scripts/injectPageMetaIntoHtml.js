@@ -86,6 +86,56 @@ function injectPageMeta(html, pageKey, doc) {
                 throw new Error(`injectPageMeta: navPageKeys references missing page "${navKey}"`);
             }
             const navTitle = documentTitleEn(navMeta);
+            const textBlock =
+                `<div class="nav-landing-card-text">` +
+                `<span class="nav-landing-card-title" data-i18n>${escapeHtmlText(navMeta.title)}</span>` +
+                `<span class="nav-landing-card-subtitle" data-i18n>${escapeHtmlText(navMeta.subtitle)}</span>` +
+                `</div>`;
+            const shot =
+                navKey === 'causalFlow'
+                    ? null
+                    : `<div class="nav-landing-card-shot" aria-hidden="true"></div>`;
+            const badge =
+                navKey === 'causalFlow'
+                    ? `<span class="nav-landing-card-badge" title="Go to demo on RedNote: xhslink.com/o/A7VLi99aBvG" data-i18n="text,title">100K+ plays on RedNote</span>`
+                    : '';
+
+            if (navKey === 'causalFlow') {
+                const re = new RegExp(
+                    `(<div\\b[^>]*\\bdata-nav-page=["']?causalFlow["']?[^>]*>)([\\s\\S]*?)(<\\/div>)`,
+                    'i'
+                );
+                const m = html.match(re);
+                if (!m) {
+                    throw new Error('injectPageMeta: missing <div data-nav-page="causalFlow"> in home HTML');
+                }
+                const href = escapeHtmlText(navMeta.href || 'causal_flow.html');
+                const slideLink = (slide, content) =>
+                    `<a class="nav-landing-card-link" data-demo-slide="${slide}" href="${href}" target="_blank" rel="noopener">${content}</a>`;
+                const carouselShot =
+                    `<div class="nav-landing-card-shot nav-landing-card-shot--carousel" aria-hidden="true">` +
+                    `<div class="nav-landing-card-carousel-viewport">` +
+                    `<div class="nav-landing-card-slide" data-slide="flow">${slideLink('flow', '<video muted loop playsinline preload="metadata"></video>')}</div>` +
+                    `<div class="nav-landing-card-slide" data-slide="spiral">${slideLink('spiral', '<video muted loop playsinline preload="none"></video>')}</div>` +
+                    `<div class="nav-landing-card-slide" data-slide="cot">${slideLink('cot', '<img alt="" decoding="async" />')}</div>` +
+                    `</div>` +
+                    `<button type="button" class="nav-landing-card-carousel-arrow nav-landing-card-carousel-arrow--prev" aria-label="Previous preview">‹</button>` +
+                    `<button type="button" class="nav-landing-card-carousel-arrow nav-landing-card-carousel-arrow--next" aria-label="Next preview">›</button>` +
+                    `<div class="nav-landing-card-carousel-dots">` +
+                    `<button type="button" class="nav-landing-card-carousel-dot is-active" aria-label="Preview 1"></button>` +
+                    `<button type="button" class="nav-landing-card-carousel-dot" aria-label="Preview 2"></button>` +
+                    `<button type="button" class="nav-landing-card-carousel-dot" aria-label="Preview 3"></button>` +
+                    `</div></div>`;
+                const inner =
+                    badge +
+                    `<a class="nav-landing-card-link" data-demo-slide="flow" href="${href}" target="_blank" rel="noopener" title="${escapeHtmlText(navTitle)}">` +
+                    textBlock +
+                    `</a>` +
+                    carouselShot;
+                html = html.replace(re, `${m[1]}${inner}${m[3]}`);
+                continue;
+            }
+
             const re = new RegExp(
                 `(<a\\b[^>]*\\bdata-nav-page=["']?${navKey}["']?[^>]*>)([\\s\\S]*?)(<\\/a>)`,
                 'i'
@@ -110,21 +160,7 @@ function injectPageMeta(html, pageKey, doc) {
             } else {
                 openTag = openTag.replace(/>$/, ` title="${escapeHtmlText(navTitle)}">`);
             }
-            const shot =
-                navKey === 'genAttribute'
-                    ? `<video class="nav-landing-card-shot" muted loop playsinline autoplay preload="metadata" aria-hidden="true"></video>`
-                    : `<div class="nav-landing-card-shot" aria-hidden="true"></div>`;
-            const badge =
-                navKey === 'genAttribute'
-                    ? `<span class="nav-landing-card-badge" title="Go to demo on RedNote: xhslink.com/o/A7VLi99aBvG" data-i18n="text,title">100K+ plays on RedNote</span>`
-                    : '';
-            const inner =
-                badge +
-                `<div class="nav-landing-card-text">` +
-                `<span class="nav-landing-card-title" data-i18n>${escapeHtmlText(navMeta.title)}</span>` +
-                `<span class="nav-landing-card-subtitle" data-i18n>${escapeHtmlText(navMeta.subtitle)}</span>` +
-                `</div>` +
-                shot;
+            const inner = badge + textBlock + shot;
             html = html.replace(re, `${openTag}${inner}${m[3]}`);
         }
     }

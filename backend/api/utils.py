@@ -1,22 +1,18 @@
 """API 工具函数"""
-import math
 import os
 import traceback
-
-
-def round_to_sig_figs(x: float, n: int = 7) -> float:
-    """将浮点数舍入为 n 位有效数字。0 或非有限值原样返回。"""
-    if x == 0 or not math.isfinite(x):
-        return x
-    return float(f"{x:.{n}g}")
 from functools import wraps
-from pathlib import Path
+
 from flask import request, jsonify
+
+from backend.platform.format import round_to_sig_figs
+
+__all__ = ["round_to_sig_figs"]
 
 
 def get_demo_directory(create=False):
     """获取 demo 目录路径"""
-    from backend.app_context import get_demo_directory as _get_demo_dir
+    from backend.platform.app_context import get_demo_directory as _get_demo_dir
     return _get_demo_dir(create=create)
 
 

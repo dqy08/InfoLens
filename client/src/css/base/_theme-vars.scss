@@ -1,0 +1,130 @@
+// 全站主题 CSS 变量唯一来源（:root 日间/夜间）；其它 scss 勿重复定义
+@use 'breakpoints' as *;
+
+:root {
+  color-scheme: light;
+
+  // 响应式断点（供 JS / 媒体查询引用）
+  --breakpoint-mobile: #{$breakpoint-mobile};
+  --breakpoint-tablet: #{$breakpoint-tablet};
+
+  // 字体
+  --font-size-base: 10pt;
+  --font-family-ui:
+    -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Micro Hei", "Noto Sans CJK SC",
+    "Source Han Sans SC", sans-serif;
+  --font-icon: Consolas, Menlo, Monaco, "Courier New", "Droid Sans Mono", monospace;
+  --font-icon-size: 16px;
+
+  // 子页顶栏（导航首页用 home.scss 内独立字阶）
+  --page-chrome-title-size: 18px;
+  --page-chrome-title-weight: 600;
+  --page-chrome-subtitle-size: 15px;
+  --page-chrome-subtitle-weight: 400;
+  --page-chrome-line-height: 1.2;
+
+  // 基础色（--app-bg 为导航首页背景，与子页 --bg-color 刻意区分）
+  --app-bg: #f5f5f5;
+  --bg-color: rgb(255, 255, 255);
+  --text-color: #333;
+  --text-color-light: #c3c3c3;
+  --text-muted: #777;
+  --panel-bg: #fafafa;
+  --border-color: #ddd;
+  --button-bg: #f8f8f8;
+  --button-hover-bg: #f0f0f0;
+  --button-active-bg: #e8e8e8;
+  --button-border: #d0d0d0;
+  --button-text: var(--text-color);
+  --hover-bg-color: #f0f0f0;
+  --input-bg: #fff;
+  --input-border: #d0d0d0;
+  --tooltip-bg: #dddddd;
+  --resizer-bg: #f0f0f0;
+  --resizer-hover: #999;
+  --loading-overlay-bg: rgba(250, 250, 250, 0.5);
+  --loading-spinner-border: #f3f3f3;
+  --loading-spinner-top: #555;
+  --text-action-btn-hover: rgba(0, 0, 0, 0.05);
+  --refresh-btn-hover: #f5f5f5;
+  --refresh-btn-color: #999;
+  --tooltip-visible-opacity: 1;
+  --bg-hover: #f5f5f5;
+  --bg-hover-light: #f8f8f8;
+  --primary-color: #2196F3;
+  --accent-color: #1e6fff;
+  --accent-glow: color-mix(in srgb, var(--accent-color) 60%, transparent);
+  --accent-shadow: color-mix(in srgb, var(--accent-color) 65%, transparent);
+  --accent-stroke: color-mix(in srgb, var(--accent-color) 90%, transparent);
+  --text-disabled: #999;
+  --text-area-bg: #fff;
+  --textarea-actions-button-row-min-height: 3.5rem;
+  --minimap-width: 8px;
+  --tooltip-text-normal: #333;
+  --tooltip-text-selected: #933;
+  --tooltip-text-detail: #666666;
+  --tooltip-text-value: #333;
+  --token-hover-shadow: var(--accent-glow);
+  --token-hover-outline: var(--accent-color);
+  --dag-normal-line-color: #ddd;
+  --dag-highlight-line-color-in: color-mix(in srgb, var(--accent-color) 80%, transparent);
+  --dag-highlight-line-color-out: rgba(255, 71, 64, 0.5);
+  --bin-highlight-outline: var(--accent-color);
+  --bin-highlight-shadow: var(--accent-shadow);
+  --avg-line-color: #8c8c8c;
+  --token-truncated-color: #888;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --app-bg: #121212;
+  --bg-color: #191919;
+  --text-color: var(--text-color-light);
+  --text-muted: #888;
+  --panel-bg: #2d2d2d;
+  --border-color: #444;
+  --button-bg: #353535;
+  --button-hover-bg: #454545;
+  --button-active-bg: #505050;
+  --button-border: #555;
+  --button-text: var(--text-color);
+  --hover-bg-color: #3a3a3a;
+  --input-bg: #282828;
+  --input-border: #555;
+  --tooltip-bg: #3a3a3a;
+  --resizer-bg: #2d2d2d;
+  --resizer-hover: #666;
+  --loading-overlay-bg: rgba(25, 25, 25, 0.7);
+  --loading-spinner-border: #3a3a3a;
+  --loading-spinner-top: #888;
+  --text-action-btn-hover: rgba(255, 255, 255, 0.1);
+  --refresh-btn-hover: #3a3a3a;
+  --refresh-btn-color: #888;
+  --bg-hover: #2d2d2d;
+  --bg-hover-light: #353535;
+  --accent-color: #5c8dff;
+  --accent-glow: color-mix(in srgb, var(--accent-color) 80%, transparent);
+  --accent-shadow: var(--accent-glow);
+  --accent-stroke: color-mix(in srgb, var(--accent-color) 90%, transparent);
+  --primary-color: var(--accent-color);
+  --text-disabled: #666;
+  --text-area-bg: #191919;
+  --tooltip-text-normal: #ccc;
+  --tooltip-text-selected: #ff6666;
+  --tooltip-text-detail: #888;
+  --tooltip-text-value: var(--text-color-light);
+  --token-truncated-color: #888;
+  --token-hover-shadow: var(--accent-glow);
+  --token-hover-outline: var(--accent-color);
+  --dag-normal-line-color: #333;
+  --dag-highlight-line-color-in: color-mix(in srgb, var(--accent-color) 80%, transparent);
+  --dag-highlight-line-color-out: rgba(255, 71, 64, 0.5);
+  --bin-highlight-outline: var(--accent-color);
+  --bin-highlight-shadow: var(--accent-shadow);
+  --avg-line-color: #b0b0b0;
+
+  .LMF {
+    font-weight: 300;
+  }
+}

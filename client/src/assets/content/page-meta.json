@@ -1,0 +1,31 @@
+{
+  "navPageKeys": ["causalFlow", "analysis", "attribution", "chat"],
+  "pages": {
+    "home": {
+      "title": "Info Lens",
+      "subtitle": "A toolbox for exploring the informational nature of LLMs and language",
+      "heartline": "A ❤️ would mean a lot!",
+      "formula": "LLM × Linguistics × Information Theory"
+    },
+    "analysis": {
+      "title": "Info Highlight",
+      "subtitle": "- highlight the 'informative' parts",
+      "href": "analysis.html"
+    },
+    "chat": {
+      "title": "LLM Raw Chat",
+      "subtitle": "- chat with explicit raw prompts",
+      "href": "chat.html"
+    },
+    "attribution": {
+      "title": "Context Attribution",
+      "subtitle": "- attribute a predicted token to its context",
+      "href": "attribution.html"
+    },
+    "causalFlow": {
+      "title": "LLM Causal Flow",
+      "subtitle": "- explore the context-attribution DAG",
+      "href": "causal_flow.html"
+    }
+  }
+}

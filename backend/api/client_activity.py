@@ -1,7 +1,7 @@
 from urllib.parse import unquote
 
-from backend.access_log import _log_request
-from backend.visit_stats import record_activity_report, record_gen_attr_opt_sec
+from backend.platform.access_log import log_request
+from backend.platform.visit_stats import normalize_page_key, record_activity_report, record_gen_attr_opt_sec
 
 
 def _sparse_page_activity_log_cum(cum: int) -> bool:
@@ -34,16 +34,18 @@ def client_activity_report(activity_body=None):
     else:
         log_path = page_key
 
+    page_key = normalize_page_key(page_key)
+
     raw_os = d.get("client_os")
     client_os = str(raw_os).strip() if raw_os is not None else None
 
     record_activity_report(page_key, dlt, cum, client_os)
-    if page_key == "gen_attribute.html":
+    if page_key == "causal_flow.html":
         raw_opts = d.get("page_opts")
         if isinstance(raw_opts, dict):
             record_gen_attr_opt_sec(dlt, {k: bool(v) for k, v in raw_opts.items() if isinstance(k, str)})
     if _sparse_page_activity_log_cum(cum):
-        _log_request(
+        log_request(
             "📄 页面活跃",
             f"path={log_path!r} total_sec={cum} delta_sec={dlt}",
         )

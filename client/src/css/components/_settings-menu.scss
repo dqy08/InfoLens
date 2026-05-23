@@ -1,0 +1,242 @@
+// 设置菜单样式（Theme/Language 下拉等共用）
+.settings-menu-wrapper {
+  position: relative;
+  display: inline-block;
+  font-family: var(--font-family-ui);
+  font-size: var(--font-size-base);
+  line-height: 1.4;
+}
+
+.settings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--text-color);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1;
+  box-shadow: none;
+  box-sizing: border-box;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+
+  .settings-icon {
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  &:hover {
+    background-color: var(--button-hover-bg);
+  }
+
+  &:active {
+    background-color: var(--button-active-bg);
+  }
+}
+
+.settings-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--button-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  width: max-content;
+  min-width: 180px;
+}
+
+.settings-menu-item {
+  padding: 8px 12px;
+  box-sizing: border-box;
+}
+
+.settings-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-menu-label {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.settings-menu-control {
+  flex-shrink: 0;
+}
+
+.settings-menu-checkbox input[type='checkbox'] {
+  cursor: pointer;
+  margin: 0;
+}
+
+.settings-menu-btn {
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--text-color);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: none;
+  box-sizing: border-box;
+  transition: background-color 0.2s ease;
+
+  &:hover {
+    background-color: var(--button-hover-bg);
+  }
+
+  &:active {
+    background-color: var(--button-active-bg);
+  }
+}
+
+.settings-menu-divider {
+  height: 1px;
+  background-color: var(--border-color);
+  margin: 4px 0;
+}
+
+// Theme/Language/Token render style 等下拉共用
+#dark_mode_toggle,
+.settings-dropdown-in-menu {
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+
+  .settings-dropdown {
+    position: relative;
+    display: inline-block;
+
+    .settings-dropdown-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      background: var(--button-bg);
+      color: var(--text-color);
+      cursor: pointer;
+      font-size: inherit;
+      font-family: inherit;
+      font-weight: 500;
+      box-shadow: none;
+      box-sizing: border-box;
+      transition: background-color 0.2s ease, border-color 0.2s ease;
+      white-space: nowrap;
+
+      &:hover {
+        background-color: var(--button-hover-bg);
+      }
+
+      &.active {
+        background-color: var(--button-hover-bg);
+        border-color: var(--button-border);
+      }
+
+      &:active {
+        background-color: var(--button-active-bg);
+      }
+    }
+
+    .settings-dropdown-menu {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      margin-top: 4px;
+      min-width: 100%;
+      width: max-content;
+      box-sizing: border-box;
+      background: var(--panel-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      z-index: 1001;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(-10px);
+      transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease;
+      pointer-events: none;
+      overflow: hidden;
+
+      &.open {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+        pointer-events: auto;
+      }
+
+      .settings-dropdown-option {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        padding: 8px 12px;
+        border: none;
+        background: transparent;
+        color: var(--text-color);
+        cursor: pointer;
+        font-size: inherit;
+        font-family: inherit;
+        font-weight: 400;
+        box-shadow: none;
+        box-sizing: border-box;
+        text-align: left;
+        transition: background-color 0.2s ease;
+        white-space: nowrap;
+
+        &:hover {
+          background-color: var(--hover-bg-color);
+        }
+
+        &.active {
+          background-color: var(--hover-bg-color);
+          font-weight: 500;
+          cursor: not-allowed;
+          pointer-events: none;
+          opacity: 0.5;
+        }
+
+        &:first-child {
+          border-radius: 4px 4px 0 0;
+        }
+
+        &:last-child {
+          border-radius: 0 0 4px 4px;
+        }
+
+        &:only-child {
+          border-radius: 4px;
+        }
+      }
+    }
+  }
+}
+
+.settings-menu .settings-dropdown-btn {
+  padding: 2px 6px;
+  font-size: inherit;
+}
+
+:root[data-theme='dark'] {
+  #dark_mode_toggle .settings-dropdown-menu,
+  .settings-dropdown-in-menu .settings-dropdown-menu {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+}

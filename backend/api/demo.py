@@ -1,6 +1,6 @@
 """Demo 文件管理 API"""
-from backend.data_utils import save_demo_payload
-from backend.demo_folder import (
+from backend.demo.data_utils import save_demo_payload
+from backend.demo.demo_folder import (
     list_demo_items,
     move_demo_file,
     rename_demo_file,
@@ -14,7 +14,7 @@ from backend.api.utils import (
     require_admin,
     validate_admin_token,
 )
-from backend.access_log import log_check_admin
+from backend.platform.access_log import log_check_admin
 
 
 def list_demos(path: str = ""):

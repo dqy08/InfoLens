@@ -1,0 +1,193 @@
+// Analysis 页专有样式（intro / 统计图 / 分析进度）
+@use 'app-pages';
+
+// 介绍区域样式
+.intro-section {
+  margin-bottom: 15px;
+  
+  p {
+    margin: 8px 0;
+  }
+}
+
+.intro-brief {
+  font-size: 11pt;  // 比 body 的 10pt 大一号
+}
+
+.intro-brief .intro-token {
+  background-color: rgba(var(--intro-rgb), var(--a, 0));
+  border-radius: 6px;
+}
+
+// 首页“了解更多”折叠区：将 <summary> 做成明显的 CTA（避免像普通链接/原文样式）
+.intro-more {
+  margin-top: 10px;
+}
+
+// 未展开：更小更窄、弱提示，贴右侧
+.intro-section .intro-more:not([open]) {
+  display: block;
+  width: fit-content;
+}
+
+// 展开：恢复为完整信息块容器，占整行
+.intro-more[open] {
+  display: block;
+  margin-left: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  overflow: hidden;
+}
+
+.intro-more > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  font-weight: 500;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &::-webkit-details-marker {
+    display: none;
+  }
+
+  &::marker {
+    content: "";
+  }
+
+  &::after {
+    content: "›";
+    font-size: 18px;
+    line-height: 1;
+    opacity: 0.45;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+  }
+
+  &:hover {
+    background-color: var(--hover-bg-color);
+    color: var(--text-color);
+  }
+}
+
+.intro-more:not([open]) > summary {
+  display: inline-flex;
+  width: fit-content;
+  padding: 4px 10px;
+  gap: 6px;
+  font-size: 9pt;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+
+  &::after {
+    font-size: 16px;
+  }
+}
+
+.intro-more[open] > summary {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  background: var(--button-bg);
+  color: var(--text-color);
+
+  &::after {
+    transform: rotate(90deg);
+    opacity: 0.85;
+  }
+}
+
+// 首页“了解更多”折叠按钮文案：展开状态与折叠状态切换
+.intro-more > summary .intro-summary-when-open {
+  display: none;
+}
+
+.intro-more[open] > summary .intro-summary-when-closed {
+  display: none;
+}
+
+.intro-more[open] > summary .intro-summary-when-open {
+  display: inline;
+  font-size: 90%;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.intro-more .intro-block {
+  padding: 10px 12px;
+
+  h4 {
+    margin: 0 0 6px 0;
+    font-size: 11pt;
+  }
+
+  pre {
+    white-space: pre-wrap;       // 保留空白，但允许换行
+    word-wrap: break-word;       // 长单词换行
+    overflow-wrap: break-word;   // 溢出时换行
+    overflow-x: auto;            // 如果仍然溢出，显示横向滚动条
+    max-width: 100%;             // 不超过容器宽度
+    margin: 8px 0;               // 适当的上下间距
+  }
+}
+
+.intro-more .intro-block + .intro-block {
+  border-top: 1px dashed var(--border-color);
+}
+// 分析进度显示样式
+.analyze-progress {
+  display: none;  // 默认隐藏
+  font-size: 9pt;
+  color: var(--text-muted, #666);
+  white-space: nowrap;
+  line-height: 1.2;
+  position: absolute;  // 绝对定位，不占用正常布局空间
+  left: 100%;  // 定位在 button-left-primary（Analyze 行）的右侧
+  margin-left: 30px;  // loader宽度(10px) + loader的margin(10px) + 额外间距(10px)
+  z-index: 10;  // 确保在上层显示
+  
+  // 夜间模式下的颜色
+  :root[data-theme="dark"] & {
+    color: var(--text-muted, #999);
+  }
+}
+// 统计图容器
+.stats-container {
+  text-align: center;
+}
+
+// 直方图项目
+.histogram-item {
+  display: block;
+  text-align: center;
+  margin-bottom: 20px;
+}
+#all_result{
+  display: flex;
+  flex-flow: column;
+  width: 100%;  // 确保宽度为100%，自适应父容器
+  max-width: 100%;  // 确保不超过父容器宽度
+  box-sizing: border-box;  // 确保宽度计算正确
+  opacity: 0;
+  transition-duration: 0.5s;
+  margin-top: 20px;
+}
+
+// 统计图容器样式（桌面端和移动端通用）
+#stats {
+  width: 100%;  // 确保宽度为100%，自适应父容器
+  max-width: 100%;  // 确保不超过父容器宽度
+  box-sizing: border-box;  // 确保宽度计算正确
+  padding: 0;  // 移除默认padding，由内部元素控制间距
+  
+  svg {
+    max-width: 100%;  // SVG最大宽度不超过容器
+    box-sizing: border-box;  // 确保宽度计算正确
+  }
+}

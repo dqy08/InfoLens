@@ -9,11 +9,11 @@ const path = require('path');
 const paths = {
     en: {
         json: path.resolve(__dirname, '../../../data/demo/public/InfoHighlight-intro.json'),
-        html: path.resolve(__dirname, '../content/home.en.html')
+        html: path.resolve(__dirname, '../assets/content/home.en.html')
     },
     zh: {
         json: path.resolve(__dirname, '../../../data/demo/public/CN/InfoHighlight-介绍.json'),
-        html: path.resolve(__dirname, '../content/home.zh.html')
+        html: path.resolve(__dirname, '../assets/content/home.zh.html')
     }
 };
 

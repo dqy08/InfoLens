@@ -1,0 +1,104 @@
+// Chat 页：共用左栏见 _chat-input-panel.scss；此处仅右栏续写栈与 Chat 专有控件
+@use 'app-pages';
+
+@use 'chat-input-panel';
+@use 'breakpoints' as *;
+@use 'generation-status';
+@use 'lmf-readout' as lmf;
+
+.chat-max-new-tokens-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-max-new-tokens-input {
+  min-width: 5em;
+}
+
+// 双实例：与下方 LMF 视觉上同一阅读区（同色、同字号行高、单一内边距，无分隔缝）
+.chat-right-stack {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--text-area-bg);
+  color: var(--text-color);
+  padding: 20px;
+  overflow: visible;
+}
+
+.chat-right-stack .semantic-debug-info {
+  background-color: var(--panel-bg);
+}
+
+.chat-prompt-used {
+  @include lmf.lmf-readout-text;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  border: none;
+  background-color: transparent;
+  color: var(--token-truncated-color);
+}
+
+.chat-streaming-preview {
+  @include lmf.lmf-readout-text;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  position: relative;
+  background-color: transparent;
+}
+
+.chat-right-stack.chat-ask-in-flight #chat_streaming_preview:not([hidden]) {
+  flex: 1 1 auto;
+  overflow: visible;
+}
+
+.chat-right-stack.chat-ask-in-flight #chat_streaming_preview:not([hidden]) ~ #results {
+  flex: 0 0 0;
+  min-height: 0 !important;
+  max-height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+:root[data-theme='dark'] {
+  .chat-prompt-used,
+  .chat-streaming-preview {
+    font-weight: 300;
+  }
+}
+
+.chat-right-stack #results {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-copy-fulltext-row {
+  flex: 0 0 auto;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+  display: flex;
+  justify-content: flex-end;
+}
+
+.chat-right-stack #results .LMF {
+  padding: 0;
+}
+
+@media (max-width: $breakpoint-mobile) {
+  .chat-right-stack {
+    padding: 15px 12px;
+  }
+
+  .chat-right-stack #results .LMF.minimap-enabled {
+    padding-right: calc(12px + var(--minimap-width));
+  }
+}

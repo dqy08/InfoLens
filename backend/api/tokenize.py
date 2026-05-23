@@ -1,6 +1,6 @@
 """文本 tokenize API：不做模型推理，仅返回各 token 的字符 offset 与原文。"""
-from backend.prediction_attributor import _slot_for_prediction_attr_model
-from backend.model_manager import ensure_slot_weights_loaded
+from backend.core.prediction_attributor import slot_for_prediction_attr_model
+from backend.models.model_manager import ensure_slot_weights_loaded
 
 
 def tokenize(tokenize_request):
@@ -17,7 +17,7 @@ def tokenize(tokenize_request):
         return {"success": False, "message": "Missing required field: model"}, 400
 
     try:
-        slot = _slot_for_prediction_attr_model(model)
+        slot = slot_for_prediction_attr_model(model)
     except ValueError as e:
         return {"success": False, "message": str(e)}, 400
 
