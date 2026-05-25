@@ -6,6 +6,45 @@
   margin-bottom: 0;
 }
 
+// Prompt 区选项标签：panel 标题、勾选行同系（9pt + 勾选主次色）
+.input-section {
+  span.semantic-submode-label {
+    color: var(--text-muted);
+  }
+
+  .semantic-submode-row:not(.attribution-exclude-prompt-patterns-header):not(.attribution-exclude-generated-patterns-header) {
+    label.semantic-submode-label {
+      color: var(--text-primary);
+    }
+
+    label.semantic-submode-label:has(> input[type='checkbox']:not(:checked)) {
+      color: var(--text-muted);
+    }
+  }
+
+  .chat-prompt-panel > .input-header > .semantic-submode-label {
+    font-size: 9pt;
+  }
+
+  // System 在 input-header 内（非 semantic-submode-row）
+  .chat-prompt-panel > .input-header label.chat-use-system-label.semantic-submode-label {
+    font-size: 9pt;
+
+    input[type='checkbox'] {
+      margin: 0;
+      flex-shrink: 0;
+    }
+
+    &:has(> input[type='checkbox']:not(:checked)) {
+      color: var(--text-muted);
+    }
+
+    &:has(> input[type='checkbox']:checked) {
+      color: var(--text-primary);
+    }
+  }
+}
+
 .input-section .textarea-wrapper.chat-prompt-actions-row .chat-completion-options-row {
   margin-bottom: 8px;
   width: 100%;

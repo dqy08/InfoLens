@@ -3,6 +3,7 @@ import {
     EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
     EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY,
 } from './attributionExcludePromptPatternsStorage';
+import { lsGet, lsReadBool, lsSet, lsWriteBool } from '../../storage/localStorageHelpers';
 
 type BindExcludePatternsUiStorageKeys = {
     textKey: string;
@@ -29,7 +30,7 @@ function bindExcludePatternsUi(options: BindExcludePatternsUiOptions): void {
     const { textKey, enabledKey } = storageKeys;
 
     try {
-        const savedExclude = localStorage.getItem(textKey);
+        const savedExclude = lsGet(textKey);
         if (textInput) {
             if (savedExclude !== null) {
                 textInput.value = savedExclude;
@@ -37,9 +38,8 @@ function bindExcludePatternsUi(options: BindExcludePatternsUiOptions): void {
                 textInput.value = defaultTextWhenKeyAbsent;
             }
         }
-        const savedEnabled = localStorage.getItem(enabledKey);
         if (enableCheckbox) {
-            enableCheckbox.checked = savedEnabled === null ? true : savedEnabled === '1';
+            enableCheckbox.checked = lsReadBool(enabledKey, true, { encoding: '1' });
         }
     } catch {
         // 读取失败则保持 HTML 默认
@@ -52,24 +52,16 @@ function bindExcludePatternsUi(options: BindExcludePatternsUiOptions): void {
     syncTextInputDisabled();
 
     enableCheckbox?.addEventListener('change', () => {
-        try {
-            if (textInput) {
-                localStorage.setItem(textKey, textInput.value);
-            }
-            localStorage.setItem(enabledKey, enableCheckbox.checked ? '1' : '0');
-        } catch {
-            /* ignore */
+        if (textInput) {
+            lsSet(textKey, textInput.value);
         }
+        lsWriteBool(enabledKey, enableCheckbox.checked, '1');
         syncTextInputDisabled();
         onEffectiveChange();
     });
 
     textInput?.addEventListener('blur', () => {
-        try {
-            localStorage.setItem(textKey, textInput.value);
-        } catch {
-            /* ignore */
-        }
+        lsSet(textKey, textInput.value);
         onEffectiveChange();
     });
 

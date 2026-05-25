@@ -39,7 +39,7 @@
                 <section class="input-section">
                     <div class="semantic-submode-row chat-raw-prompt-mode-row">
                         <span class="semantic-submode-group">
-                            <label for="chat_skip_chat_template">
+                            <label class="semantic-submode-label" for="chat_skip_chat_template">
                                 <input type="checkbox" id="chat_skip_chat_template" />
                                 <span data-i18n>Raw prompt mode</span>
                             </label>
@@ -47,7 +47,7 @@
                     </div>
                     <div id="raw_input_panel" class="chat-prompt-panel">
                         <div class="input-header">
-                            <span><span class="demo" data-i18n>Raw prompt</span></span>
+                            <span class="semantic-submode-label" data-i18n>Raw prompt</span>
                             <div class="text-action-buttons-top">
                                 <div class="textarea-counter" id="text_count_display">
                                     <span id="text_count_value">0</span> <span data-i18n>chars</span>
@@ -67,9 +67,9 @@
                     <div id="chat_input_panel" hidden>
                         <div class="chat-prompt-panel" id="chat_system_prompt_panel">
                             <div class="input-header">
-                                <label class="chat-use-system-label">
+                                <label class="chat-use-system-label semantic-submode-label" for="chat_use_system_prompt">
                                     <input type="checkbox" id="chat_use_system_prompt" checked />
-                                    <span class="demo" data-i18n>System</span>
+                                    <span data-i18n>System</span>
                                 </label>
                                 <div class="text-action-buttons-top">
                                     <div class="textarea-counter" id="chat_system_text_count_display">
@@ -89,7 +89,7 @@
                         </div>
                         <div class="chat-prompt-panel">
                             <div class="input-header">
-                                <span><span class="demo" data-i18n>User</span></span>
+                                <span class="semantic-submode-label" data-i18n>User</span>
                                 <div class="text-action-buttons-top">
                                     <div class="textarea-counter" id="chat_user_text_count_display">
                                         <span id="chat_user_text_count_value">0</span> <span data-i18n>chars</span>
@@ -105,6 +105,14 @@
                                     <ul id="chat_user_prompt_history_dropdown" class="semantic-search-history-dropdown"></ul>
                                 </div>
                             </div>
+                        </div>
+                        <div class="semantic-submode-row chat-enable-thinking-row">
+                            <span class="semantic-submode-group">
+                                <label class="semantic-submode-label" for="chat_enable_thinking">
+                                    <input type="checkbox" id="chat_enable_thinking" />
+                                    <span data-i18n>Enable thinking</span>
+                                </label>
+                            </span>
                         </div>
                     </div>
                     <div class="textarea-wrapper chat-prompt-actions-row">

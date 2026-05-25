@@ -97,7 +97,7 @@ function injectPageMeta(html, pageKey, doc) {
                     : `<div class="nav-landing-card-shot" aria-hidden="true"></div>`;
             const badge =
                 navKey === 'causalFlow'
-                    ? `<span class="nav-landing-card-badge" title="Go to demo on RedNote: xhslink.com/o/A7VLi99aBvG" data-i18n="text,title">100K+ plays on RedNote</span>`
+                    ? `<span class="nav-landing-card-badge" title="Go to demo on RedNote: xhslink.com" data-i18n="text,title">500K+ plays on RedNote</span>`
                     : '';
 
             if (navKey === 'causalFlow') {
@@ -117,7 +117,7 @@ function injectPageMeta(html, pageKey, doc) {
                     `<div class="nav-landing-card-carousel-viewport">` +
                     `<div class="nav-landing-card-slide" data-slide="flow">${slideLink('flow', '<video muted loop playsinline preload="metadata"></video>')}</div>` +
                     `<div class="nav-landing-card-slide" data-slide="spiral">${slideLink('spiral', '<video muted loop playsinline preload="none"></video>')}</div>` +
-                    `<div class="nav-landing-card-slide" data-slide="cot">${slideLink('cot', '<img alt="" decoding="async" />')}</div>` +
+                    `<div class="nav-landing-card-slide" data-slide="cot">${slideLink('cot', '<video muted loop playsinline preload="none"></video>')}</div>` +
                     `</div>` +
                     `<button type="button" class="nav-landing-card-carousel-arrow nav-landing-card-carousel-arrow--prev" aria-label="Previous preview">‹</button>` +
                     `<button type="button" class="nav-landing-card-carousel-arrow nav-landing-card-carousel-arrow--next" aria-label="Next preview">›</button>` +

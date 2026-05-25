@@ -52,6 +52,7 @@ import { saveHistory, initQueryHistoryDropdown } from '../../shared/cross/queryH
 import { removeByQuery as removeSemanticCacheByQuery } from '../../shared/cross/semanticResultCache';
 import { playAnalysisCompleteSound } from '../../shared/cross/soundNotification';
 import { getSemanticMatchThreshold, setSemanticMatchThreshold } from '../../shared/cross/semanticThresholdManager';
+import { lsGet, lsSet, lsWriteBool } from '../../shared/storage/localStorageHelpers';
 import { SEMANTIC_MATCH_THRESHOLD } from '../../shared/core/constants';
 import { SemanticSearchController } from '../../shared/controllers/semanticSearchController';
 import { initDensityAttributionSidebar } from '../../shared/prediction_attribution/density_sidebar/densityAttributionSidebar';
@@ -137,7 +138,7 @@ window.onload = () => {
     loadHomeContent('home-intro-content');
 
     // minimap启用状态（优先使用localStorage，否则根据设备类型判断：移动端默认为false，桌面端默认为true）
-    const storedMinimap = localStorage.getItem('minimap_enabled');
+    const storedMinimap = lsGet('minimap_enabled');
     let enableMinimap: boolean = storedMinimap !== null
         ? storedMinimap === '1'
         : !isMobileDevice();
@@ -257,9 +258,9 @@ window.onload = () => {
         const validSubmodes = ['count', 'fill_blank', 'hybrid'];
         const validColorSources = ['raw_score_normed', 'signal_probability', 'pw_score'];
         const query = URLHandler.parameters['semantic_query'] ?? '';
-        const submode = localStorage.getItem(SEMANTIC_KEYS.submode) ?? 'hybrid';
-        const chunked = localStorage.getItem(SEMANTIC_KEYS.chunked) !== '0';
-        const colorSource = localStorage.getItem(SEMANTIC_KEYS.colorSource) ?? 'pw_score';
+        const submode = lsGet(SEMANTIC_KEYS.submode) ?? 'hybrid';
+        const chunked = lsGet(SEMANTIC_KEYS.chunked) !== '0';
+        const colorSource = lsGet(SEMANTIC_KEYS.colorSource) ?? 'pw_score';
         const queryEl = document.getElementById('semantic_search_input') as HTMLInputElement | null;
         if (queryEl) queryEl.value = typeof query === 'string' ? query : '';
         const submodeEl = document.getElementById('semantic_submode_select') as HTMLSelectElement | null;
@@ -276,9 +277,9 @@ window.onload = () => {
         const chunkedEl = document.getElementById('semantic_chunked_mode') as HTMLInputElement | null;
         const colorEl = document.getElementById('semantic_color_source_select') as HTMLSelectElement | null;
         const thresholdEl = document.getElementById('semantic_threshold_input') as HTMLInputElement | null;
-        localStorage.setItem(SEMANTIC_KEYS.submode, submodeEl?.value ?? 'hybrid');
-        if (chunkedEl) localStorage.setItem(SEMANTIC_KEYS.chunked, chunkedEl.checked ? '1' : '0');
-        if (colorEl) localStorage.setItem(SEMANTIC_KEYS.colorSource, colorEl.value);
+        lsSet(SEMANTIC_KEYS.submode, submodeEl?.value ?? 'hybrid');
+        if (chunkedEl) lsWriteBool(SEMANTIC_KEYS.chunked, chunkedEl.checked, '1');
+        if (colorEl) lsSet(SEMANTIC_KEYS.colorSource, colorEl.value);
         if (thresholdEl) {
             const v = parseFloat(thresholdEl.value);
             if (Number.isFinite(v)) {
@@ -315,7 +316,7 @@ window.onload = () => {
                 lmf.updateOptions({
                     enableMinimap: enableMinimap
                 }, false);
-                localStorage.setItem('minimap_enabled', enableMinimap ? '1' : '0');
+                lsWriteBool('minimap_enabled', enableMinimap, '1');
             },
             onSemanticAnalysisToggle: (_enabled: boolean) => {
                 // 打开/关闭时都清除 query，并将 submode/chunked/color/阈值 重置为默认值并写回 localStorage
@@ -709,7 +710,7 @@ window.onload = () => {
             return;
         }
 
-        const lastPath = localStorage.getItem(LAST_SAVE_PATH_KEY);
+        const lastPath = lsGet(LAST_SAVE_PATH_KEY);
         const { options: folderOptions, defaultPath } = buildFolderOptions(folders, lastPath);
         const defaultName = getDefaultDemoName(null, prefillText);
 

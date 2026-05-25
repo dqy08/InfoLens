@@ -8,7 +8,7 @@ from backend.models.class_register import register_model, REGISTERED_MODELS
 from backend.models.device import DeviceManager
 from backend.models.model_manager import ensure_model_loaded
 from backend.platform.runtime_config import load_runtime_config, DEFAULT_TOPK
-from model_paths import DEFAULT_MODEL, MODEL_PATHS, SEMANTIC_MODEL_PATHS, resolve_hf_path
+from model_paths import DEFAULT_BASE_MODEL, INSTRUCT_MODEL_PATHS, MODEL_PATHS, resolve_hf_path
 
 # 按 id(model) 缓存「仅含 BOS/等价起始符一步 forward」得到的末位词表 logits（全词表，不随分析文本变）
 _bos_first_position_logits_cache: Dict[int, torch.Tensor] = {}
@@ -109,7 +109,7 @@ class QwenLM(AbstractLanguageChecker):
     """
     def __init__(self, model_path=None, model_name=None):
         super(QwenLM, self).__init__()
-        model_name = model_name or getattr(self.__class__, '_registered_model_name', DEFAULT_MODEL)
+        model_name = model_name or getattr(self.__class__, '_registered_model_name', DEFAULT_BASE_MODEL)
         if model_path is not None and str(model_path).strip():
             resolved = str(model_path).strip()
         else:
@@ -392,13 +392,13 @@ class QwenLM(AbstractLanguageChecker):
 
 
 # ============================================================
-# 自动注册：根据 MODEL_PATHS 与 SEMANTIC_MODEL_PATHS 自动注册所有模型
+# 自动注册：根据 MODEL_PATHS 与 INSTRUCT_MODEL_PATHS 自动注册所有模型
 # ============================================================
 # 只需要在 model_paths.py 中添加模型路径，即可自动注册
 # 无需手动创建子类，实现 DRY 原则
 def _auto_register_models():
-    """自动注册 MODEL_PATHS 与 SEMANTIC_MODEL_PATHS 中的所有模型"""
-    for model_name in (*MODEL_PATHS.keys(), *SEMANTIC_MODEL_PATHS.keys()):
+    """自动注册 MODEL_PATHS 与 INSTRUCT_MODEL_PATHS 中的所有模型"""
+    for model_name in (*MODEL_PATHS.keys(), *INSTRUCT_MODEL_PATHS.keys()):
         if model_name not in REGISTERED_MODELS:
             # 动态创建模型类并注册
             # 使用闭包捕获当前 model_name

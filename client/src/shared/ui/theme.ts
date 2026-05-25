@@ -1,6 +1,7 @@
 import * as d3 from 'd3';
 import { tr } from '../../shared/lang/i18n-lite';
 import { createSettingsDropdown } from './settingsDropdown';
+import { lsGet, lsRemove, lsSet } from '../storage/localStorageHelpers';
 
 export type Theme = 'light' | 'dark';
 export type ThemeMode = 'light' | 'dark' | 'auto';
@@ -26,11 +27,11 @@ function getActualTheme(mode: ThemeMode): Theme {
 }
 
 function getInitialThemeMode(): ThemeMode {
-    const savedMode = localStorage.getItem('theme-mode') as ThemeMode | null;
+    const savedMode = lsGet('theme-mode') as ThemeMode | null;
     if (savedMode && ['light', 'dark', 'auto'].includes(savedMode)) return savedMode;
-    const oldTheme = localStorage.getItem('theme') as Theme | null;
+    const oldTheme = lsGet('theme') as Theme | null;
     if (oldTheme === 'light' || oldTheme === 'dark') {
-        localStorage.removeItem('theme');
+        lsRemove('theme');
         return oldTheme;
     }
     return 'auto';
@@ -59,8 +60,8 @@ export function applyStoredTheme(options: ThemeManagerOptions = {}): { dispose: 
 
     let mediaQuery: MediaQueryList | null = null;
     const systemThemeListener = () => {
-        const currentMode = localStorage.getItem('theme-mode') as ThemeMode | null;
-        if (currentMode === 'auto' || (!currentMode && !localStorage.getItem('theme'))) {
+        const currentMode = lsGet('theme-mode') as ThemeMode | null;
+        if (currentMode === 'auto' || (!currentMode && !lsGet('theme'))) {
             applyTheme(mediaQuery!.matches ? 'dark' : 'light');
         }
     };
@@ -92,8 +93,8 @@ export function initThemeManager(options: ThemeManagerOptions = {}, containerSel
     };
 
     const setThemeMode = (mode: ThemeMode, persist: boolean = true) => {
-        if (persist) localStorage.setItem('theme-mode', mode);
-        else localStorage.removeItem('theme-mode');
+        if (persist) lsSet('theme-mode', mode);
+        else lsRemove('theme-mode');
         applyTheme(getActualTheme(mode));
         dropdown.updateCurrent(mode);
     };
@@ -123,8 +124,8 @@ export function initThemeManager(options: ThemeManagerOptions = {}, containerSel
 
     let mediaQuery: MediaQueryList | null = null;
     const systemThemeListener = () => {
-        const currentMode = localStorage.getItem('theme-mode') as ThemeMode | null;
-        if (currentMode === 'auto' || (!currentMode && !localStorage.getItem('theme'))) {
+        const currentMode = lsGet('theme-mode') as ThemeMode | null;
+        if (currentMode === 'auto' || (!currentMode && !lsGet('theme'))) {
             applyTheme(mediaQuery!.matches ? 'dark' : 'light');
         }
     };

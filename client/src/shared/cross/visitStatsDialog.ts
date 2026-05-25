@@ -30,13 +30,14 @@ const OS_ORDER = ['ios', 'android', 'windows', 'macos', 'linux', 'unknown'] as c
 
 const GEN_ATTR_OPT_ORDER = [
     'layout_linear_arc', 'layout_step_down', 'layout_spiral',
-    'propagated',
+    'propagated', 'propagated_anim_backward',
     'downstream', 'token_tooltip',
 ] as const;
 
 /** gen_attribute.html UI 原文；key 与上报/存储一致 */
 const GEN_ATTR_OPT_LABELS: Record<(typeof GEN_ATTR_OPT_ORDER)[number], string> = {
     propagated: 'Propagated attribution mode',
+    propagated_anim_backward: 'Animation direction/backward',
     layout_linear_arc: 'DAG layout mode/linear_arc',
     layout_step_down: 'DAG layout mode/step-down',
     layout_spiral: 'DAG layout mode/spiral',
@@ -171,7 +172,9 @@ export async function showVisitStatsDialog(api: TextAnalysisAPI): Promise<void> 
     showDialog({
         title: 'Visit Stats',
         content: (dialog) => {
-            const wrap = dialog.append('div').attr('class', 'dialog-form-container');
+            const wrap = dialog
+                .append('div')
+                .attr('class', 'dialog-form-container dialog-form-container--fill');
             const headerRow = wrap
                 .append('div')
                 .style('display', 'flex')
@@ -179,7 +182,7 @@ export async function showVisitStatsDialog(api: TextAnalysisAPI): Promise<void> 
                 .style('align-items', 'center')
                 .style('gap', '6px')
                 .style('margin-bottom', '6px');
-            const body = wrap.append('div');
+            const body = wrap.append('div').attr('class', 'dialog-scroll-region');
             headerRow
                 .append('button')
                 .attr('type', 'button')

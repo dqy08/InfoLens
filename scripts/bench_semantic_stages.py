@@ -44,13 +44,13 @@ def run_benchmark(
     from backend.platform.app_context import AppContext
     from backend.demo.data_utils import resolve_data_dir
     from backend.models.device import DeviceManager
-    from backend.models.model_manager import ensure_semantic_slot_ready
+    from backend.models.model_manager import ensure_instruct_slot_ready
     from backend.core.semantic_analyzer import analyze_semantic
 
     data_dir = resolve_data_dir(None)
     init_args = Namespace(
-        model="default",
-        semantic_model="qwen3-0.6b-instruct",
+        base_model="qwen3-0.6b",
+        instruct_model="qwen3-0.6b-instruct",
         logits_gradient_submode="topk_sum",
         logits_gradient_prob_weighted=False,
         gradient_checkpointing=gradient_checkpointing,
@@ -67,7 +67,7 @@ def run_benchmark(
     print(f"\n设备: {device_name} ({device})")
     print(f"目标: {target_tokens} tokens，重复 {repeats} 次，gradient_checkpointing={gradient_checkpointing}\n")
 
-    tokenizer, _, _ = ensure_semantic_slot_ready()
+    tokenizer, _, _ = ensure_instruct_slot_ready()
     text = _make_text_for_tokens(tokenizer, target_tokens)
     actual_tokens = len(tokenizer.encode(text, add_special_tokens=False))
     print(f"实际原文 tokens: {actual_tokens}")

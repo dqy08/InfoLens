@@ -149,6 +149,22 @@
 // 对话框表单元素样式
 .dialog-form-container {
   margin-bottom: 15px;
+
+  // 长内容弹窗：占满 .dialog-content，正文在 .dialog-scroll-region 内滚动
+  &--fill {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    margin-bottom: 0;
+  }
+}
+
+.dialog-scroll-region {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .dialog-label {
@@ -171,6 +187,7 @@
   }
 }
 
+// 弹窗表单任意屏宽 16px（iOS 防放大）；子页左栏窄屏见 responsive.narrow-ios-form-font
 .dialog-input {
   width: 100%;
   padding: 8px;

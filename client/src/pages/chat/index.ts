@@ -53,9 +53,10 @@ import {
 } from '../../shared/cross/contentUrl';
 import { CHAT_SURPRISAL_COLOR_MAP_MAX } from '../../shared/cross/SurprisalColorConfig';
 import { updateChatCompletionMetrics } from '../../shared/cross/textMetricsUpdater';
+import { lsReadBool, lsWriteBool } from '../../shared/storage/localStorageHelpers';
 import {
-    readSkipChatTemplateFromStorage,
-    writeSkipChatTemplateToStorage,
+    CHAT_ENABLE_THINKING_STORAGE_KEY,
+    LS_SKIP_CHAT_TEMPLATE,
 } from '../../features/chat/chatPromptTemplateMode';
 import { createToast } from '../../shared/ui/toast';
 import { initDensityAttributionSidebar } from '../../shared/prediction_attribution/density_sidebar/densityAttributionSidebar';
@@ -110,6 +111,9 @@ const chatUseSystemPromptInput = document.getElementById(
     'chat_use_system_prompt'
 ) as HTMLInputElement | null;
 const chatSystemPromptPanel = document.getElementById('chat_system_prompt_panel');
+const enableThinkingInput = document.getElementById(
+    'chat_enable_thinking'
+) as HTMLInputElement | null;
 
 function isSkipChatTemplate(): boolean {
     return skipChatTemplateInput?.checked ?? false;
@@ -117,6 +121,10 @@ function isSkipChatTemplate(): boolean {
 
 function isChatUseSystemPrompt(): boolean {
     return chatUseSystemPromptInput?.checked ?? true;
+}
+
+function isEnableThinking(): boolean {
+    return enableThinkingInput?.checked ?? false;
 }
 
 function syncChatSystemPromptSuppressedUi(): void {
@@ -450,12 +458,15 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
             const useSystem = isChatUseSystemPrompt();
             const systemRaw =
                 (chatSystemTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
-            const promptReq: { model: string; prompt: string; system?: string } = {
+            const promptReq: { model: string; prompt: string; system?: string; enable_thinking?: boolean } = {
                 model: completionModel,
                 prompt
             };
             if (useSystem) {
                 promptReq.system = systemRaw;
+            }
+            if (isEnableThinking()) {
+                promptReq.enable_thinking = true;
             }
             const assembled = await postCompletionsPrompt(promptReq, {
                 signal: askAbort.signal
@@ -526,11 +537,18 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
 };
 
 if (skipChatTemplateInput) {
-    skipChatTemplateInput.checked = readSkipChatTemplateFromStorage();
+    skipChatTemplateInput.checked = lsReadBool(LS_SKIP_CHAT_TEMPLATE, false);
     skipChatTemplateInput.addEventListener('change', () => {
-        writeSkipChatTemplateToStorage(skipChatTemplateInput.checked);
+        lsWriteBool(LS_SKIP_CHAT_TEMPLATE, skipChatTemplateInput.checked);
         syncPromptPanelVisibility();
         syncChatSystemPromptSuppressedUi();
+        syncAskButtonState();
+    });
+}
+if (enableThinkingInput) {
+    enableThinkingInput.checked = lsReadBool(CHAT_ENABLE_THINKING_STORAGE_KEY, false);
+    enableThinkingInput.addEventListener('change', () => {
+        lsWriteBool(CHAT_ENABLE_THINKING_STORAGE_KEY, enableThinkingInput.checked);
         syncAskButtonState();
     });
 }

@@ -4,6 +4,7 @@
 @use "chat-input-panel";
 @use "generation-status";
 @use "lmf-readout" as lmf;
+@use '../base/narrow-ios-form-font-tail' as ios-form-font;
 
 $gen-attr-option-row-gap: 12px;
 $gen-attr-cached-demos-panel-width: 18em;
@@ -345,7 +346,7 @@ $gen-attr-cached-demos-panel-width: 18em;
   #results.gen-attr-results-surface.LMF.css-pseudo-fullscreen-target {
     width: 100vw;
     height: 100vh;
-    padding: 20px;
+    padding: 6px;
     background: var(--text-area-bg);
     color: var(--text-color);
     overflow: auto;
@@ -421,50 +422,8 @@ $gen-attr-cached-demos-panel-width: 18em;
   max-height: 250px;
 }
 
-body.gen-attribute-page .input-section {
-  span.semantic-submode-label {
-    color: var(--text-muted);
-  }
-
-  .semantic-submode-row:not(.attribution-exclude-prompt-patterns-header):not(.attribution-exclude-generated-patterns-header) {
-    label.semantic-submode-label {
-      color: var(--text-primary);
-    }
-
-    label.semantic-submode-label:has(> input[type='checkbox']:not(:checked)) {
-      color: var(--text-muted);
-    }
-  }
-
-  // Start 上方的 prompt 区标题与同系字号（非 .semantic-submode-row 后代时补齐 9pt）
-  > .semantic-submode-row.chat-raw-prompt-mode-row label.semantic-submode-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .chat-prompt-panel > .input-header > .semantic-submode-label {
-    font-size: 9pt;
-  }
-
-  // System：在 input-header 内（非 semantic-submode-row），勾选主次色与勾选行一致
-  #gen_attr_system_prompt_panel.chat-prompt-panel > .input-header label.chat-use-system-label.semantic-submode-label {
-    font-size: 9pt;
-
-    &:has(> input[type='checkbox']:not(:checked)) {
-      color: var(--text-muted);
-    }
-
-    &:has(> input[type='checkbox']:checked) {
-      color: var(--text-primary);
-    }
-  }
-
-  .textarea-wrapper.chat-prompt-actions-row > .chat-completion-options-row.semantic-submode-row {
-    gap: $gen-attr-option-row-gap;
-  }
+body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row > .chat-completion-options-row.semantic-submode-row {
+  gap: $gen-attr-option-row-gap;
 }
 
 // 与 Attribution 页 Exclude prompt patterns 同形；generated 仅本页有 UI（持久化键见 attributionExclude*PatternsStorage）
@@ -583,7 +542,6 @@ body.gen-attribute-page .input-section {
 .attribution-exclude-prompt-patterns-input {
   width: 100%;
   box-sizing: border-box;
-  font-size: 9pt;
   padding: 6px 8px;
   border: 1px solid var(--input-border);
   border-radius: 4px;
@@ -600,3 +558,6 @@ body.gen-attribute-page .input-section {
 body.css-pseudo-fullscreen-body-lock {
   overflow: hidden;
 }
+
+// 保持在本文件末尾；说明见 responsive.narrow-ios-form-font
+@include ios-form-font.apply;

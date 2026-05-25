@@ -40,6 +40,7 @@ import { loadPredictionAttributeWithCache } from '../../shared/prediction_attrib
 import { readStoredEffectiveExcludePromptPatternsText } from '../../shared/prediction_attribution/core/attributionExcludePromptPatternsStorage';
 import { bindExcludePromptPatternsUi } from '../../shared/prediction_attribution/core/excludePromptPatternsUi';
 import { syncDraftCommittedButtonPair } from '../../shared/cross/syncDraftCommittedButtonPair';
+import { lsReadEnum, lsWriteString } from '../../shared/storage/localStorageHelpers';
 
 d3.selectAll('.loadersmall').style('display', 'none');
 
@@ -52,13 +53,7 @@ const TARGET_HISTORY_KEY = 'info_radar_attribution_target_history';
 const ATTRIBUTION_MODEL_VARIANT_STORAGE_KEY = 'info_radar_attribution_model_variant';
 
 function readStoredAttributionPageModelVariant(): PredictionAttributeModelVariant {
-    try {
-        const v = localStorage.getItem(ATTRIBUTION_MODEL_VARIANT_STORAGE_KEY);
-        if (v === 'base' || v === 'instruct') return v;
-    } catch {
-        // ignore
-    }
-    return 'instruct';
+    return lsReadEnum(ATTRIBUTION_MODEL_VARIANT_STORAGE_KEY, ['base', 'instruct'] as const, 'instruct');
 }
 
 const apiPrefix = URLHandler.parameters['api'] || '';
@@ -101,11 +96,7 @@ function currentAttributionModelVariant(): PredictionAttributeModelVariant {
 }
 
 modelVariantSelect?.addEventListener('change', () => {
-    try {
-        localStorage.setItem(ATTRIBUTION_MODEL_VARIANT_STORAGE_KEY, currentAttributionModelVariant());
-    } catch {
-        // ignore
-    }
+    lsWriteString(ATTRIBUTION_MODEL_VARIANT_STORAGE_KEY, currentAttributionModelVariant());
 });
 
 // --- TextInputController ---

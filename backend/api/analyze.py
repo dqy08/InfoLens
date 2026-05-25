@@ -6,7 +6,7 @@ import queue
 import threading
 from typing import Optional
 from backend.platform.schemas import create_empty_analysis_result
-from backend.models.model_manager import project_registry, DEFAULT_MODEL, inference_lock
+from backend.models.model_manager import project_registry, DEFAULT_BASE_MODEL, inference_lock
 from model_paths import resolve_hf_path
 from backend.platform.oom import exit_if_oom
 from backend.api.sse_utils import (
@@ -86,7 +86,7 @@ def _validate_and_prepare_request(analyze_request):
     # 获取默认模型（使用模块级上下文以获取持久化的当前活动模型）
     from backend.platform.app_context import get_app_context
     context = get_app_context(prefer_module_context=True)
-    default_model = context.model_name if context.model_name else DEFAULT_MODEL
+    default_model = context.base_model_id if context.base_model_id else DEFAULT_BASE_MODEL
     
     # 处理 default、None 或空字符串，使用默认模型
     if not model or model == 'default' or model == '':
@@ -119,7 +119,7 @@ def _load_project_with_error_handling(model):
     p = project_registry.get(model)
     if p is None:
         from backend.platform.app_context import get_app_context
-        from backend.models.model_manager import ensure_main_slot_ready
+        from backend.models.model_manager import ensure_base_slot_ready
 
         context = get_app_context(prefer_module_context=True)
         if context.model_loading:
@@ -129,7 +129,7 @@ def _load_project_with_error_handling(model):
         # 懒加载模式 (--no_auto_load)：首次请求仅初始化主槽位（权重 + QwenLM 项目）
         if getattr(context.args, 'no_auto_load', False):
             try:
-                ensure_main_slot_ready()
+                ensure_base_slot_ready()
                 p = project_registry.get(model)
             except Exception as e:  # noqa: BLE001
                 import traceback

@@ -49,7 +49,7 @@ def get_current_model():
     
     return {
         'success': True,
-        'model': context.model_name,
+        'model': context.base_model_id,
         'loading': context.model_loading,
         'device_type': device_type,
         'use_int8': os.environ.get('FORCE_INT8') == '1',
@@ -115,7 +115,7 @@ def switch_model(switch_request):
 
         # 使用模块级上下文以确保状态修改持久化（不会被后续请求重置）
         context = get_app_context(prefer_module_context=True)
-        current_model = context.model_name
+        current_model = context.base_model_id
 
         # 保存当前环境变量配置（用于回滚）
         old_force_int8 = os.environ.get('FORCE_INT8')
@@ -223,7 +223,7 @@ def switch_model(switch_request):
     return (
         {
             'success': False,
-            'message': '在线模型切换已禁用，请通过命令行 --model / --semantic_model 指定后重启服务',
+            'message': '在线模型切换已禁用，请通过命令行 --base_model / --instruct_model 指定后重启服务',
         },
         501,
     )

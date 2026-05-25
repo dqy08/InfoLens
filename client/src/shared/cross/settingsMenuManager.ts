@@ -14,7 +14,10 @@ import { getSemanticAnalysisEnabled, setSemanticAnalysisEnabled } from './semant
 import { getDigitsMergeEnabled, setDigitsMergeEnabled } from './digitsMergeManager';
 import { getForceNarrowScreen, setForceNarrowScreen, FORCE_NARROW_CHANGE_EVENT } from '../core/responsive';
 import { getSemanticMatchThreshold } from './semanticThresholdManager';
-import { getInfoDensityRenderDisabled, setInfoDensityRenderDisabled } from '../../features/analysis/infoDensityRenderManager';
+import {
+    getInfoDensityRenderDisabled,
+    setInfoDensityRenderDisabled,
+} from '../../features/analysis/infoDensityRenderManager';
 import { showVisitStatsDialog } from './visitStatsDialog';
 import { showModelManageDialog } from './modelManageDialog';
 

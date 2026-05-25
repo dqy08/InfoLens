@@ -7,7 +7,7 @@ import time
 import traceback
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from backend.models.model_manager import inference_lock, get_semantic_model_display_name
+from backend.models.model_manager import inference_lock, get_instruct_model_display_name
 from backend.core.prediction_attributor import slot_for_prediction_attr_model
 from backend.platform.oom import exit_if_oom, is_oom_error
 from backend.core.completion_generator import (
@@ -54,7 +54,7 @@ def _build_response(
         "id": "cmpl-stub-info-radar",
         "object": "text_completion",
         "created": int(time.time()),
-        "model": get_semantic_model_display_name(),
+        "model": get_instruct_model_display_name(),
         "choices": [
             {
                 "text": completion_text,
@@ -322,6 +322,14 @@ def completions_prompt(completions_prompt_request):
             return {"success": False, "message": "system 必须为字符串"}, 400
         system_opt = system_raw
 
+    enable_thinking_raw = completions_prompt_request.get("enable_thinking")
+    if enable_thinking_raw is None:
+        enable_thinking = False
+    elif not isinstance(enable_thinking_raw, bool):
+        return {"success": False, "message": "enable_thinking 必须为布尔值"}, 400
+    else:
+        enable_thinking = enable_thinking_raw
+
     client_ip = get_client_ip()
     from backend.platform.access_log import log_openai_completions_prompt_request
 
@@ -329,6 +337,7 @@ def completions_prompt(completions_prompt_request):
         model,
         user_prompt=prompt,
         system=system_opt,
+        enable_thinking=enable_thinking,
         client_ip=client_ip,
     )
 
@@ -338,7 +347,9 @@ def completions_prompt(completions_prompt_request):
         return {"success": False, "message": str(e)}, 400
 
     try:
-        prompt_used = apply_chat_template_for_completion(prompt, system_opt, slot=slot)
+        prompt_used = apply_chat_template_for_completion(
+            prompt, system_opt, slot=slot, enable_thinking=enable_thinking
+        )
     except PromptTooLongError as e:
         return {"success": False, "message": str(e)}, 400
 

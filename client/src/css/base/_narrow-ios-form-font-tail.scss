@@ -1,0 +1,14 @@
+// 子页 bundle 末尾：@use '../base/narrow-ios-form-font-tail' as ios-form-font; @include ios-form-font.apply;
+// 设计说明见 responsive.narrow-ios-form-font
+@use 'breakpoints' as *;
+@use 'responsive';
+
+@mixin apply {
+  @media (max-width: $breakpoint-mobile) {
+    @include responsive.narrow-ios-form-font('html');
+  }
+
+  @media (min-width: $breakpoint-tablet) {
+    @include responsive.narrow-ios-form-font('html[data-force-narrow]:has(.main_frame)');
+  }
+}

@@ -1,5 +1,6 @@
 // Analysis 页专有样式（intro / 统计图 / 分析进度）
 @use 'app-pages';
+@use '../base/narrow-ios-form-font-tail' as ios-form-font;
 
 // 介绍区域样式
 .intro-section {
@@ -191,3 +192,6 @@
     box-sizing: border-box;  // 确保宽度计算正确
   }
 }
+
+// 保持在本文件末尾；说明见 responsive.narrow-ios-form-font
+@include ios-form-font.apply;

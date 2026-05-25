@@ -1,7 +1,6 @@
 // 语义分析相关样式（section、查询输入、历史下拉、loader）
 
 @use "loaders";
-@use "breakpoints" as *;
 @use "query-history-dropdown" as qh;
 @use "lmf-readout" as lmf;
 
@@ -261,12 +260,5 @@
 
   :root[data-theme="dark"] & {
     color: var(--text-muted, #999);
-  }
-}
-
-// 窄屏：与 _responsive 中 input[type=text] 的 16px 一致；上方三层嵌套选择器优先级高于 input[type=text]，故在此用同权重规则 + 源顺序覆盖
-@media (max-width: $breakpoint-mobile) {
-  .semantic-analysis-section .semantic-analysis-controls .semantic-search-input {
-    font-size: 16px;
   }
 }

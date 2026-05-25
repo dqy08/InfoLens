@@ -1,6 +1,7 @@
 // 对比页面样式 - app-pages 提供 chrome / demo / tooltip 等共用样式
 @use 'app-pages';
 @use "lmf-readout" as lmf;
+@use '../base/narrow-ios-form-font-tail' as ios-form-font;
 
 // 主框架样式
 .main_frame {
@@ -400,4 +401,7 @@
     height: 125vh; // 移动端补偿缩放：100vh / 0.8
   }
 }
+
+// 保持在本文件末尾；说明见 responsive.narrow-ios-form-font
+@include ios-form-font.apply;
 

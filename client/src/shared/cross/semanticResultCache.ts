@@ -3,6 +3,8 @@
  * 持久化到 localStorage，刷新后保留。删除查询历史时需调用 removeByQuery 清理对应缓存。
  */
 
+import { lsGet, lsSetCatch } from '../storage/localStorageHelpers';
+
 const MAX_SIZE = 50;
 const STORAGE_KEY = 'info_radar_semantic_result_cache';
 
@@ -35,7 +37,7 @@ let keyOrder: string[] = [];
 
 function load(): void {
     try {
-        const raw = localStorage.getItem(STORAGE_KEY);
+        const raw = lsGet(STORAGE_KEY);
         if (!raw) return;
         const parsed = JSON.parse(raw) as { entries?: Record<string, StoredEntry>; keyOrder?: string[] };
         if (!parsed?.entries || typeof parsed.entries !== 'object') return;
@@ -55,17 +57,15 @@ function load(): void {
 load();
 
 function persist(): void {
-    try {
-        const entries: Record<string, StoredEntry> = {};
-        for (const [k, v] of cache) entries[k] = v;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ entries, keyOrder }));
-    } catch (e) {
-        const reason =
-            e instanceof DOMException && e.name === 'QuotaExceededError'
-                ? 'localStorage 配额已满（Chrome 约 5MB/域名），建议减少 MAX_SIZE 或清理其他站点数据'
-                : String(e);
-        console.warn('[semanticResultCache] 持久化失败，刷新后缓存可能丢失。原因:', reason);
-    }
+    const entries: Record<string, StoredEntry> = {};
+    for (const [k, v] of cache) entries[k] = v;
+    const err = lsSetCatch(STORAGE_KEY, JSON.stringify({ entries, keyOrder }));
+    if (err === undefined) return;
+    const reason =
+        err instanceof DOMException && err.name === 'QuotaExceededError'
+            ? 'localStorage 配额已满（Chrome 约 5MB/域名），建议减少 MAX_SIZE 或清理其他站点数据'
+            : String(err);
+    console.warn('[semanticResultCache] 持久化失败，刷新后缓存可能丢失。原因:', reason);
 }
 
 function evictOne(): void {

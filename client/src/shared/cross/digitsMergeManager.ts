@@ -1,4 +1,6 @@
 /** 数字段合并（digit merge）开关，与 BPE overlap 合并独立；默认开启以保持既有行为 */
+import { lsGet, lsWriteBool } from '../storage/localStorageHelpers';
+
 export const DIGITS_MERGE_STORAGE_KEY = 'info_radar_digits_merge_enabled';
 
 const renderListeners = new Set<() => void>();
@@ -39,12 +41,12 @@ export function addDigitsMergeRenderListener(callback: () => void): void {
 }
 
 export function getDigitsMergeEnabled(): boolean {
-    const v = localStorage.getItem(DIGITS_MERGE_STORAGE_KEY);
+    const v = lsGet(DIGITS_MERGE_STORAGE_KEY);
     if (v === null) return true;
     return v === 'true';
 }
 
 export function setDigitsMergeEnabled(enabled: boolean): void {
-    localStorage.setItem(DIGITS_MERGE_STORAGE_KEY, enabled ? 'true' : 'false');
+    lsWriteBool(DIGITS_MERGE_STORAGE_KEY, enabled);
     notifyDigitsMergeRenderListeners();
 }

@@ -8,7 +8,7 @@ Semantic analysis：基于 instruct 模型提取原文 token 与 query 的相关
 
 count/fill_blank 按概率加权（Σ pᵢ·zᵢ）。
 
-模型由 --semantic_model 参数指定，默认 qwen3-0.6b-instruct
+模型由 --instruct_model 参数指定，默认 qwen3-0.6b-instruct
 """
 
 import gc
@@ -19,7 +19,7 @@ import torch
 
 from backend.platform.format import round_to_sig_figs
 from backend.models.device import DeviceManager
-from backend.models.model_manager import ensure_semantic_slot_ready, get_semantic_model_display_name
+from backend.models.model_manager import ensure_instruct_slot_ready, get_instruct_model_display_name
 from .next_token_topk import decode_topk_ids_to_strings_and_rounded_probs, DEFAULT_NEXT_TOKEN_TOPK
 from backend.platform.runtime_config import get_semantic_max_token_length
 
@@ -178,7 +178,7 @@ def _analyze_logits_gradient(
 
         if full_match_degree_only:
             return {
-                "model": get_semantic_model_display_name(),
+                "model": get_instruct_model_display_name(),
                 "token_attention": [],
                 "full_match_degree": full_match_degree,
             }
@@ -235,7 +235,7 @@ def _analyze_logits_gradient(
             print(f"⚠️ token_attention 中有 {nan_count} 个 score 为 NaN/Inf，已替换为 0。")
 
         out = {
-            "model": get_semantic_model_display_name(),
+            "model": get_instruct_model_display_name(),
             "token_attention": token_attention,
             "full_match_degree": full_match_degree,
         }
@@ -270,7 +270,7 @@ def analyze_semantic(
     Returns:
         {"model", "token_attention", "full_match_degree"}；debug_info=True 时包含 debug_info 对象
     """
-    tokenizer, model, device = ensure_semantic_slot_ready()
+    tokenizer, model, device = ensure_instruct_slot_ready()
     return _analyze_logits_gradient(
         query, text, tokenizer, model, device,
         submode_override=submode_override,

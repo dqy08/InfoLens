@@ -119,6 +119,14 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="semantic-submode-row chat-enable-thinking-row">
+                            <span class="semantic-submode-group">
+                                <label class="semantic-submode-label" for="gen_attr_enable_thinking">
+                                    <input type="checkbox" id="gen_attr_enable_thinking" />
+                                    <span data-i18n>Enable thinking</span>
+                                </label>
+                            </span>
+                        </div>
                     </div>
 
                     <div class="attribution-exclude-prompt-patterns-row">
@@ -187,7 +195,6 @@
                                         <div class="loadersmall"></div>
                                         <span id="gen_attr_complete_reason" class="generation-end-reason"></span>
                                     </div>
-                                    <span id="gen_attr_analyze_progress" class="analyze-progress"></span>
                                 </div>
                             </div>
                             <div id="gen_attr_text_metrics" class="text-metrics text-metrics-chat">
@@ -200,7 +207,7 @@
 
                     <div class="gen-attr-reset-ui-options-row">
                         <button type="button" id="gen_attr_reset_ui_options_btn" class="text-action-btn"
-                            title="Restore DAG options, replay speed, exclusions, etc. to defaults and clear saved preferences for those controls."
+                            title="Restore DAG options, play speed, exclusions, etc. to defaults and clear saved preferences for those controls."
                             data-i18n="text,title">
                             Reset UI options
                         </button>
@@ -290,8 +297,8 @@
                             <select id="gen_attr_dag_recursive_edge_animation_direction" class="semantic-submode-select"
                                 title="Choose one direction for propagated-edge batch animation."
                                 data-i18n="title">
-                                <option value="backward">backward</option>
                                 <option value="forward">forward</option>
+                                <option value="backward">backward</option>
                             </select>
                         </span>
                         <span class="semantic-submode-group" id="gen_attr_dag_show_downstream_influence_group">
@@ -379,10 +386,10 @@
                     </div>
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
                         <span class="semantic-submode-group gen-attr-dag-replay-speed-row semantic-submode-group--emphasis">
-                            <label class="semantic-submode-label" for="gen_attr_dag_replay_mode" data-i18n>DAG replay speed</label>
+                            <label class="semantic-submode-label" for="gen_attr_dag_replay_mode" data-i18n>Play speed</label>
                             <select id="gen_attr_dag_replay_mode"
                                 class="semantic-submode-select gen-attr-dag-replay-mode-select"
-                                title="Total duration vs. fixed delay per step. Waits shrink if a step is slow; long idle realigns the beat."
+                                title="Total duration or per-step delay. DAG Play uses equal steps or a fixed step interval; focus-chain animation scales each step by attribution weight."
                                 data-i18n="title">
                                 <option value="total" data-i18n>total time</option>
                                 <option value="step" data-i18n>step time</option>
@@ -390,14 +397,14 @@
                             <span id="gen_attr_dag_replay_total_wrap" class="gen-attr-dag-replay-value-wrap">
                                 <input type="number" id="gen_attr_dag_playback_total_s" class="gen-attr-dag-measure-width-input"
                                     value="7" min="1" max="3600" step="1"
-                                    title="Nominal delay = total seconds ÷ (steps − 1). Saved locally; applied when you press play."
+                                    title="Total seconds. DAG Play divides evenly across steps; focus-chain animation splits by layer weight. Saved locally; applied when you press Play or select a focus node."
                                     data-i18n="title">
                                 <span class="semantic-submode-label">s</span>
                             </span>
                             <span id="gen_attr_dag_replay_step_wrap" class="gen-attr-dag-replay-value-wrap" hidden>
                                 <input type="number" id="gen_attr_dag_playback_step_ms" class="gen-attr-dag-measure-width-input"
                                     value="200" min="0" max="10000" step="10"
-                                    title="Nominal ms between steps. Saved locally; applied when you press play (not mid-run)."
+                                    title="Milliseconds per step. DAG Play uses this fixed interval; focus-chain animation multiplies by layer weight. Saved locally; applied when you press Play or select a focus node."
                                     data-i18n="title">
                                 <span class="semantic-submode-label">ms</span>
                             </span>

@@ -4,6 +4,7 @@
  */
 import { showDialog, createSelectContent, createInputContent, showConfirmDialog } from './dialog';
 import { tr, trf } from '../../shared/lang/i18n-lite';
+import { lsGet, lsSet } from '../../shared/storage/localStorageHelpers';
 
 export function showMoveDialog(
     folders: string[],
@@ -31,7 +32,7 @@ export function showMoveDialog(
 
     // 获取上次选择的路径（从 localStorage）
     const lastSelectedPathKey = 'lastMoveTargetPath';
-    const lastSelectedPath = localStorage.getItem(lastSelectedPathKey);
+    const lastSelectedPath = lsGet(lastSelectedPathKey);
     
     // 设置默认选择：优先使用上次选择的路径，如果不存在则使用当前路径，最后使用根目录
     let defaultPath = '/';
@@ -48,7 +49,7 @@ export function showMoveDialog(
         content: createSelectContent(tr('Target folder:'), options, defaultPath),
         onConfirm: (targetPath: string) => {
             // 保存选择的路径到 localStorage
-            localStorage.setItem(lastSelectedPathKey, targetPath);
+            lsSet(lastSelectedPathKey, targetPath);
             onConfirm(targetPath);
         },
         cancelText: tr('Cancel')

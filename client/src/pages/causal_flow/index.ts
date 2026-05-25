@@ -33,6 +33,7 @@ import {
     DAG_COMPACTNESS_DEFAULT,
     LINEAR_ARC_ADJACENT_GAP_DEFAULT,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagView';
+import type { DagRecursiveEdgeReplayPacing } from '../../shared/prediction_attribution/causal_flow/genAttributeDagRecursiveEdgeAnimation';
 import {
     createHydratedTokenGenHandle,
     startTokenGenAttribution,
@@ -85,11 +86,21 @@ import {
     saveHistory,
 } from '../../shared/cross/queryHistory';
 import {
-    readSkipChatTemplateFromStorage,
-    writeSkipChatTemplateToStorage,
+    GEN_ATTR_ENABLE_THINKING_STORAGE_KEY,
+    LS_SKIP_CHAT_TEMPLATE,
 } from '../../features/chat/chatPromptTemplateMode';
 import { postCompletionsPrompt, postCompletionsStop } from '../../shared/api/completionsClient';
 import { updateApiUsageDisplay, updateModel, validateMetricsElements } from '../../shared/cross/textMetricsUpdater';
+import {
+    lsGet,
+    lsReadBool,
+    lsReadEnum,
+    lsReadNumber,
+    lsRemove,
+    lsSet,
+    lsWriteBool,
+    lsWriteString,
+} from '../../shared/storage/localStorageHelpers';
 
 d3.selectAll('.loadersmall').style('display', 'none');
 
@@ -162,7 +173,7 @@ const DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS: GenAttrDemoUiOptions = {
     showDownstreamInfluence: false,
     recursiveAttributionEnabled: false,
     recursiveEdgeBatchAnimationEnabled: true,
-    recursiveEdgeBatchAnimationDirection: 'backward',
+    recursiveEdgeBatchAnimationDirection: 'forward',
     showTokenInfoOnSelected: false,
     replayPacingMode: 'total',
     playbackTotalS: GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT,
@@ -183,24 +194,13 @@ function createFlowId(): string {
 }
 
 function readStoredModelVariant(): PredictionAttributeModelVariant {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_MODEL_VARIANT_STORAGE_KEY);
-        if (v === 'base' || v === 'instruct') return v;
-    } catch {
-        // ignore
-    }
-    return 'instruct';
+    return lsReadEnum(GEN_ATTR_MODEL_VARIANT_STORAGE_KEY, ['base', 'instruct'] as const, 'instruct');
 }
 
 function readStoredMaxTokens(): number {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_MAX_TOKENS_STORAGE_KEY);
-        const n = v !== null ? parseInt(v, 10) : NaN;
-        if (Number.isFinite(n) && n >= 1 && n <= 500) return n;
-    } catch {
-        // ignore
-    }
-    return GEN_ATTR_MAX_TOKENS_DEFAULT;
+    return lsReadNumber(GEN_ATTR_MAX_TOKENS_STORAGE_KEY, GEN_ATTR_MAX_TOKENS_DEFAULT, {
+        validate: (n) => n >= 1 && n <= 500,
+    });
 }
 
 function clampDagMeasureWidth(n: number): number {
@@ -211,47 +211,32 @@ function clampDagMeasureWidth(n: number): number {
 }
 
 function readStoredDagMeasureWidth(): number {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY);
-        const n = v !== null ? parseInt(v, 10) : NaN;
-        if (Number.isFinite(n)) return clampDagMeasureWidth(n);
-    } catch {
-        // ignore
-    }
-    return GEN_ATTR_DAG_MEASURE_WIDTH_DEFAULT;
+    return lsReadNumber(GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY, GEN_ATTR_DAG_MEASURE_WIDTH_DEFAULT, {
+        clamp: clampDagMeasureWidth,
+    });
 }
 
 function readStoredDagCompactness(): number {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY);
-        const n = v !== null ? parseFloat(v) : NaN;
-        if (Number.isFinite(n)) return clampDagCompactness(n);
-    } catch {
-        // ignore
-    }
-    return DAG_COMPACTNESS_DEFAULT;
+    return lsReadNumber(GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY, DAG_COMPACTNESS_DEFAULT, {
+        parse: 'float',
+        clamp: clampDagCompactness,
+    });
 }
 
 function readStoredDagEdgeTopPCoverage(): number {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY);
-        const n = v !== null ? parseFloat(v) : NaN;
-        if (Number.isFinite(n)) return clampDagEdgeTopPCoverage(n);
-    } catch {
-        // ignore
-    }
-    return DAG_EDGE_TOP_P_COVERAGE_DEFAULT;
+    return lsReadNumber(
+        GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY,
+        DAG_EDGE_TOP_P_COVERAGE_DEFAULT,
+        { parse: 'float', clamp: clampDagEdgeTopPCoverage },
+    );
 }
 
 function readStoredDagLinearArcAdjacentGap(): number {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY);
-        const n = v !== null ? parseInt(v, 10) : NaN;
-        if (Number.isFinite(n)) return clampLinearArcAdjacentGap(n);
-    } catch {
-        // ignore
-    }
-    return LINEAR_ARC_ADJACENT_GAP_DEFAULT;
+    return lsReadNumber(
+        GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY,
+        LINEAR_ARC_ADJACENT_GAP_DEFAULT,
+        { clamp: clampLinearArcAdjacentGap },
+    );
 }
 
 function clampDagPlaybackStepMs(n: number): number {
@@ -262,14 +247,11 @@ function clampDagPlaybackStepMs(n: number): number {
 }
 
 function readStoredDagPlaybackStepMs(): number {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY);
-        const n = v !== null ? parseInt(v, 10) : NaN;
-        if (Number.isFinite(n)) return clampDagPlaybackStepMs(n);
-    } catch {
-        // ignore
-    }
-    return GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT;
+    return lsReadNumber(
+        GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY,
+        GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT,
+        { clamp: clampDagPlaybackStepMs },
+    );
 }
 
 function clampDagPlaybackTotalS(n: number): number {
@@ -280,41 +262,27 @@ function clampDagPlaybackTotalS(n: number): number {
 }
 
 function readStoredDagPlaybackTotalS(): number {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY);
-        const n = v !== null ? parseInt(v, 10) : NaN;
-        if (Number.isFinite(n)) return clampDagPlaybackTotalS(n);
-    } catch {
-        // ignore
-    }
-    return GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT;
+    return lsReadNumber(
+        GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY,
+        GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT,
+        { clamp: clampDagPlaybackTotalS },
+    );
 }
 
 function readStoredDagReplayPacingMode(): DagReplayPacingMode {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY);
-        if (v === 'total' || v === 'step') return v;
-    } catch {
-        // ignore
-    }
-    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.replayPacingMode;
+    return lsReadEnum(
+        GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY,
+        ['total', 'step'] as const,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.replayPacingMode,
+    );
 }
 
 function readStoredDagLayoutMode(): DagLayoutMode {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY);
-        if (
-            v === 'text-flow' ||
-            v === 'linear-arc' ||
-            v === 'linear-arc-step-down' ||
-            v === 'spiral'
-        ) {
-            return v;
-        }
-    } catch {
-        // ignore
-    }
-    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.layoutMode;
+    return lsReadEnum(
+        GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY,
+        ['text-flow', 'linear-arc', 'linear-arc-step-down', 'spiral'] as const,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.layoutMode,
+    );
 }
 
 const apiPrefix = URLHandler.parameters['api'] || '';
@@ -366,10 +334,12 @@ const genAttrTeacherForcingBlock = document.getElementById('gen_attr_teacher_for
 const genAttrStopAfterTeacherForcing = document.getElementById(
     'gen_attr_stop_after_teacher_forcing'
 ) as HTMLInputElement | null;
+const genAttrEnableThinkingInput = document.getElementById(
+    'gen_attr_enable_thinking'
+) as HTMLInputElement | null;
 
 const submitBtn = d3.select('#gen_attr_submit_btn');
 const loaderSmall = d3.select('.loadersmall');
-const analyzeProgressEl = d3.select('#gen_attr_analyze_progress');
 const metricUsage = d3.select('#gen_attr_metric_usage');
 const metricModel = d3.select('#gen_attr_metric_model');
 const genAttrResultsEl = d3.select('#results.gen-attr-results-surface');
@@ -408,6 +378,23 @@ const dagReplayStepWrap = document.getElementById('gen_attr_dag_replay_step_wrap
 /** 与 `#gen_attr_dag_replay_mode` 同步；非法或缺失时视为 `total`。 */
 function currentDagReplayPacingMode(): DagReplayPacingMode {
     return dagReplayModeSelect?.value === 'step' ? 'step' : 'total';
+}
+
+/** DAG replay speed 控件 → 规范化节奏；生成回放、传播链动画、demo 导出共用。 */
+function readDagReplayPacingFromControls(options?: { writeBack?: boolean }): DagRecursiveEdgeReplayPacing {
+    const rawStep = parseInt(dagPlaybackStepMsInput?.value ?? '', 10);
+    const stepMs = Number.isFinite(rawStep)
+        ? clampDagPlaybackStepMs(rawStep)
+        : readStoredDagPlaybackStepMs();
+    const rawS = parseInt(dagPlaybackTotalSInput?.value ?? '', 10);
+    const totalS = Number.isFinite(rawS)
+        ? clampDagPlaybackTotalS(rawS)
+        : readStoredDagPlaybackTotalS();
+    if (options?.writeBack) {
+        if (dagPlaybackStepMsInput) dagPlaybackStepMsInput.value = String(stepMs);
+        if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = String(totalS);
+    }
+    return { mode: currentDagReplayPacingMode(), stepMs, totalS };
 }
 
 /** 切换下拉时更新 `hidden`；样式见 `.gen-attr-dag-replay-value-wrap:not([hidden])`。 */
@@ -504,28 +491,30 @@ function syncGenAttrExcludePatternTextareasDisabled(): void {
 }
 
 function hydrateGenAttrExcludePatternsFromGenAttrStorage(): void {
-    try {
-        const savedPrompt = localStorage.getItem(GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY);
-        if (genAttrExcludePromptPatternsTa) {
-            genAttrExcludePromptPatternsTa.value =
-                savedPrompt !== null ? savedPrompt : DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT;
-        }
-        const promptEnRaw = localStorage.getItem(GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY);
-        if (genAttrExcludePromptPatternsEnable) {
-            genAttrExcludePromptPatternsEnable.checked = promptEnRaw === null ? true : promptEnRaw === '1';
-        }
+    const savedPrompt = lsGet(GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY);
+    if (genAttrExcludePromptPatternsTa) {
+        genAttrExcludePromptPatternsTa.value =
+            savedPrompt !== null ? savedPrompt : DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT;
+    }
+    if (genAttrExcludePromptPatternsEnable) {
+        genAttrExcludePromptPatternsEnable.checked = lsReadBool(
+            GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
+            true,
+            { encoding: '1' },
+        );
+    }
 
-        const savedGen = localStorage.getItem(GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY);
-        if (genAttrExcludeGeneratedPatternsTa) {
-            genAttrExcludeGeneratedPatternsTa.value =
-                savedGen !== null ? savedGen : DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT;
-        }
-        const genEnRaw = localStorage.getItem(GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY);
-        if (genAttrExcludeGeneratedPatternsEnable) {
-            genAttrExcludeGeneratedPatternsEnable.checked = genEnRaw === null ? true : genEnRaw === '1';
-        }
-    } catch {
-        /* ignore */
+    const savedGen = lsGet(GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY);
+    if (genAttrExcludeGeneratedPatternsTa) {
+        genAttrExcludeGeneratedPatternsTa.value =
+            savedGen !== null ? savedGen : DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT;
+    }
+    if (genAttrExcludeGeneratedPatternsEnable) {
+        genAttrExcludeGeneratedPatternsEnable.checked = lsReadBool(
+            GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY,
+            true,
+            { encoding: '1' },
+        );
     }
     syncGenAttrExcludePatternTextareasDisabled();
 }
@@ -543,7 +532,6 @@ function genAttrEffectiveExcludeGeneratedPatternsText(): string {
     return genAttrExcludeGeneratedPatternsTa?.value ?? '';
 }
 
-if (modelVariantSelect) modelVariantSelect.value = readStoredModelVariant();
 if (maxTokensInput) maxTokensInput.value = String(readStoredMaxTokens());
 const initialDagLayoutMode = readStoredDagLayoutMode();
 if (dagLayoutModeSelect) dagLayoutModeSelect.value = initialDagLayoutMode;
@@ -568,37 +556,27 @@ applyDagReplaySpeedUi();
 
 const genAttrResultsNode = genAttrResultsEl.node() as HTMLElement | null;
 function readStoredDagNodeCiVisualScale(): boolean {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY);
-        if (v !== null) return v === '1';
-    } catch {
-        // ignore
-    }
-    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.nodeCiVisualScaleEnabled;
+    return lsReadBool(
+        GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.nodeCiVisualScaleEnabled,
+        { encoding: '1' },
+    );
 }
 const initialDagNodeCiVisualScale = readStoredDagNodeCiVisualScale();
 if (dagNodeCiVisualScaleInput) dagNodeCiVisualScaleInput.checked = initialDagNodeCiVisualScale;
 setDagNodeCiVisualScaleEnabled(initialDagNodeCiVisualScale);
 dagNodeCiVisualScaleInput?.addEventListener('change', () => {
     const enabled = dagNodeCiVisualScaleInput.checked;
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY, enabled ? '1' : '0');
-    } catch {
-        /* ignore */
-    }
+    lsWriteBool(GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY, enabled, '1');
     setDagNodeCiVisualScaleEnabled(enabled);
     tryResetAndReplayDag();
 });
 
 function readStoredDagDecayAttributionToHighSurprisalTarget(): boolean {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY);
-        if (v !== null) return v === '1';
-        const legacy = localStorage.getItem(GEN_ATTR_DAG_EDGE_WEAKEN_HIGH_SURPRISAL_STORAGE_KEY_LEGACY);
-        if (legacy !== null) return legacy === '1';
-    } catch {
-        // ignore
-    }
+    const v = lsGet(GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY);
+    if (v !== null) return v === '1';
+    const legacy = lsGet(GEN_ATTR_DAG_EDGE_WEAKEN_HIGH_SURPRISAL_STORAGE_KEY_LEGACY);
+    if (legacy !== null) return legacy === '1';
     return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.decayAttributionToHighSurprisalTargetEnabled;
 }
 const initialDagDecayAttributionHighSurprisal = readStoredDagDecayAttributionToHighSurprisalTarget();
@@ -608,13 +586,9 @@ if (dagDecayAttributionHighSurprisalInput) {
 setDagDecayAttributionToHighSurprisalTargetEnabled(initialDagDecayAttributionHighSurprisal);
 dagDecayAttributionHighSurprisalInput?.addEventListener('change', () => {
     const enabled = dagDecayAttributionHighSurprisalInput.checked;
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY, enabled ? '1' : '0');
-    } catch {
-        /* ignore */
-    }
+    lsWriteBool(GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY, enabled, '1');
     setDagDecayAttributionToHighSurprisalTargetEnabled(enabled);
-    tryResetAndReplayDag();
+    tryResetAndReplayDag({ refit: false });
 });
 
 function applyDagHideInactiveEdges(hide: boolean): void {
@@ -622,35 +596,27 @@ function applyDagHideInactiveEdges(hide: boolean): void {
     genAttrResultsNode.classList.toggle('gen-attr-dag-hide-inactive-edges', hide);
 }
 function readStoredDagHideInactiveEdges(): boolean {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY);
-        if (v !== null) return v === '1';
-    } catch {
-        // ignore
-    }
-    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.hideInactiveEdges;
+    return lsReadBool(
+        GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.hideInactiveEdges,
+        { encoding: '1' },
+    );
 }
 const initialDagHideInactiveEdges = readStoredDagHideInactiveEdges();
 if (dagHideInactiveEdgesInput) dagHideInactiveEdgesInput.checked = initialDagHideInactiveEdges;
 applyDagHideInactiveEdges(initialDagHideInactiveEdges);
 dagHideInactiveEdgesInput?.addEventListener('change', () => {
     const hide = dagHideInactiveEdgesInput.checked;
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY, hide ? '1' : '0');
-    } catch {
-        /* ignore */
-    }
+    lsWriteBool(GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY, hide, '1');
     applyDagHideInactiveEdges(hide);
 });
 
 function readStoredDagShowDownstreamInfluence(): boolean {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY);
-        if (v !== null) return v === '1';
-    } catch {
-        // ignore
-    }
-    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.showDownstreamInfluence;
+    return lsReadBool(
+        GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.showDownstreamInfluence,
+        { encoding: '1' },
+    );
 }
 const initialDagShowDownstreamInfluence = readStoredDagShowDownstreamInfluence();
 if (dagShowDownstreamInfluenceInput) {
@@ -658,11 +624,7 @@ if (dagShowDownstreamInfluenceInput) {
 }
 dagShowDownstreamInfluenceInput?.addEventListener('change', () => {
     const show = dagShowDownstreamInfluenceInput.checked;
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY, show ? '1' : '0');
-    } catch {
-        /* ignore */
-    }
+    lsWriteBool(GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY, show, '1');
     dagHandle.setShowDownstreamInfluence(show);
 });
 
@@ -682,35 +644,29 @@ function applyDagRecursiveAttributionSubmodeUi(): void {
 }
 
 function readStoredDagRecursiveAttribution(): boolean {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY);
-        if (v !== null) return v === '1';
-    } catch {
-        // ignore
-    }
-    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.recursiveAttributionEnabled;
+    return lsReadBool(
+        GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.recursiveAttributionEnabled,
+        { encoding: '1' },
+    );
 }
 const initialDagRecursiveAttribution = readStoredDagRecursiveAttribution();
 if (dagRecursiveAttributionInput) dagRecursiveAttributionInput.checked = initialDagRecursiveAttribution;
 
 function readStoredDagRecursiveEdgeAnimationEnabled(): boolean {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_STORAGE_KEY);
-        if (v !== null) return v === '1';
-    } catch {
-        // ignore
-    }
-    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.recursiveEdgeBatchAnimationEnabled;
+    return lsReadBool(
+        GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.recursiveEdgeBatchAnimationEnabled,
+        { encoding: '1' },
+    );
 }
 
 function readStoredDagRecursiveEdgeAnimationDirection(): DagRecursiveEdgeAnimationDirection {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_DIRECTION_STORAGE_KEY);
-        if (v === 'backward' || v === 'forward') return v;
-    } catch {
-        // ignore
-    }
-    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.recursiveEdgeBatchAnimationDirection;
+    return lsReadEnum(
+        GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_DIRECTION_STORAGE_KEY,
+        ['backward', 'forward'] as const,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.recursiveEdgeBatchAnimationDirection,
+    );
 }
 
 const initialDagRecursiveEdgeAnimationEnabled = readStoredDagRecursiveEdgeAnimationEnabled();
@@ -723,74 +679,50 @@ if (dagRecursiveEdgeAnimationDirectionSelect) {
 applyDagRecursiveAttributionSubmodeUi();
 dagRecursiveAttributionInput?.addEventListener('change', () => {
     const enabled = dagRecursiveAttributionInput.checked;
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY, enabled ? '1' : '0');
-    } catch {
-        /* ignore */
-    }
+    lsWriteBool(GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY, enabled, '1');
     applyDagRecursiveAttributionSubmodeUi();
     dagHandle.setRecursiveAttributionEnabled(enabled);
 });
 dagRecursiveEdgeAnimationInput?.addEventListener('change', () => {
     const enabled = dagRecursiveEdgeAnimationInput.checked;
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_STORAGE_KEY, enabled ? '1' : '0');
-    } catch {
-        /* ignore */
-    }
+    lsWriteBool(GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_STORAGE_KEY, enabled, '1');
     applyDagRecursiveAttributionSubmodeUi();
     dagHandle.setRecursiveEdgeBatchAnimationEnabled(enabled);
 });
 dagRecursiveEdgeAnimationDirectionSelect?.addEventListener('change', () => {
     const direction = currentDagRecursiveEdgeAnimationDirection();
     dagRecursiveEdgeAnimationDirectionSelect.value = direction;
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_DIRECTION_STORAGE_KEY, direction);
-    } catch {
-        /* ignore */
-    }
+    lsWriteString(GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_DIRECTION_STORAGE_KEY, direction);
     dagHandle.setRecursiveEdgeBatchAnimationDirection(direction);
 });
 
 function readStoredDagHideExcludedTokens(): boolean {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY);
-        if (v !== null) return v === '1';
-    } catch {
-        // ignore
-    }
-    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.hideExcludedTokens;
+    return lsReadBool(
+        GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.hideExcludedTokens,
+        { encoding: '1' },
+    );
 }
 const initialDagHideExcludedTokens = readStoredDagHideExcludedTokens();
 if (dagHideExcludedTokensInput) dagHideExcludedTokensInput.checked = initialDagHideExcludedTokens;
 function readStoredDagShowTopkOnSelected(): boolean {
-    try {
-        const v = localStorage.getItem(GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY);
-        if (v !== null) return v === '1';
-    } catch {
-        // ignore
-    }
-    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.showTokenInfoOnSelected;
+    return lsReadBool(
+        GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.showTokenInfoOnSelected,
+        { encoding: '1' },
+    );
 }
 const initialDagShowTopkOnSelected = readStoredDagShowTopkOnSelected();
 if (dagShowTopkOnSelectedInput) dagShowTopkOnSelectedInput.checked = initialDagShowTopkOnSelected;
 dagHideExcludedTokensInput?.addEventListener('change', () => {
     const hide = dagHideExcludedTokensInput.checked;
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY, hide ? '1' : '0');
-    } catch {
-        /* ignore */
-    }
+    lsWriteBool(GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY, hide, '1');
     dagHandle.setHideExcludedTokens(hide);
 });
 
 dagShowTopkOnSelectedInput?.addEventListener('change', () => {
     const show = dagShowTopkOnSelectedInput.checked;
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY, show ? '1' : '0');
-    } catch {
-        /* ignore */
-    }
+    lsWriteBool(GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY, show, '1');
     dagHandle.setShowTokenInfoOnSelected(show);
 });
 
@@ -802,31 +734,24 @@ setPageOptsGetter(() => {
         layout_spiral: mode === 'spiral',
         propagated: dagRecursiveAttributionInput?.checked ?? false,
         propagated_anim: dagRecursiveEdgeAnimationInput?.checked ?? true,
-        propagated_anim_forward: currentDagRecursiveEdgeAnimationDirection() === 'forward',
+        propagated_anim_backward: currentDagRecursiveEdgeAnimationDirection() === 'backward',
         downstream: dagShowDownstreamInfluenceInput?.checked ?? false,
         token_tooltip: dagShowTopkOnSelectedInput?.checked ?? false,
     };
 });
 
 modelVariantSelect?.addEventListener('change', () => {
-    try {
-        localStorage.setItem(GEN_ATTR_MODEL_VARIANT_STORAGE_KEY, currentModelVariant());
-    } catch {
-        /* ignore */
-    }
+    if (!isSkipChatTemplate()) return;
+    lsWriteString(GEN_ATTR_MODEL_VARIANT_STORAGE_KEY, currentModelVariant());
     syncIdleModelMetric();
     syncSubmitButtonState();
 });
 
 maxTokensInput?.addEventListener('change', () => {
-    try {
-        localStorage.setItem(
-            GEN_ATTR_MAX_TOKENS_STORAGE_KEY,
-            maxTokensInput?.value ?? String(GEN_ATTR_MAX_TOKENS_DEFAULT)
-        );
-    } catch {
-        /* ignore */
-    }
+    lsSet(
+        GEN_ATTR_MAX_TOKENS_STORAGE_KEY,
+        maxTokensInput?.value ?? String(GEN_ATTR_MAX_TOKENS_DEFAULT),
+    );
     syncSubmitButtonState();
 });
 
@@ -837,20 +762,12 @@ dagPlaybackStepMsInput?.addEventListener('change', () => {
         ? clampDagPlaybackStepMs(raw)
         : GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT;
     dagPlaybackStepMsInput.value = String(ms);
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY, String(ms));
-    } catch {
-        /* ignore */
-    }
+    lsSet(GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY, String(ms));
 });
 
 dagReplayModeSelect?.addEventListener('change', () => {
     const mode = currentDagReplayPacingMode();
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY, mode);
-    } catch {
-        /* ignore */
-    }
+    lsWriteString(GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY, mode);
     applyDagReplaySpeedUi();
 });
 
@@ -860,11 +777,7 @@ dagPlaybackTotalSInput?.addEventListener('change', () => {
         ? clampDagPlaybackTotalS(raw)
         : GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT;
     dagPlaybackTotalSInput.value = String(s);
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY, String(s));
-    } catch {
-        /* ignore */
-    }
+    lsSet(GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY, String(s));
 });
 
 function isSkipChatTemplate(): boolean {
@@ -873,6 +786,10 @@ function isSkipChatTemplate(): boolean {
 
 function isGenAttrUseSystemPrompt(): boolean {
     return genAttrUseSystemPromptInput?.checked ?? true;
+}
+
+function isEnableThinking(): boolean {
+    return genAttrEnableThinkingInput?.checked ?? false;
 }
 
 function syncGenAttrSystemPromptSuppressedUi(): void {
@@ -894,6 +811,20 @@ function syncPromptPanelVisibility(): void {
     const skip = isSkipChatTemplate();
     if (rawInputPanel) rawInputPanel.hidden = !skip;
     if (chatInputPanel) chatInputPanel.hidden = skip;
+}
+
+/** Chat template 下 model 恒为 instruct 且下拉仅展示；Raw 下读写 localStorage 偏好。 */
+function syncModelVariantUi(): void {
+    if (!modelVariantSelect) return;
+    const skip = isSkipChatTemplate();
+    if (skip) {
+        modelVariantSelect.disabled = false;
+        modelVariantSelect.value = readStoredModelVariant();
+    } else {
+        modelVariantSelect.disabled = true;
+        modelVariantSelect.value = 'instruct';
+    }
+    syncIdleModelMetric();
 }
 
 function getActivePromptValue(): string {
@@ -947,6 +878,7 @@ function buildGenAttrRunDraftForCache(): GenAttrRunDraft {
               system: systemPromptTextarea?.value ?? '',
               user: userPromptTextarea?.value ?? '',
               useSystem: isGenAttrUseSystemPrompt(),
+              enableThinking: isEnableThinking(),
               ...tfDraftFields,
           };
 }
@@ -1093,25 +1025,13 @@ function scheduleDagLastTokenDwell(action: () => void, dwellMs: number = DAG_LAS
  *   `fullStepCount` 即生成 token 步数；prompt 帧 → step0 占一段，step0 → step1 占一段，依此类推。
  */
 function resolveDagPlaybackStepDelayMsOnPlay(fullStepCount: number): number {
-    if (currentDagReplayPacingMode() === 'step') {
-        const raw = parseInt(dagPlaybackStepMsInput?.value ?? '', 10);
-        const ms = Number.isFinite(raw)
-            ? clampDagPlaybackStepMs(raw)
-            : readStoredDagPlaybackStepMs();
-        if (dagPlaybackStepMsInput) dagPlaybackStepMsInput.value = String(ms);
-        return ms;
-    }
-
-    const rawS = parseInt(dagPlaybackTotalSInput?.value ?? '', 10);
-    const totalS = Number.isFinite(rawS)
-        ? clampDagPlaybackTotalS(rawS)
-        : readStoredDagPlaybackTotalS();
-    if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = String(totalS);
+    const pacing = readDagReplayPacingFromControls({ writeBack: true });
+    if (pacing.mode === 'step') return pacing.stepMs;
 
     // prompt 帧作为等权第一段，共 fullStepCount 段（比原来的 fullStepCount-1 多一段）
     const transitionCount = Math.max(0, fullStepCount);
     if (transitionCount <= 0) return 0;
-    return Math.round((totalS * 1000) / transitionCount);
+    return Math.round((pacing.totalS * 1000) / transitionCount);
 }
 
 function stopDagPlayback(): void {
@@ -1232,6 +1152,7 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
     recursiveAttributionEnabled: initialDagRecursiveAttribution,
     recursiveEdgeBatchAnimationEnabled: initialDagRecursiveEdgeAnimationEnabled,
     recursiveEdgeBatchAnimationDirection: initialDagRecursiveEdgeAnimationDirection,
+    getReplayPacing: readDagReplayPacingFromControls,
     edgeTopPCoverage: initialDagEdgeTopPCoverage,
     onFullscreenError: (message) => showToast(message, 'error'),
     getEffectiveExcludePromptPatternsText: genAttrEffectiveExcludePromptPatternsText,
@@ -1240,11 +1161,7 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
 
 dagLayoutModeSelect?.addEventListener('change', () => {
     const mode = currentDagLayoutMode();
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY, mode);
-    } catch {
-        /* ignore */
-    }
+    lsWriteString(GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY, mode);
     applyDagLayoutModeUi();
     dagHandle.setLayoutMode(mode);
 });
@@ -1259,19 +1176,23 @@ function isDagBusy(): boolean {
 }
 
 /**
- * 非忙状态下 reset + replay + fit，供各设置项切换后复用。忙时为 no-op。
+ * 非忙状态下 reset + replay，按需 fit，供各设置项切换后复用。忙时为 no-op。
  * 默认保留 DAG 选中节点；整页重置 UI 等场景传 `preserveNodeSelection: false`。
+ * `refit: false` 时 `reset(true)` 保留 pan/zoom（仅边集/样式类变更）。
  */
-function tryResetAndReplayDag(opts?: { preserveNodeSelection?: boolean }): void {
+function tryResetAndReplayDag(opts?: { preserveNodeSelection?: boolean; refit?: boolean }): void {
     if (isDagBusy()) return;
+    const refit = opts?.refit !== false;
     const preserveSelection = opts?.preserveNodeSelection !== false;
     const preservedSelectedId = preserveSelection ? dagHandle.getSelectedNodeId() : null;
     const h = runnerHandle;
-    dagHandle.reset();
+    dagHandle.reset(!refit);
     if (h && h.tokenCount > 0) {
         replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
     }
-    dagHandle.fitViewportToContent();
+    if (refit) {
+        dagHandle.fitViewportToContent();
+    }
     if (preservedSelectedId != null) {
         dagHandle.setSelectedNodeId(preservedSelectedId);
     } else {
@@ -1285,11 +1206,7 @@ dagMeasureWidthInput?.addEventListener('change', () => {
         ? clampDagMeasureWidth(raw)
         : GEN_ATTR_DAG_MEASURE_WIDTH_DEFAULT;
     dagMeasureWidthInput.value = String(w);
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY, String(w));
-    } catch {
-        /* ignore */
-    }
+    lsSet(GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY, String(w));
     dagHandle.setMeasureWidthPx(w);
     tryResetAndReplayDag();
 });
@@ -1298,11 +1215,7 @@ dagCompactnessInput?.addEventListener('change', () => {
     const raw = parseFloat(dagCompactnessInput.value);
     const c = Number.isFinite(raw) ? clampDagCompactness(raw) : DAG_COMPACTNESS_DEFAULT;
     dagCompactnessInput.value = String(c);
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY, String(c));
-    } catch {
-        /* ignore */
-    }
+    lsSet(GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY, String(c));
     dagHandle.setDagCompactness(c);
     tryResetAndReplayDag();
 });
@@ -1313,13 +1226,9 @@ dagEdgeTopPCoverageInput?.addEventListener('change', () => {
         ? clampDagEdgeTopPCoverage(raw)
         : DAG_EDGE_TOP_P_COVERAGE_DEFAULT;
     dagEdgeTopPCoverageInput.value = String(c);
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY, String(c));
-    } catch {
-        /* ignore */
-    }
+    lsSet(GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY, String(c));
     dagHandle.setEdgeTopPCoverage(c);
-    tryResetAndReplayDag();
+    tryResetAndReplayDag({ refit: false });
 });
 
 dagLinearArcIntervalInput?.addEventListener('change', () => {
@@ -1328,11 +1237,7 @@ dagLinearArcIntervalInput?.addEventListener('change', () => {
         ? clampLinearArcAdjacentGap(raw)
         : LINEAR_ARC_ADJACENT_GAP_DEFAULT;
     dagLinearArcIntervalInput.value = String(n);
-    try {
-        localStorage.setItem(GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY, String(n));
-    } catch {
-        /* ignore */
-    }
+    lsSet(GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY, String(n));
     dagHandle.setLinearArcAdjacentGapPx(n, { skipRefit: isDagBusy() });
 });
 
@@ -1354,14 +1259,11 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
     const edgeTopPCoverage = Number.isFinite(rawTop)
         ? clampDagEdgeTopPCoverage(rawTop)
         : DAG_EDGE_TOP_P_COVERAGE_DEFAULT;
-    const rawTotal = parseInt(dagPlaybackTotalSInput?.value ?? '', 10);
-    const playbackTotalS = Number.isFinite(rawTotal)
-        ? clampDagPlaybackTotalS(rawTotal)
-        : GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT;
-    const rawStep = parseInt(dagPlaybackStepMsInput?.value ?? '', 10);
-    const playbackStepMs = Number.isFinite(rawStep)
-        ? clampDagPlaybackStepMs(rawStep)
-        : GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT;
+    const {
+        mode: replayPacingMode,
+        stepMs: playbackStepMs,
+        totalS: playbackTotalS,
+    } = readDagReplayPacingFromControls();
     return {
         layoutMode: currentDagLayoutMode(),
         measureWidthPx,
@@ -1378,7 +1280,7 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
         recursiveEdgeBatchAnimationEnabled: dagRecursiveEdgeAnimationInput?.checked ?? true,
         recursiveEdgeBatchAnimationDirection: currentDagRecursiveEdgeAnimationDirection(),
         showTokenInfoOnSelected: dagShowTopkOnSelectedInput?.checked ?? false,
-        replayPacingMode: currentDagReplayPacingMode(),
+        replayPacingMode,
         playbackTotalS,
         playbackStepMs,
         excludePromptPatternsEnabled: genAttrExcludePromptPatternsEnable?.checked ?? true,
@@ -1600,12 +1502,8 @@ const GEN_ATTR_DEMO_UI_LOCAL_STORAGE_KEYS: readonly string[] = [
 ];
 
 function removeGenAttrDemoUiOptionsFromLocalStorage(): void {
-    try {
-        for (const k of GEN_ATTR_DEMO_UI_LOCAL_STORAGE_KEYS) {
-            localStorage.removeItem(k);
-        }
-    } catch {
-        /* ignore */
+    for (const k of GEN_ATTR_DEMO_UI_LOCAL_STORAGE_KEYS) {
+        lsRemove(k);
     }
 }
 
@@ -1646,17 +1544,13 @@ function bindExcludePatternControls(
     enabledKey: string,
 ): void {
     enableEl?.addEventListener('change', () => {
-        try {
-            if (textEl) localStorage.setItem(textKey, textEl.value);
-            localStorage.setItem(enabledKey, enableEl.checked ? '1' : '0');
-        } catch { /* ignore */ }
+        if (textEl) lsSet(textKey, textEl.value);
+        lsWriteBool(enabledKey, enableEl.checked, '1');
         syncGenAttrExcludePatternTextareasDisabled();
         onExcludePatternsEffectiveChange();
     });
     textEl?.addEventListener('blur', () => {
-        try {
-            localStorage.setItem(textKey, textEl.value);
-        } catch { /* ignore */ }
+        lsSet(textKey, textEl.value);
         onExcludePatternsEffectiveChange();
     });
 }
@@ -1675,6 +1569,7 @@ bindExcludePatternControls(
 );
 
 function currentModelVariant(): PredictionAttributeModelVariant {
+    if (!isSkipChatTemplate()) return 'instruct';
     const v = modelVariantSelect?.value;
     return v === 'base' || v === 'instruct' ? v : 'instruct';
 }
@@ -1727,6 +1622,7 @@ function getInputSnapshotForRun(): string {
         useSys: isGenAttrUseSystemPrompt(),
         sys: (systemTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
         user: (userTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
+        think: isEnableThinking(),
         ...runOpts,
     });
 }
@@ -1735,9 +1631,6 @@ function setGenLoading(loading: boolean): void {
     inFlight = loading;
     loaderSmall.style('display', loading ? null : 'none');
     genAttrResultsEl.classed('gen-attr-in-flight', loading);
-    if (!loading) {
-        analyzeProgressEl.text('').style('display', 'none');
-    }
     syncSubmitButtonState();
 }
 
@@ -1790,15 +1683,24 @@ function bindInputsForSync(): void {
 }
 
 if (skipChatTemplateInput) {
-    skipChatTemplateInput.checked = readSkipChatTemplateFromStorage();
+    skipChatTemplateInput.checked = lsReadBool(LS_SKIP_CHAT_TEMPLATE, false);
     skipChatTemplateInput.addEventListener('change', () => {
-        writeSkipChatTemplateToStorage(skipChatTemplateInput.checked);
+        lsWriteBool(LS_SKIP_CHAT_TEMPLATE, skipChatTemplateInput.checked);
         syncPromptPanelVisibility();
         syncGenAttrSystemPromptSuppressedUi();
+        syncModelVariantUi();
+        syncSubmitButtonState();
+    });
+}
+if (genAttrEnableThinkingInput) {
+    genAttrEnableThinkingInput.checked = lsReadBool(GEN_ATTR_ENABLE_THINKING_STORAGE_KEY, false);
+    genAttrEnableThinkingInput.addEventListener('change', () => {
+        lsWriteBool(GEN_ATTR_ENABLE_THINKING_STORAGE_KEY, genAttrEnableThinkingInput.checked);
         syncSubmitButtonState();
     });
 }
 syncPromptPanelVisibility();
+syncModelVariantUi();
 syncGenAttrSystemPromptSuppressedUi();
 genAttrUseSystemPromptInput?.addEventListener('change', () => {
     syncGenAttrSystemPromptSuppressedUi();
@@ -1914,28 +1816,39 @@ async function applyGenAttrCachedRun(
         }
         if (skipChatTemplateInput) {
             skipChatTemplateInput.checked = false;
-            writeSkipChatTemplateToStorage(false);
+            lsWriteBool(LS_SKIP_CHAT_TEMPLATE, false);
             syncPromptPanelVisibility();
             syncGenAttrSystemPromptSuppressedUi();
+            syncModelVariantUi();
         }
         systemTextField.property('value', draft.system ?? '');
         systemPromptTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
         userTextField.property('value', draft.user ?? '');
         userPromptTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
+        if (genAttrEnableThinkingInput) {
+            genAttrEnableThinkingInput.checked = draft.enableThinking ?? false;
+            lsWriteBool(
+                GEN_ATTR_ENABLE_THINKING_STORAGE_KEY,
+                genAttrEnableThinkingInput.checked,
+            );
+        }
     } else {
         if (skipChatTemplateInput) {
             skipChatTemplateInput.checked = true;
-            writeSkipChatTemplateToStorage(true);
+            lsWriteBool(LS_SKIP_CHAT_TEMPLATE, true);
             syncPromptPanelVisibility();
+            syncModelVariantUi();
         }
         rawTextField.property('value', rec.initialContext);
         rawTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
     // 恢复 model / maxTokens（必须在 getInputSnapshotForRun() 之前，使快照与实际一致）
-    if (draft?.model && modelVariantSelect) {
+    if (draft?.mode === 'raw' && draft.model && modelVariantSelect) {
         modelVariantSelect.value = draft.model;
+        lsWriteString(GEN_ATTR_MODEL_VARIANT_STORAGE_KEY, draft.model);
     }
+    syncModelVariantUi();
     if (draft?.maxTokens != null && maxTokensInput) {
         maxTokensInput.value = String(draft.maxTokens);
     }
@@ -2107,11 +2020,7 @@ initQueryHistoryDropdown({
 refreshGenAttrBundledDemoEntriesList();
 syncGenAttrCachedDemosValueDisplay();
 
-// --- 进度与指标 ---
-function showProgress(current: number, total: number): void {
-    analyzeProgressEl.text(`${current} / ${total}`).style('display', null);
-}
-
+// --- 指标 ---
 /** 首步 `token_attribution.length` ≈ 初始 prompt 子词数（与 Chat 展示同形，无需后端 usage） */
 function initialPromptTokensFromFirstStep(step: TokenGenStep): number | undefined {
     const n = step.response.token_attribution?.length;
@@ -2213,12 +2122,15 @@ async function resolveInitialContext(signal: AbortSignal): Promise<string> {
     const user = (userTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
     const useSystem = isGenAttrUseSystemPrompt();
     const systemRaw = (systemTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
-    const promptReq: { model: string; prompt: string; system?: string } = {
+    const promptReq: { model: string; prompt: string; system?: string; enable_thinking?: boolean } = {
         model: currentModelVariant(),
         prompt: user,
     };
     if (useSystem) {
         promptReq.system = systemRaw;
+    }
+    if (isEnableThinking()) {
+        promptReq.enable_thinking = true;
     }
     const assembled = await postCompletionsPrompt(promptReq, { signal });
     return assembled.prompt_used;
@@ -2277,7 +2189,6 @@ async function runGeneration(): Promise<void> {
         const tokenizeModel = currentModelVariant();
         const runDraft = buildGenAttrRunDraftForCache();
         const prompt = getActivePromptValue();
-        analyzeProgressEl.text('Assembling prompt…').style('display', null);
         initialContext = await resolveInitialContext(signal);
         lastRunInitialContext = initialContext;
         lastRunInputSnapshot = getInputSnapshotForRun();
@@ -2301,7 +2212,6 @@ async function runGeneration(): Promise<void> {
         let initialPromptTokens: number | undefined;
         currentRunPromptSpans = [];
         setGenAttrUsageMetric(undefined, 0);
-        showProgress(0, maxTokens);
 
         dagHandle.reset();
         void fetchTokenize(apiBaseForRequests, initialContext, tokenizeModel).then((spans) => {
@@ -2332,7 +2242,6 @@ async function runGeneration(): Promise<void> {
                 const excludeCtx = excludeIntervalContextFromSteps(h.getAllSteps());
                 pushDagFromPreprocess(step, stepIndex, true, excludeCtx);
                 dagPlaybackNextIndex = stepIndex + 1;
-                showProgress(stepIndex + 1, maxTokens);
                 setGenAttrUsageMetric(initialPromptTokens, stepIndex + 1);
                 showAttributionForStepIndex(stepIndex);
             },
@@ -2402,7 +2311,7 @@ function refreshDagForThemeChange(): void {
     stopDagPlayback();
     const h = runnerHandle;
     if (!h || h.tokenCount === 0) return;
-    tryResetAndReplayDag();
+    tryResetAndReplayDag({ refit: false });
 }
 
 const themeManager = initThemeManager(

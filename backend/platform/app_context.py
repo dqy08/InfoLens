@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Optional
 from argparse import Namespace
 
+from model_paths import DEFAULT_BASE_MODEL, DEFAULT_INSTRUCT_MODEL
+
 
 class AppContext:
     """
@@ -54,21 +56,31 @@ class AppContext:
         self.args = args
         self.data_dir = data_dir
         self._model_loading = True  # 初始时处于加载状态
-        self._current_model_name = getattr(args, 'model', None)
+        self._base_model_id = getattr(args, "base_model", None) or DEFAULT_BASE_MODEL
+        self._instruct_model_id = getattr(args, "instruct_model", None) or DEFAULT_INSTRUCT_MODEL
     
     @property
-    def model_name(self) -> str:
-        """当前模型名称"""
-        return self._current_model_name
+    def base_model_id(self) -> str:
+        """当前 base 槽位 CLI 模型 id（信息密度主模型）。"""
+        return self._base_model_id
+
+    @property
+    def instruct_model_id(self) -> str:
+        """当前 instruct 槽位 CLI 模型 id（语义 / 续写）。"""
+        return self._instruct_model_id
     
     @property
     def model_loading(self) -> bool:
         """模型是否正在加载"""
         return self._model_loading
     
-    def set_current_model(self, model_name: str):
-        """设置当前模型名称"""
-        self._current_model_name = model_name
+    def set_base_model_id(self, model_id: str):
+        """设置 base 槽位 CLI 模型 id（如在线切换）。"""
+        self._base_model_id = model_id
+
+    def set_current_model(self, model_id: str):
+        """兼容旧名：同 set_base_model_id。"""
+        self.set_base_model_id(model_id)
     
     def set_model_loading(self, loading: bool):
         """设置模型加载状态"""

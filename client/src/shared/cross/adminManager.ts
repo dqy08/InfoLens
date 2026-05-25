@@ -2,6 +2,8 @@
  * 管理员状态管理模块
  */
 
+import { lsGet, lsRemove, lsSet } from '../storage/localStorageHelpers';
+
 const INFORADAR_ADMIN_TOKEN_KEY = 'admin_token';
 const ADMIN_MODE_KEY = 'is_admin_mode';
 
@@ -12,8 +14,8 @@ export class AdminManager {
 
     private constructor() {
         // 从localStorage恢复状态
-        const savedToken = localStorage.getItem(INFORADAR_ADMIN_TOKEN_KEY);
-        const savedMode = localStorage.getItem(ADMIN_MODE_KEY);
+        const savedToken = lsGet(INFORADAR_ADMIN_TOKEN_KEY);
+        const savedMode = lsGet(ADMIN_MODE_KEY);
         
         if (savedToken) {
             this.adminToken = savedToken;
@@ -66,8 +68,8 @@ export class AdminManager {
             if (result.success) {
                 this.adminToken = token;
                 this.isAdminMode = true;
-                localStorage.setItem(INFORADAR_ADMIN_TOKEN_KEY, token);
-                localStorage.setItem(ADMIN_MODE_KEY, 'true');
+                lsSet(INFORADAR_ADMIN_TOKEN_KEY, token);
+                lsSet(ADMIN_MODE_KEY, 'true');
                 return {
                     success: true,
                     message: result.message
@@ -98,8 +100,8 @@ export class AdminManager {
     public clearAdminToken(): void {
         this.adminToken = null;
         this.isAdminMode = false;
-        localStorage.removeItem(INFORADAR_ADMIN_TOKEN_KEY);
-        localStorage.removeItem(ADMIN_MODE_KEY);
+        lsRemove(INFORADAR_ADMIN_TOKEN_KEY);
+        lsRemove(ADMIN_MODE_KEY);
     }
 
     /**

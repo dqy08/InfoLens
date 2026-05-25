@@ -1,4 +1,10 @@
-"""模型管理模块：主槽位与语义槽位对称配置，权重缓存共用。"""
+"""模型管理：base / instruct 双槽位，HF 权重缓存共用。
+
+加载约定（由简到繁）：
+- ``ensure_slot_weights_loaded(slot)``：仅保证该槽位 HF 权重在 ``_hf_loaded`` 中（归因、tokenize）。
+- ``ensure_slot_ready(slot)``：槽位可推理；base 另挂 ``project_registry`` / QwenLM（信息密度）。
+- 业务入口：信息密度 ``ensure_base_slot_ready()``；语义 / 续写 ``ensure_instruct_slot_ready()``。
+"""
 from enum import Enum
 import threading
 
@@ -7,55 +13,52 @@ from backend.models.project_registry import ModelRegistry
 from backend.models.device import DeviceManager
 from backend.models.model_loader import attn_implementation_for_device, load_causal_lm, load_tokenizer
 
-from model_paths import DEFAULT_MODEL, DEFAULT_SEMANTIC_MODEL, resolve_hf_path
+from model_paths import DEFAULT_BASE_MODEL, DEFAULT_INSTRUCT_MODEL, resolve_hf_path
 
 project_registry = ModelRegistry(REGISTERED_MODELS)
 _init_lock = threading.Lock()
 
-# 统一推理锁：信息密度分析与 Semantic 分析共用，确保模型推理串行执行
+# 统一推理锁：信息密度分析与 instruct 路径共用，确保模型推理串行执行
 inference_lock = threading.Lock()
 
-# 按 HuggingFace 路径去重的已加载模型缓存（主分析 / 语义 / 续写共用）
+# 按 HuggingFace 路径去重的已加载模型缓存（两槽位共用）
 _hf_load_lock = threading.Lock()
 _hf_loaded: dict[str, tuple] = {}
 
 
 class ModelSlot(str, Enum):
-    """与 CLI --model / --semantic_model 对应的两个对等槽位。"""
+    """与 CLI --base_model / --instruct_model 对应的两个对等槽位。"""
 
-    MAIN = "main"
-    SEMANTIC = "semantic"
+    BASE = "base"
+    INSTRUCT = "instruct"
 
 
-# 启动预载与「全部权重」枚举时使用的槽位顺序（对等、无主次）
-CONFIGURED_SLOTS: tuple[ModelSlot, ...] = (ModelSlot.MAIN, ModelSlot.SEMANTIC)
+CONFIGURED_SLOTS: tuple[ModelSlot, ...] = (ModelSlot.BASE, ModelSlot.INSTRUCT)
 
 
 def _resolved_hf_path_for_slot(slot: ModelSlot) -> str:
     """由应用上下文解析槽位对应的 HuggingFace 路径（或本地路径字符串）。"""
-    if slot == ModelSlot.MAIN:
-        try:
-            from backend.platform.app_context import get_app_context
+    from backend.platform.app_context import get_app_context
 
-            context = get_app_context(prefer_module_context=True)
-            model_name = context.model_name or DEFAULT_MODEL
-        except RuntimeError:
-            model_name = DEFAULT_MODEL
-        return resolve_hf_path(model_name)
-    if slot == ModelSlot.SEMANTIC:
-        try:
-            from backend.platform.app_context import get_args
+    try:
+        context = get_app_context(prefer_module_context=True)
+    except RuntimeError:
+        if slot == ModelSlot.BASE:
+            return resolve_hf_path(DEFAULT_BASE_MODEL)
+        if slot == ModelSlot.INSTRUCT:
+            return resolve_hf_path(DEFAULT_INSTRUCT_MODEL)
+        raise ValueError(f"unknown ModelSlot: {slot!r}") from None
 
-            raw = getattr(get_args(), "semantic_model", DEFAULT_SEMANTIC_MODEL)
-        except RuntimeError:
-            raw = DEFAULT_SEMANTIC_MODEL
-        return resolve_hf_path(raw)
+    if slot == ModelSlot.BASE:
+        return resolve_hf_path(context.base_model_id or DEFAULT_BASE_MODEL)
+    if slot == ModelSlot.INSTRUCT:
+        return resolve_hf_path(context.instruct_model_id or DEFAULT_INSTRUCT_MODEL)
     raise ValueError(f"unknown ModelSlot: {slot!r}")
 
 
 def ensure_slot_weights_loaded(slot: ModelSlot):
     """
-    加载指定槽位权重（若未缓存）；主 / 语义完全相同的入口。
+    加载指定槽位权重（若未缓存）。
     返回 (tokenizer, model, device)。
     """
     return ensure_model_loaded(_resolved_hf_path_for_slot(slot))
@@ -99,24 +102,23 @@ def ensure_project_loaded(project_name: str):
     try:
         return project_registry.ensure_loaded(project_name)
     except KeyError:
-        # Re-raise to allow caller to format message uniformly.
         raise
     except Exception as exc:  # noqa: BLE001 - propagate detailed message
         raise RuntimeError(f"模型 '{project_name}' 加载失败: {exc}") from exc
 
 
-def _register_main_qwenlm_if_needed():
+def _register_base_qwenlm_if_needed():
     """
-    信息密度路径：在 MAIN 槽位权重已就绪后，注册 project_registry 中的 QwenLM 实例。
-    语义槽位无对应 registry 包装，故仅此槽位需要。
+    信息密度路径：在 base 槽位权重已就绪后，注册 project_registry 中的 QwenLM 实例。
+    instruct 槽位无对应 registry 包装。
     """
     from backend.platform.app_context import get_app_context
 
     context = get_app_context(prefer_module_context=True)
-    selected_name = context.model_name
+    selected_name = context.base_model_id
 
     if not selected_name:
-        raise ValueError("未指定模型名称")
+        raise ValueError("未指定 base 模型 id")
 
     if selected_name in project_registry:
         _ensure_default_project_ready(selected_name)
@@ -135,7 +137,7 @@ def _register_main_qwenlm_if_needed():
 def preload_all_slots():
     """
     启动预载（非 --no_auto_load）：对 CONFIGURED_SLOTS 各解析 HF 路径，去重后加载全部权重，
-    再注册主槽位 QwenLM 项目。两槽位在「先加载权重」层面完全对等。
+    再注册 base 槽位 QwenLM 项目。
     """
     from backend.platform.app_context import get_app_context
 
@@ -146,45 +148,43 @@ def preload_all_slots():
     with _init_lock:
         for path in paths:
             ensure_model_loaded(path)
-        _register_main_qwenlm_if_needed()
+        _register_base_qwenlm_if_needed()
 
 
 def ensure_slot_ready(slot: ModelSlot):
     """
-    槽位业务就绪（对称 API）：保证该槽位后续推理所需状态已备好。
+    槽位业务就绪：保证该槽位后续推理所需状态已备好。
 
     - 两槽位均先保证 HF 权重已加载，返回 (tokenizer, model, device)。
-    - MAIN 另需将 QwenLM 挂入 project_registry（信息密度管线）；SEMANTIC 无 registry 步骤。
-
-    懒加载时：信息密度调 ensure_main_slot_ready()；语义/续写调 ensure_semantic_slot_ready()。
+    - base 另需将 QwenLM 挂入 project_registry（信息密度）；instruct 无 registry 步骤。
     """
     from backend.platform.app_context import get_app_context
 
     get_app_context(prefer_module_context=True)
 
-    if slot == ModelSlot.MAIN:
+    if slot == ModelSlot.BASE:
         with _init_lock:
-            out = ensure_slot_weights_loaded(ModelSlot.MAIN)
-            _register_main_qwenlm_if_needed()
+            out = ensure_slot_weights_loaded(ModelSlot.BASE)
+            _register_base_qwenlm_if_needed()
             return out
-    if slot == ModelSlot.SEMANTIC:
-        return ensure_slot_weights_loaded(ModelSlot.SEMANTIC)
+    if slot == ModelSlot.INSTRUCT:
+        return ensure_slot_weights_loaded(ModelSlot.INSTRUCT)
     raise ValueError(f"unknown ModelSlot: {slot!r}")
 
 
-def ensure_main_slot_ready():
-    """懒加载首次信息密度：同 ensure_slot_ready(ModelSlot.MAIN)。"""
-    return ensure_slot_ready(ModelSlot.MAIN)
+def ensure_base_slot_ready():
+    """信息密度等业务：``ensure_slot_ready(ModelSlot.BASE)``。"""
+    return ensure_slot_ready(ModelSlot.BASE)
 
 
-def ensure_semantic_slot_ready():
-    """懒加载首次语义类请求：同 ensure_slot_ready(ModelSlot.SEMANTIC)。"""
-    return ensure_slot_ready(ModelSlot.SEMANTIC)
+def ensure_instruct_slot_ready():
+    """语义分析 / 续写：``ensure_slot_ready(ModelSlot.INSTRUCT)``。"""
+    return ensure_slot_ready(ModelSlot.INSTRUCT)
 
 
 def get_current_model_max_token_length() -> int:
     """
-    查询当前生效模型的 max_token_length 参数。
+    查询当前生效 base 模型的 max_token_length 参数。
     优先从已加载的模型实例获取，未加载时取 default_model.default_cpu_machine 配置。
     """
     from backend.platform.app_context import get_app_context
@@ -192,7 +192,7 @@ def get_current_model_max_token_length() -> int:
 
     try:
         context = get_app_context(prefer_module_context=True)
-        model_name = context.model_name or DEFAULT_MODEL
+        model_name = context.base_model_id or DEFAULT_BASE_MODEL
     except RuntimeError:
         model_name = "default_model"
 
@@ -212,22 +212,11 @@ def _ensure_default_project_ready(selected_name: str):
     project_registry.ensure_loaded(selected_name)
 
 
-# 旧名保留（与槽位就绪 API 等价）
-ensure_semantic_loaded = ensure_semantic_slot_ready
-ensure_main_project_ready = ensure_main_slot_ready
-
-def get_semantic_model_display_name() -> str:
-    """返回 semantic 槽位 HuggingFace 路径（用于结果中的 model 字段）"""
-    return _resolved_hf_path_for_slot(ModelSlot.SEMANTIC)
+def get_instruct_model_display_name() -> str:
+    """返回 instruct 槽位 HuggingFace 路径（用于结果中的 model 字段）。"""
+    return _resolved_hf_path_for_slot(ModelSlot.INSTRUCT)
 
 
-def ensure_main_model_loaded():
-    """
-    仅需主模型前向、且不必经过 project_registry 时（如 attribution）：MAIN 槽位权重。
-    """
-    return ensure_slot_weights_loaded(ModelSlot.MAIN)
-
-
-def get_main_model_display_name() -> str:
-    """返回主槽位 HuggingFace 路径（用于结果中的 model 字段）"""
-    return _resolved_hf_path_for_slot(ModelSlot.MAIN)
+def get_base_model_display_name() -> str:
+    """返回 base 槽位 HuggingFace 路径（用于结果中的 model 字段）。"""
+    return _resolved_hf_path_for_slot(ModelSlot.BASE)

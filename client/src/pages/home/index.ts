@@ -5,7 +5,7 @@ import '../../shared/core/d3-polyfill';
 import dagPreviewLight from '../../assets/images/dag.mov';
 import dagPreviewDark from '../../assets/images/dag-dark.mov';
 import dagSpiralPreview from '../../assets/images/dag-spiral.mov';
-import dagCotPreview from '../../assets/images/dag-cot.png';
+import dagCotPreview from '../../assets/images/dag-cot.mov';
 import '../../css/pages/home.scss';
 
 import { initThemeManager, type Theme } from '../../shared/ui/theme';
@@ -43,7 +43,7 @@ function applyGenAttributeNavCardHref(): void {
     });
 }
 
-const GEN_ATTRIBUTE_BADGE_LINK = 'http://xhslink.com/o/A7VLi99aBvG';
+const GEN_ATTRIBUTE_BADGE_LINK = 'https://xhslink.com/m/PwoOhuuhtV';
 
 const DAG_PREVIEW_BY_THEME: Record<Theme, string> = {
     light: dagPreviewLight,
@@ -61,14 +61,14 @@ function initGenAttributeCardCarousel(): (theme: Theme) => void {
     const dots = card?.querySelectorAll<HTMLButtonElement>('.nav-landing-card-carousel-dots button');
     const flowVideo = card?.querySelector<HTMLVideoElement>('[data-slide="flow"] video');
     const spiralVideo = card?.querySelector<HTMLVideoElement>('[data-slide="spiral"] video');
-    const cotImg = card?.querySelector<HTMLImageElement>('[data-slide="cot"] img');
+    const cotVideo = card?.querySelector<HTMLVideoElement>('[data-slide="cot"] video');
 
-    if (!card || !viewport || slides.length === 0 || !dots?.length || !flowVideo || !spiralVideo || !cotImg) {
+    if (!card || !viewport || slides.length === 0 || !dots?.length || !flowVideo || !spiralVideo || !cotVideo) {
         return () => {};
     }
 
     spiralVideo.src = dagSpiralPreview;
-    cotImg.src = dagCotPreview;
+    cotVideo.src = dagCotPreview;
 
     let index = 0;
     let paused = false;
@@ -98,10 +98,13 @@ function initGenAttributeCardCarousel(): (theme: Theme) => void {
     const syncSlideVideos = (): void => {
         flowVideo.pause();
         spiralVideo.pause();
+        cotVideo.pause();
         if (index === 0) {
             void flowVideo.play().catch(() => {});
         } else if (index === 1) {
             void spiralVideo.play().catch(() => {});
+        } else if (index === 2) {
+            void cotVideo.play().catch(() => {});
         }
     };
 

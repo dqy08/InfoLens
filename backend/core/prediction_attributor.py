@@ -2,7 +2,7 @@
 预测归因：对任意上下文的下一个 token 预测，计算指定候选 token 的 logit
 对输入各 token embedding 的梯度，以梯度 L2 范数作为归因分。
 
-由请求参数 `model` 选择权重槽位：base 为主槽位（--model），instruct 为语义槽位（--semantic_model）。
+由请求参数 `model` 选择权重槽位：base 为主槽位（--base_model），instruct 为 instruct 槽位（--instruct_model）。
 """
 
 import math
@@ -15,8 +15,8 @@ from backend.models.device import DeviceManager
 from backend.models.model_manager import (
     ModelSlot,
     ensure_slot_weights_loaded,
-    get_main_model_display_name,
-    get_semantic_model_display_name,
+    get_base_model_display_name,
+    get_instruct_model_display_name,
 )
 from .next_token_topk import decode_topk_ids_to_strings_and_rounded_probs, DEFAULT_NEXT_TOKEN_TOPK
 
@@ -41,9 +41,9 @@ PREDICTION_ATTR_MODEL_INSTRUCT = "instruct"
 
 def slot_for_prediction_attr_model(model: str) -> ModelSlot:
     if model == PREDICTION_ATTR_MODEL_BASE:
-        return ModelSlot.MAIN
+        return ModelSlot.BASE
     if model == PREDICTION_ATTR_MODEL_INSTRUCT:
-        return ModelSlot.SEMANTIC
+        return ModelSlot.INSTRUCT
     raise ValueError(
         f"Unsupported model {model!r}; only {PREDICTION_ATTR_MODEL_BASE!r} and "
         f"{PREDICTION_ATTR_MODEL_INSTRUCT!r} are supported."
@@ -80,7 +80,7 @@ def analyze_prediction_attribution(
     slot = slot_for_prediction_attr_model(model)
     tokenizer, hf_model, device = ensure_slot_weights_loaded(slot)
     model_display = (
-        get_main_model_display_name() if slot == ModelSlot.MAIN else get_semantic_model_display_name()
+        get_base_model_display_name() if slot == ModelSlot.BASE else get_instruct_model_display_name()
     )
 
     if target_prediction is not None and target_token_id is not None:

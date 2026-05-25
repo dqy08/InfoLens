@@ -9,6 +9,7 @@
  */
 
 import { translations } from './translations';
+import { lsGet, lsSet } from '../storage/localStorageHelpers';
 
 export type Language = 'en' | 'zh';
 
@@ -17,7 +18,7 @@ let currentLanguage: Language = 'en';
 
 // 初始化：从 localStorage 读取语言设置
 const LANG_STORAGE_KEY = 'app_language';
-const storedLang = localStorage.getItem(LANG_STORAGE_KEY);
+const storedLang = lsGet(LANG_STORAGE_KEY);
 if (storedLang === 'en' || storedLang === 'zh') {
     currentLanguage = storedLang;
 }
@@ -92,7 +93,7 @@ export function getCurrentLanguage(): Language {
  */
 export function setLanguage(lang: Language): void {
     currentLanguage = lang;
-    localStorage.setItem(LANG_STORAGE_KEY, lang);
+    lsSet(LANG_STORAGE_KEY, lang);
 }
 
 /**

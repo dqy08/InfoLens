@@ -19,7 +19,7 @@ from transformers import StoppingCriteria, StoppingCriteriaList, TextStreamer
 from backend.platform.format import round_to_sig_figs
 from backend.platform.app_context import get_verbose
 from backend.models.device import DeviceManager
-from backend.models.model_manager import ModelSlot, ensure_semantic_slot_ready, ensure_slot_weights_loaded
+from backend.models.model_manager import ModelSlot, ensure_instruct_slot_ready, ensure_slot_weights_loaded
 from .pred_topk_format import pred_topk_pairs_from_probs_1d
 from backend.platform.runtime_config import DEFAULT_TOPK
 
@@ -408,7 +408,7 @@ def core_generate_from_text(
         (续写文本, finish_reason, prompt_tokens, completion_tokens, 续写段 bpe_strings, ttft_s)。
         ttft_s 为自 ``model.generate`` 起至首次产出续写片段的秒数；仅取消时为 ``None``。
     """
-    tokenizer, model, device = ensure_semantic_slot_ready()
+    tokenizer, model, device = ensure_instruct_slot_ready()
     ctx_limit = completion_max_token_length
 
     model.eval()
@@ -518,14 +518,15 @@ def apply_chat_template_for_completion(
     user_content: str,
     system: Optional[str] = None,
     *,
-    slot: ModelSlot = ModelSlot.SEMANTIC,
+    slot: ModelSlot = ModelSlot.INSTRUCT,
+    enable_thinking: bool = False,
 ) -> str:
     """
     将单条 user 文本套用到 tokenizer chat template，返回实际送入 core_generate_from_text 的字符串。
 
     调用方未传入 ``system``（即 ``None``）时仅拼装单条 user 消息；传入字符串时（含 ``\"\"``、仅空白）
     原样作为 chat template 的 system 段，不做裁剪或改写。长度与上下文上限由 ``core_generate_from_text``
-    在生成前校验。slot 控制使用哪个槽位的 tokenizer（base 传 ModelSlot.MAIN）。
+    在生成前校验。slot 控制使用哪个槽位的 tokenizer（base 传 ModelSlot.BASE）。
     """
     tokenizer, _, _ = ensure_slot_weights_loaded(slot)
     if system is None:
@@ -539,7 +540,7 @@ def apply_chat_template_for_completion(
         messages,
         tokenize=False,
         add_generation_prompt=True,
-        enable_thinking=False,
+        enable_thinking=enable_thinking,
     )
 
 

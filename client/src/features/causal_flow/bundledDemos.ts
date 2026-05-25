@@ -7,7 +7,7 @@ import {
     parseGenAttrCachedRunPayload,
     type GenAttrCachedRun,
 } from '../../shared/storage/genAttributeRunCache';
-import { GEN_ATTRIBUTE_BUNDLED_DEMO_SLUGS } from './genAttributeBundledDemoManifest.generated';
+import { GEN_ATTRIBUTE_BUNDLED_DEMOS } from './genAttributeBundledDemoManifest.generated';
 
 const BASE = 'assets/demos/causal_flow/';
 
@@ -28,7 +28,7 @@ export type BundledDemoListEntry = { id: string; label: string };
 
 /** 构建期固定的 bundled demo 列表（与当前 JS 同版本）。 */
 export function getBundledGenAttributeDemoList(): readonly BundledDemoListEntry[] {
-    return GEN_ATTRIBUTE_BUNDLED_DEMO_SLUGS.map((slug) => ({ id: slug, label: slug }));
+    return GEN_ATTRIBUTE_BUNDLED_DEMOS.map(({ slug, label }) => ({ id: slug, label }));
 }
 
 /**

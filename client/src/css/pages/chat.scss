@@ -1,5 +1,6 @@
 // Chat 页：共用左栏见 _chat-input-panel.scss；此处仅右栏续写栈与 Chat 专有控件
 @use 'app-pages';
+@use '../base/narrow-ios-form-font-tail' as ios-form-font;
 
 @use 'chat-input-panel';
 @use 'breakpoints' as *;
@@ -102,3 +103,6 @@
     padding-right: calc(12px + var(--minimap-width));
   }
 }
+
+// 保持在本文件末尾；说明见 responsive.narrow-ios-form-font
+@include ios-form-font.apply;

@@ -10,9 +10,17 @@ print(f"[inforadar] run.py start at {time.strftime('%Y-%m-%d %H:%M:%S')}", flush
 
 import argparse
 import logging
+import sys
 import threading
 
-from model_paths import CLI_MODEL_IDS, DEFAULT_MODEL, DEFAULT_SEMANTIC_MODEL
+from model_paths import (
+    DEFAULT_BASE_MODEL,
+    DEFAULT_INSTRUCT_MODEL,
+    INSTRUCT_MODEL_PATHS,
+    MODEL_PATHS,
+    validate_base_model_id,
+    validate_instruct_model_id,
+)
 
 ENV_HELP = """
 环境变量:
@@ -30,14 +38,20 @@ def _parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--model",
-        default=DEFAULT_MODEL,
-        help=f"模型名称 (默认: {DEFAULT_MODEL})。可用: {', '.join(CLI_MODEL_IDS)}",
+        "--base_model",
+        default=DEFAULT_BASE_MODEL,
+        help=(
+            f"Base 槽位模型 id (默认: {DEFAULT_BASE_MODEL})。"
+            f"可用: {', '.join(MODEL_PATHS.keys())}"
+        ),
     )
     parser.add_argument(
-        "--semantic_model",
-        default=DEFAULT_SEMANTIC_MODEL,
-        help=f"Semantic analysis 模型 id（与 --model 同一套 id，可用列表见 --model）。默认: {DEFAULT_SEMANTIC_MODEL}",
+        "--instruct_model",
+        default=DEFAULT_INSTRUCT_MODEL,
+        help=(
+            f"Instruct 槽位模型 id (默认: {DEFAULT_INSTRUCT_MODEL})。"
+            f"可用: {', '.join(INSTRUCT_MODEL_PATHS.keys())}"
+        ),
     )
     parser.add_argument(
         "--logits_gradient_submode",
@@ -106,6 +120,12 @@ def _load_and_run(args):
 
 def main():
     args = _parse_args()
+    try:
+        args.base_model = validate_base_model_id(args.base_model)
+        args.instruct_model = validate_instruct_model_id(args.instruct_model)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
     _load_and_run(args)
 
 

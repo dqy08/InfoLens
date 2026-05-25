@@ -12,7 +12,7 @@ import {TokenFragmentRect, HighlightStyle} from "./types";
 import {ScrollbarMinimap} from "./ScrollbarMinimap";
 import {isNarrowScreen} from "../core/responsive";
 import {getTokenRenderStyle} from "../cross/tokenRenderStyle";
-import {getInfoDensityRenderDisabled} from "../../features/analysis/infoDensityRenderManager";
+import { getInfoDensityRenderDisabled } from "../../features/analysis/infoDensityRenderManager";
 import type { FrontendToken } from "../../shared/api/GLTR_API";
 
 /**

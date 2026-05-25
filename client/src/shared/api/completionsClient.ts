@@ -68,17 +68,25 @@ export type PostCompletionsPromptOptions = {
  * POST /v1/completions/prompt：将用户原文套用 chat template，返回实际送入续写的完整 prompt。
  */
 export async function postCompletionsPrompt(
-    body: { model: string; prompt: string; system?: string },
+    body: { model: string; prompt: string; system?: string; enable_thinking?: boolean },
     options: PostCompletionsPromptOptions = {}
 ): Promise<{ prompt_used: string }> {
     const { signal } = options;
     const url = URLHandler.basicURL() + COMPLETIONS_PROMPT_PATH;
-    const payload: { model: string; prompt: string; system?: string } = {
+    const payload: {
+        model: string;
+        prompt: string;
+        system?: string;
+        enable_thinking?: boolean;
+    } = {
         model: body.model,
         prompt: body.prompt
     };
     if (body.system !== undefined) {
         payload.system = body.system;
+    }
+    if (body.enable_thinking === true) {
+        payload.enable_thinking = true;
     }
     const res = await fetch(url, {
         method: 'POST',

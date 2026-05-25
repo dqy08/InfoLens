@@ -504,7 +504,7 @@ paths:
               model:
                 type: string
                 enum: [base, instruct]
-                description: base 使用主槽位（--model），instruct 使用语义槽位（--semantic_model）
+                description: base 使用主槽位（--base_model），instruct 使用 instruct 槽位（--instruct_model）
               source_page:
                 type: string
                 description: 发起页面 slug（analysis / chat / attribution / causal_flow）

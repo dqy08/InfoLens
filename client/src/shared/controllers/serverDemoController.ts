@@ -12,6 +12,7 @@ import {
     buildFolderOptions
 } from '../../features/demo/demoPathUtils';
 import { tr, trf } from '../../shared/lang/i18n-lite';
+import { lsGet, lsSet } from '../../shared/storage/localStorageHelpers';
 
 /**
  * 从保存结果中提取文件名，如果不存在则根据名称生成
@@ -40,7 +41,7 @@ export const showDemoNameInput = (
                 const folders = result.folders || [];
                 
                 // 获取上次保存的路径（从 localStorage）
-                const lastSavePath = localStorage.getItem(LAST_SAVE_PATH_KEY);
+                const lastSavePath = lsGet(LAST_SAVE_PATH_KEY);
                 
                 // 使用统一的 buildFolderOptions 函数
                 const { options: selectOptions, defaultPath } = buildFolderOptions(folders, lastSavePath);
@@ -59,7 +60,7 @@ export const showDemoNameInput = (
                         if (value && value.input) {
                             // 保存选择的路径到 localStorage
                             const selectedPath = value.select || '/';
-                            localStorage.setItem(LAST_SAVE_PATH_KEY, selectedPath);
+                            lsSet(LAST_SAVE_PATH_KEY, selectedPath);
                             resolve({ name: value.input, path: selectedPath });
                         } else {
                             resolve(null);
@@ -161,7 +162,7 @@ export const handleServerDemoSave = async (options: ServerDemoSaveOptions): Prom
         result = { name: presetSaveInfo.name.trim(), path: normalizedPath };
         // 记录最近路径
         if (normalizedPath) {
-            localStorage.setItem(LAST_SAVE_PATH_KEY, normalizedPath);
+            lsSet(LAST_SAVE_PATH_KEY, normalizedPath);
         }
     } else {
         const defaultName = getDefaultDemoName(currentData, textFieldValue, currentFileName);

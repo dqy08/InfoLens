@@ -3,6 +3,7 @@
 @use "attribution-inspector";
 @use "chat-input-panel";
 @use "breakpoints" as *;
+@use '../base/narrow-ios-form-font-tail' as ios-form-font;
 
 // 桌面端：覆盖全局 min-height:100%，使 #results 按内容收缩（debug 面板紧跟其后）
 @media (min-width: $breakpoint-tablet) {
@@ -116,7 +117,6 @@
 .attribution-exclude-prompt-patterns-input {
   width: 100%;
   box-sizing: border-box;
-  font-size: 9pt;
   padding: 6px 8px;
   border: 1px solid var(--input-border);
   border-radius: 4px;
@@ -128,3 +128,6 @@
     cursor: not-allowed;
   }
 }
+
+// 保持在本文件末尾；说明见 responsive.narrow-ios-form-font
+@include ios-form-font.apply;

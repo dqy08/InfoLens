@@ -33,6 +33,8 @@ export type GenAttrRunDraft = {
     user?: string;
     /** chat 模式：是否启用 system prompt */
     useSystem?: boolean;
+    /** chat 模式：是否启用 Qwen3 thinking chat template */
+    enableThinking?: boolean;
     /** Teacher forcing 续写原文；非空则表示已启用 teacher forcing。旧缓存无此字段时从根级 teacherForcingContinuation 降级读取。 */
     teacherForcing?: string;
     /** teacher forcing 结束后是否停止（而非继续 top-1 生成）。 */

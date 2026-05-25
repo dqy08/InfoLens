@@ -47,6 +47,6 @@ def client_activity_report(activity_body=None):
     if _sparse_page_activity_log_cum(cum):
         log_request(
             "📄 页面活跃",
-            f"path={log_path!r} total_sec={cum} delta_sec={dlt}",
+            f"path(sampled)={log_path!r} total_sec={cum} delta_sec={dlt}",
         )
     return {"ok": True}

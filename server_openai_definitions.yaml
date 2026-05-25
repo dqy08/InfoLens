@@ -24,6 +24,9 @@ definitions:
       system:
         description: 可选；chat template 的 system 段。省略时不拼装 system（仅 user）；传入字符串时原样作为 system 段（含空字符串、仅空白等）
         type: string
+      enable_thinking:
+        description: 可选；是否启用 Qwen3 chat template 的 thinking 模式；省略或 false 时不插入 thinking 块
+        type: boolean
 
   OpenAICompletionsPromptResponse:
     type: object

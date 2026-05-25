@@ -29,8 +29,8 @@ export const translations: Translations = {
         '- attribute a predicted token to its context': '- 将预测 token 归因到上下文',
         'LLM Causal Flow': 'LLM Causal Flow 因果流',
         '- explore the context-attribution DAG': '- 探索上下文归因的 DAG 关系图',
-        '100K+ plays on RedNote': '小红书 10万+次播放',
-        'Go to demo on RedNote: xhslink.com/o/A7VLi99aBvG': '在小红书打开demo：xhslink.com/o/A7VLi99aBvG）',
+        '500K+ plays on RedNote': '小红书 50万+次播放',
+        'Go to demo on RedNote: xhslink.com': '在小红书打开demo：xhslink.com',
         // 合成标题串（<title>）：英文 key 与 injectPageMeta documentTitleEn 拼接一致
         'Info Lens - A toolbox for exploring the informational nature of LLMs and language': 'Info Lens 信息透镜 - 用于探索 LLM 与语言的信息本质的工具箱',
         "Info Highlight - highlight the 'informative' parts": 'Info Highlight 信息高亮 - 高亮“信息量大”的地方',
@@ -122,8 +122,15 @@ export const translations: Translations = {
         'Cached run not found': '未找到该条生成缓存，可能已被删除',
         'Cached run not found (link may be expired)': '未找到该条生成缓存（分享链接可能已过期）',
         'Reset UI options': '重置界面选项',
-        'Restore DAG options, replay speed, exclusions, etc. to defaults and clear saved preferences for those controls.':
-            '将 DAG 参数、回放速度、排除正则等恢复为默认值，并清除这些控件的本地保存项。',
+        'Restore DAG options, play speed, exclusions, etc. to defaults and clear saved preferences for those controls.':
+            '将 DAG 参数、播放速度、排除正则等恢复为默认值，并清除这些控件的本地保存项。',
+        'Play speed': '播放速度',
+        'Total duration or per-step delay. DAG Play uses equal steps or a fixed step interval; focus-chain animation scales each step by attribution weight.':
+            '总时长或单步延时。DAG 播放（▶）按步均分或固定单步间隔；焦点传播链动画按各层归因权重缩放每步停留时间。',
+        'Total seconds. DAG Play divides evenly across steps; focus-chain animation splits by layer weight. Saved locally; applied when you press Play or select a focus node.':
+            '总秒数。DAG 播放（▶）在步间均分；焦点传播链动画按层权重分配。本地保存；在点击播放或选中焦点节点时生效。',
+        'Milliseconds per step. DAG Play uses this fixed interval; focus-chain animation multiplies by layer weight. Saved locally; applied when you press Play or select a focus node.':
+            '每步毫秒数。DAG 播放（▶）使用固定间隔；焦点传播链动画乘以层权重。本地保存；在点击播放或选中焦点节点时生效。',
         'Cached history': '历史缓存',
         'Cached demo': '示例缓存',
         'Demo not found': '未找到该示例缓存',
@@ -131,6 +138,7 @@ export const translations: Translations = {
         'History': '输入历史',
         'Raw prompt': 'Raw prompt 原始提示词',
         'Raw prompt mode': 'Raw prompt mode 原始提示词模式',
+        'Enable thinking': 'Enable thinking 启用思考模式',
         'Teacher forcing': 'Teacher forcing 强制续写归因',
         'Forced continuation': 'Forced continuation 期望续写',
         'Stop after teacher forcing': '续写结束后停止（不继续 top-1 生成）',

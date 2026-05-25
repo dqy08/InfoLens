@@ -3,6 +3,8 @@
  * 使用 CSS 变量和 matchMedia API 实现单一数据源
  */
 
+import { lsGet, lsRemove, lsSet } from '../storage/localStorageHelpers';
+
 /**
  * 从 CSS 变量获取断点值
  */
@@ -46,7 +48,7 @@ export const FORCE_NARROW_STORAGE_KEY = 'info_radar_force_narrow';
 export const FORCE_NARROW_CHANGE_EVENT = 'force-narrow-change';
 
 export const getForceNarrowScreen = (): boolean =>
-  localStorage.getItem(FORCE_NARROW_STORAGE_KEY) === '1';
+  lsGet(FORCE_NARROW_STORAGE_KEY) === '1';
 
 export const syncForceNarrowAttribute = (): void => {
   const root = document.documentElement;
@@ -70,8 +72,8 @@ export const initForceNarrowFromStorage = (): void => {
 };
 
 export const setForceNarrowScreen = (enabled: boolean): void => {
-  if (enabled) localStorage.setItem(FORCE_NARROW_STORAGE_KEY, '1');
-  else localStorage.removeItem(FORCE_NARROW_STORAGE_KEY);
+  if (enabled) lsSet(FORCE_NARROW_STORAGE_KEY, '1');
+  else lsRemove(FORCE_NARROW_STORAGE_KEY);
   syncForceNarrowAttribute();
   window.dispatchEvent(new Event(FORCE_NARROW_CHANGE_EVENT));
   window.dispatchEvent(new Event('resize'));

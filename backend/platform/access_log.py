@@ -270,6 +270,7 @@ def log_openai_completions_prompt_request(
     model: str,
     user_prompt: str,
     system: Optional[str] = None,
+    enable_thinking: bool = False,
     client_ip: str = None,
 ) -> None:
     """记录 POST /v1/completions/prompt（仅拼装 chat template，不分配 req_id）。"""
@@ -277,8 +278,11 @@ def log_openai_completions_prompt_request(
 
     up = _log_str_preview(user_prompt, preview)
     if system is None:
-        details = f"model='{model}', user_prompt='{up}'"
+        details = f"model='{model}', enable_thinking={enable_thinking}, user_prompt='{up}'"
     else:
-        details = f"model='{model}', system='{_log_str_preview(system, preview)}', user_prompt='{up}'"
+        details = (
+            f"model='{model}', enable_thinking={enable_thinking}, "
+            f"system='{_log_str_preview(system, preview)}', user_prompt='{up}'"
+        )
     log_request("📥 openai completions/prompt 请求", details, client_ip)
 

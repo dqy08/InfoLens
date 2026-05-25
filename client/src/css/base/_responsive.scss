@@ -24,6 +24,38 @@
   box-sizing: border-box;
 }
 
+// --- 窄屏表单字号（防 iOS 聚焦自动放大）---
+//
+// 背景：iOS Safari 在可编辑控件 computed font-size < 16px 时，聚焦常会整页 zoom。
+//
+// 约定：
+// - 窄屏（≤$breakpoint-mobile）与「强制窄屏」下，input/textarea/select 统一 16px（不用 viewport 禁缩放）。
+// - 桌面端仍可用 9pt 等紧凑字号；弹窗表单见 dialog.scss（全宽 16px，与窄屏无关）。
+// - 页面 SCSS 勿对表单写 font-size < 16px；布局类名、padding 不受限。小字号请用于 label/说明，勿用于可编辑控件。
+//
+// 实现注意：
+// - 本 mixin 须在子页 SCSS 最后生效：各 pages/*.scss 末尾 @include narrow-ios-form-font-tail.apply
+//   （若只写在 narrow-app-layout 里，会被同文件后加载的 .foo-input { font-size: 9pt } 盖住）。
+// - 选择器含 textarea[class] 等，用于压过带 class 的页面规则；不要改回仅 .textarea-wrapper textarea。
+// - 新增子页（@use app-pages）时，记得在文件末尾加上述 tail include。
+//
+@mixin narrow-ios-form-font($root) {
+  #{$root} textarea,
+  #{$root} textarea[class],
+  #{$root} select,
+  #{$root} select[class],
+  #{$root} input[type="text"],
+  #{$root} input[type="url"],
+  #{$root} input[type="search"],
+  #{$root} input[type="email"],
+  #{$root} input[type="number"],
+  #{$root} input[type="tel"],
+  #{$root} input[type="password"],
+  #{$root} input[class] {
+    font-size: 16px;
+  }
+}
+
 // 窄屏布局（视口 ≤767px 与设置「强制窄屏」共用）
 @mixin narrow-app-layout($root) {
   #{$root} {
@@ -164,18 +196,6 @@
 
   #{$root} .textarea-wrapper textarea {
     min-height: 80px;
-    font-size: 16px;  // 设置为至少 16px，防止 iOS 自动缩放
-  }
-
-  #{$root} input[type="text"],
-  #{$root} input[type="url"],
-  #{$root} input[type="search"],
-  #{$root} input[type="email"],
-  #{$root} input[type="number"],
-  #{$root} input[type="tel"],
-  #{$root} input[type="password"],
-  #{$root} select {
-    font-size: 16px;  // 所有文本类输入控件在移动端统一使用 16px
   }
 }
 

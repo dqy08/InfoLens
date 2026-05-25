@@ -29628,11 +29628,11 @@
     "enableThinking": false
   },
   "demoUiOptions": {
-    "layoutMode": "text-flow",
+    "layoutMode": "linear-arc",
     "measureWidthPx": 500,
     "dagCompactness": 0.9,
     "linearArcAdjacentGapPx": 0,
-    "hideExcludedTokens": false,
+    "hideExcludedTokens": true,
     "edgeTopPCoverage": 0.4,
     "nodeCiVisualScaleEnabled": true,
     "decayAttributionToHighSurprisalTargetEnabled": true,
@@ -29643,7 +29643,7 @@
     "recursiveEdgeBatchAnimationDirection": "forward",
     "showTokenInfoOnSelected": true,
     "replayPacingMode": "total",
-    "playbackTotalS": 6,
+    "playbackTotalS": 3,
     "playbackStepMs": 200,
     "excludePromptPatternsEnabled": true,
     "excludePromptPatternsText": "先一步步推理再回答。\n#comment# use '#comment#' to comment lines; support regex\n<\\|im_start\\|>system\\n\n<\\|im_start\\|>user\\n\n<\\|im_start\\|>assistant\\n\n<\\|im_start\\|>assistant\\n\\n\n<\\|im_end\\|>\\n\n<think>\\n\\n\n</think>\\n\\n\n<\\|im_start\\|>system\\n[\\s\\S]*?<\\|im_end\\|>#comment# all system prompt",

@@ -3,6 +3,7 @@
  */
 
 import { tr } from '../../shared/lang/i18n-lite';
+import { lsGet, lsSet } from '../storage/localStorageHelpers';
 
 /** 首页语义搜索等默认使用 */
 export const SEMANTIC_QUERY_HISTORY_KEY = 'info_radar_query_search_history';
@@ -49,7 +50,7 @@ function shouldTouchLinkedMru(applyHistoryOnHover: boolean, fromHover: boolean):
 
 function load(storageKey: string): string[] {
     try {
-        const raw = localStorage.getItem(storageKey);
+        const raw = lsGet(storageKey);
         if (!raw) return [];
         const parsed = JSON.parse(raw);
         if (!Array.isArray(parsed)) return [];
@@ -68,12 +69,12 @@ function load(storageKey: string): string[] {
 
 function remove(storageKey: string, query: string): void {
     const list = load(storageKey).filter((s) => s !== query);
-    localStorage.setItem(storageKey, JSON.stringify(list));
+    lsSet(storageKey, JSON.stringify(list));
 }
 
 export function saveHistory(query: string, storageKey: string = SEMANTIC_QUERY_HISTORY_KEY): void {
     const list = [query, ...load(storageKey).filter((s) => s !== query)].slice(0, MAX);
-    localStorage.setItem(storageKey, JSON.stringify(list));
+    lsSet(storageKey, JSON.stringify(list));
 }
 
 export interface InitQueryHistoryDropdownOptions {
