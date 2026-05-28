@@ -182,9 +182,9 @@
                                 </select>
                             </span>
                             <span class="semantic-submode-group">
-                                <label class="semantic-submode-label" for="gen_attr_max_tokens">Max tokens</label>
+                                <label class="semantic-submode-label" for="gen_attr_max_tokens" data-i18n>Max new tokens</label>
                                 <input type="number" id="gen_attr_max_tokens" class="gen-attr-max-tokens-input"
-                                    value="100" min="1" max="500" step="1">
+                                    value="200" min="1" max="300" step="1" required>
                             </span>
                         </div>
                         <div class="button-group">
@@ -269,13 +269,15 @@
                         </span>
                     </div>
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
-                        <span class="semantic-submode-group">
+                        <span class="semantic-submode-group semantic-submode-group--emphasis">
                             <label class="semantic-submode-label" for="gen_attr_dag_edge_top_p_coverage" data-i18n>Attribution top-p coverage</label>
                             <input type="number" id="gen_attr_dag_edge_top_p_coverage" class="gen-attr-dag-measure-width-input"
                                 value="0.7" min="0.05" max="1" step="0.05"
                                 title="Coverage is the cumulative mass share within each generation step's Top-N candidate pool (after sorting candidates into the pool and normalizing mass inside that pool). Higher values keep more incoming edges. The denominator is this pool only, not every token-attribution entry returned for the step."
                                 data-i18n="title">
                         </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
                         <span class="semantic-submode-group semantic-submode-group--emphasis">
                             <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_recursive_attribution"
@@ -284,7 +286,7 @@
                                 Propagated attribution mode
                             </label>
                         </span>
-                        <span class="semantic-submode-group" id="gen_attr_dag_recursive_edge_animation_group" hidden>
+                        <span class="semantic-submode-group semantic-submode-group--emphasis" id="gen_attr_dag_recursive_edge_animation_group" hidden>
                             <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_recursive_edge_animation" checked
                                     title="When checked, propagated incoming edges are shown batch-by-batch with the configured direction."
@@ -293,7 +295,7 @@
                             </label>
                         </span>
                         <span class="semantic-submode-group" id="gen_attr_dag_recursive_edge_animation_direction_group" hidden>
-                            <label class="semantic-submode-label" for="gen_attr_dag_recursive_edge_animation_direction">Animation direction</label>
+                            <label class="semantic-submode-label" for="gen_attr_dag_recursive_edge_animation_direction">Direction</label>
                             <select id="gen_attr_dag_recursive_edge_animation_direction" class="semantic-submode-select"
                                 title="Choose one direction for propagated-edge batch animation."
                                 data-i18n="title">

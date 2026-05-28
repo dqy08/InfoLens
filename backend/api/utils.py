@@ -68,6 +68,13 @@ def get_admin_token() -> str:
     return os.environ.get('INFORADAR_ADMIN_TOKEN')
 
 
+def request_has_valid_admin() -> bool:
+    """当前 HTTP 请求是否携带有效的 X-Admin-Token。"""
+    token = request.headers.get('X-Admin-Token') or ''
+    is_valid, _ = validate_admin_token(token)
+    return is_valid
+
+
 def validate_admin_token(request_token: str) -> tuple[bool, str]:
     """
     验证管理员token是否有效

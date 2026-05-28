@@ -12,11 +12,15 @@ import {
 } from './genAttributeDagPreprocess';
 import {
     DAG_EDGE_MIN_NORMALIZED_SCORE,
-    DAG_EDGE_RENDER_OPACITY_FLOOR,
     DAG_MIN_ATTRIBUTION_SHARE,
     DAG_NODE_STROKE_OPACITY_BASE,
 } from './genAttributeDagEdgeDisplay';
 import {
+    buildMaxNormalizedRenderStrengthByKey,
+    normalizeEdgeRenderOpacity,
+} from './genAttributeDagEdgeRenderStrength';
+import {
+    backwardSlideIncomingEdgeKeysForBatch,
     createDagRecursiveEdgeAnimationController,
     type DagRecursiveEdgeReplayPacing,
     maxHighlightEdgeShare,
@@ -214,7 +218,7 @@ type DagNodeAttrs = {
      * 下台阶等处用 {@link dagStepDownEffectiveCiRatio}(dagTargetProb)（高置信 p>p₁ 为 0；与「关闭 CI 视觉」无关）；
      */
     dagTargetProb?: number;
-    /** {@link visualizeSpecialChars}（DAG：仅「空格后是 [A-Za-z0-9]」保留空格，其余空格为 ·），建点后不变 */
+    /** {@link visualizeSpecialChars}（DAG 节点：词界空格 + 不可打印为 `[]`），建点后不变；边 tooltip 用完整 `[hex]` */
     displayLabel: string;
     /** 悬停 / 选中焦点时 Top‑K tooltip；仅生成节点（`step >= 0`） */
     gltrTooltipToken?: FrontendToken;
@@ -269,21 +273,6 @@ function dagLinkEndpointKey(source: string, target: string): string {
 /** 节点 target 端 MI ratio（与 tooltip「Target MI ratio」同源；与 decay 开关无关）。 */
 function nodeTargetMiRatio(node: DagNode): number {
     return computeMutualInformationRatio(node.dagTargetProb);
-}
-
-/**
- * 池内 max 归一后的 `stroke-opacity`；最强边刻度为 {@link maxOpacity}（默认 1）。
- * 按实际值计算后，最终不低于 {@link DAG_EDGE_RENDER_OPACITY_FLOOR}，防止过淡不可见。
- */
-function normalizeEdgeRenderOpacity(share: number, maxShare: number, maxOpacity = 1): number {
-    if (!Number.isFinite(share) || share <= 0) return 0;
-    const cap = Number.isFinite(maxOpacity) && maxOpacity > 0 ? maxOpacity : 1;
-    const scaled =
-        !Number.isFinite(maxShare) || maxShare <= 0
-            ? Math.min(cap, share)
-            : Math.min(cap, (share / maxShare) * cap);
-    if (scaled <= 0) return 0;
-    return Math.max(DAG_EDGE_RENDER_OPACITY_FLOOR, scaled);
 }
 
 /**
@@ -350,23 +339,6 @@ function computeSteadyStateStayShareById(
         if (stay >= DAG_MIN_ATTRIBUTION_SHARE) byNodeId.set(nodeId, stay);
     }
     return byNodeId;
-}
-
-/** 池内 max 归一后的 render 强度；{@link maxOpacity} 为链内最强边刻度（蓝入边见 {@link refreshNodeLinkHighlight}，默认 1）。 */
-function buildMaxNormalizedRenderStrengthByKey(
-    sharesByKey: Map<string, number>,
-    maxOpacity = 1,
-    maxShareOverride?: number,
-): Map<string, number> {
-    const maxShare =
-        maxShareOverride != null && Number.isFinite(maxShareOverride) && maxShareOverride > 0
-            ? maxShareOverride
-            : maxHighlightEdgeShare(sharesByKey);
-    const byKey = new Map<string, number>();
-    for (const [key, share] of sharesByKey) {
-        byKey.set(key, normalizeEdgeRenderOpacity(share, maxShare, maxOpacity));
-    }
-    return byKey;
 }
 
 /** 递归链候选节点描边强度：stay 池内 max 归一后映射到 `[{@link DAG_NODE_STROKE_OPACITY_BASE}, 1]`。 */
@@ -722,9 +694,10 @@ function buildLinkTitleText(snapshot: DagLinkTitleSnapshot): string {
         `Link strength: ${formatTooltipLinkStrength(snapshot.linkStrength)}`,
     ];
 
+    const dagTooltipLabelOpts = { spaceDotExceptBeforeAsciiLetterOrNumber: true as const };
     return [
-        `From:\n${snapshot.src.displayLabel}\nOffset: ${formatNodeOffsetRange(snapshot.src.id)}`,
-        `To:\n${snapshot.tgt.displayLabel}\nOffset: ${formatNodeOffsetRange(snapshot.tgt.id)}`,
+        `From:\n${visualizeSpecialChars(snapshot.src.label, dagTooltipLabelOpts)}\nOffset: ${formatNodeOffsetRange(snapshot.src.id)}`,
+        `To:\n${visualizeSpecialChars(snapshot.tgt.label, dagTooltipLabelOpts)}\nOffset: ${formatNodeOffsetRange(snapshot.tgt.id)}`,
         metrics.join('\n'),
     ].join('\n\n');
 }
@@ -792,6 +765,7 @@ function resolveDagLinkHighlightDisplay(
     grayRenderByKey: Map<string, number>,
     incomingHighlightRenderByKey: Map<string, number>,
     downstreamHighlightRenderByKey: Map<string, number>,
+    backwardSlideIncomingRenderByKey: Map<string, number> | null,
 ): DagLinkHighlightDisplay {
     const directStrength = directAttributionStrength(d);
     const grayRender = grayRenderByKey.get(edgeKey) ?? directStrength;
@@ -808,9 +782,14 @@ function resolveDagLinkHighlightDisplay(
 
         const incomingShare = focusState.incomingEdgeShareByKey.get(edgeKey);
         if (incomingShare != null) {
+            const backwardSlideRender = backwardSlideIncomingRenderByKey?.get(edgeKey);
             return {
-                stroke: `var(${CSS_VAR_DAG_HIGHLIGHT_LINE_IN})`,
-                renderStrength: incomingHighlightRenderByKey.get(edgeKey)!,
+                stroke:
+                    backwardSlideRender != null
+                        ? `var(${CSS_VAR_DAG_HIGHLIGHT_LINE_OUT})`
+                        : `var(${CSS_VAR_DAG_HIGHLIGHT_LINE_IN})`,
+                renderStrength:
+                    backwardSlideRender ?? incomingHighlightRenderByKey.get(edgeKey)!,
                 linkStrength: incomingShare,
                 recursiveAttributionShare: recursiveAttributionEnabled ? incomingShare : undefined,
             };
@@ -1181,6 +1160,11 @@ export function initGenAttributeDagView(
     let hoveredId: string | null = null;
     /** 最近一次 {@link refreshNodeLinkHighlight} 计算出的归因状态（基于 {@link effectiveFocusId}）；tooltip 用于展示归因份额 */
     let currentFocusState: FocusAttributionState | null = null;
+    /** 传播链动画进行中 tooltip 锚点；播放结束后为 null，恢复 target / hover。 */
+    let propagationPlaybackTooltip: {
+        nodeId: string;
+        direction: DagRecursiveEdgeAnimationDirection;
+    } | null = null;
 
     const focusAttributionCtx = () => ({
         nodesSortedByStepDesc,
@@ -1217,10 +1201,35 @@ export function initGenAttributeDagView(
         return selectedId ?? hoveredId;
     }
 
-    /** tooltip 锚点：悬浮任意节点时展示该节点；无悬浮则展示焦点节点（选中 > 无） */
+    /** 传播链动画当前帧应对应 tooltip 的节点；非播放中返回 null。 */
+    function resolvePropagationPlaybackTooltipNodeId(
+        animOverlay: ReturnType<typeof recursiveEdgeAnimation.resolveRenderOverlay>,
+        focusId: string | null,
+    ): string | null {
+        if (focusId == null || !animOverlay.animationFrontierPartial || animOverlay.anim == null) {
+            return null;
+        }
+        const { anim, forwardPromptOnlyFrame, propagationSlideTgtId, nodeStrokeShareById } = animOverlay;
+        if (forwardPromptOnlyFrame) {
+            if (nodeStrokeShareById != null) {
+                for (const id of nodeStrokeShareById.keys()) {
+                    if (graph.hasNode(id) && (graph.getNodeAttributes(id) as DagNode).step === -1) {
+                        return id;
+                    }
+                }
+            }
+            return nodes.find((n) => n.step === -1)?.id ?? null;
+        }
+        return propagationSlideTgtId ?? anim.plan.batches[anim.batchIndex]?.tgtId ?? null;
+    }
+
+    /** tooltip 锚点：传播播放（忽略 hover）> hover > 焦点 */
     function tooltipFocusId(): string | null {
-        if (hoveredId != null) {
-            return graph.hasNode(hoveredId) ? hoveredId : null;
+        if (propagationPlaybackTooltip != null && graph.hasNode(propagationPlaybackTooltip.nodeId)) {
+            return propagationPlaybackTooltip.nodeId;
+        }
+        if (hoveredId != null && graph.hasNode(hoveredId)) {
+            return hoveredId;
         }
         return effectiveFocusId();
     }
@@ -1282,6 +1291,15 @@ export function initGenAttributeDagView(
         svg.attr('width', w).attr('height', h);
     }
 
+    /** 传播归因 + backward：仅 UI 路径反向，不改边数据与归因 key。 */
+    function linkEndpointsForPaint(d: DagLink): { src: DagNode; tgt: DagNode } {
+        const src = endpointNode(d.source, graph);
+        const tgt = endpointNode(d.target, graph);
+        const flipArrows =
+            recursiveAttributionEnabled && recursiveEdgeAnimation.getDirection() === 'backward';
+        return flipArrows ? { src: tgt, tgt: src } : { src, tgt };
+    }
+
     function paint(): void {
         syncNodeStrokeRects(nodeSel, displayScale);
         if (layoutMode === 'linear-arc' || layoutMode === 'linear-arc-step-down') {
@@ -1294,10 +1312,7 @@ export function initGenAttributeDagView(
                 nodes: layoutNodes,
                 adjacentGapPx: linearArcAdjacentGapPx,
                 variant: layoutMode === 'linear-arc-step-down' ? 'step-down' : 'flat',
-                getLinkNodes: (d) => ({
-                    src: endpointNode(d.source, graph),
-                    tgt: endpointNode(d.target, graph),
-                }),
+                getLinkNodes: linkEndpointsForPaint,
             });
         } else if (layoutMode === 'spiral') {
             const layoutNodes = hideExcludedTokens
@@ -1308,20 +1323,14 @@ export function initGenAttributeDagView(
                 nodeSel,
                 nodes: layoutNodes,
                 linkEndInsetPx,
-                getLinkNodes: (d) => ({
-                    src: endpointNode(d.source, graph),
-                    tgt: endpointNode(d.target, graph),
-                }),
+                getLinkNodes: linkEndpointsForPaint,
             });
         } else {
             paintTextFlowLayout({
                 linkSel,
                 nodeSel,
                 linkEndInsetPx,
-                getLinkNodes: (d) => ({
-                    src: endpointNode(d.source, graph),
-                    tgt: endpointNode(d.target, graph),
-                }),
+                getLinkNodes: linkEndpointsForPaint,
             });
         }
         syncNodeHitTransforms();
@@ -1374,6 +1383,11 @@ export function initGenAttributeDagView(
             recursiveAttributionEnabled,
             ctx: focusAttributionCtx(),
         });
+        const playbackNodeId = resolvePropagationPlaybackTooltipNodeId(animOverlay, focusId);
+        propagationPlaybackTooltip =
+            playbackNodeId != null && animOverlay.anim != null
+                ? { nodeId: playbackNodeId, direction: animOverlay.anim.direction }
+                : null;
         const linkFocusState = animOverlay.linkFocusState ?? focusState;
         const focusNodeIds = focusState?.activeNodeIds ?? null;
         const nodeStrokeShareById = animOverlay.nodeStrokeShareById;
@@ -1408,8 +1422,42 @@ export function initGenAttributeDagView(
                 : buildMaxNormalizedRenderStrengthByKey(focusState.downstreamEdgeStrengthByKey);
         grayRenderCache ??= buildGrayRenderStrengthByEdgeKey(graph, incomingLinksByTarget);
         const grayRenderByKey = grayRenderCache;
-        const forwardSlideTgtId = animOverlay.forwardSlideTgtId;
-        const forwardPromptOnlyFrame = animOverlay.forwardPromptOnlyFrame;
+        const {
+            propagationSlideTgtId,
+            forwardPromptOnlyFrame,
+            deferFocusHighlightDuringAnim,
+            suppressFocusSelectedStroke,
+            incomingShareForRender,
+            anim,
+            animationFrontierPartial,
+        } = animOverlay;
+        let backwardSlideIncomingRenderByKey: Map<string, number> | null = null;
+        if (
+            animationFrontierPartial &&
+            anim?.direction === 'backward' &&
+            !forwardPromptOnlyFrame &&
+            focusId != null
+        ) {
+            const slideKeys = backwardSlideIncomingEdgeKeysForBatch(
+                anim.plan,
+                anim.batchIndex,
+                focusId,
+            );
+            if (slideKeys.size > 0) {
+                backwardSlideIncomingRenderByKey = buildMaxNormalizedRenderStrengthByKey(
+                    incomingShareForRender,
+                    focusTargetMiRatio,
+                    undefined,
+                    slideKeys,
+                );
+            }
+        }
+        const isPropagationSlide = (d: DagNode): boolean =>
+            propagationSlideTgtId != null && d.id === propagationSlideTgtId;
+        const isBackwardSlide = (d: DagNode): boolean =>
+            animOverlay.anim?.direction === 'backward' && isPropagationSlide(d);
+        const showFocusSelectedStroke = (d: DagNode): boolean =>
+            selectedId === d.id && !(suppressFocusSelectedStroke && d.id === focusId);
         const nodeOnChainForRender = (d: DagNode): boolean => {
             if (!forwardPromptOnlyFrame) return nodeStrokeShareById?.has(d.id) ?? false;
             return d.step === -1 && (nodeStrokeShareById?.has(d.id) ?? false);
@@ -1420,15 +1468,15 @@ export function initGenAttributeDagView(
                 : null;
         nodeSel
             .classed('gen-attr-dag-node--hover', (d) => hoveredId === d.id)
-            .classed('gen-attr-dag-node--selected', (d) => selectedId === d.id)
+            .classed('gen-attr-dag-node--selected', showFocusSelectedStroke)
             .style('display', nodeDisplay)
             .attr('opacity', (d) => {
                 const nodeFullyHighlighted = recursiveAttributionEnabled
                     ? forwardPromptOnlyFrame
                         ? nodeOnChainForRender(d)
-                        : d.id === focusId ||
+                        : (!deferFocusHighlightDuringAnim && d.id === focusId) ||
                           (nodeStrokeShareById?.has(d.id) ?? false) ||
-                          (forwardSlideTgtId != null && d.id === forwardSlideTgtId)
+                          isPropagationSlide(d)
                     : (focusNodeIds?.has(d.id) ?? false);
                 if (nodeFullyHighlighted) return 1;
                 if (isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)) {
@@ -1439,15 +1487,19 @@ export function initGenAttributeDagView(
                 if (focusId || isPromptLeaf) return DAG_NODE_WEAKEN_OPACITY;
                 return 1;
             })
-            .classed('gen-attr-dag-node--recursive-chain', (d) => nodeOnChainForRender(d))
+            .classed(
+                'gen-attr-dag-node--recursive-chain',
+                (d) => nodeOnChainForRender(d) || isBackwardSlide(d),
+            )
+            .classed('gen-attr-dag-node--backward-slide', isBackwardSlide)
             .style(CSS_VAR_DAG_NODE_RECURSIVE_SHARE, (d) => {
-                if (!nodeOnChainForRender(d)) return null;
+                if (!nodeOnChainForRender(d) && !isBackwardSlide(d)) return null;
                 const renderStrength = nodeStrokeRenderById?.get(d.id);
                 return renderStrength != null ? String(renderStrength) : null;
             });
         nodeHitSel
             .classed('gen-attr-dag-node--hover', (d) => hoveredId === d.id)
-            .classed('gen-attr-dag-node--selected', (d) => selectedId === d.id)
+            .classed('gen-attr-dag-node--selected', showFocusSelectedStroke)
             .style('display', nodeDisplay);
         // 每条边：颜色/强度（见 resolveDagLinkHighlightDisplay）、`<title>` 一并刷新（含 linkGFront 高亮边）。
         rootG.selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link').each(function(d) {
@@ -1463,6 +1515,7 @@ export function initGenAttributeDagView(
                     grayRenderByKey,
                     incomingHighlightRenderByKey,
                     downstreamHighlightRenderByKey,
+                    backwardSlideIncomingRenderByKey,
                 );
             const finalRenderStrength =
                 renderStrength *
@@ -1536,16 +1589,24 @@ export function initGenAttributeDagView(
             pred_topk: [],
         };
 
-        // 构建 augment：归因份额行（token 下方最前）+ CI/MI 行（surprisal 之后）
+        // 反向播放：当前 token 展示稳态归因份额（同 hover）；正向播放 / 非播放：仅 hover 时展示
         const rowsBeforeInfo: ToolTipUpdateAugment['rowsBeforeInfo'] = [];
-        if (selectedId && hoveredId && currentFocusState && hoveredId !== selectedId && graph.hasNode(selectedId)) {
+        const shareSourceId =
+            propagationPlaybackTooltip?.direction === 'backward' ? focusIdNext : hoveredId;
+        if (
+            selectedId &&
+            shareSourceId &&
+            currentFocusState &&
+            shareSourceId !== selectedId &&
+            graph.hasNode(selectedId)
+        ) {
             const selectedStep = (graph.getNodeAttributes(selectedId) as DagNode).step;
             // 归因范围：选中 token 之前的所有 token（prompt 节点 step=-1，生成节点 step < selectedStep）
             const inAttributionRange =
                 selectedStep >= 0 &&
                 (attrs.step === -1 || (attrs.step >= 0 && attrs.step < selectedStep));
             if (inAttributionRange) {
-                const share = currentFocusState.nodeShareById.get(hoveredId) ?? 0;
+                const share = currentFocusState.nodeShareById.get(shareSourceId) ?? 0;
                 if (recursiveAttributionEnabled) {
                     const stay = share * (1 - nodePropagationMiRatio(attrs));
                     rowsBeforeInfo.push(
@@ -1728,6 +1789,7 @@ export function initGenAttributeDagView(
             }
             const displayLabel = visualizeSpecialChars(attr.raw, {
                 spaceDotExceptBeforeAsciiLetterOrNumber: true,
+                omitHexInCodePointLabel: true,
             });
             const srcNode: DagNode = {
                 id: srcId,
@@ -1784,6 +1846,7 @@ export function initGenAttributeDagView(
         const g = textMeasure.appendGeneratedToken(token, [targetStart, targetEnd]);
         const displayLabel = visualizeSpecialChars(token, {
             spaceDotExceptBeforeAsciiLetterOrNumber: true,
+            omitHexInCodePointLabel: true,
         });
         const ciVisualScale = dagGeneratedNodeCiVisualScale(response.target_prob);
         const gltrTooltipToken = frontendTokenFromGenAttrStep(step);
@@ -2075,6 +2138,7 @@ export function initGenAttributeDagView(
         if (recursiveAttributionEnabled === enabled) return;
         recursiveAttributionEnabled = enabled;
         if (!enabled) recursiveEdgeAnimation.stopAnimation();
+        paint();
         refreshNodeLinkHighlight();
     }
 
@@ -2089,6 +2153,7 @@ export function initGenAttributeDagView(
 
     function setRecursiveEdgeBatchAnimationDirection(direction: DagRecursiveEdgeAnimationDirection): void {
         recursiveEdgeAnimation.setDirection(direction);
+        paint();
         refreshNodeLinkHighlight();
     }
 

@@ -38,6 +38,10 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+
+      &--bold {
+        font-weight: 500;
+      }
     }
   }
 }

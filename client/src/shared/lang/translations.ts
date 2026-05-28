@@ -37,6 +37,8 @@ export const translations: Translations = {
         'LLM Raw Chat - chat with explicit raw prompts': 'LLM Raw Chat 原始对话 - 用精确的 prompt 进行对话',
         'Context Attribution - attribute a predicted token to its context': 'Context Attribution 上下文归因 - 将预测 token 归因到上下文',
         'LLM Causal Flow - explore the context-attribution DAG': 'LLM Causal Flow 因果流 - 探索上下文归因的 DAG 关系图',
+        'Max new tokens must not exceed {limit}': 'Max new tokens 不得超过 {limit}',
+        'Max new tokens must be a positive integer': 'Max new tokens 须为正整数',
         // LLM Causal Flow（gen_attribute）页：placeholder / title 文案
         'When enabled, each line below is a regex with the global flag, matched only within the initial static prompt prefix (excluding generated continuation). If a token offset lies fully inside a match, its score is treated as 0.':
             '启用后仅在初始静态 prompt 前缀内按下列正则匹配（不含已生成 continuation）；token 的 offset 完全落在某次匹配区间内则 score 视为 0。',

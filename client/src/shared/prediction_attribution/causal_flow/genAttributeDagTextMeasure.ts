@@ -42,6 +42,7 @@ function estimateExpandedLabelWidthFloorPx(raw: string): number {
     const APPROX_CHAR_WIDTH_PX = 10;
     const displayLabel = visualizeSpecialChars(raw, {
         spaceDotExceptBeforeAsciiLetterOrNumber: true,
+        omitHexInCodePointLabel: true,
     });
     const displayLen = Array.from(displayLabel).length;
     return Math.max(displayLen * APPROX_CHAR_WIDTH_PX, 1);

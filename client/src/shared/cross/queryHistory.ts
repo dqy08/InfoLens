@@ -108,7 +108,7 @@ export interface InitQueryHistoryDropdownOptions {
      * 与 {@link getHistoryItems} 二选一：每项含稳定 id（如续写缓存的 contentKey）与展示 label。
      * 选中/删除/置顶回调均传递 id。
      */
-    getHistoryEntries?: () => Array<{ id: string; label: string }>;
+    getHistoryEntries?: () => Array<{ id: string; label: string; featuredStyle?: string }>;
     /**
      * 每次渲染列表前调用（如打开下拉时从 IndexedDB 刷新内存镜像）。
      * 失败时仍会继续渲染，避免下拉空白。
@@ -210,7 +210,10 @@ export function initQueryHistoryDropdown(options: InitQueryHistoryDropdownOption
                 const display = row.label;
                 const li = document.createElement('li');
                 const span = document.createElement('span');
-                span.className = 'history-text';
+                span.className =
+                    row.featuredStyle === 'bold'
+                        ? 'history-text history-text--bold'
+                        : 'history-text';
                 span.textContent = display;
                 if (!pointerFineHover) span.title = display;
                 let promoteBtn: HTMLButtonElement | null = null;

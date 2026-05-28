@@ -4,7 +4,7 @@ import '../../css/pages/chat.scss';
 
 import { initThemeManager } from '../../shared/ui/theme';
 import { initLanguageManager } from '../../shared/ui/language';
-import { initI18n, tr } from '../../shared/lang/i18n-lite';
+import { initI18n, tr, trf } from '../../shared/lang/i18n-lite';
 import { AdminManager } from '../../shared/cross/adminManager';
 import { SettingsMenuManager } from '../../shared/cross/settingsMenuManager';
 import { initCachedHistoryQueryDropdown, type CachedHistorySelectContext } from '../../shared/cross/cachedHistoryUi';
@@ -53,14 +53,24 @@ import {
 } from '../../shared/cross/contentUrl';
 import { CHAT_SURPRISAL_COLOR_MAP_MAX } from '../../shared/cross/SurprisalColorConfig';
 import { updateChatCompletionMetrics } from '../../shared/cross/textMetricsUpdater';
-import { lsReadBool, lsWriteBool } from '../../shared/storage/localStorageHelpers';
+import { lsReadBool, lsReadNumber, lsSet, lsWriteBool } from '../../shared/storage/localStorageHelpers';
 import {
     CHAT_ENABLE_THINKING_STORAGE_KEY,
+    CHAT_MAX_NEW_TOKENS_STORAGE_KEY,
     LS_SKIP_CHAT_TEMPLATE,
 } from '../../features/chat/chatPromptTemplateMode';
 import { createToast } from '../../shared/ui/toast';
 import { initDensityAttributionSidebar } from '../../shared/prediction_attribution/density_sidebar/densityAttributionSidebar';
 import { syncDraftCommittedButtonPair } from '../../shared/cross/syncDraftCommittedButtonPair';
+import {
+    DEFAULT_MAX_NEW_TOKENS,
+    finalizeMaxNewTokensInput,
+    formatMaxNewTokensParseError,
+    MaxNewTokensParseError,
+    parseMaxNewTokens as parseMaxNewTokensShared,
+    isMaxNewTokensRawValid,
+    syncMaxNewTokensInputSiteMax,
+} from '../../shared/cross/maxNewTokensConfig';
 
 // 与首页一致：默认隐藏 Ask 旁的小菊花，仅在请求进行中再显示
 d3.selectAll('.loadersmall').style('display', 'none');
@@ -305,7 +315,8 @@ function fingerprintsEqual(a: ChatCommittedFingerprint, b: ChatCommittedFingerpr
 
 function syncAskButtonState(): void {
     const fp = getCurrentFingerprint();
-    const idleInputsReady = 'raw' in fp ? fp.raw.length > 0 : fp.user.length > 0;
+    const idleInputsReady =
+        ('raw' in fp ? fp.raw.length > 0 : fp.user.length > 0) && isMaxNewTokensInputValid();
     const hasUncommittedDraft =
         lastCommittedFingerprint === null ||
         !fingerprintsEqual(lastCommittedFingerprint, fp);
@@ -380,6 +391,12 @@ void new SettingsMenuManager(
     'common'
 );
 
+adminManager.onAdminModeChange(() => {
+    api.setAdminToken(adminManager.isInAdminMode() ? adminManager.getAdminToken() : null);
+    syncChatMaxNewTokensUi();
+    normalizeChatMaxNewTokensField();
+});
+
 const flushStreamingPreview = (text: string, streamEnd: boolean): void => {
     if (
         !streamEnd &&
@@ -398,19 +415,63 @@ const getActivePromptValue = (): string => {
     return (chatUserTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
 };
 
-/** 空白 = 不限制（用尽剩余上下文）；否则须为正整数。 */
-function parseOptionalMaxNewTokens(raw: string): number | undefined {
-    const t = raw.trim();
-    if (t === '') return undefined;
-    if (!/^\d+$/.test(t)) {
-        throw new Error(tr('Max new tokens must be a positive integer or empty'));
+function parseMaxNewTokens(raw: string): number {
+    try {
+        return parseMaxNewTokensShared(raw, adminManager.isInAdminMode());
+    } catch (e) {
+        if (e instanceof MaxNewTokensParseError) {
+            throw new Error(
+                formatMaxNewTokensParseError(e.code, tr, trf)
+            );
+        }
+        throw e;
     }
-    const n = parseInt(t, 10);
-    if (n <= 0) {
-        throw new Error(tr('Max new tokens must be a positive integer or empty'));
-    }
-    return n;
 }
+
+function normalizeChatMaxNewTokensField(): boolean {
+    const ok = finalizeMaxNewTokensInput(
+        maxNewTokensInput,
+        adminManager.isInAdminMode(),
+        (msg) => showAlertDialog(tr('LLM Raw Chat'), msg),
+        tr,
+        trf
+    );
+    syncAskButtonState();
+    return ok;
+}
+
+function isMaxNewTokensInputValid(): boolean {
+    return isMaxNewTokensRawValid(
+        maxNewTokensInput?.value ?? '',
+        adminManager.isInAdminMode()
+    );
+}
+
+function readChatStoredMaxTokens(): number {
+    return lsReadNumber(CHAT_MAX_NEW_TOKENS_STORAGE_KEY, DEFAULT_MAX_NEW_TOKENS, {
+        validate: (n) =>
+            isMaxNewTokensRawValid(String(n), adminManager.isInAdminMode()),
+    });
+}
+
+function persistChatMaxNewTokens(): void {
+    if (!maxNewTokensInput) return;
+    try {
+        const n = parseMaxNewTokens(maxNewTokensInput.value);
+        lsSet(CHAT_MAX_NEW_TOKENS_STORAGE_KEY, String(n));
+    } catch {
+        /* 非法值不写 storage */
+    }
+}
+
+function syncChatMaxNewTokensUi(): void {
+    if (maxNewTokensInput) {
+        maxNewTokensInput.value = String(readChatStoredMaxTokens());
+    }
+    syncMaxNewTokensInputSiteMax(maxNewTokensInput, adminManager.isInAdminMode());
+}
+
+syncChatMaxNewTokensUi();
 
 const setAskLoading = (loading: boolean): void => {
     askInFlight = loading;
@@ -433,9 +494,9 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
     if (askInFlight || prompt.length === 0) return;
     const forceRefresh = options?.forceRefresh === true;
 
-    let maxTokensOpt: number | undefined;
+    let maxTokensOpt: number;
     try {
-        maxTokensOpt = parseOptionalMaxNewTokens(maxNewTokensInput?.value ?? '');
+        maxTokensOpt = parseMaxNewTokens(maxNewTokensInput?.value ?? '');
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         showAlertDialog(tr('LLM Raw Chat'), translateApiErrorMessage(msg));
@@ -494,7 +555,7 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
             {
                 model: completionModel,
                 prompt: modelPrompt,
-                ...(maxTokensOpt !== undefined ? { max_tokens: maxTokensOpt } : {})
+                max_tokens: maxTokensOpt
             },
             {
                 signal: askAbort.signal,
@@ -578,8 +639,16 @@ if (chatSystemPromptTextarea) {
         syncAskButtonState();
     });
 }
-maxNewTokensInput?.addEventListener('input', () => {
-    syncAskButtonState();
+maxNewTokensInput?.addEventListener('input', () => syncAskButtonState());
+maxNewTokensInput?.addEventListener('change', () => {
+    if (normalizeChatMaxNewTokensField()) {
+        persistChatMaxNewTokens();
+    }
+});
+maxNewTokensInput?.addEventListener('blur', () => {
+    if (normalizeChatMaxNewTokensField()) {
+        persistChatMaxNewTokens();
+    }
 });
 
 async function restoreChatFromCachedPrompt(

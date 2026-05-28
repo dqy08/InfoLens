@@ -1,6 +1,19 @@
 import URLHandler from '../core/URLHandler';
 import * as completionResultCache from '../../features/chat/completionResultCache';
+import { AdminManager } from '../cross/adminManager';
 import type { TokenWithOffset } from './generatedSchemas';
+
+function completionsRequestHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json; charset=UTF-8',
+    };
+    const admin = AdminManager.getInstance();
+    const token = admin.isInAdminMode() ? admin.getAdminToken() : null;
+    if (token) {
+        headers['X-Admin-Token'] = token;
+    }
+    return headers;
+}
 
 /** 与 server.yaml basePath `/api` + `/v1/completions` 一致 */
 const COMPLETIONS_PATH = '/api/v1/completions';
@@ -53,7 +66,7 @@ export function postCompletionsStop(): void {
     const url = URLHandler.basicURL() + COMPLETIONS_STOP_PATH;
     void fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+        headers: completionsRequestHeaders(),
         body: '{}'
     }).catch(() => {
         /* 忽略：Stop 与 SSE 并行，失败时生成仍可能靠墙钟或其它路径结束 */
@@ -90,7 +103,7 @@ export async function postCompletionsPrompt(
     }
     const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+        headers: completionsRequestHeaders(),
         body: JSON.stringify(payload),
         signal
     });
@@ -219,7 +232,7 @@ export async function postCompletions(
         function fetchRemote(): void {
         fetch(URLHandler.basicURL() + COMPLETIONS_PATH, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+            headers: completionsRequestHeaders(),
             body: JSON.stringify(body),
             signal
         })

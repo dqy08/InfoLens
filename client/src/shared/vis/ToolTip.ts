@@ -21,13 +21,13 @@ export type ToolTipOptions = {
     surprisalRowLabel?: string;
     /**
      * `parent-bottom-right`：`position:absolute`，贴在定位包含块（`offsetParent`）右下角（DAG Top‑K 作为 `#results` 直接子节点时即为 results 内侧右下）。
-     * 该 HUD 模式不依赖锚点几何；面板应由页面 CSS（如 `.gen-attr-dag-topk-tooltip`）约束宽高与内部滚动，而非按内容 shrink-wrap。
+     * 该 HUD 模式不依赖锚点几何；面板应由页面 CSS（如 `.gen-attr-dag-topk-tooltip`）约束宽高，超出部分裁剪。
      * 默认 `anchor`：沿用原有相对 token rect 的定位。
      */
     placement?: 'anchor' | 'parent-bottom-right';
     /**
      * false：面板不参与命中测试（`pointer-events: none`），避免盖住底层 SVG 时在节点上反复 `mouseleave`/闪动；
-     * 同时不注册点击/触摸收起，且不接收内部滚动交互。
+     * 同时不注册点击/触摸收起。
      */
     pointerInteractive?: boolean;
 };

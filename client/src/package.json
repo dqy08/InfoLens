@@ -8,6 +8,7 @@
     "test:charIndex": "npx tsx tests/utils/charIndexForByteLimit.test.ts",
     "test:findSplitPoint": "npx tsx tests/utils/findSplitPoint.test.ts",
     "test:splitChunks": "npx tsx tests/utils/splitTextToChunks.test.ts",
+    "test:dagPropagationPlayback": "npx tsx tests/prediction_attribution/genAttributeDagPropagationPlayback.test.ts",
     "prebuild": "node scripts/updateIntroHTML.js",
     "prebuild:dev": "node scripts/updateIntroHTML.js",
     "wp": "npm run build:dev",

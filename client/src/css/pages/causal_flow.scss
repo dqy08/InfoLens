@@ -7,7 +7,7 @@
 @use '../base/narrow-ios-form-font-tail' as ios-form-font;
 
 $gen-attr-option-row-gap: 12px;
-$gen-attr-cached-demos-panel-width: 18em;
+$gen-attr-cached-demos-panel-width: 21em;
 
 // 单行右对齐：Cached history 最右；Cached demo 靠其左侧
 .chat-cached-history-bar.chat-cached-history-bar--dual {
@@ -143,7 +143,7 @@ $gen-attr-cached-demos-panel-width: 18em;
     box-sizing: border-box;
   }
 
-  // DAG Top‑K：贴在 #results 内侧右下（absolute）；固定尺寸 HUD；Top‑K 区超出则在滚动层内滚动。
+  // DAG Top‑K：贴在 #results 内侧右下（absolute）；固定尺寸 HUD；超出部分裁剪。
   #results.gen-attr-results-surface.LMF > .tooltip.gen-attr-dag-topk-tooltip {
     box-sizing: border-box;
     // 与 #major_tooltip 一致：不参与 opacity 过渡，避免 reposition 后与底层叠影
@@ -164,8 +164,7 @@ $gen-attr-cached-demos-panel-width: 18em;
       flex: 1 1 auto;
       min-height: 0;
       margin-top: 6px;
-      overflow-x: hidden;
-      overflow-y: auto;
+      overflow: hidden;
     }
   }
 
@@ -222,6 +221,11 @@ $gen-attr-cached-demos-panel-width: 18em;
       stroke: var(--dag-highlight-line-color-in);
       stroke-width: calc(2 * var(--gen-attr-dag-display-scale, 1));
       stroke-opacity: var(--gen-attr-dag-node-recursive-share, 1);
+    }
+
+    // 反向传播动画：当前滑过节点仅改描边色相（与出边红一致），stroke-opacity 仍由 recursive-share 控制。
+    &--recursive-chain.gen-attr-dag-node--backward-slide .gen-attr-dag-node-stroke {
+      stroke: var(--dag-highlight-line-color-out);
     }
 
     // 选中/悬停 = 焦点（追因起点，nodeShare=1）；置于 recursive-chain 之后以覆盖链上节点的 stroke-opacity

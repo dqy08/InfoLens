@@ -10,10 +10,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from backend.models.model_manager import inference_lock, get_instruct_model_display_name
 from backend.core.prediction_attributor import slot_for_prediction_attr_model
 from backend.platform.oom import exit_if_oom, is_oom_error
+from backend.api.utils import request_has_valid_admin
 from backend.core.completion_generator import (
+    ModelContextLimitUnknownError,
     PromptTooLongError,
     apply_chat_template_for_completion,
     completion_cancel_requested,
+    completion_max_token_length,
     generate_completion_text,
     global_completion_stop_event,
     inference_shutdown_event,
@@ -84,6 +87,7 @@ def _completion_inference_after_lock(
     *,
     stream_delta: Optional[Callable[[str, bool], None]] = None,
     max_tokens: Optional[int] = None,
+    bypass_site_context_limit: bool = False,
 ) -> CompletionRunResult:
     """
     在已持有推理锁的上下文中执行续写（旧版非流式路径的持锁体内逻辑）。
@@ -92,7 +96,12 @@ def _completion_inference_after_lock(
     from backend.platform.access_log import log_openai_completions_start
 
     log_openai_completions_start(request_id, lock_wait_time)
-    return generate_completion_text(prompt, stream_delta=stream_delta, max_tokens=max_tokens)
+    return generate_completion_text(
+        prompt,
+        stream_delta=stream_delta,
+        max_tokens=max_tokens,
+        bypass_site_context_limit=bypass_site_context_limit,
+    )
 
 
 def _log_completion_finished(
@@ -136,6 +145,7 @@ def _generate_completion_events(
     request_id: int,
     *,
     max_tokens: Optional[int] = None,
+    bypass_site_context_limit: bool = False,
 ):
     global_completion_stop_event.clear()
     q: queue.Queue = queue.Queue()
@@ -163,6 +173,7 @@ def _generate_completion_events(
                     lock_wait_time,
                     stream_delta=stream_delta,
                     max_tokens=max_tokens,
+                    bypass_site_context_limit=bypass_site_context_limit,
                 )
             finally:
                 inference_lock.release()
@@ -246,8 +257,8 @@ def _generate_completion_events(
                 return
             elif kind == "error":
                 err = item[1]
-                if isinstance(err, PromptTooLongError):
-                    _log_cmpl_issue(request_id, f"prompt too long: {err}")
+                if isinstance(err, (PromptTooLongError, ModelContextLimitUnknownError)):
+                    _log_cmpl_issue(request_id, str(err))
                     yield send_error_event(str(err), 400)
                 elif isinstance(err, QueueTimeoutError):
                     _log_cmpl_issue(request_id, f"排队超时: {err}")
@@ -276,9 +287,15 @@ def _completions_sse_response(
     request_id: int,
     *,
     max_tokens: Optional[int] = None,
+    bypass_site_context_limit: bool = False,
 ):
     return SSEProgressReporter(
-        lambda: _generate_completion_events(prompt, request_id, max_tokens=max_tokens)
+        lambda: _generate_completion_events(
+            prompt,
+            request_id,
+            max_tokens=max_tokens,
+            bypass_site_context_limit=bypass_site_context_limit,
+        )
     ).create_response()
 
 
@@ -390,7 +407,25 @@ def completions(completions_request):
     else:
         max_tokens = max_tokens_raw
 
+    bypass_site = request_has_valid_admin() and max_tokens is not None
+    if (
+        not bypass_site
+        and max_tokens is not None
+        and max_tokens > completion_max_token_length
+    ):
+        return {
+            "success": False,
+            "message": (
+                f"max_tokens 不得超过续写上下文上限 {completion_max_token_length}"
+            ),
+        }, 400
+
     client_ip = get_client_ip()
     request_id = _log_request(model, prompt, client_ip)
 
-    return _completions_sse_response(prompt, request_id, max_tokens=max_tokens)
+    return _completions_sse_response(
+        prompt,
+        request_id,
+        max_tokens=max_tokens,
+        bypass_site_context_limit=bypass_site,
+    )

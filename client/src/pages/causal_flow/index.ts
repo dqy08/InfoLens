@@ -4,7 +4,7 @@ import '../../css/pages/causal_flow.scss';
 
 import { initThemeManager } from '../../shared/ui/theme';
 import { initLanguageManager } from '../../shared/ui/language';
-import { initI18n, tr } from '../../shared/lang/i18n-lite';
+import { initI18n, tr, trf } from '../../shared/lang/i18n-lite';
 import { AdminManager } from '../../shared/cross/adminManager';
 import { SettingsMenuManager } from '../../shared/cross/settingsMenuManager';
 import { initChatPanelLayout } from '../../shared/ui/chat_panel_layout';
@@ -37,10 +37,16 @@ import type { DagRecursiveEdgeReplayPacing } from '../../shared/prediction_attri
 import {
     createHydratedTokenGenHandle,
     startTokenGenAttribution,
-    TOKEN_GEN_MAX_TOKENS_DEFAULT,
     type TokenGenAttributionHandle,
     type TokenGenStep,
 } from '../../shared/prediction_attribution/causal_flow/tokenGenAttributionRunner';
+import {
+    DEFAULT_MAX_NEW_TOKENS,
+    finalizeMaxNewTokensInput,
+    isMaxNewTokensRawValid,
+    parseMaxNewTokens,
+    syncMaxNewTokensInputSiteMax,
+} from '../../shared/cross/maxNewTokensConfig';
 import { fetchTokenize } from '../../shared/prediction_attribution/core/predictionAttributeClient';
 import { completionFinishReasonLabel, type CompletionFinishReason } from '../../shared/cross/generationEndReasonLabel';
 import {
@@ -72,6 +78,7 @@ import {
 } from '../../shared/cross/contentUrl';
 import {
     fetchBundledGenAttributeDemoBySlug,
+    getBundledGenAttributeDemoLabel,
     getBundledGenAttributeDemoList,
     isGenAttrRunPayloadValidForUi,
 } from '../../features/causal_flow/bundledDemos';
@@ -110,7 +117,6 @@ const showToast = createToast('#toast').show;
 
 const GEN_ATTR_MODEL_VARIANT_STORAGE_KEY = 'info_radar_gen_attr_model_variant';
 const GEN_ATTR_MAX_TOKENS_STORAGE_KEY = 'info_radar_gen_attr_max_tokens';
-const GEN_ATTR_MAX_TOKENS_DEFAULT = TOKEN_GEN_MAX_TOKENS_DEFAULT;
 const GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY = 'info_radar_gen_attr_dag_measure_width';
 const GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_mode';
 const GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_step_ms';
@@ -198,8 +204,9 @@ function readStoredModelVariant(): PredictionAttributeModelVariant {
 }
 
 function readStoredMaxTokens(): number {
-    return lsReadNumber(GEN_ATTR_MAX_TOKENS_STORAGE_KEY, GEN_ATTR_MAX_TOKENS_DEFAULT, {
-        validate: (n) => n >= 1 && n <= 500,
+    const admin = adminManager.isInAdminMode();
+    return lsReadNumber(GEN_ATTR_MAX_TOKENS_STORAGE_KEY, DEFAULT_MAX_NEW_TOKENS, {
+        validate: (n) => isMaxNewTokensRawValid(String(n), admin),
     });
 }
 
@@ -532,7 +539,10 @@ function genAttrEffectiveExcludeGeneratedPatternsText(): string {
     return genAttrExcludeGeneratedPatternsTa?.value ?? '';
 }
 
-if (maxTokensInput) maxTokensInput.value = String(readStoredMaxTokens());
+if (maxTokensInput) {
+    maxTokensInput.value = String(readStoredMaxTokens());
+    syncMaxNewTokensInputSiteMax(maxTokensInput, adminManager.isInAdminMode());
+}
 const initialDagLayoutMode = readStoredDagLayoutMode();
 if (dagLayoutModeSelect) dagLayoutModeSelect.value = initialDagLayoutMode;
 applyDagLayoutModeUi();
@@ -748,11 +758,16 @@ modelVariantSelect?.addEventListener('change', () => {
 });
 
 maxTokensInput?.addEventListener('change', () => {
+    if (!normalizeGenAttrMaxTokensField()) return;
     lsSet(
         GEN_ATTR_MAX_TOKENS_STORAGE_KEY,
-        maxTokensInput?.value ?? String(GEN_ATTR_MAX_TOKENS_DEFAULT),
+        maxTokensInput?.value ?? String(DEFAULT_MAX_NEW_TOKENS),
     );
     syncSubmitButtonState();
+});
+maxTokensInput?.addEventListener('input', () => syncSubmitButtonState());
+maxTokensInput?.addEventListener('blur', () => {
+    normalizeGenAttrMaxTokensField();
 });
 
 // DAG 回放节奏（与上节「DAG 测量宽度」无关；宽度 listener 在后文）
@@ -1575,13 +1590,22 @@ function currentModelVariant(): PredictionAttributeModelVariant {
 }
 
 function currentMaxTokens(): number {
-    const n = parseInt(
-        maxTokensInput?.value ?? String(GEN_ATTR_MAX_TOKENS_DEFAULT),
-        10
+    return parseMaxNewTokens(
+        maxTokensInput?.value ?? String(DEFAULT_MAX_NEW_TOKENS),
+        adminManager.isInAdminMode()
     );
-    return Number.isFinite(n) && n >= 1
-        ? Math.min(n, 500)
-        : GEN_ATTR_MAX_TOKENS_DEFAULT;
+}
+
+function normalizeGenAttrMaxTokensField(): boolean {
+    const ok = finalizeMaxNewTokensInput(
+        maxTokensInput,
+        adminManager.isInAdminMode(),
+        (msg) => showAlertDialog(tr('LLM Causal Flow'), msg),
+        tr,
+        trf
+    );
+    syncSubmitButtonState();
+    return ok;
 }
 
 function syncIdleModelMetric(): void {
@@ -1605,7 +1629,7 @@ let lastRunInputSnapshot: string | null = null;
 function getInputSnapshotForRun(): string {
     const runOpts = {
         v: currentModelVariant(),
-        max: currentMaxTokens(),
+        max: maxTokensInput?.value ?? String(DEFAULT_MAX_NEW_TOKENS),
         tfOn: isGenAttrTeacherForcingUiOn(),
         tfText: (teacherForcingTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
         saOn: isStopAfterTeacherForcingOn(),
@@ -1640,7 +1664,10 @@ function isInputReadyForRun(): boolean {
     const forcing = teacherForcingContinuationForRun();
     if (prompt.length === 0 && forcing === undefined) return false;
     if (prompt.length > 0 && isGenAttrTeacherForcingUiOn() && forcing === undefined) return false;
-    return true;
+    return isMaxNewTokensRawValid(
+        maxTokensInput?.value ?? '',
+        adminManager.isInAdminMode()
+    );
 }
 
 function syncSubmitButtonState(): void {
@@ -1971,12 +1998,13 @@ const genAttrCachedHistoryBtn = document.getElementById('gen_attr_cached_history
 const genAttrCachedDemosBtn = document.getElementById('gen_attr_cached_demos_btn');
 const genAttrCachedDemosValueBtn = document.getElementById('gen_attr_cached_demos_value_btn');
 const genAttrCachedDemosValueEl = document.getElementById('gen_attr_cached_demos_value');
-let genAttrBundledDemoEntries: Array<{ id: string; label: string }> = [];
+let genAttrBundledDemoEntries: Array<{ id: string; label: string; featuredStyle?: string }> = [];
 
 function syncGenAttrCachedDemosValueDisplay(): void {
     const slug = readDemoUrlParam();
-    if (genAttrCachedDemosValueEl) genAttrCachedDemosValueEl.textContent = slug ?? '';
-    if (genAttrCachedDemosValueBtn) genAttrCachedDemosValueBtn.title = slug ?? '';
+    const display = slug ? getBundledGenAttributeDemoLabel(slug) : '';
+    if (genAttrCachedDemosValueEl) genAttrCachedDemosValueEl.textContent = display;
+    if (genAttrCachedDemosValueBtn) genAttrCachedDemosValueBtn.title = display;
 }
 
 genAttrCachedDemosValueBtn?.addEventListener('click', (e) => {
@@ -2343,8 +2371,16 @@ function syncGenAttrExportDemoBtn(): void {
     if (!exportDemoBtn) return;
     exportDemoBtn.style.display = adminManager.isInAdminMode() ? '' : 'none';
 }
-syncGenAttrExportDemoBtn();
-adminManager.onAdminModeChange(() => syncGenAttrExportDemoBtn());
+function syncGenAttrAdminUi(): void {
+    syncGenAttrExportDemoBtn();
+    syncMaxNewTokensInputSiteMax(maxTokensInput, adminManager.isInAdminMode());
+    if (maxTokensInput) {
+        maxTokensInput.value = String(readStoredMaxTokens());
+    }
+    normalizeGenAttrMaxTokensField();
+}
+syncGenAttrAdminUi();
+adminManager.onAdminModeChange(() => syncGenAttrAdminUi());
 exportDemoBtn?.addEventListener('click', () => {
     void (async () => {
         const h = runnerHandle;

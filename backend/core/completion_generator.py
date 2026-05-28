@@ -24,7 +24,22 @@ from .pred_topk_format import pred_topk_pairs_from_probs_1d
 from backend.platform.runtime_config import DEFAULT_TOPK
 
 # 续写路径：prompt + 续写合计不得超过该 token 数（与语义分析 runtime 无关）。
-completion_max_token_length = 500
+completion_max_token_length = 300
+
+
+def _model_context_token_limit(tokenizer, model) -> int:
+    """管理员续写路径：须能解析模型上下文，否则抛错（不回退站点 500）。"""
+    pe = getattr(getattr(model, "config", None), "max_position_embeddings", None)
+    if isinstance(pe, int) and pe > 0:
+        return pe
+    ml = getattr(tokenizer, "model_max_length", None)
+    if isinstance(ml, int) and 0 < ml < 1_000_000:
+        return ml
+    raise ModelContextLimitUnknownError(
+        "无法从模型 config.max_position_embeddings 或 tokenizer.model_max_length "
+        "确定上下文长度；管理员续写已拒绝。"
+    )
+
 
 # 特殊 token 亦视为分析/展示内容，故不跳过。
 _COMPLETION_DECODE_SKIP_SPECIAL = False
@@ -67,6 +82,10 @@ def register_inference_shutdown_handlers() -> None:
 
 class PromptTooLongError(ValueError):
     """prompt 过长或占满上下文导致无法续写（``input_len >= ctx_limit`` 时由 ``core_generate_from_text`` 抛出）。"""
+
+
+class ModelContextLimitUnknownError(ValueError):
+    """管理员 bypass 站点上限时无法解析模型上下文长度。"""
 
 
 def _completion_without_generate(
@@ -392,6 +411,7 @@ def core_generate_from_text(
     *,
     stream_delta: Optional[Callable[[str, bool], None]] = None,
     max_tokens: Optional[int] = None,
+    bypass_site_context_limit: bool = False,
 ) -> Tuple[str, str, int, int, List[Dict[str, Any]], Optional[float]]:
     """
     对一段已确定的模型输入字符串做自回归续写（默认贪心；函数内 ``_use_low_temp_sampling`` 可临时切到低温采样）。
@@ -403,19 +423,23 @@ def core_generate_from_text(
     Args:
         stream_delta: 可选；若提供则额外调用（如 SSE）。本地 verbose 打印由 ``_print_completion_stream_delta`` 单独控制，与是否传入 stream_delta 无关。
         max_tokens: 可选；正整数，限制本次最多生成多少个新 token（与 ``min(max_tokens, 上限 − prompt)`` 取小）。省略则用尽剩余上下文额度。
+        bypass_site_context_limit: 为 True 时（管理员显式 max_tokens）不按站点上限封顶，``ctx_limit`` 为模型上下文上限；无法解析时抛 ``ModelContextLimitUnknownError``。
 
     Returns:
         (续写文本, finish_reason, prompt_tokens, completion_tokens, 续写段 bpe_strings, ttft_s)。
         ttft_s 为自 ``model.generate`` 起至首次产出续写片段的秒数；仅取消时为 ``None``。
     """
     tokenizer, model, device = ensure_instruct_slot_ready()
-    ctx_limit = completion_max_token_length
 
     model.eval()
     enc = tokenizer(formatted_text, return_tensors="pt")
     input_ids = enc["input_ids"].to(device)
     input_len = input_ids.shape[1]
     n = int(input_len)
+    if bypass_site_context_limit and max_tokens is not None:
+        ctx_limit = _model_context_token_limit(tokenizer, model)
+    else:
+        ctx_limit = completion_max_token_length
     if n >= ctx_limit:
         raise PromptTooLongError(
             "Prompt too long: "
@@ -549,6 +573,7 @@ def generate_completion_text(
     stream_delta: Optional[Callable[[str, bool], None]] = None,
     *,
     max_tokens: Optional[int] = None,
+    bypass_site_context_limit: bool = False,
 ) -> Tuple[str, str, int, int, List[Dict[str, Any]], Optional[float]]:
     """
     ``prompt`` 须为已确定的完整模型输入（不再在服务端套用 chat template）。
@@ -556,4 +581,9 @@ def generate_completion_text(
     流式可传 stream_delta；中止由 ``completion_cancel_requested()`` 统一判断。
     ``max_tokens`` 为可选的正整数续写上限（与 API 约定一致）。
     """
-    return core_generate_from_text(prompt, stream_delta=stream_delta, max_tokens=max_tokens)
+    return core_generate_from_text(
+        prompt,
+        stream_delta=stream_delta,
+        max_tokens=max_tokens,
+        bypass_site_context_limit=bypass_site_context_limit,
+    )

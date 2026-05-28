@@ -24,11 +24,22 @@ function isSafeDemoSlug(s: string): boolean {
 const payloadCache = new Map<string, GenAttrCachedRun>();
 const payloadInflight = new Map<string, Promise<GenAttrCachedRun | undefined>>();
 
-export type BundledDemoListEntry = { id: string; label: string };
+export type BundledDemoListEntry = { id: string; label: string; featuredStyle?: string };
 
 /** 构建期固定的 bundled demo 列表（与当前 JS 同版本）。 */
 export function getBundledGenAttributeDemoList(): readonly BundledDemoListEntry[] {
-    return GEN_ATTRIBUTE_BUNDLED_DEMOS.map(({ slug, label }) => ({ id: slug, label }));
+    return GEN_ATTRIBUTE_BUNDLED_DEMOS.map(({ slug, label, featured }) => ({
+        id: slug,
+        label,
+        ...(featured ? { featuredStyle: featured } : {}),
+    }));
+}
+
+/** `?demo=` / 列表 id 为 slug；UI 展示用 order 中的 label，未知 slug 则回退 slug。 */
+export function getBundledGenAttributeDemoLabel(slug: string): string {
+    const s = slug.trim();
+    const hit = GEN_ATTRIBUTE_BUNDLED_DEMOS.find((d) => d.slug === s);
+    return hit?.label ?? s;
 }
 
 /**

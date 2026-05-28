@@ -50,6 +50,11 @@ export type VisualizeSpecialCharsOptions = {
      * 省略或 false：每个 ASCII 空格都变为 ·（与 Tooltip / 候选词等一致）。
      */
     spaceDotExceptBeforeAsciiLetterOrNumber?: boolean;
+    /**
+     * 为 true（如 DAG 节点 SVG 标签）：不可打印码点显示为 `[]` 而非 `[hex]`。
+     * Tooltip 等需辨认码点的场景勿开启。
+     */
+    omitHexInCodePointLabel?: boolean;
 };
 
 function visualizeSpecialCharsImpl(text: string, options?: VisualizeSpecialCharsOptions): string {
@@ -88,8 +93,7 @@ function visualizeSpecialCharsImpl(text: string, options?: VisualizeSpecialChars
             } else {
                 const codePoint = char.codePointAt(0);
                 if (codePoint !== undefined) {
-                    const hexCode = codePoint.toString(16).toLowerCase().padStart(4, '0');
-                    processed.push(`[${hexCode}]`);
+                    processed.push(options?.omitHexInCodePointLabel === true ? '[]' : `[${codePoint.toString(16).toLowerCase().padStart(4, '0')}]`);
                 } else {
                     processed.push(char);
                 }

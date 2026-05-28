@@ -6,9 +6,10 @@ import type { AttributionApiResponse, PredictionAttributeModelVariant } from '..
 import type { PromptTokenSpan } from './genAttributeDagPreprocess';
 import type { CompletionFinishReason } from '../../cross/generationEndReasonLabel';
 import { fetchPredictionAttribute, fetchTokenize } from '../core/predictionAttributeClient';
+import { DEFAULT_MAX_NEW_TOKENS } from '../../cross/maxNewTokensConfig';
 
-/** 与生成归因页（含 DAG）「Max tokens」输入框默认值一致 */
-export const TOKEN_GEN_MAX_TOKENS_DEFAULT = 100;
+/** @deprecated 使用 {@link DEFAULT_MAX_NEW_TOKENS} */
+export const TOKEN_GEN_MAX_TOKENS_DEFAULT = DEFAULT_MAX_NEW_TOKENS;
 
 function splitCodePointPrefix(text: string, prefixLength: number): { prefix: string; rest: string } | null {
     if (prefixLength < 0) return null;
