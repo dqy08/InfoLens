@@ -32,6 +32,7 @@ import {PANEL_SPLIT_STORAGE_KEY_START} from '../../shared/cross/panelSplitStorag
 import {handleServerDemoSave} from '../../shared/controllers/serverDemoController';
 // 公共初始化模块
 import {initializeCommonApp} from '../../shared/bootstrap';
+import { registerPageBusy } from '../../shared/core/activitySession';
 // 工具函数
 import {ensureJsonExtension} from '../../shared/cross/localFileUtils';
 import {extractErrorMessage} from '../../shared/core/errorUtils';
@@ -192,6 +193,10 @@ window.onload = () => {
         semanticSearchBtn: semanticSearchBtn as d3.Selection<HTMLElement, unknown, HTMLElement, unknown>,
         getSemanticSearchQuery: () => (document.getElementById('semantic_search_input') as HTMLInputElement | null)?.value ?? '',
         tr
+    });
+    registerPageBusy(() => {
+        const s = appStateManager.getState();
+        return appStateManager.getIsAnalyzing() || s.isSemanticSearching;
     });
 
     // 创建GLTR文本可视化实例

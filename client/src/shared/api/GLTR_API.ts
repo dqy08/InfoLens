@@ -235,9 +235,6 @@ export class TextAnalysisAPI {
         });
     }
 
-    /**
-     * 获取访问统计（管理员）
-     */
     public getVisitStats(): Promise<{
         success: boolean,
         totals: { page_loads: number, active_visits: number },
@@ -264,6 +261,8 @@ export class TextAnalysisAPI {
             gen_attr_opt_sec?: Record<string, number>,
         },
         reset_at?: string | null,
+        online_now?: number,
+        online_window_sec?: number,
     }> {
         return d3.json(this.baseURL + '/api/visit_stats', {
             headers: this.getHeaders()

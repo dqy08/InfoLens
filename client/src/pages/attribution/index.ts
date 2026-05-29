@@ -11,6 +11,7 @@ import { initChatPanelLayout } from '../../shared/ui/chat_panel_layout';
 import { PANEL_SPLIT_STORAGE_KEY_ATTRIBUTION } from '../../shared/cross/panelSplitStorage';
 import { TextInputController } from '../../shared/controllers/textInputController';
 import { initializeCommonApp } from '../../shared/bootstrap';
+import { registerPageBusy } from '../../shared/core/activitySession';
 import { showAlertDialog } from '../../shared/ui/dialog';
 import URLHandler from '../../shared/core/URLHandler';
 import { initCachedHistoryQueryDropdown, type CachedHistorySelectContext } from '../../shared/cross/cachedHistoryUi';
@@ -164,6 +165,8 @@ function setAnalyzeLoading(loading: boolean): void {
     loaderSmall.style('display', loading ? null : 'none');
     syncAnalyzeButtonState();
 }
+
+registerPageBusy(() => analyzeInFlight);
 
 // input 事件同步按钮状态
 [contextField, targetField].forEach((field) => {

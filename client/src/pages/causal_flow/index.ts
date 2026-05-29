@@ -11,6 +11,7 @@ import { initChatPanelLayout } from '../../shared/ui/chat_panel_layout';
 import { PANEL_SPLIT_STORAGE_KEY_GEN_ATTRIBUTE } from '../../shared/cross/panelSplitStorage';
 import { TextInputController } from '../../shared/controllers/textInputController';
 import { initializeCommonApp } from '../../shared/bootstrap';
+import { registerPageBusy } from '../../shared/core/activitySession';
 import { setPageOptsGetter } from '../../shared/core/clientActivityPing';
 import { showAlertDialog } from '../../shared/ui/dialog';
 import URLHandler from '../../shared/core/URLHandler';
@@ -1657,6 +1658,8 @@ function setGenLoading(loading: boolean): void {
     genAttrResultsEl.classed('gen-attr-in-flight', loading);
     syncSubmitButtonState();
 }
+
+registerPageBusy(() => inFlight);
 
 /** 当前输入是否满足可以发起一次生成（不含 inFlight 判断）。 */
 function isInputReadyForRun(): boolean {

@@ -130,6 +130,7 @@ function visitStatsHtml(data: VisitStatsRow): string {
         `[All-time (${g('+ delta since reset')})]`,
         `Page loads: ${fmtTotal(t.page_loads)}${deltaSuffix(t.page_loads - (sb.page_loads ?? 0))}`,
         `Active visits: ${fmtTotal(t.active_visits)}${deltaSuffix(t.active_visits - (sb.active_visits ?? 0))}`,
+        `Online: ${data.online_now ?? 'unknown'}`,
         '',
         '[OS]',
         ...linesJoined(orderedKeysGt0(OS_ORDER, os), os, sb.os ?? {}),

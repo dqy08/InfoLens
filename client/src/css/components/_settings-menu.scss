@@ -1,10 +1,35 @@
 // 设置菜单样式（Theme/Language 下拉等共用）
 .settings-menu-wrapper {
   position: relative;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-family: var(--font-family-ui);
   font-size: var(--font-size-base);
   line-height: 1.4;
+}
+
+.online-count {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  color: var(--text-muted, var(--text-color));
+  opacity: 0.85;
+  font-size: 11px;
+  line-height: 1.15;
+  user-select: none;
+}
+
+.online-count-label,
+.online-count-value {
+  white-space: nowrap;
+}
+
+.online-count-value {
+  font-variant-numeric: tabular-nums;
+  min-width: 1.5ch;
+  text-align: center;
 }
 
 .settings-btn {

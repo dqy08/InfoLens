@@ -12,6 +12,7 @@ import { initChatPanelLayout } from '../../shared/ui/chat_panel_layout';
 import { PANEL_SPLIT_STORAGE_KEY_CHAT } from '../../shared/cross/panelSplitStorage';
 import { TextInputController } from '../../shared/controllers/textInputController';
 import { initializeCommonApp } from '../../shared/bootstrap';
+import { registerPageBusy } from '../../shared/core/activitySession';
 import { showAlertDialog } from '../../shared/ui/dialog';
 import URLHandler from '../../shared/core/URLHandler';
 import { ToolTip } from '../../shared/vis/ToolTip';
@@ -488,6 +489,8 @@ const setAskLoading = (loading: boolean): void => {
     }
     syncAskButtonState();
 };
+
+registerPageBusy(() => askInFlight);
 
 const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
     const prompt = getActivePromptValue();

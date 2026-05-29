@@ -515,8 +515,12 @@ def _merge_from_sample(s: dict) -> tuple[dict, dict, dict]:
 
 
 def get_stats_snapshot() -> dict:
+    from backend.platform.online_presence import WINDOW_SEC, get_online_now
+
     sample = _sample_locked_counters()
     public, _, _ = _merge_from_sample(sample)
+    public["online_now"] = get_online_now()
+    public["online_window_sec"] = WINDOW_SEC
     public["server_platform"] = _get_server_platform()
     public["startup_base"] = _startup_base
     if _process_start_at is not None:

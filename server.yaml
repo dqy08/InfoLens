@@ -397,14 +397,20 @@ paths:
               client_os:
                 type: string
                 description: 首轮心跳附带；ios / android / windows / macos / linux / unknown
+            description: |
+              有效心跳计入访问统计与在线估计。请求头带有效 X-Admin-Token 时仅返回 online_now，不计入统计。
       responses:
         200:
-          description: acknowledged
+          description: acknowledged; includes estimated online_now after valid heartbeat
           schema:
             type: object
             properties:
               ok:
                 type: boolean
+              online_now:
+                type: integer
+              online_window_sec:
+                type: integer
 
   /check_admin:
     post:
@@ -863,6 +869,13 @@ paths:
                 type: string
                 description: |
                   最近一次手动 reset 的 UTC 时间；从未 reset 时为 null。
+              online_now:
+                type: integer
+                description: |
+                  最近 online_window_sec 内 client-activity 心跳数按每 10s 一次折算的当前在线估计（ceil）；进程内存，重启清零。
+              online_window_sec:
+                type: integer
+                description: 在线估计滑动窗口秒数（当前为 20）。
 
   /visit_stats/reset:
     post:
