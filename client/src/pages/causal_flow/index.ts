@@ -133,8 +133,6 @@ const GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY = 'info_radar_gen_attr_dag_hi
 const GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY =
     'info_radar_gen_attr_dag_show_downstream_influence';
 const GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY = 'info_radar_gen_attr_dag_recursive_attribution';
-const GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_STORAGE_KEY =
-    'info_radar_gen_attr_dag_recursive_edge_animation';
 const GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_DIRECTION_STORAGE_KEY =
     'info_radar_gen_attr_dag_recursive_edge_animation_direction';
 const GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY = 'info_radar_gen_attr_dag_hide_excluded_tokens';
@@ -179,7 +177,6 @@ const DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS: GenAttrDemoUiOptions = {
     hideInactiveEdges: false,
     showDownstreamInfluence: false,
     recursiveAttributionEnabled: false,
-    recursiveEdgeBatchAnimationEnabled: true,
     recursiveEdgeBatchAnimationDirection: 'forward',
     showTokenInfoOnSelected: false,
     replayPacingMode: 'total',
@@ -460,12 +457,6 @@ const dagShowDownstreamInfluenceGroup = document.getElementById(
 const dagRecursiveAttributionInput = document.getElementById(
     'gen_attr_dag_recursive_attribution'
 ) as HTMLInputElement | null;
-const dagRecursiveEdgeAnimationGroup = document.getElementById(
-    'gen_attr_dag_recursive_edge_animation_group'
-);
-const dagRecursiveEdgeAnimationInput = document.getElementById(
-    'gen_attr_dag_recursive_edge_animation'
-) as HTMLInputElement | null;
 const dagRecursiveEdgeAnimationDirectionGroup = document.getElementById(
     'gen_attr_dag_recursive_edge_animation_direction_group'
 );
@@ -645,12 +636,8 @@ function applyDagRecursiveAttributionSubmodeUi(): void {
     if (dagShowDownstreamInfluenceGroup) {
         dagShowDownstreamInfluenceGroup.hidden = recursive;
     }
-    if (dagRecursiveEdgeAnimationGroup) {
-        dagRecursiveEdgeAnimationGroup.hidden = !recursive;
-    }
     if (dagRecursiveEdgeAnimationDirectionGroup) {
-        const animationEnabled = dagRecursiveEdgeAnimationInput?.checked ?? true;
-        dagRecursiveEdgeAnimationDirectionGroup.hidden = !recursive || !animationEnabled;
+        dagRecursiveEdgeAnimationDirectionGroup.hidden = !recursive;
     }
 }
 
@@ -664,14 +651,6 @@ function readStoredDagRecursiveAttribution(): boolean {
 const initialDagRecursiveAttribution = readStoredDagRecursiveAttribution();
 if (dagRecursiveAttributionInput) dagRecursiveAttributionInput.checked = initialDagRecursiveAttribution;
 
-function readStoredDagRecursiveEdgeAnimationEnabled(): boolean {
-    return lsReadBool(
-        GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_STORAGE_KEY,
-        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.recursiveEdgeBatchAnimationEnabled,
-        { encoding: '1' },
-    );
-}
-
 function readStoredDagRecursiveEdgeAnimationDirection(): DagRecursiveEdgeAnimationDirection {
     return lsReadEnum(
         GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_DIRECTION_STORAGE_KEY,
@@ -680,8 +659,6 @@ function readStoredDagRecursiveEdgeAnimationDirection(): DagRecursiveEdgeAnimati
     );
 }
 
-const initialDagRecursiveEdgeAnimationEnabled = readStoredDagRecursiveEdgeAnimationEnabled();
-if (dagRecursiveEdgeAnimationInput) dagRecursiveEdgeAnimationInput.checked = initialDagRecursiveEdgeAnimationEnabled;
 const initialDagRecursiveEdgeAnimationDirection = readStoredDagRecursiveEdgeAnimationDirection();
 if (dagRecursiveEdgeAnimationDirectionSelect) {
     dagRecursiveEdgeAnimationDirectionSelect.value = initialDagRecursiveEdgeAnimationDirection;
@@ -693,12 +670,6 @@ dagRecursiveAttributionInput?.addEventListener('change', () => {
     lsWriteBool(GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY, enabled, '1');
     applyDagRecursiveAttributionSubmodeUi();
     dagHandle.setRecursiveAttributionEnabled(enabled);
-});
-dagRecursiveEdgeAnimationInput?.addEventListener('change', () => {
-    const enabled = dagRecursiveEdgeAnimationInput.checked;
-    lsWriteBool(GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_STORAGE_KEY, enabled, '1');
-    applyDagRecursiveAttributionSubmodeUi();
-    dagHandle.setRecursiveEdgeBatchAnimationEnabled(enabled);
 });
 dagRecursiveEdgeAnimationDirectionSelect?.addEventListener('change', () => {
     const direction = currentDagRecursiveEdgeAnimationDirection();
@@ -743,9 +714,8 @@ setPageOptsGetter(() => {
         layout_linear_arc: mode === 'linear-arc',
         layout_step_down: mode === 'linear-arc-step-down',
         layout_spiral: mode === 'spiral',
-        propagated: dagRecursiveAttributionInput?.checked ?? false,
-        propagated_anim: dagRecursiveEdgeAnimationInput?.checked ?? true,
-        propagated_anim_backward: currentDagRecursiveEdgeAnimationDirection() === 'backward',
+        causal_flow: dagRecursiveAttributionInput?.checked ?? false,
+        causal_flow_anim_backward: currentDagRecursiveEdgeAnimationDirection() === 'backward',
         downstream: dagShowDownstreamInfluenceInput?.checked ?? false,
         token_tooltip: dagShowTopkOnSelectedInput?.checked ?? false,
     };
@@ -977,6 +947,9 @@ function pushDagFromPreprocess(
 /** 下一步要 `pushDagFromPreprocess` 的步下标；与当前 DAG 前缀一致（暂停不重置） */
 let dagPlaybackNextIndex = 0;
 
+/** 当前 run 的 token 归因步序；须在 `initGenAttributeDagView` 之前声明（init 会同步调用 `onDagCanPlay`） */
+let runnerHandle: TokenGenAttributionHandle | null = null;
+
 /**
  * 当前 run 的 prompt token spans：tokenize 先行写入，或 step 0 归因兜底，或历史加载时赋值。
  * 步进回放从头开始时作为 prompt 帧数据源，独立于 token_attribution 完整性。
@@ -1060,11 +1033,13 @@ function stopDagPlayback(): void {
 }
 
 function handleDagPlaybackToggle(wantPlay: boolean): void {
+    if (dagHandle.getUserFocusId() != null) return;
     const h = runnerHandle;
     if (!wantPlay) {
         stopDagPlayback();
         return;
     }
+    dagHandle.stopPropagationPlayback();
     if (!h || h.tokenCount === 0) return;
     if (dagPlaybackTimer !== null) {
         clearTimeout(dagPlaybackTimer);
@@ -1152,6 +1127,10 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
 
 const dagHandle = initGenAttributeDagView(d3.select('#results'), {
     onDagPlaybackToggle: handleDagPlaybackToggle,
+    onDagCanPlay: () => {
+        const h = runnerHandle;
+        return h != null && h.tokenCount > 0;
+    },
     onDagRefresh: () => {
         stopDagPlayback();
         const h = runnerHandle;
@@ -1166,9 +1145,8 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
     showTokenInfoOnSelected: initialDagShowTopkOnSelected,
     showDownstreamInfluence: initialDagShowDownstreamInfluence,
     recursiveAttributionEnabled: initialDagRecursiveAttribution,
-    recursiveEdgeBatchAnimationEnabled: initialDagRecursiveEdgeAnimationEnabled,
     recursiveEdgeBatchAnimationDirection: initialDagRecursiveEdgeAnimationDirection,
-    getReplayPacing: readDagReplayPacingFromControls,
+    getReplayPacing: () => readDagReplayPacingFromControls({ writeBack: true }),
     edgeTopPCoverage: initialDagEdgeTopPCoverage,
     onFullscreenError: (message) => showToast(message, 'error'),
     getEffectiveExcludePromptPatternsText: genAttrEffectiveExcludePromptPatternsText,
@@ -1188,7 +1166,12 @@ dagLayoutModeSelect?.addEventListener('change', () => {
  * 否则（稳态显示已完成结果）则自动 reset + replay + fit 到新宽度。
  */
 function isDagBusy(): boolean {
-    return inFlight || dagPlaybackTimer !== null || dagLastTokenDwellTimer !== null;
+    return (
+        inFlight ||
+        dagPlaybackTimer !== null ||
+        dagLastTokenDwellTimer !== null ||
+        dagHandle.isPropagationPlaybackEngaged()
+    );
 }
 
 /**
@@ -1293,7 +1276,6 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
         hideInactiveEdges: dagHideInactiveEdgesInput?.checked ?? false,
         showDownstreamInfluence: dagShowDownstreamInfluenceInput?.checked ?? false,
         recursiveAttributionEnabled: dagRecursiveAttributionInput?.checked ?? false,
-        recursiveEdgeBatchAnimationEnabled: dagRecursiveEdgeAnimationInput?.checked ?? true,
         recursiveEdgeBatchAnimationDirection: currentDagRecursiveEdgeAnimationDirection(),
         showTokenInfoOnSelected: dagShowTopkOnSelectedInput?.checked ?? false,
         replayPacingMode,
@@ -1437,13 +1419,6 @@ function applyGenAttrDemoUiOptionsSnap(snap: Partial<GenAttrDemoUiOptions>): voi
         applyDagRecursiveAttributionSubmodeUi();
         dagHandle.setRecursiveAttributionEnabled(snap.recursiveAttributionEnabled);
     }
-    if (snap.recursiveEdgeBatchAnimationEnabled !== undefined) {
-        if (dagRecursiveEdgeAnimationInput) {
-            dagRecursiveEdgeAnimationInput.checked = snap.recursiveEdgeBatchAnimationEnabled;
-        }
-        applyDagRecursiveAttributionSubmodeUi();
-        dagHandle.setRecursiveEdgeBatchAnimationEnabled(snap.recursiveEdgeBatchAnimationEnabled);
-    }
     if (snap.recursiveEdgeBatchAnimationDirection !== undefined) {
         const direction: DagRecursiveEdgeAnimationDirection =
             snap.recursiveEdgeBatchAnimationDirection === 'forward' ? 'forward' : 'backward';
@@ -1478,7 +1453,7 @@ function restoreGenAttrDagFocusFromDemoUiOptions(snap: Partial<GenAttrDemoUiOpti
     const focusId = snap?.selectedNodeId;
     if (typeof focusId === 'string' && focusId.length > 0) {
         try {
-            dagHandle.setSelectedNodeId(focusId);
+            dagHandle.setUserFocusNodeId(focusId);
             return;
         } catch {
             /* demo 快照与当前图不一致时忽略 */
@@ -1504,7 +1479,6 @@ const GEN_ATTR_DEMO_UI_LOCAL_STORAGE_KEYS: readonly string[] = [
     GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY,
     GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY,
     GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY,
-    GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_STORAGE_KEY,
     GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_DIRECTION_STORAGE_KEY,
     GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY,
     GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY,
@@ -1616,7 +1590,6 @@ function syncIdleModelMetric(): void {
 }
 
 // --- 状态 ---
-let runnerHandle: TokenGenAttributionHandle | null = null;
 
 /** 供导出 demo JSON；从缓存恢复时由 applyGenAttrCachedRun 写入 */
 let lastRunCompletionReason: CompletionFinishReason | null = null;

@@ -213,12 +213,12 @@
 
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
                         <span class="semantic-submode-group semantic-submode-group--emphasis">
-                            <label class="semantic-submode-label" for="gen_attr_dag_layout_mode">DAG layout mode</label>
+                            <label class="semantic-submode-label" for="gen_attr_dag_layout_mode">DAG layout</label>
                             <select id="gen_attr_dag_layout_mode"
                                 class="semantic-submode-select gen-attr-dag-layout-mode-select"
-                                title="Choose DAG layout mode. 'text-flow' follows text layout geometry; 'linear-arc' uses fixed-order linear nodes with arc links; 'linear-arc-step-down' is like linear-arc but drops each successive token vertically by CI (baseline = unscaled node height); 'spiral' lays nodes on an Archimedean spiral (for fun)."
+                                title="Choose DAG layout. 'text-flow' follows text layout geometry; 'linear-arc' uses fixed-order linear nodes with arc links; 'linear-arc-step-down' is like linear-arc but drops each successive token vertically by CI (baseline = unscaled node height); 'spiral' lays nodes on an Archimedean spiral (for fun)."
                                 data-i18n="title">
-                                <option value="text-flow">text-flow</option>
+                                <option value="text-flow">text</option>
                                 <option value="linear-arc">linear-arc</option>
                                 <option value="linear-arc-step-down">step-down</option>
                                 <option value="spiral">spiral (for fun)</option>
@@ -268,34 +268,20 @@
                     </div>
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
                         <span class="semantic-submode-group semantic-submode-group--emphasis">
-                            <label class="semantic-submode-label" for="gen_attr_dag_edge_top_p_coverage" data-i18n>Attribution top-p coverage</label>
-                            <input type="number" id="gen_attr_dag_edge_top_p_coverage" class="gen-attr-dag-measure-width-input"
-                                value="0.7" min="0.05" max="1" step="0.05"
-                                title="Coverage is the cumulative mass share within each generation step's Top-N candidate pool (after sorting candidates into the pool and normalizing mass inside that pool). Higher values keep more incoming edges. The denominator is this pool only, not every token-attribution entry returned for the step."
-                                data-i18n="title">
-                        </span>
-                    </div>
-                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
-                        <span class="semantic-submode-group semantic-submode-group--emphasis">
                             <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_recursive_attribution"
-                                    title="Trace from the focused token back to information sources (not one hop). Sources: prompt; surprising or teacher-forced generated tokens (MI decay stops the chain). Conduits: high-confidence middle tokens—attribution passes through. Blue edges: propagated share; node ring: attribution stay (strong where explanation lands). Use with Decay attribution to high-surprisal targets. Off = direct mode (immediate predecessors only)."
+                                    title="Unchecked: direct attribution — immediate predecessors only (default). Checked: Causal Flow Mode (↯) — trace from the focused token back to information sources. Sources: prompt; surprising or teacher-forced generated tokens (MI decay stops the chain). Conduits: high-confidence middle tokens—attribution passes through. Blue edges: propagated share; node ring: attribution stay (strong where explanation lands). Use with Decay attribution to high-surprisal targets. On the DAG, ↯ plays the focus propagation chain; ▶ replays generation steps when no token is focused."
                                     data-i18n="title">
-                                Propagated attribution mode
-                            </label>
-                        </span>
-                        <span class="semantic-submode-group semantic-submode-group--emphasis" id="gen_attr_dag_recursive_edge_animation_group" hidden>
-                            <label class="semantic-submode-label">
-                                <input type="checkbox" id="gen_attr_dag_recursive_edge_animation" checked
-                                    title="When checked, propagated incoming edges are shown batch-by-batch with the configured direction."
-                                    data-i18n="title">
-                                Animate propagation on click
+                                <span class="gen-attr-causal-flow-mode-label">
+                                    <span class="gen-attr-causal-flow-mode-icon" aria-hidden="true">↯</span>
+                                    <span data-i18n>Causal Flow Mode</span>
+                                </span>
                             </label>
                         </span>
                         <span class="semantic-submode-group" id="gen_attr_dag_recursive_edge_animation_direction_group" hidden>
                             <label class="semantic-submode-label" for="gen_attr_dag_recursive_edge_animation_direction">Direction</label>
                             <select id="gen_attr_dag_recursive_edge_animation_direction" class="semantic-submode-select"
-                                title="Choose one direction for propagated-edge batch animation."
+                                title="Direction for focus-chain batch animation when you press propagation play (↯) on the DAG with a focused token in Causal Flow Mode."
                                 data-i18n="title">
                                 <option value="forward">forward</option>
                                 <option value="backward">backward</option>
@@ -304,9 +290,26 @@
                         <span class="semantic-submode-group" id="gen_attr_dag_show_downstream_influence_group">
                             <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_show_downstream_influence"
-                                    title="When checked, direct attribution focus also shows outgoing edges from the selected or hovered token as downstream influence. Propagated attribution keeps showing upstream attribution chains only."
+                                    title="When checked, direct attribution focus also shows outgoing edges from the selected or hovered token as downstream influence. Causal Flow Mode keeps showing upstream attribution chains only."
                                     data-i18n="title">
                                 Show downstream influence
+                            </label>
+                        </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
+                        <span class="semantic-submode-group semantic-submode-group--emphasis">
+                            <label class="semantic-submode-label" for="gen_attr_dag_edge_top_p_coverage" data-i18n>Attribution top-p coverage</label>
+                            <input type="number" id="gen_attr_dag_edge_top_p_coverage" class="gen-attr-dag-measure-width-input"
+                                value="0.7" min="0.05" max="1" step="0.05"
+                                title="Coverage is the cumulative mass share within each generation step's Top-N candidate pool (after sorting candidates into the pool and normalizing mass inside that pool). Higher values keep more incoming edges. The denominator is this pool only, not every token-attribution entry returned for the step."
+                                data-i18n="title">
+                        </span>
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_hide_inactive_edges"
+                                    title="When checked, gray DAG edges not adjacent to the hovered or selected node are hidden."
+                                    data-i18n="title">
+                                Hide inactive edges
                             </label>
                         </span>
                     </div>
@@ -364,16 +367,6 @@
                             </label>
                         </span>
                     </div>
-                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
-                        <span class="semantic-submode-group">
-                            <label class="semantic-submode-label">
-                                <input type="checkbox" id="gen_attr_dag_hide_inactive_edges"
-                                    title="When checked, gray DAG edges not adjacent to the hovered or selected node are hidden."
-                                    data-i18n="title">
-                                Hide inactive edges
-                            </label>
-                        </span>
-                    </div>
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row gen-attr-dag-show-topk-on-selected-row">
                         <span class="semantic-submode-group">
                             <label class="semantic-submode-label">
@@ -389,7 +382,7 @@
                             <label class="semantic-submode-label" for="gen_attr_dag_replay_mode" data-i18n>Play speed</label>
                             <select id="gen_attr_dag_replay_mode"
                                 class="semantic-submode-select gen-attr-dag-replay-mode-select"
-                                title="Total duration or per-step delay. DAG Play uses equal steps or a fixed step interval; focus-chain animation scales each step by attribution weight."
+                                title="Total duration or per-step delay. DAG step replay (▶) uses equal steps or a fixed step interval; propagation chain animation (↯) scales each step by attribution weight."
                                 data-i18n="title">
                                 <option value="total" data-i18n>total time</option>
                                 <option value="step" data-i18n>step time</option>
@@ -397,14 +390,14 @@
                             <span id="gen_attr_dag_replay_total_wrap" class="gen-attr-dag-replay-value-wrap">
                                 <input type="number" id="gen_attr_dag_playback_total_s" class="gen-attr-dag-measure-width-input"
                                     value="7" min="1" max="3600" step="1"
-                                    title="Total seconds. DAG Play divides evenly across steps; focus-chain animation splits by layer weight. Saved locally; applied when you press Play or select a focus node."
+                                    title="Total seconds. With no focused token, DAG step replay (▶) divides evenly; in Causal Flow Mode with a focused token, propagation play (↯) runs focus-chain animation split by layer weight. Saved locally; applied when you press play."
                                     data-i18n="title">
                                 <span class="semantic-submode-label">s</span>
                             </span>
                             <span id="gen_attr_dag_replay_step_wrap" class="gen-attr-dag-replay-value-wrap" hidden>
                                 <input type="number" id="gen_attr_dag_playback_step_ms" class="gen-attr-dag-measure-width-input"
                                     value="200" min="0" max="10000" step="10"
-                                    title="Milliseconds per step. DAG Play uses this fixed interval; focus-chain animation multiplies by layer weight. Saved locally; applied when you press Play or select a focus node."
+                                    title="Milliseconds per step. DAG step replay (▶) uses this fixed interval; with a focused token in Causal Flow Mode, propagation play (↯) scales each batch by layer weight. Saved locally; applied when you press play."
                                     data-i18n="title">
                                 <span class="semantic-submode-label">ms</span>
                             </span>

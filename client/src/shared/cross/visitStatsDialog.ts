@@ -30,17 +30,35 @@ const OS_ORDER = ['ios', 'android', 'windows', 'macos', 'linux', 'unknown'] as c
 
 const GEN_ATTR_OPT_ORDER = [
     'layout_linear_arc', 'layout_step_down', 'layout_spiral',
-    'propagated', 'propagated_anim_backward',
+    'causal_flow', 'causal_flow_anim_backward',
     'downstream', 'token_tooltip',
 ] as const;
 
+/** 上报键更名前写入 Hub 的别名；展示时并入新键 */
+const GEN_ATTR_OPT_LEGACY_KEYS: Record<string, (typeof GEN_ATTR_OPT_ORDER)[number]> = {
+    propagated: 'causal_flow',
+    propagated_anim_backward: 'causal_flow_anim_backward',
+};
+
+function mergeLegacyGenAttrOptSec(rec: Record<string, number>): Record<string, number> {
+    const out = { ...rec };
+    for (const [legacy, next] of Object.entries(GEN_ATTR_OPT_LEGACY_KEYS)) {
+        const v = out[legacy];
+        if (v) {
+            out[next] = (out[next] ?? 0) + v;
+            delete out[legacy];
+        }
+    }
+    return out;
+}
+
 /** gen_attribute.html UI 原文；key 与上报/存储一致 */
 const GEN_ATTR_OPT_LABELS: Record<(typeof GEN_ATTR_OPT_ORDER)[number], string> = {
-    propagated: 'Propagated attribution mode',
-    propagated_anim_backward: 'Animation direction/backward',
-    layout_linear_arc: 'DAG layout mode/linear_arc',
-    layout_step_down: 'DAG layout mode/step-down',
-    layout_spiral: 'DAG layout mode/spiral',
+    causal_flow: 'Causal Flow Mode',
+    causal_flow_anim_backward: 'Causal Flow Mode / animation backward',
+    layout_linear_arc: 'DAG layout/linear_arc',
+    layout_step_down: 'DAG layout/step-down',
+    layout_spiral: 'DAG layout/spiral',
     downstream: 'Show downstream influence',
     token_tooltip: 'Show token tooltip',
 };
@@ -109,7 +127,8 @@ function visitStatsHtml(data: VisitStatsRow): string {
         });
     };
 
-    const genAttrOpts = data.gen_attr_opt_sec ?? {};
+    const genAttrOpts = mergeLegacyGenAttrOptSec(data.gen_attr_opt_sec ?? {});
+    const genAttrOptsBase = mergeLegacyGenAttrOptSec(sb.gen_attr_opt_sec ?? {});
     const genAttrTotalSec = pg['causal_flow.html'] ?? 0;
     const genAttrOptKeys = orderedKeysGt0(GEN_ATTR_OPT_ORDER, genAttrOpts);
     const genAttrOptLines: string[] = genAttrOptKeys.length > 0 && genAttrTotalSec > 0
@@ -117,7 +136,7 @@ function visitStatsHtml(data: VisitStatsRow): string {
             const v = genAttrOpts[k] ?? 0;
             const pct = Math.round(v / genAttrTotalSec * 100);
             const main = hasBase ? `${formatDurationSec(v)} (${pct}%)` : 'unknown';
-            const bv = (sb.gen_attr_opt_sec ?? {})[k] ?? 0;
+            const bv = genAttrOptsBase[k] ?? 0;
             const label = GEN_ATTR_OPT_LABELS[k as (typeof GEN_ATTR_OPT_ORDER)[number]] ?? k;
             return `${esc(label)}: ${main}${deltaSuffixDuration(v - bv)}`;
         })
@@ -173,18 +192,17 @@ export async function showVisitStatsDialog(api: TextAnalysisAPI): Promise<void> 
     showDialog({
         title: 'Visit Stats',
         content: (dialog) => {
-            const wrap = dialog
-                .append('div')
-                .attr('class', 'dialog-form-container dialog-form-container--fill');
-            const headerRow = wrap
-                .append('div')
-                .style('display', 'flex')
-                .style('justify-content', 'flex-end')
-                .style('align-items', 'center')
-                .style('gap', '6px')
-                .style('margin-bottom', '6px');
-            const body = wrap.append('div').attr('class', 'dialog-scroll-region');
-            headerRow
+            const shell = d3.select(dialog.node()!.parentElement!);
+            const titleText = shell.select('.dialog-title').text();
+            shell.select('.dialog-title').remove();
+            const titleRow = shell
+                .insert('div', '.dialog-content')
+                .attr('class', 'dialog-title-row');
+            titleRow.append('div').attr('class', 'dialog-title').text(titleText);
+            const actions = titleRow.append('div').attr('class', 'dialog-title-actions');
+
+            let scrollBody: d3.Selection<HTMLDivElement, unknown, HTMLElement, any>;
+            actions
                 .append('button')
                 .attr('type', 'button')
                 .attr('class', 'refresh-btn')
@@ -197,14 +215,14 @@ export async function showVisitStatsDialog(api: TextAnalysisAPI): Promise<void> 
                     try {
                         const res = await api.resetVisitStats();
                         if (!res?.success) throw new Error(res?.error ?? 'failed');
-                        await fetchAndRender(body);
+                        await fetchAndRender(scrollBody);
                     } catch (e) {
                         alert(`Reset failed: ${e}`);
                     } finally {
                         btn.property('disabled', false).style('opacity', null).text('Persist and reset delta');
                     }
                 });
-            headerRow
+            actions
                 .append('button')
                 .attr('type', 'button')
                 .attr('class', 'refresh-btn')
@@ -213,10 +231,15 @@ export async function showVisitStatsDialog(api: TextAnalysisAPI): Promise<void> 
                 .on('click', async function () {
                     const btn = d3.select(this);
                     btn.property('disabled', true).text('…');
-                    await fetchAndRender(body);
+                    await fetchAndRender(scrollBody);
                     btn.property('disabled', false).text('↻');
                 });
-            fetchAndRender(body);
+
+            const wrap = dialog
+                .append('div')
+                .attr('class', 'dialog-form-container dialog-form-container--fill');
+            scrollBody = wrap.append('div').attr('class', 'dialog-scroll-region');
+            fetchAndRender(scrollBody);
             return { focus: () => {} };
         },
         cancelText: tr('Exit'),

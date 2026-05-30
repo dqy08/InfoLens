@@ -74,9 +74,7 @@ export type GenAttrDemoUiOptions = {
     showDownstreamInfluence: boolean;
     /** 传播归因（UI: Propagated attribution mode；与 `recursiveAttribution*` 同义）。 */
     recursiveAttributionEnabled: boolean;
-    /** 传播归因边分批动画开关。 */
-    recursiveEdgeBatchAnimationEnabled: boolean;
-    /** 传播归因边分批动画方向。 */
+    /** 传播链播放方向（▶ 在传播模式下、有用户焦点时）。 */
     recursiveEdgeBatchAnimationDirection: 'backward' | 'forward';
     /** 是否显示 token tooltip（UI: Show token tooltip；`showTokenInfoOnSelected`）。 */
     showTokenInfoOnSelected: boolean;
@@ -260,12 +258,6 @@ function isValidDemoUiOptionsPayload(v: unknown): v is Partial<GenAttrDemoUiOpti
     if (
         d.recursiveAttributionEnabled !== undefined &&
         typeof d.recursiveAttributionEnabled !== 'boolean'
-    ) {
-        return false;
-    }
-    if (
-        d.recursiveEdgeBatchAnimationEnabled !== undefined &&
-        typeof d.recursiveEdgeBatchAnimationEnabled !== 'boolean'
     ) {
         return false;
     }

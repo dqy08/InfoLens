@@ -54,6 +54,29 @@
   flex-shrink: 0; // 标题不收缩
 }
 
+.dialog-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+
+  .dialog-title {
+    margin-bottom: 0;
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.dialog-title-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 // 对话框内容区域
 .dialog-content {
   margin-bottom: 12px;

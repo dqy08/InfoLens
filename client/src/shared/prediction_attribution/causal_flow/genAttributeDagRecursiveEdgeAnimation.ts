@@ -541,7 +541,6 @@ export function resolveRecursiveEdgeAnimationRenderOverlay(args: {
     userAnimationFocusId: string | null;
     animation: DagEdgeBatchAnimationState | null;
     recursiveAttributionEnabled: boolean;
-    animationEnabled: boolean;
     computeFocusState: ComputeFocusStateFn;
     computeSteadyStateStayShareById: ComputeSteadyStateStayShareByIdFn;
     ctx: DagFocusAttributionGraphContext;
@@ -552,7 +551,6 @@ export function resolveRecursiveEdgeAnimationRenderOverlay(args: {
         userAnimationFocusId,
         animation: anim,
         recursiveAttributionEnabled,
-        animationEnabled,
         computeFocusState,
         computeSteadyStateStayShareById,
         ctx,
@@ -563,9 +561,9 @@ export function resolveRecursiveEdgeAnimationRenderOverlay(args: {
         focusId == null ||
         focusState == null ||
         !recursiveAttributionEnabled ||
-        !animationEnabled ||
         userAnimationFocusId == null ||
-        userAnimationFocusId !== focusId
+        userAnimationFocusId !== focusId ||
+        anim == null
     ) {
         const nodeStrokeShareById =
             focusId != null && focusState != null && recursiveAttributionEnabled
@@ -687,26 +685,32 @@ function logPropagationPlaybackPlanOnStart(args: {
     }
 }
 
+export type DagPropagationPlaybackPhase = 'idle' | 'playing' | 'paused' | 'ended';
+
 export type DagRecursiveEdgeAnimationController = {
-    onUserSelect(focusId: string, ctx: DagFocusAttributionGraphContext): void;
     onClear(): void;
-    setEnabled(enabled: boolean): void;
     setDirection(direction: DagRecursiveEdgeAnimationDirection): void;
     getDirection(): DagRecursiveEdgeAnimationDirection;
     getUserAnimationFocusId(): string | null;
-    isEnabled(): boolean;
+    getPlaybackPhase(): DagPropagationPlaybackPhase;
+    canStartPlayback(focusId: string, ctx: DagFocusAttributionGraphContext): boolean;
+    startPlayback(focusId: string, ctx: DagFocusAttributionGraphContext): void;
+    pausePlayback(): void;
+    resumePlayback(): void;
+    stopPlayback(): void;
+    isPlaybackActive(): boolean;
     resolveRenderOverlay(args: {
         effectiveFocusId: string | null;
         focusState: DagFocusAttributionState | null;
         recursiveAttributionEnabled: boolean;
         ctx: DagFocusAttributionGraphContext;
     }): RecursiveEdgeAnimationRenderOverlay;
-    stopAnimation(): void;
     dispose(): void;
 };
 
 export type CreateDagRecursiveEdgeAnimationControllerOptions = {
     onTick: () => void;
+    onPlaybackPhaseChange?: () => void;
     computeFocusState: ComputeFocusStateFn;
     computeSteadyStateStayShareById: ComputeSteadyStateStayShareByIdFn;
     isRecursiveAttributionEnabled: () => boolean;
@@ -714,9 +718,8 @@ export type CreateDagRecursiveEdgeAnimationControllerOptions = {
     offsetOf: (id: string) => number;
     /** 节点 id → 界面展示用 token 文案（如 `displayLabel`）。 */
     tokenLabelOf: (id: string) => string | null;
-    enabled?: boolean;
     direction?: DagRecursiveEdgeAnimationDirection;
-    /** 点击焦点开始动画时读取；与 DAG 生成回放共用 UI 配置。 */
+    /** 开始传播播放时读取；与 DAG 生成回放共用 UI 配置。 */
     getReplayPacing?: () => DagRecursiveEdgeReplayPacing;
 };
 
@@ -729,15 +732,24 @@ export function createDagRecursiveEdgeAnimationController(
         totalS: 7,
     });
     const getReplayPacing = options.getReplayPacing ?? defaultPacing;
-    let enabled = options.enabled ?? true;
+    const notifyPhaseChange = (): void => {
+        options.onPlaybackPhaseChange?.();
+    };
     let direction: DagRecursiveEdgeAnimationDirection = options.direction ?? 'forward';
     let userAnimationFocusId: string | null = null;
     let animation: DagEdgeBatchAnimationState | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let version = 0;
     let graphCtx: DagFocusAttributionGraphContext | null = null;
+    let playbackPhase: DagPropagationPlaybackPhase = 'idle';
 
-    function stopAnimation(): void {
+    function setPlaybackPhase(next: DagPropagationPlaybackPhase): void {
+        if (playbackPhase === next) return;
+        playbackPhase = next;
+        notifyPhaseChange();
+    }
+
+    function stopPlayback(): void {
         if (animation != null) {
             const s = animation;
             const batch = s.plan.batches[s.batchIndex];
@@ -752,17 +764,51 @@ export function createDagRecursiveEdgeAnimationController(
             timer = null;
         }
         animation = null;
+        userAnimationFocusId = null;
+        setPlaybackPhase('idle');
     }
 
     function onClear(): void {
-        userAnimationFocusId = null;
-        stopAnimation();
         graphCtx = null;
+        stopPlayback();
     }
 
-    function beginUserClickAnimation(focusId: string): void {
-        stopAnimation();
-        if (!enabled || !options.isRecursiveAttributionEnabled() || !options.hasNode(focusId) || graphCtx == null) {
+    function canStartPlayback(focusId: string, ctx: DagFocusAttributionGraphContext): boolean {
+        if (!options.isRecursiveAttributionEnabled() || !options.hasNode(focusId)) {
+            return false;
+        }
+        const focusState = options.computeFocusState(
+            focusId,
+            {
+                maxIncomingDepth: Number.POSITIVE_INFINITY,
+                includeDownstreamInfluence: false,
+            },
+            ctx,
+        );
+        if (focusState == null || focusState.incomingEdgeShareByKey.size === 0) {
+            return false;
+        }
+        return (
+            buildPropagationPlaybackPlan(
+                focusState.incomingEdgeShareByKey,
+                options.offsetOf,
+                focusState.nodeShareById,
+                focusId,
+            ) != null
+        );
+    }
+
+    function startPlayback(focusId: string, ctx: DagFocusAttributionGraphContext): void {
+        graphCtx = ctx;
+        version++;
+        if (timer !== null) {
+            clearTimeout(timer);
+            timer = null;
+        }
+        animation = null;
+        if (!canStartPlayback(focusId, ctx)) {
+            userAnimationFocusId = null;
+            setPlaybackPhase('idle');
             return;
         }
         const focusState = options.computeFocusState(
@@ -771,9 +817,10 @@ export function createDagRecursiveEdgeAnimationController(
                 maxIncomingDepth: Number.POSITIVE_INFINITY,
                 includeDownstreamInfluence: false,
             },
-            graphCtx,
+            ctx,
         );
-        if (focusState == null || focusState.incomingEdgeShareByKey.size === 0) {
+        if (focusState == null) {
+            setPlaybackPhase('idle');
             return;
         }
         const plan = buildPropagationPlaybackPlan(
@@ -782,9 +829,13 @@ export function createDagRecursiveEdgeAnimationController(
             focusState.nodeShareById,
             focusId,
         );
-        if (plan == null) return;
+        if (plan == null) {
+            setPlaybackPhase('idle');
+            return;
+        }
         const initialBatchIndex =
             direction === 'backward' ? 0 : FORWARD_PROMPT_BATCH_INDEX;
+        userAnimationFocusId = focusId;
         animation = {
             plan,
             direction,
@@ -799,6 +850,24 @@ export function createDagRecursiveEdgeAnimationController(
             nodeShareById: focusState.nodeShareById,
             tokenLabelOf: options.tokenLabelOf,
         });
+        setPlaybackPhase('playing');
+        scheduleAnimationStep(focusId);
+    }
+
+    function pausePlayback(): void {
+        if (playbackPhase !== 'playing') return;
+        if (timer !== null) {
+            clearTimeout(timer);
+            timer = null;
+        }
+        setPlaybackPhase('paused');
+    }
+
+    function resumePlayback(): void {
+        if (playbackPhase !== 'paused' && playbackPhase !== 'ended') return;
+        const focusId = animation?.plan.focusId;
+        if (focusId == null || graphCtx == null) return;
+        setPlaybackPhase('playing');
         scheduleAnimationStep(focusId);
     }
 
@@ -891,6 +960,7 @@ export function createDagRecursiveEdgeAnimationController(
 
                 if (!hasNextBatch(stateAfterDwell, lastBatch)) {
                     timer = null;
+                    setPlaybackPhase('ended');
                     return;
                 }
                 advanceBatchIndex(stateAfterDwell);
@@ -902,21 +972,11 @@ export function createDagRecursiveEdgeAnimationController(
     }
 
     return {
-        onUserSelect(focusId: string, ctx: DagFocusAttributionGraphContext): void {
-            graphCtx = ctx;
-            userAnimationFocusId = focusId;
-            beginUserClickAnimation(focusId);
-        },
         onClear,
-        setEnabled(next: boolean): void {
-            if (enabled === next) return;
-            enabled = next;
-            if (!enabled) stopAnimation();
-        },
         setDirection(next: DagRecursiveEdgeAnimationDirection): void {
             if (direction === next) return;
             direction = next;
-            stopAnimation();
+            stopPlayback();
         },
         getDirection(): DagRecursiveEdgeAnimationDirection {
             return direction;
@@ -924,20 +984,26 @@ export function createDagRecursiveEdgeAnimationController(
         getUserAnimationFocusId(): string | null {
             return userAnimationFocusId;
         },
-        isEnabled(): boolean {
-            return enabled;
+        getPlaybackPhase(): DagPropagationPlaybackPhase {
+            return playbackPhase;
+        },
+        canStartPlayback,
+        startPlayback,
+        pausePlayback,
+        resumePlayback,
+        stopPlayback,
+        isPlaybackActive(): boolean {
+            return timer !== null;
         },
         resolveRenderOverlay(args): RecursiveEdgeAnimationRenderOverlay {
             return resolveRecursiveEdgeAnimationRenderOverlay({
                 ...args,
                 userAnimationFocusId,
                 animation,
-                animationEnabled: enabled,
                 computeFocusState: options.computeFocusState,
                 computeSteadyStateStayShareById: options.computeSteadyStateStayShareById,
             });
         },
-        stopAnimation,
         dispose(): void {
             onClear();
         },

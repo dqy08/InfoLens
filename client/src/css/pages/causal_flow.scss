@@ -332,7 +332,7 @@ $gen-attr-cached-demos-panel-width: 21em;
     -webkit-user-select: none;
   }
 
-  // 从右到左：⛶ (fullscreen) → ↻ (refresh) → ▶ (play)
+  // 从右到左：⛶ (fullscreen) → ↻ (refresh) → ▶ / ↯ (play: step replay / propagation)
   #results.gen-attr-results-surface.LMF > button.gen-attr-dag-fullscreen {
     right: 12px;
   }
@@ -343,6 +343,30 @@ $gen-attr-cached-demos-panel-width: 21em;
 
   #results.gen-attr-results-surface.LMF > button.gen-attr-dag-play {
     right: 84px;
+  }
+
+  // 传播播放（↯）可点时：灰 ↔ 强调色脉动，提示可播传播链
+  @keyframes gen-attr-dag-propagation-play-hint {
+    0%,
+    100% {
+      color: var(--refresh-btn-color);
+    }
+
+    50% {
+      color: var(--accent-color);
+    }
+  }
+
+  #results.gen-attr-results-surface.LMF
+    > button.gen-attr-dag-play.gen-attr-dag-play--propagation-hint:not(:disabled) {
+    animation: gen-attr-dag-propagation-play-hint 1.6s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #results.gen-attr-results-surface.LMF
+      > button.gen-attr-dag-play.gen-attr-dag-play--propagation-hint {
+      animation: none;
+    }
   }
 
   // --- WORKAROUND：原生全屏不可用时的 CSS 伪全屏（见 ts/ui/cssPseudoFullscreen.ts），与 :fullscreen 共用版心样式 ---
@@ -510,6 +534,20 @@ body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row
   &.semantic-submode-row {
     gap: $gen-attr-option-row-gap;
   }
+}
+
+// ↯ 与 ▶ / ↻ 等同用 `--font-icon`，与 9pt 标签正文分离
+.gen-attr-causal-flow-mode-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gen-attr-causal-flow-mode-icon {
+  font-family: var(--font-icon);
+  font-size: 1.5em;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 // 高 surprisal 两项勾选项：固定同一行，避免与其它 DAG 行一致的 wrap 把两项拆成两行

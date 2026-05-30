@@ -19,6 +19,7 @@ import {
     buildMaxNormalizedRenderStrengthByKey,
     normalizeEdgeRenderOpacity,
 } from './genAttributeDagEdgeRenderStrength';
+import { DAG_CAUSAL_FLOW_ICON } from './genAttributeDagIcons';
 import {
     backwardSlideIncomingEdgeKeysForBatch,
     createDagRecursiveEdgeAnimationController,
@@ -473,7 +474,7 @@ const CSS_VAR_DAG_NORMAL_LINE_COLOR = '--dag-normal-line-color';
 const CSS_VAR_DAG_HIGHLIGHT_LINE_IN = '--dag-highlight-line-color-in';
 /** 与 {@link start.scss} `--dag-highlight-line-color-out` 一致（出边：从焦点出发） */
 const CSS_VAR_DAG_HIGHLIGHT_LINE_OUT = '--dag-highlight-line-color-out';
-/** 与 {@link gen_attribute.scss} `.gen-attr-dag-node--recursive-chain` 中 `stroke-opacity` 一致（由 JS 写入 g 元素） */
+/** 与 causal_flow.scss 中 `--recursive-chain` 的 `stroke-opacity` 一致（由 JS 写入 g 元素） */
 const CSS_VAR_DAG_NODE_RECURSIVE_SHARE = '--gen-attr-dag-node-recursive-share';
 
 /** 弱化：未排除的 prompt 无出边，或（prompt/生成区）邻域外且存在悬停/选中焦点时 */
@@ -584,12 +585,22 @@ export type GenAttributeDagHandle = {
     fitViewportToContent(force?: boolean): void;
     /** 当前选中节点 id；无选中为 `null`。 */
     getSelectedNodeId(): string | null;
-    /** 设置选中节点（`null` 清除）；节点须已存在于图中。 */
-    setSelectedNodeId(id: string | null, options?: { triggerEdgeAnimation?: boolean }): void;
+    /** 用户点击确立的传播播放焦点；与 {@link getSelectedNodeId} 解耦（步进 update 会改 selected 但不改此项）。 */
+    getUserFocusId(): string | null;
+    /** 设置选中节点（`null` 清除）；节点须已存在于图中。不更新 {@link getUserFocusId}。 */
+    setSelectedNodeId(id: string | null): void;
+    /**
+     * 同时设置用户传播焦点与选中描边（demo 快照恢复等）；`null` 等价于 {@link clearNodeSelection}。
+     */
+    setUserFocusNodeId(id: string | null): void;
     /** 清除节点选中态（与点击画布空白等价）；不改变图数据，生成结束后可调用以去掉末 token 描边 */
     clearNodeSelection(): void;
     /** DAG 步进重放：更新 ▶ / ⏸ 按钮文案（由页面在播放开始/结束/暂停时调用） */
     setDagPlaybackPlaying: (playing: boolean) => void;
+    /** 传播链动画处于播放/暂停/结束可续播（非 idle）。 */
+    isPropagationPlaybackEngaged(): boolean;
+    /** 停止传播链播放并清动画状态（不改变 {@link getUserFocusId}）。 */
+    stopPropagationPlayback(): void;
     /**
      * 设置不可见测量层的固定像素宽度（写入 inline `width`）。
      * 测量层宽度是节点几何（折行位置 / `x, y`）的唯一自变量；容器尺寸变化不再改变几何。
@@ -621,9 +632,7 @@ export type GenAttributeDagHandle = {
     setShowTokenInfoOnSelected(show: boolean): void;
     /** 是否启用传播归因（UI: Propagated attribution mode；`recursiveAttributionEnabled`）。 */
     setRecursiveAttributionEnabled(enabled: boolean): void;
-    /** 传播归因边分批动画开关（仅在 Propagated attribution mode 下生效）。 */
-    setRecursiveEdgeBatchAnimationEnabled(enabled: boolean): void;
-    /** 传播归因边分批动画方向（仅在开关开启时生效）。 */
+    /** 传播链播放方向（forward / backward）。 */
     setRecursiveEdgeBatchAnimationDirection(direction: DagRecursiveEdgeAnimationDirection): void;
     /** 是否在直接归因焦点上额外展示从焦点出发的下游影响出边。 */
     setShowDownstreamInfluence(show: boolean): void;
@@ -736,7 +745,7 @@ function snapSubwordNode(node: DagNode, prev: DagNode | null): void {
  * - 焦点蓝入边：链内 max 归一，最强边刻度统一为焦点 MI ratio（动画前沿仅改归一分母与可见性，不 per-edge 再乘 MI）；
  *   最终 opacity 不低于 {@link DAG_EDGE_RENDER_OPACITY_FLOOR}；
  * - 上游节点描边（仅传播归因）：stay 池内 max 归一，映射到 `[{@link DAG_NODE_STROKE_OPACITY_BASE}, 1]`；直接模式一跳由边色表达，不描边。
- * - 传播模式节点提亮与描边一致：仅焦点 + stay 达阈的上游（传导节点仅保留蓝边，不提亮）。
+ * - 传播模式节点提亮与 stay 描边一致：仅焦点 + stay 达阈的上游（传导节点仅蓝边，不提亮）。
  */
 type FocusAttributionState = DagFocusAttributionState;
 
@@ -888,8 +897,10 @@ function computeFocusAttributionState(
  * 节点框左上角对齐测量起点；矩形与 SVG 标签相对测量层共用 `--gen-attr-dag-display-scale`；仅缩放平移作用于 SVG。
  */
 export type InitGenAttributeDagViewOptions = {
-    /** 点击 ▶：传入 `true`；点击 ⏸：传入 `false`（页面内定时重放 DAG） */
+    /** 点击 ▶：传入 `true`；点击 ⏸：传入 `false`（页面内定时重放 DAG；仅无用户焦点时由 view 调用） */
     onDagPlaybackToggle?: (playing: boolean) => void;
+    /** 无用户焦点时 DAG 步进是否可播（如无 runner 步则 false） */
+    onDagCanPlay?: () => boolean;
     /** 点击 DAG 刷新时：在内部先按需 `fitViewportToContent`、再 `reset` 之后调用，用于重放（视口沿用 fit 结果）。 */
     onDagRefresh?: () => void;
     /**
@@ -920,9 +931,7 @@ export type InitGenAttributeDagViewOptions = {
     showTokenInfoOnSelected?: boolean;
     /** 传播归因（UI: Propagated attribution mode；`recursiveAttributionEnabled`）；默认 `false`。 */
     recursiveAttributionEnabled?: boolean;
-    /** 传播归因边分批动画开关；默认 `true`。 */
-    recursiveEdgeBatchAnimationEnabled?: boolean;
-    /** 传播归因边分批动画方向；默认 `forward`。 */
+    /** 传播链播放方向；默认 `forward`。 */
     recursiveEdgeBatchAnimationDirection?: DagRecursiveEdgeAnimationDirection;
     /** 传播链动画节奏；默认 step / 500ms / 7s。 */
     getReplayPacing?: () => DagRecursiveEdgeReplayPacing;
@@ -946,6 +955,7 @@ export function initGenAttributeDagView(
 ): GenAttributeDagHandle {
     const onDagRefresh = options?.onDagRefresh;
     const onDagPlaybackToggle = options?.onDagPlaybackToggle;
+    const onDagCanPlay = options?.onDagCanPlay;
     const onFullscreenError = options?.onFullscreenError;
     let layoutMode: DagLayoutMode = options?.layoutMode ?? 'text-flow';
     let linearArcAdjacentGapPx = LINEAR_ARC_ADJACENT_GAP_DEFAULT;
@@ -988,7 +998,9 @@ export function initGenAttributeDagView(
             reset: noop,
             fitViewportToContent: noop,
             getSelectedNodeId: () => null,
+            getUserFocusId: () => null,
             setSelectedNodeId: noop,
+            setUserFocusNodeId: noop,
             clearNodeSelection: noop,
             setDagPlaybackPlaying: noop,
             setMeasureWidthPx: noop,
@@ -999,8 +1011,9 @@ export function initGenAttributeDagView(
             setHideExcludedTokens: noop,
             setShowTokenInfoOnSelected: noop,
             setRecursiveAttributionEnabled: noop,
-            setRecursiveEdgeBatchAnimationEnabled: noop,
             setRecursiveEdgeBatchAnimationDirection: noop,
+            isPropagationPlaybackEngaged: () => false,
+            stopPropagationPlayback: noop,
             setShowDownstreamInfluence: noop,
             hasPromptSpans: () => false,
             detach: noop,
@@ -1136,7 +1149,7 @@ export function initGenAttributeDagView(
     svg.call(zoomBehavior);
     applyInitialDagZoom();
 
-    svg.on('click', () => setSelectedNodeId(null));
+    svg.on('click', () => clearNodeSelection());
 
     const linkG = rootG.append('g').attr('class', 'gen-attr-dag-links');
     const nodeG = rootG.append('g').attr('class', 'gen-attr-dag-nodes');
@@ -1156,6 +1169,8 @@ export function initGenAttributeDagView(
     let grayRenderCache: Map<string, number> | null = null;
     let stepProcessed = 0;
     let selectedId: string | null = null;
+    /** 用户点击确立的播放焦点；`update` 不修改，用于 ▶ 传播链路由 */
+    let userFocusId: string | null = null;
     /** 悬浮节点 id；无选中时参与归因预览焦点，有选中时仅驱动 `--hover` 等样式，不改归因焦点 */
     let hoveredId: string | null = null;
     /** 最近一次 {@link refreshNodeLinkHighlight} 计算出的归因状态（基于 {@link effectiveFocusId}）；tooltip 用于展示归因份额 */
@@ -1171,8 +1186,11 @@ export function initGenAttributeDagView(
         incomingLinksByTarget,
     });
 
+    let syncDagPlayButtonImpl: () => void = () => {};
+
     const recursiveEdgeAnimation = createDagRecursiveEdgeAnimationController({
         onTick: () => refreshNodeLinkHighlight(),
+        onPlaybackPhaseChange: () => syncDagPlayButtonImpl(),
         computeFocusState: (focusId, options, ctx) =>
             computeFocusAttributionState(
                 graph,
@@ -1191,14 +1209,13 @@ export function initGenAttributeDagView(
             const n = graph.getNodeAttributes(id) as DagNode;
             return n.displayLabel ?? n.label;
         },
-        enabled: options?.recursiveEdgeBatchAnimationEnabled ?? true,
         direction: options?.recursiveEdgeBatchAnimationDirection ?? 'forward',
         getReplayPacing: options?.getReplayPacing,
     });
 
-    /** 归因预览焦点：有选中则固定选中节点，否则随悬浮临时预览 */
+    /** 归因预览焦点：用户播放焦点优先，否则选中 / 悬浮 */
     function effectiveFocusId(): string | null {
-        return selectedId ?? hoveredId;
+        return userFocusId ?? selectedId ?? hoveredId;
     }
 
     /** 传播链动画当前帧应对应 tooltip 的节点；非播放中返回 null。 */
@@ -1281,8 +1298,12 @@ export function initGenAttributeDagView(
             })
             .on('click', (event, d) => {
                 event.stopPropagation();
-                const next = selectedId === d.id ? null : d.id;
-                setSelectedNodeId(next, { triggerEdgeAnimation: next != null });
+                const next = userFocusId === d.id ? null : d.id;
+                userFocusId = next;
+                selectedId = next;
+                recursiveEdgeAnimation.stopPlayback();
+                refreshNodeLinkHighlight();
+                syncDagPlayButtonImpl();
             });
     }
 
@@ -1630,24 +1651,35 @@ export function initGenAttributeDagView(
         dagTopkToolTip.updateData({ tokenData: tokenForTooltip }, rect, augment);
     };
 
-    function setSelectedNodeId(
-        id: string | null,
-        options?: { triggerEdgeAnimation?: boolean },
-    ): void {
+    function setSelectedNodeId(id: string | null): void {
         if (id != null && !graph.hasNode(id)) {
             throw new Error(`genAttributeDagView: unknown node id ${id}`);
         }
         selectedId = id;
-        if (id != null && options?.triggerEdgeAnimation) {
-            recursiveEdgeAnimation.onUserSelect(id, focusAttributionCtx());
-        } else {
-            recursiveEdgeAnimation.onClear();
-        }
         refreshNodeLinkHighlight();
     }
 
     function clearNodeSelection(): void {
-        setSelectedNodeId(null);
+        selectedId = null;
+        userFocusId = null;
+        recursiveEdgeAnimation.stopPlayback();
+        refreshNodeLinkHighlight();
+        syncDagPlayButtonImpl();
+    }
+
+    function setUserFocusNodeId(id: string | null): void {
+        if (id == null) {
+            clearNodeSelection();
+            return;
+        }
+        if (!graph.hasNode(id)) {
+            throw new Error(`genAttributeDagView: unknown node id ${id}`);
+        }
+        userFocusId = id;
+        selectedId = id;
+        recursiveEdgeAnimation.stopPlayback();
+        refreshNodeLinkHighlight();
+        syncDagPlayButtonImpl();
     }
 
     /** 将当前 `nodes` / `links` 同步到 SVG：join 新 DOM、`paint` 几何、`refreshNodeLinkHighlight` 样式。 */
@@ -1947,7 +1979,7 @@ export function initGenAttributeDagView(
         stepProcessed++;
         // 每步生成后：默认选中本步新生成的 token；无其它选中时悬浮仍可临时预览
         selectedId = targetId;
-        recursiveEdgeAnimation.onClear();
+        recursiveEdgeAnimation.stopPlayback();
         if (batchDepth === 0) {
             syncGraphToSvg();
             // 生成 / 单步回放 / DAG 步进播放（均非批内）每步 `fitViewportToContent()`；其内部在
@@ -1969,6 +2001,7 @@ export function initGenAttributeDagView(
         grayRenderCache = null;
         stepProcessed = 0;
         selectedId = null;
+        userFocusId = null;
         hoveredId = null;
         dagTopkToolTip.hideAndReset();
         linkMarkersDefs.selectAll('marker').remove();
@@ -2087,13 +2120,81 @@ export function initGenAttributeDagView(
         .style('display', onDagPlaybackToggle ? null : 'none')
         .on('click', (event) => {
             event.stopPropagation();
+            if (playBtn.property('disabled')) return;
+            if (userFocusId != null) {
+                togglePropagationPlayback();
+                return;
+            }
             if (!onDagPlaybackToggle) return;
             onDagPlaybackToggle(!dagPlaybackPlaying);
         });
 
+    function syncDagPlayButton(): void {
+        const propPhase = recursiveEdgeAnimation.getPlaybackPhase();
+        const propActive = recursiveEdgeAnimation.isPlaybackActive();
+        const playing = dagPlaybackPlaying || propActive;
+        const propagationPlayUi = userFocusId != null && recursiveAttributionEnabled;
+        let disabled = false;
+        if (userFocusId != null) {
+            if (!recursiveAttributionEnabled) {
+                disabled = true;
+            } else {
+                const canProp =
+                    propPhase !== 'idle' ||
+                    recursiveEdgeAnimation.canStartPlayback(userFocusId, focusAttributionCtx());
+                disabled = !canProp;
+            }
+        } else {
+            disabled = onDagCanPlay != null && !onDagCanPlay();
+        }
+        playBtn.property('disabled', disabled);
+        const propagationHint =
+            propagationPlayUi && !playing && !disabled;
+        playBtn.classed('gen-attr-dag-play--propagation-hint', propagationHint);
+        playBtn
+            .text(playing ? '⏸' : propagationPlayUi ? DAG_CAUSAL_FLOW_ICON : '▶')
+            .attr(
+                'title',
+                playing
+                    ? 'Pause'
+                    : propagationPlayUi
+                      ? 'Propagation (↯)'
+                      : 'Step replay (▶)'
+            );
+    }
+    syncDagPlayButtonImpl = syncDagPlayButton;
+    syncDagPlayButton();
+
+    function togglePropagationPlayback(): void {
+        const phase = recursiveEdgeAnimation.getPlaybackPhase();
+        if (phase === 'playing') {
+            recursiveEdgeAnimation.pausePlayback();
+            syncDagPlayButton();
+            return;
+        }
+        onDagPlaybackToggle?.(false);
+        if (userFocusId == null) return;
+        if (phase === 'paused') {
+            recursiveEdgeAnimation.resumePlayback();
+        } else {
+            recursiveEdgeAnimation.startPlayback(userFocusId, focusAttributionCtx());
+        }
+        syncDagPlayButton();
+    }
+
     function setDagPlaybackPlaying(playing: boolean): void {
         dagPlaybackPlaying = playing;
-        playBtn.text(playing ? '⏸' : '▶').attr('title', playing ? 'Pause' : 'Play');
+        syncDagPlayButton();
+    }
+
+    function isPropagationPlaybackEngaged(): boolean {
+        const phase = recursiveEdgeAnimation.getPlaybackPhase();
+        return phase !== 'idle';
+    }
+
+    function stopPropagationPlayback(): void {
+        recursiveEdgeAnimation.stopPlayback();
+        syncDagPlayButton();
     }
 
     function setLayoutMode(mode: DagLayoutMode): void {
@@ -2137,24 +2238,17 @@ export function initGenAttributeDagView(
     function setRecursiveAttributionEnabled(enabled: boolean): void {
         if (recursiveAttributionEnabled === enabled) return;
         recursiveAttributionEnabled = enabled;
-        if (!enabled) recursiveEdgeAnimation.stopAnimation();
+        if (!enabled) recursiveEdgeAnimation.stopPlayback();
         paint();
         refreshNodeLinkHighlight();
-    }
-
-    function setRecursiveEdgeBatchAnimationEnabled(enabled: boolean): void {
-        const wasEnabled = recursiveEdgeAnimation.isEnabled();
-        recursiveEdgeAnimation.setEnabled(enabled);
-        if (enabled && !wasEnabled && selectedId != null && recursiveAttributionEnabled) {
-            recursiveEdgeAnimation.onUserSelect(selectedId, focusAttributionCtx());
-        }
-        refreshNodeLinkHighlight();
+        syncDagPlayButton();
     }
 
     function setRecursiveEdgeBatchAnimationDirection(direction: DagRecursiveEdgeAnimationDirection): void {
         recursiveEdgeAnimation.setDirection(direction);
         paint();
         refreshNodeLinkHighlight();
+        syncDagPlayButton();
     }
 
     function setShowDownstreamInfluence(show: boolean): void {
@@ -2253,7 +2347,9 @@ export function initGenAttributeDagView(
         reset,
         fitViewportToContent,
         getSelectedNodeId: () => selectedId,
+        getUserFocusId: () => userFocusId,
         setSelectedNodeId,
+        setUserFocusNodeId,
         clearNodeSelection,
         setDagPlaybackPlaying,
         setMeasureWidthPx,
@@ -2264,8 +2360,9 @@ export function initGenAttributeDagView(
         setHideExcludedTokens,
         setShowTokenInfoOnSelected,
         setRecursiveAttributionEnabled,
-        setRecursiveEdgeBatchAnimationEnabled,
         setRecursiveEdgeBatchAnimationDirection,
+        isPropagationPlaybackEngaged,
+        stopPropagationPlayback,
         setShowDownstreamInfluence,
         hasPromptSpans: () => nodes.some((n) => n.step === -1),
         detach,

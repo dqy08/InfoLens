@@ -91,12 +91,17 @@
   height: 28px;
   transition: all 0.15s ease;
   color: var(--refresh-btn-color);  // 颜色变浅
-  
-  &:hover {
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  &:hover:not(:disabled) {
     background-color: var(--refresh-btn-hover);
   }
-  
-  &:active {
+
+  &:active:not(:disabled) {
     background-color: var(--refresh-btn-hover);
     transform: scale(0.95);  // 按下效果
   }

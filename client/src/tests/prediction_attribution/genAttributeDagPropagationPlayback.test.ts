@@ -12,6 +12,7 @@ import { buildMaxNormalizedRenderStrengthByKey } from '../../shared/prediction_a
 import {
     backwardSlideIncomingEdgeKeysForBatch,
     buildPropagationPlaybackPlan,
+    createDagRecursiveEdgeAnimationController,
     maxShareInEdgeKeySet,
     tgtIdFromEdgeKey,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagRecursiveEdgeAnimation';
@@ -264,6 +265,67 @@ console.log('6. backwardSlideIncomingEdgeKeysForBatch');
             );
         }
     }
+}
+
+// ── propagation playback controller pause / resume ───────────────────────────
+console.log('6. createDagRecursiveEdgeAnimationController pause/resume');
+{
+    const focusId = 'f';
+    const incoming = new Map<string, number>([
+        ['p->a', 0.3],
+        ['a->b', 0.2],
+        ['b->f', 0.5],
+    ]);
+    const offsetOf = (id: string) => ({ p: 0, a: 1, b: 2, f: 3 })[id] ?? 0;
+    const nodeShare = new Map([
+        ['f', 1],
+        ['b', 0.4],
+        ['a', 0.3],
+        ['p', 0.2],
+    ]);
+    const focusState = {
+        activeNodeIds: new Set(['p', 'a', 'b', focusId]),
+        incomingEdgeShareByKey: incoming,
+        downstreamEdgeStrengthByKey: new Map<string, number>(),
+        nodeShareById: nodeShare,
+    };
+    const ctx = {
+        nodesSortedByStepDesc: [
+            { id: 'f', step: 3 },
+            { id: 'b', step: 2 },
+            { id: 'a', step: 1 },
+            { id: 'p', step: -1 },
+        ],
+        incomingLinksByTarget: new Map<string, readonly unknown[]>(),
+    };
+    let tickCount = 0;
+    const ctrl = createDagRecursiveEdgeAnimationController({
+        onTick: () => {
+            tickCount++;
+        },
+        computeFocusState: () => focusState,
+        computeSteadyStateStayShareById: (m) => new Map(m),
+        isRecursiveAttributionEnabled: () => true,
+        hasNode: () => true,
+        offsetOf,
+        tokenLabelOf: (id) => id,
+        direction: 'backward',
+        getReplayPacing: () => ({ mode: 'step', stepMs: 60_000, totalS: 7 }),
+    });
+    assert('canStartPlayback', ctrl.canStartPlayback(focusId, ctx));
+    ctrl.startPlayback(focusId, ctx);
+    assertEq('start → playing', ctrl.getPlaybackPhase(), 'playing');
+    assert('onTick after start', tickCount >= 1);
+    const ticksAfterStart = tickCount;
+    ctrl.pausePlayback();
+    assertEq('pause → paused', ctrl.getPlaybackPhase(), 'paused');
+    assertEq('pause clears active timer', ctrl.isPlaybackActive(), false);
+    ctrl.resumePlayback();
+    assertEq('resume → playing', ctrl.getPlaybackPhase(), 'playing');
+    assert('resume re-ticks frame', tickCount > ticksAfterStart);
+    ctrl.stopPlayback();
+    assertEq('stop → idle', ctrl.getPlaybackPhase(), 'idle');
+    assertEq('stop clears animation focus', ctrl.getUserAnimationFocusId(), null);
 }
 
 // ── summary ─────────────────────────────────────────────────────────────────

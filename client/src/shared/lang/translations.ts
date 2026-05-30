@@ -58,18 +58,18 @@ export const translations: Translations = {
             '显示 token 提示',
         'When checked, selecting or hovering a token node shows token information in the results area.':
             '勾选后，选中或悬浮 token 节点时，在右侧结果区展示该 token 的信息（信息量、预测分布、归因份额等）。',
-        'Width (px) of the invisible measurement layer used for DAG layout. Only this width affects wrapping and node positions. When idle, changes replay and fit automatically; during generation or DAG playback, the setting updates for the next run or refresh.':
-            'DAG 节点几何所基于的不可见测量层宽度（px）。只有测量层宽度会影响节点折行/位置。修改后：稳态下自动按新宽度重放并 fit；若正在生成或 DAG 播放中，仅更新设置，下次刷新/生成时生效。',
+        'Width (px) of the invisible measurement layer used for DAG layout. Only this width affects wrapping and node positions. When idle, changes replay and fit automatically; during generation or DAG step replay (▶), the setting updates for the next run or refresh.':
+            'DAG 节点几何所基于的不可见测量层宽度（px）。只有测量层宽度会影响节点折行/位置。修改后：稳态下自动按新宽度重放并 fit；若正在生成或 DAG 步进重放（▶）中，仅更新设置，下次刷新/生成时生效。',
         'Token distance': 'Token distance 间距',
-        'Horizontal gap (px) between the outer left/right edges of adjacent token nodes in linear-arc / linear-arc-step-down layout only. When idle, the DAG refits; during generation or DAG playback, the value is stored and applied on the next sync.':
-            '仅 linear-arc / linear-arc-step-down 布局下生效：相邻 token 节点矩形外侧边之间的水平间隙（px）。修改后：稳态下立即重绘并 fit；若正在生成或 DAG 播放中，仅写入存储，下一轮同步时再反映。',
-        'Horizontal gap (px) between the outer left/right edges of adjacent token nodes in linear-arc layout only. When idle, the DAG refits; during generation or DAG playback, the value is stored and applied on the next sync.':
-            '仅 linear-arc / linear-arc-step-down 布局下生效：相邻 token 节点矩形外侧边之间的水平间隙（px）。修改后：稳态下立即重绘并 fit；若正在生成或 DAG 播放中，仅写入存储，下一轮同步时再反映。',
+        'Horizontal gap (px) between the outer left/right edges of adjacent token nodes in linear-arc / linear-arc-step-down layout only. When idle, the DAG refits; during generation or DAG step replay (▶), the value is stored and applied on the next sync.':
+            '仅 linear-arc / linear-arc-step-down 布局下生效：相邻 token 节点矩形外侧边之间的水平间隙（px）。修改后：稳态下立即重绘并 fit；若正在生成或 DAG 步进重放（▶）中，仅写入存储，下一轮同步时再反映。',
+        'Horizontal gap (px) between the outer left/right edges of adjacent token nodes in linear-arc layout only. When idle, the DAG refits; during generation or DAG step replay (▶), the value is stored and applied on the next sync.':
+            '仅 linear-arc / linear-arc-step-down 布局下生效：相邻 token 节点矩形外侧边之间的水平间隙（px）。修改后：稳态下立即重绘并 fit；若正在生成或 DAG 步进重放（▶）中，仅写入存储，下一轮同步时再反映。',
         'Compactness': 'DAG 紧凑度',
-        'Scales DAG node boxes and labels relative to the measurement layer; 1 matches full readout scale. When idle, changes replay and fit automatically; during generation or DAG playback, the setting updates for the next run or refresh.':
-            '相对测量层缩放 DAG 节点框与标签；1 与正文阅读比例一致。修改后：稳态下自动重放并 fit；若正在生成或 DAG 播放中，仅更新设置，下次运行或刷新时生效。',
-        'Delay in milliseconds between steps during DAG playback. Stored locally; the value is read when you press play—changing it mid-playback does not affect the current run.':
-            'DAG 步进重放时相邻两步之间的间隔（ms）。写入本地存储；每次点击播放时读取当前输入，播放中途改数值不影响本轮。',
+        'Scales DAG node boxes and labels relative to the measurement layer; 1 matches full readout scale. When idle, changes replay and fit automatically; during generation or DAG step replay (▶), the setting updates for the next run or refresh.':
+            '相对测量层缩放 DAG 节点框与标签；1 与正文阅读比例一致。修改后：稳态下自动重放并 fit；若正在生成或 DAG 步进重放（▶）中，仅更新设置，下次运行或刷新时生效。',
+        'Delay in milliseconds between steps during DAG step replay (▶). Stored locally; the value is read when you press play—changing it mid-playback does not affect the current run.':
+            'DAG 步进重放（▶）时相邻两步之间的间隔（ms）。写入本地存储；每次点击播放时读取当前输入，播放中途改数值不影响本轮。',
         'Perform gradient attribution on the target token below.': '对以下target token做梯度归因。',
         // Context Attribution 页（attribution.html）
         'Context': 'Context 上下文',
@@ -127,12 +127,23 @@ export const translations: Translations = {
         'Restore DAG options, play speed, exclusions, etc. to defaults and clear saved preferences for those controls.':
             '将 DAG 参数、播放速度、排除正则等恢复为默认值，并清除这些控件的本地保存项。',
         'Play speed': '播放速度',
-        'Total duration or per-step delay. DAG Play uses equal steps or a fixed step interval; focus-chain animation scales each step by attribution weight.':
-            '总时长或单步延时。DAG 播放（▶）按步均分或固定单步间隔；焦点传播链动画按各层归因权重缩放每步停留时间。',
-        'Total seconds. DAG Play divides evenly across steps; focus-chain animation splits by layer weight. Saved locally; applied when you press Play or select a focus node.':
-            '总秒数。DAG 播放（▶）在步间均分；焦点传播链动画按层权重分配。本地保存；在点击播放或选中焦点节点时生效。',
-        'Milliseconds per step. DAG Play uses this fixed interval; focus-chain animation multiplies by layer weight. Saved locally; applied when you press Play or select a focus node.':
-            '每步毫秒数。DAG 播放（▶）使用固定间隔；焦点传播链动画乘以层权重。本地保存；在点击播放或选中焦点节点时生效。',
+        'Causal Flow Mode': '因果流模式',
+        'Unchecked: direct attribution — immediate predecessors only (default). Checked: Causal Flow Mode (↯) — trace from the focused token back to information sources. Sources: prompt; surprising or teacher-forced generated tokens (MI decay stops the chain). Conduits: high-confidence middle tokens—attribution passes through. Blue edges: propagated share; node ring: attribution stay (strong where explanation lands). Use with Decay attribution to high-surprisal targets. On the DAG, ↯ plays the focus propagation chain; ▶ replays generation steps when no token is focused.':
+            '未勾选：原始直接归因（仅一跳前驱，默认）。勾选：因果流模式（↯）— 从焦点 token 向上追溯到信息来源。来源：prompt；高惊讶或 teacher-forced 的生成 token（MI 衰减可截断链）。传导：高置信中间 token，归因穿过。蓝边：传播份额；节点环：归因停留（解释落点处更强）。建议与「向高惊讶目标衰减归因」配合使用。DAG 上：↯ 播放焦点传播链；无焦点时 ▶ 步进重放生成过程。',
+        'Direction for focus-chain batch animation when you press propagation play (↯) on the DAG with a focused token in Causal Flow Mode.':
+            '因果流模式下，对已聚焦 token 在 DAG 上按传播播放（↯）时，焦点传播链分批动画的方向。',
+        'When checked, direct attribution focus also shows outgoing edges from the selected or hovered token as downstream influence. Causal Flow Mode keeps showing upstream attribution chains only.':
+            '勾选后，直接归因焦点下还会显示从选中/悬浮 token 出发的下游影响出边。因果流模式仍只显示向上游的归因链。',
+        'Total duration or per-step delay. DAG step replay (▶) uses equal steps or a fixed step interval; propagation chain animation (↯) scales each step by attribution weight.':
+            '总时长或单步延时。DAG 步进重放（▶）按步均分或固定单步间隔；传播链动画（↯）按各层归因权重缩放每步停留时间。',
+        'Total seconds. DAG step replay (▶) divides evenly across steps; propagation chain (↯) splits by layer weight. Saved locally; applied when you press play or select a focus node.':
+            '总秒数。步进重放（▶）在步间均分；传播链（↯）按层权重分配。本地保存；点击对应播放钮或选中焦点节点时生效。',
+        'Total seconds. With no focused token, DAG step replay (▶) divides evenly; in Causal Flow Mode with a focused token, propagation play (↯) runs focus-chain animation split by layer weight. Saved locally; applied when you press play.':
+            '总秒数。无焦点时步进重放（▶）在步间均分；因果流模式下对已聚焦 token 按传播播放（↯）时，按层权重运行焦点传播链动画。本地保存；点击播放时生效。',
+        'Milliseconds per step. DAG step replay (▶) uses this fixed interval; propagation chain (↯) multiplies by layer weight. Saved locally; applied when you press play or select a focus node.':
+            '每步毫秒数。步进重放（▶）使用固定间隔；传播链（↯）乘以层权重。本地保存；点击对应播放钮或选中焦点节点时生效。',
+        'Milliseconds per step. DAG step replay (▶) uses this fixed interval; with a focused token in Causal Flow Mode, propagation play (↯) scales each batch by layer weight. Saved locally; applied when you press play.':
+            '每步毫秒数。步进重放（▶）使用固定间隔；因果流模式下对已聚焦 token 按传播播放（↯）时，各批按层权重缩放停留。本地保存；点击播放时生效。',
         'Cached history': '历史缓存',
         'Cached demo': '示例缓存',
         'Demo not found': '未找到该示例缓存',
