@@ -1,6 +1,8 @@
+import atexit
 import copy
 import json
 import os
+import signal
 import tempfile
 import threading
 import time
@@ -48,6 +50,7 @@ _STATS_GEN_ATTR_OPT_ORDER = (
 
 # RLock：_persist_tick 在已持锁时调用 _sample_locked_counters，同线程需可重入。
 _LOCK = threading.RLock()
+_shutdown_persist_done = False
 
 # Hub 上与 stats_total 对齐的已累计快照；未完成启动加载或未配置 token 时为 {}。
 _base: dict = {}
@@ -543,6 +546,45 @@ def _daemon_persist_hourly():
         _persist_tick()
 
 
+def _try_persist_on_shutdown():
+    """进程退出路径（atexit / SIGTERM / SIGINT 等）最多尝试一次持久化；失败不阻断退出。"""
+    global _shutdown_persist_done
+    with _LOCK:
+        if _shutdown_persist_done:
+            return
+        _shutdown_persist_done = True
+        sample = _sample_locked_counters()
+    _, _, delta_body = _merge_from_sample(sample)
+    if not _increment_nonempty(delta_body):
+        return
+    print("[访问统计] 进程退出：尝试持久化未同步增量。", flush=True)
+    try:
+        _persist_tick()
+    except Exception as e:  # noqa: BLE001
+        print(f"[访问统计] 退出持久化失败: {e}", flush=True)
+
+
+def _chain_shutdown_signal(signum: int) -> None:
+    previous = signal.getsignal(signum)
+
+    def _wrapper(sig: int, frame) -> None:
+        _try_persist_on_shutdown()
+        if callable(previous):
+            previous(sig, frame)
+
+    try:
+        signal.signal(signum, _wrapper)
+    except (ValueError, OSError):
+        pass
+
+
+def _register_shutdown_persist():
+    atexit.register(_try_persist_on_shutdown)
+    _chain_shutdown_signal(signal.SIGTERM)
+    _chain_shutdown_signal(signal.SIGINT)
+
+
 def register_visit_stats(_app):
     """_app 与 server 注册约定一致；统计线程不依赖应用对象。"""
+    _register_shutdown_persist()
     threading.Thread(target=_daemon_persist_hourly, daemon=True).start()

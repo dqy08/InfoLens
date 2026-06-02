@@ -77,18 +77,15 @@ function orderedKeysGt0(primary: readonly string[], rec: Record<string, number>)
     return [...head, ...tail];
 }
 
-/** 秒 → `1d 2h 3m 4s`（省略为 0 的单位；全 0 为 `0s`；负数带负号） */
+/** 秒 → `1h 2m 3s`（最高 h；省略为 0 的单位；全 0 为 `0s`；负数带负号） */
 function formatDurationSec(sec: number): string {
     const sign = sec < 0 ? '-' : '';
     let x = Math.abs(Math.floor(sec));
-    const days = Math.floor(x / 86400);
-    x %= 86400;
     const h = Math.floor(x / 3600);
     x %= 3600;
     const m = Math.floor(x / 60);
     const s = x % 60;
     const parts: string[] = [];
-    if (days) parts.push(`${days}d`);
     if (h) parts.push(`${h}h`);
     if (m) parts.push(`${m}m`);
     if (s || parts.length === 0) parts.push(`${s}s`);
