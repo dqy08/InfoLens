@@ -4,7 +4,7 @@ import '../../css/pages/chat.scss';
 
 import { initThemeManager } from '../../shared/ui/theme';
 import { initLanguageManager } from '../../shared/ui/language';
-import { initI18n, tr, trf } from '../../shared/lang/i18n-lite';
+import { initI18n, tr } from '../../shared/lang/i18n-lite';
 import { AdminManager } from '../../shared/cross/adminManager';
 import { SettingsMenuManager } from '../../shared/cross/settingsMenuManager';
 import { initCachedHistoryQueryDropdown, type CachedHistorySelectContext } from '../../shared/cross/cachedHistoryUi';
@@ -24,10 +24,9 @@ import {
     type OpenAICompletionsResponse
 } from '../../shared/api/completionsClient';
 import { translateApiErrorMessage } from '../../shared/core/errorUtils';
-import {
-    buildCompletionDisplayResult,
-    CHAT_DEFAULT_COMPLETION_MODEL
-} from '../../features/chat/buildCompletionDisplayResult';
+import { buildCompletionDisplayResult } from '../../features/chat/buildCompletionDisplayResult';
+import type { PredictionAttributeModelVariant } from '../../shared/prediction_attribution/core/attributionResultCache';
+import { createCompletionOptionsRow } from '../../shared/cross/completionOptionsRow';
 import { completionFinishReasonLabel } from '../../shared/cross/generationEndReasonLabel';
 import { addDigitsMergeRenderListener } from '../../shared/cross/digitsMergeManager';
 import {
@@ -38,11 +37,12 @@ import {
     saveHistory
 } from '../../shared/cross/queryHistory';
 import {
-    buildCachedContentUrlParam,
     getCachedEntryByContentKey,
     listCachedHistoryRows,
+    migrateLegacyChatCacheIfNeeded,
     removeCachedEntryByContentKey,
     touchCachedEntryByContentKey,
+    type ChatCompletionDraft,
     type CompletionCachedEntry,
     type CompletionResultCacheKey,
 } from '../../features/chat/completionResultCache';
@@ -54,29 +54,23 @@ import {
 } from '../../shared/cross/contentUrl';
 import { CHAT_SURPRISAL_COLOR_MAP_MAX } from '../../shared/cross/SurprisalColorConfig';
 import { updateChatCompletionMetrics } from '../../shared/cross/textMetricsUpdater';
-import { lsReadBool, lsReadNumber, lsSet, lsWriteBool } from '../../shared/storage/localStorageHelpers';
+import { lsReadBool, lsSet, lsWriteBool, lsWriteString } from '../../shared/storage/localStorageHelpers';
 import {
     CHAT_ENABLE_THINKING_STORAGE_KEY,
     CHAT_MAX_NEW_TOKENS_STORAGE_KEY,
+    CHAT_MODEL_VARIANT_STORAGE_KEY,
     LS_SKIP_CHAT_TEMPLATE,
 } from '../../features/chat/chatPromptTemplateMode';
 import { createToast } from '../../shared/ui/toast';
 import { initDensityAttributionSidebar } from '../../shared/prediction_attribution/density_sidebar/densityAttributionSidebar';
 import { syncDraftCommittedButtonPair } from '../../shared/cross/syncDraftCommittedButtonPair';
-import {
-    DEFAULT_MAX_NEW_TOKENS,
-    finalizeMaxNewTokensInput,
-    formatMaxNewTokensParseError,
-    MaxNewTokensParseError,
-    parseMaxNewTokens as parseMaxNewTokensShared,
-    isMaxNewTokensRawValid,
-    syncMaxNewTokensInputSiteMax,
-} from '../../shared/cross/maxNewTokensConfig';
+import { syncMaxNewTokensInputSiteMax } from '../../shared/cross/maxNewTokensConfig';
 
 // 与首页一致：默认隐藏 Ask 旁的小菊花，仅在请求进行中再显示
 d3.selectAll('.loadersmall').style('display', 'none');
 
 initI18n();
+void migrateLegacyChatCacheIfNeeded();
 
 const showToast = createToast('#toast').show;
 
@@ -107,9 +101,6 @@ const chatUserPasteBtn = d3.select('#chat_user_paste_text_btn');
 const rawInputHistoryBtn = document.getElementById('chat_raw_input_history_btn');
 const chatSystemHistoryBtn = document.getElementById('chat_system_prompt_history_btn');
 const chatUserHistoryBtn = document.getElementById('chat_user_prompt_history_btn');
-const maxNewTokensInput = document.getElementById(
-    'chat_max_new_tokens'
-) as HTMLInputElement | null;
 const loaderSmall = d3.select('.loadersmall');
 
 const rawInputPanel = document.getElementById('raw_input_panel');
@@ -157,6 +148,12 @@ function syncPromptPanelVisibility(): void {
     const skip = isSkipChatTemplate();
     if (rawInputPanel) rawInputPanel.hidden = !skip;
     if (chatInputPanel) chatInputPanel.hidden = skip;
+}
+
+const DEFAULT_CHAT_MODEL_VARIANT: PredictionAttributeModelVariant = 'instruct';
+
+function resolveStoredModelVariant(v?: PredictionAttributeModelVariant): PredictionAttributeModelVariant {
+    return v === 'base' || v === 'instruct' ? v : DEFAULT_CHAT_MODEL_VARIANT;
 }
 
 const chatRightStack = d3.select('.chat-right-stack');
@@ -244,11 +241,9 @@ d3.select('body').on('touchstart', () => {
     toolTip.hideAndReset();
 });
 
-const modelParam = URLHandler.parameters['model'];
-const completionModel =
-    typeof modelParam === 'string' && modelParam.length > 0
-        ? modelParam
-        : CHAT_DEFAULT_COMPLETION_MODEL;
+const urlModelParam = URLHandler.parameters['model'];
+const urlModelVariant: PredictionAttributeModelVariant | null =
+    urlModelParam === 'base' || urlModelParam === 'instruct' ? urlModelParam : null;
 
 let askAbort: AbortController | null = null;
 let askInFlight = false;
@@ -264,28 +259,126 @@ let streamingPreviewLastFlush = 0;
 let lastCompletionForRerender: {
     res: OpenAICompletionsResponse;
     promptUsed: string;
+    modelVariant?: PredictionAttributeModelVariant;
+    contentUrlKey: string;
 } | null = null;
 
 /** 右侧已展示结果对应的左侧输入快照（与 Context Attribution 页 lastCommittedInputs 同类） */
 type ChatCommittedFingerprint =
-    | { skipTemplate: true; raw: string; maxTokens: string }
+    | { skipTemplate: true; raw: string; maxTokens: string; model: PredictionAttributeModelVariant }
     | {
           skipTemplate: false;
           user: string;
           system: string;
           useSystem: boolean;
           maxTokens: string;
+          model: PredictionAttributeModelVariant;
       };
 
 let lastCommittedFingerprint: ChatCommittedFingerprint | null = null;
 
+const completionOptions = createCompletionOptionsRow({
+    isSkipChatTemplate,
+    metricModel,
+    alertDialogTitle: tr('LLM Raw Chat'),
+    onStateChange: () => syncAskButtonState(),
+    adminMode: () => adminManager.isInAdminMode(),
+    modelVariantStorageKey: CHAT_MODEL_VARIANT_STORAGE_KEY,
+    maxNewTokensStorageKey: CHAT_MAX_NEW_TOKENS_STORAGE_KEY,
+    urlModelVariant,
+});
+
+const {
+    maxTokensInput,
+    modelVariantSelect,
+    currentModelVariant,
+    currentMaxTokens,
+    parseMaxNewTokensFromField,
+    isMaxNewTokensInputValid,
+    syncModelVariantUi,
+    syncIdleModelMetric,
+    syncMaxTokensUi,
+    normalizeMaxTokensField,
+} = completionOptions;
+
+function buildChatRunDraftForCache(): ChatCompletionDraft {
+    const maxTokens = currentMaxTokens();
+    if (isSkipChatTemplate()) {
+        return {
+            mode: 'raw',
+            model: currentModelVariant(),
+            maxTokens,
+            raw: (textField.node() as HTMLTextAreaElement | null)?.value ?? '',
+        };
+    }
+    return {
+        mode: 'chat',
+        model: 'instruct',
+        maxTokens,
+        system: (chatSystemTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
+        user: (chatUserTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
+        useSystem: isChatUseSystemPrompt(),
+        enableThinking: isEnableThinking(),
+    };
+}
+
+/** 从缓存 draft 还原左侧面板（仅含 draft 的新条目；与 causal_flow applyGenAttrCachedRun 对齐） */
+function applyChatDraftFromCache(draft: ChatCompletionDraft, entry: CompletionCachedEntry): void {
+    if (draft.mode === 'chat') {
+        if (skipChatTemplateInput) {
+            skipChatTemplateInput.checked = false;
+            lsWriteBool(LS_SKIP_CHAT_TEMPLATE, false);
+        }
+        syncPromptPanelVisibility();
+        syncChatSystemPromptSuppressedUi();
+        if (chatUseSystemPromptInput) {
+            chatUseSystemPromptInput.checked = draft.useSystem ?? true;
+        }
+        chatSystemTextField.property('value', draft.system ?? '');
+        chatSystemPromptTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
+        chatUserTextField.property('value', draft.user ?? '');
+        chatUserPromptTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
+        if (enableThinkingInput) {
+            enableThinkingInput.checked = draft.enableThinking ?? false;
+            lsWriteBool(CHAT_ENABLE_THINKING_STORAGE_KEY, enableThinkingInput.checked);
+        }
+    } else if (draft.mode === 'raw') {
+        if (skipChatTemplateInput) {
+            skipChatTemplateInput.checked = true;
+            lsWriteBool(LS_SKIP_CHAT_TEMPLATE, true);
+        }
+        syncPromptPanelVisibility();
+        textField.property('value', draft.raw ?? entry.promptUsed);
+        promptTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
+        const model = resolveStoredModelVariant(draft.model);
+        if (modelVariantSelect) {
+            modelVariantSelect.value = model;
+            lsWriteString(CHAT_MODEL_VARIANT_STORAGE_KEY, model);
+        }
+    }
+
+    syncModelVariantUi();
+    if (draft.maxTokens != null) {
+        if (maxTokensInput) {
+            maxTokensInput.value = String(draft.maxTokens);
+        }
+        lsSet(CHAT_MAX_NEW_TOKENS_STORAGE_KEY, String(draft.maxTokens));
+        syncMaxNewTokensInputSiteMax(maxTokensInput, adminManager.isInAdminMode());
+    } else {
+        syncMaxTokensUi();
+    }
+    normalizeMaxTokensField();
+}
+
 function getCurrentFingerprint(): ChatCommittedFingerprint {
-    const maxTokens = maxNewTokensInput?.value ?? '';
+    const maxTokens = maxTokensInput?.value ?? '';
+    const model = currentModelVariant();
     if (isSkipChatTemplate()) {
         return {
             skipTemplate: true,
             raw: (textField.node() as HTMLTextAreaElement | null)?.value ?? '',
             maxTokens,
+            model,
         };
     }
     return {
@@ -294,12 +387,13 @@ function getCurrentFingerprint(): ChatCommittedFingerprint {
         system: (chatSystemTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
         useSystem: isChatUseSystemPrompt(),
         maxTokens,
+        model,
     };
 }
 
 function fingerprintsEqual(a: ChatCommittedFingerprint, b: ChatCommittedFingerprint): boolean {
     if (a.skipTemplate && b.skipTemplate) {
-        return a.raw === b.raw && a.maxTokens === b.maxTokens;
+        return a.raw === b.raw && a.maxTokens === b.maxTokens && a.model === b.model;
     }
     if (!a.skipTemplate && !b.skipTemplate) {
         const ta = a as Extract<ChatCommittedFingerprint, { skipTemplate: false }>;
@@ -308,7 +402,8 @@ function fingerprintsEqual(a: ChatCommittedFingerprint, b: ChatCommittedFingerpr
             ta.user === tb.user &&
             ta.system === tb.system &&
             ta.useSystem === tb.useSystem &&
-            ta.maxTokens === tb.maxTokens
+            ta.maxTokens === tb.maxTokens &&
+            ta.model === tb.model
         );
     }
     return false;
@@ -333,10 +428,9 @@ function syncAskButtonState(): void {
     });
 }
 
-/** 与 Ask 成功末尾一致：用 completions 响应更新右侧可视化（不发起请求、不改左侧输入） */
-function applyCompletionResponseToUi(res: OpenAICompletionsResponse, promptUsed: string): void {
+/** 仅重绘右侧可视化；不修改 `?content=`（主题 / digit merge 等） */
+function renderCompletionResultToUi(res: OpenAICompletionsResponse, promptUsed: string): void {
     currentPromptUsed = promptUsed;
-    lastCompletionForRerender = { res, promptUsed };
     streamingPreviewLastFlush = 0;
     chatStreamingPreviewEl.text('').attr('hidden', 'true');
     chatPromptUsedEl.text(promptUsed).attr('hidden', null);
@@ -352,23 +446,38 @@ function applyCompletionResponseToUi(res: OpenAICompletionsResponse, promptUsed:
     lmf.update(display);
     updateChatCompletionMetrics(metricUsage, metricModel, res.model ?? null, res.usage ?? null);
     chatCompleteReasonEl.text(completionFinishReasonLabel(res.choices?.[0]?.finish_reason));
-    replaceContentUrlParam(buildCachedContentUrlParam(promptUsed), DEFAULT_CONTENT_URL_PARAM, 'chat');
+}
+
+/**
+ * Ask 成功或从 Cached history 恢复：更新可视化，并将 URL 设为 IndexedDB 条目的 contentKey。
+ * contentUrlKey 必须来自 save 返回值、下拉列表 id 或 `?content=` hydrate，不得在 UI 层由 prompt+model 重算。
+ */
+function applyCompletionResponseToUi(
+    res: OpenAICompletionsResponse,
+    promptUsed: string,
+    contentUrlKey: string,
+    modelVariant?: PredictionAttributeModelVariant
+): void {
+    renderCompletionResultToUi(res, promptUsed);
+    lastCompletionForRerender = { res, promptUsed, modelVariant, contentUrlKey };
+    replaceContentUrlParam(contentUrlKey, DEFAULT_CONTENT_URL_PARAM, 'chat');
     lastCommittedFingerprint = getCurrentFingerprint();
     syncAskButtonState();
 }
 
-addDigitsMergeRenderListener(() => {
+function rerenderLastCompletionResult(): void {
     if (!lastCompletionForRerender) return;
     const { res, promptUsed } = lastCompletionForRerender;
-    applyCompletionResponseToUi(res, promptUsed);
-});
+    renderCompletionResultToUi(res, promptUsed);
+}
+
+addDigitsMergeRenderListener(rerenderLastCompletionResult);
 
 const themeManager = initThemeManager(
     {
         onThemeChange: () => {
             if (lastCompletionForRerender) {
-                const { res, promptUsed } = lastCompletionForRerender;
-                applyCompletionResponseToUi(res, promptUsed);
+                rerenderLastCompletionResult();
             } else {
                 lmf.reRenderCurrent();
             }
@@ -394,8 +503,8 @@ void new SettingsMenuManager(
 
 adminManager.onAdminModeChange(() => {
     api.setAdminToken(adminManager.isInAdminMode() ? adminManager.getAdminToken() : null);
-    syncChatMaxNewTokensUi();
-    normalizeChatMaxNewTokensField();
+    syncMaxTokensUi();
+    normalizeMaxTokensField();
 });
 
 const flushStreamingPreview = (text: string, streamEnd: boolean): void => {
@@ -416,64 +525,6 @@ const getActivePromptValue = (): string => {
     return (chatUserTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
 };
 
-function parseMaxNewTokens(raw: string): number {
-    try {
-        return parseMaxNewTokensShared(raw, adminManager.isInAdminMode());
-    } catch (e) {
-        if (e instanceof MaxNewTokensParseError) {
-            throw new Error(
-                formatMaxNewTokensParseError(e.code, tr, trf)
-            );
-        }
-        throw e;
-    }
-}
-
-function normalizeChatMaxNewTokensField(): boolean {
-    const ok = finalizeMaxNewTokensInput(
-        maxNewTokensInput,
-        adminManager.isInAdminMode(),
-        (msg) => showAlertDialog(tr('LLM Raw Chat'), msg),
-        tr,
-        trf
-    );
-    syncAskButtonState();
-    return ok;
-}
-
-function isMaxNewTokensInputValid(): boolean {
-    return isMaxNewTokensRawValid(
-        maxNewTokensInput?.value ?? '',
-        adminManager.isInAdminMode()
-    );
-}
-
-function readChatStoredMaxTokens(): number {
-    return lsReadNumber(CHAT_MAX_NEW_TOKENS_STORAGE_KEY, DEFAULT_MAX_NEW_TOKENS, {
-        validate: (n) =>
-            isMaxNewTokensRawValid(String(n), adminManager.isInAdminMode()),
-    });
-}
-
-function persistChatMaxNewTokens(): void {
-    if (!maxNewTokensInput) return;
-    try {
-        const n = parseMaxNewTokens(maxNewTokensInput.value);
-        lsSet(CHAT_MAX_NEW_TOKENS_STORAGE_KEY, String(n));
-    } catch {
-        /* 非法值不写 storage */
-    }
-}
-
-function syncChatMaxNewTokensUi(): void {
-    if (maxNewTokensInput) {
-        maxNewTokensInput.value = String(readChatStoredMaxTokens());
-    }
-    syncMaxNewTokensInputSiteMax(maxNewTokensInput, adminManager.isInAdminMode());
-}
-
-syncChatMaxNewTokensUi();
-
 const setAskLoading = (loading: boolean): void => {
     askInFlight = loading;
     loaderSmall.style('display', loading ? null : 'none');
@@ -485,7 +536,7 @@ const setAskLoading = (loading: boolean): void => {
         chatStreamingPreviewEl.text('').attr('hidden', 'true');
         chatCompleteReasonEl.text('');
         // 新请求开始即清空主可视化，避免仍显示上一轮结果
-        lmf.update(buildCompletionDisplayResult('', completionModel, null));
+        lmf.update(buildCompletionDisplayResult('', currentModelVariant(), null));
     }
     syncAskButtonState();
 };
@@ -499,7 +550,7 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
 
     let maxTokensOpt: number;
     try {
-        maxTokensOpt = parseMaxNewTokens(maxNewTokensInput?.value ?? '');
+        maxTokensOpt = parseMaxNewTokensFromField();
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         showAlertDialog(tr('LLM Raw Chat'), translateApiErrorMessage(msg));
@@ -513,6 +564,7 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
     try {
         let streamedText = '';
         const skipTemplate = skipChatTemplateInput?.checked ?? false;
+        const model = currentModelVariant();
 
         let modelPrompt: string;
         if (skipTemplate) {
@@ -523,7 +575,7 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
             const systemRaw =
                 (chatSystemTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
             const promptReq: { model: string; prompt: string; system?: string; enable_thinking?: boolean } = {
-                model: completionModel,
+                model,
                 prompt
             };
             if (useSystem) {
@@ -552,17 +604,19 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
             }
         }
 
-        const cacheKey: CompletionResultCacheKey = { prompt: modelPrompt };
+        const cacheKey: CompletionResultCacheKey = { prompt: modelPrompt, model };
+        const cacheDraft = buildChatRunDraftForCache();
 
-        const res = await postCompletions(
+        const { response: res, contentKey } = await postCompletions(
             {
-                model: completionModel,
+                model,
                 prompt: modelPrompt,
                 max_tokens: maxTokensOpt
             },
             {
                 signal: askAbort.signal,
                 cacheKey,
+                cacheDraft,
                 forceRefresh,
                 onDelta: (chunk, streamEnd) => {
                     streamedText += chunk;
@@ -570,6 +624,9 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
                 }
             }
         );
+        if (!contentKey) {
+            throw new Error('Chat completion cache: missing contentKey after successful request');
+        }
         const finalText = res.choices?.[0]?.text;
         if (typeof finalText !== 'string') {
             throw new Error('Completion response missing choices[0].text');
@@ -582,7 +639,7 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
                     `delta_len=${streamedText.length}, final_len=${finalText.length}`
             );
         }
-        applyCompletionResponseToUi(res, modelPrompt);
+        applyCompletionResponseToUi(res, modelPrompt, contentKey, model);
     } catch (err: unknown) {
         if (
             err &&
@@ -606,6 +663,7 @@ if (skipChatTemplateInput) {
         lsWriteBool(LS_SKIP_CHAT_TEMPLATE, skipChatTemplateInput.checked);
         syncPromptPanelVisibility();
         syncChatSystemPromptSuppressedUi();
+        syncModelVariantUi();
         syncAskButtonState();
     });
 }
@@ -617,6 +675,8 @@ if (enableThinkingInput) {
     });
 }
 syncPromptPanelVisibility();
+syncModelVariantUi();
+syncIdleModelMetric();
 syncChatSystemPromptSuppressedUi();
 chatUseSystemPromptInput?.addEventListener('change', () => {
     syncChatSystemPromptSuppressedUi();
@@ -642,24 +702,13 @@ if (chatSystemPromptTextarea) {
         syncAskButtonState();
     });
 }
-maxNewTokensInput?.addEventListener('input', () => syncAskButtonState());
-maxNewTokensInput?.addEventListener('change', () => {
-    if (normalizeChatMaxNewTokensField()) {
-        persistChatMaxNewTokens();
-    }
-});
-maxNewTokensInput?.addEventListener('blur', () => {
-    if (normalizeChatMaxNewTokensField()) {
-        persistChatMaxNewTokens();
-    }
-});
-
 async function restoreChatFromCachedPrompt(
     contentKey: string,
     options: {
         shouldTouch: boolean;
         ctx?: CachedHistorySelectContext;
-        syncPromptToTextField: boolean;
+        /** 无 draft 的旧缓存：仅把 promptUsed 填入 raw 框，不切换模式 */
+        syncLegacyPromptToField?: boolean;
         cached?: CompletionCachedEntry;
     }
 ): Promise<void> {
@@ -671,13 +720,25 @@ async function restoreChatFromCachedPrompt(
     const promptUsed = entry.promptUsed;
     const res = entry.response;
     try {
-        if (options.syncPromptToTextField) {
+        if (entry.draft?.mode === 'chat' || entry.draft?.mode === 'raw') {
+            applyChatDraftFromCache(entry.draft, entry);
+        } else if (options.syncLegacyPromptToField) {
             textField.property('value', promptUsed);
             promptTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
-            syncAskButtonState();
+            const model = resolveStoredModelVariant(entry.modelVariant);
+            if (modelVariantSelect) {
+                modelVariantSelect.value = model;
+                lsWriteString(CHAT_MODEL_VARIANT_STORAGE_KEY, model);
+            }
+            syncModelVariantUi();
         }
-        applyCompletionResponseToUi(res, promptUsed);
-        if (!options.syncPromptToTextField || !isSkipChatTemplate()) {
+        applyCompletionResponseToUi(
+            res,
+            promptUsed,
+            contentKey,
+            resolveStoredModelVariant(entry.modelVariant)
+        );
+        if (!entry.draft && options.syncLegacyPromptToField && !isSkipChatTemplate()) {
             lastCommittedFingerprint = null;
         }
         syncAskButtonState();
@@ -724,7 +785,7 @@ void initCachedHistoryQueryDropdown({
         await restoreChatFromCachedPrompt(contentKey, {
             shouldTouch: Boolean(shouldTouch),
             ctx,
-            syncPromptToTextField: true,
+            syncLegacyPromptToField: true,
         });
     },
     onRemove: removeCachedEntryByContentKey,
@@ -737,7 +798,6 @@ void runContentUrlHydrate({
     apply: async (entry, rawContentKey) => {
         await restoreChatFromCachedPrompt(rawContentKey, {
             shouldTouch: false,
-            syncPromptToTextField: false,
             cached: entry,
         });
     },
@@ -790,5 +850,6 @@ initDensityAttributionSidebar({
     showToast,
     getContextPrefix: () => currentPromptUsed,
     predictionModelVariant: 'instruct',
+    getPredictionModelVariant: () => currentModelVariant(),
     sourcePage: 'chat',
 });

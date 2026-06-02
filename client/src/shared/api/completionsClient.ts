@@ -131,8 +131,16 @@ export type PostCompletionsOptions = {
     onDelta?: (text: string, streamEnd: boolean) => void;
     /** 与请求体 `prompt` 一致（prompt_used）；仅 Chat 等需缓存时传入 */
     cacheKey?: completionResultCache.CompletionResultCacheKey;
+    /** 与 cacheKey 一并写入 IndexedDB，加载时还原左侧面板 */
+    cacheDraft?: completionResultCache.ChatCompletionDraft;
     /** 为 true 时跳过命中本地缓存，与 Chat 页「Force retry」一致 */
     forceRefresh?: boolean;
+};
+
+/** postCompletions 返回值；传入 cacheKey 时 contentKey 与 IndexedDB / `?content=` 一致 */
+export type PostCompletionsResult = {
+    response: OpenAICompletionsResponse;
+    contentKey?: string;
 };
 
 /**
@@ -142,8 +150,8 @@ export type PostCompletionsOptions = {
 export async function postCompletions(
     body: OpenAICompletionsRequest,
     options: PostCompletionsOptions = {}
-): Promise<OpenAICompletionsResponse> {
-    const { signal, onDelta, cacheKey, forceRefresh } = options;
+): Promise<PostCompletionsResult> {
+    const { signal, onDelta, cacheKey, cacheDraft, forceRefresh } = options;
     const modelName = body.model;
 
     return new Promise((resolve, reject) => {
@@ -157,17 +165,37 @@ export async function postCompletions(
             }
         };
 
-        const safeResolve = (v: OpenAICompletionsResponse) => {
+        const finishResolve = (response: OpenAICompletionsResponse, contentKey?: string) => {
+            settled = true;
+            resolve({ response, contentKey });
+        };
+
+        const safeResolve = async (v: OpenAICompletionsResponse) => {
             if (settled) return;
             if (signal?.aborted) {
                 safeReject(new DOMException('Aborted', 'AbortError'));
                 return;
             }
-            settled = true;
+            let contentKey: string | undefined;
             if (typeof v.choices?.[0]?.text === 'string' && cacheKey) {
-                void completionResultCache.save(cacheKey, v, 'complete');
+                try {
+                    ({ contentKey } = await completionResultCache.save(
+                        cacheKey,
+                        v,
+                        'complete',
+                        cacheDraft
+                    ));
+                } catch (e) {
+                    safeReject(e);
+                    return;
+                }
             }
-            resolve(v);
+            if (settled) return;
+            if (signal?.aborted) {
+                safeReject(new DOMException('Aborted', 'AbortError'));
+                return;
+            }
+            finishResolve(v, contentKey);
         };
 
         const rejectIfAborted = (): boolean => {
@@ -182,7 +210,8 @@ export async function postCompletions(
                         model: modelName,
                         choices: [{ text: streamedText, index: 0, finish_reason: 'abort' }],
                     },
-                    'partial'
+                    'partial',
+                    cacheDraft
                 );
             }
             safeReject(new DOMException('Aborted', 'AbortError'));
@@ -193,9 +222,7 @@ export async function postCompletions(
             void (async () => {
                 try {
                     if (forceRefresh) {
-                        await completionResultCache.removeCachedEntryByContentKey(
-                            completionResultCache.contentKeyForPrompt(cacheKey.prompt)
-                        );
+                        await completionResultCache.removeForCacheKey(cacheKey);
                     }
                     const cached = forceRefresh ? undefined : await completionResultCache.get(cacheKey);
                     if (cached) {
@@ -214,8 +241,7 @@ export async function postCompletions(
                                 safeReject(new DOMException('Aborted', 'AbortError'));
                                 return;
                             }
-                            settled = true;
-                            resolve(cached);
+                            finishResolve(cached, completionResultCache.contentKeyForCacheKey(cacheKey));
                         });
                         return;
                     }
@@ -277,7 +303,7 @@ export async function postCompletions(
                     } else if (parsed.type === 'result') {
                         const data = parsed.data;
                         if (data && typeof data === 'object' && 'choices' in data) {
-                            safeResolve(data as OpenAICompletionsResponse);
+                            void safeResolve(data as OpenAICompletionsResponse);
                         } else {
                             safeReject(new Error('completions stream: invalid result payload'));
                         }

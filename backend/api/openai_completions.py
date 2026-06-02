@@ -7,7 +7,12 @@ import time
 import traceback
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from backend.models.model_manager import inference_lock, get_instruct_model_display_name
+from backend.models.model_manager import (
+    ModelSlot,
+    inference_lock,
+    get_base_model_display_name,
+    get_instruct_model_display_name,
+)
 from backend.core.prediction_attributor import slot_for_prediction_attr_model
 from backend.platform.oom import exit_if_oom, is_oom_error
 from backend.api.utils import request_has_valid_admin
@@ -44,12 +49,20 @@ def _log_request(model: str, prompt: str, client_ip=None):
     return log_openai_completions_request(model, prompt, client_ip)
 
 
+def _model_display_name_for_slot(slot: ModelSlot) -> str:
+    if slot == ModelSlot.BASE:
+        return get_base_model_display_name()
+    return get_instruct_model_display_name()
+
+
 def _build_response(
     completion_text: str,
     finish_reason: str,
     prompt_tokens: int,
     completion_tokens: int,
     bpe_strings: List[Dict[str, Any]],
+    *,
+    model_display: str,
 ):
     """OpenAICompletionsResponse：choices + usage；info_radar 为续写 token 级数据。"""
     total = prompt_tokens + completion_tokens
@@ -57,7 +70,7 @@ def _build_response(
         "id": "cmpl-stub-info-radar",
         "object": "text_completion",
         "created": int(time.time()),
-        "model": get_instruct_model_display_name(),
+        "model": model_display,
         "choices": [
             {
                 "text": completion_text,
@@ -85,6 +98,7 @@ def _completion_inference_after_lock(
     request_id: int,
     lock_wait_time: float,
     *,
+    slot: ModelSlot,
     stream_delta: Optional[Callable[[str, bool], None]] = None,
     max_tokens: Optional[int] = None,
     bypass_site_context_limit: bool = False,
@@ -101,6 +115,7 @@ def _completion_inference_after_lock(
         stream_delta=stream_delta,
         max_tokens=max_tokens,
         bypass_site_context_limit=bypass_site_context_limit,
+        slot=slot,
     )
 
 
@@ -144,6 +159,8 @@ def _generate_completion_events(
     prompt: str,
     request_id: int,
     *,
+    slot: ModelSlot,
+    model_display: str,
     max_tokens: Optional[int] = None,
     bypass_site_context_limit: bool = False,
 ):
@@ -171,6 +188,7 @@ def _generate_completion_events(
                     prompt,
                     request_id,
                     lock_wait_time,
+                    slot=slot,
                     stream_delta=stream_delta,
                     max_tokens=max_tokens,
                     bypass_site_context_limit=bypass_site_context_limit,
@@ -185,29 +203,28 @@ def _generate_completion_events(
     worker = threading.Thread(target=run, daemon=True)
     worker.start()
 
+    wall_clock_timed_out = False
+
+    # 墙钟超时与用户 Stop 同路：置位 global_completion_stop_event，等 worker 末条 result（abort）。
+    # 正常路径由 completion_cancel_requested + StoppingCriteria 结束 generate；排队仅 LOCK_WAIT_TIMEOUT。
+    # 仅在与 Stop 相同的推理僵死（如 CUDA 挂死）时 SSE 可能一直等 result，旧 504 即时断开亦无法回收 worker。
     try:
         while True:
             elapsed = time.perf_counter() - start_time
-            if elapsed >= COMPLETION_WALL_CLOCK_TIMEOUT_SEC:
-                try:
-                    item = q.get_nowait()
-                except queue.Empty:
-                    global_completion_stop_event.set()
-                    _log_cmpl_issue(
-                        request_id,
-                        f"墙钟超时 {elapsed:.1f}s / 上限 {COMPLETION_WALL_CLOCK_TIMEOUT_SEC:.0f}s",
-                    )
-                    yield send_error_event(
-                        f"续写处理超过 {COMPLETION_WALL_CLOCK_TIMEOUT_SEC:.0f} 秒（墙钟限制），已中止",
-                        504,
-                    )
-                    return
-            else:
-                try:
-                    # 每 100ms 醒一次，检查一次是否到 60 秒
-                    item = q.get(timeout=0.1)
-                except queue.Empty:
-                    continue
+            if (
+                not wall_clock_timed_out
+                and elapsed >= COMPLETION_WALL_CLOCK_TIMEOUT_SEC
+            ):
+                global_completion_stop_event.set()
+                wall_clock_timed_out = True
+                _log_cmpl_issue(
+                    request_id,
+                    f"墙钟超时 {elapsed:.1f}s / 上限 {COMPLETION_WALL_CLOCK_TIMEOUT_SEC:.0f}s",
+                )
+            try:
+                item = q.get(timeout=0.1)
+            except queue.Empty:
+                continue
             kind = item[0]
             if kind == "delta":
                 _, text, stream_end = item
@@ -232,9 +249,10 @@ def _generate_completion_events(
                         f"tokens={prompt_tokens}/{completion_tokens}",
                     )
                 elif global_completion_stop_event.is_set():
+                    stop_label = "墙钟超时" if wall_clock_timed_out else "用户 Stop"
                     _log_cmpl_issue(
                         request_id,
-                        f"用户 Stop，续写中止 elapsed={elapsed:.2f}s "
+                        f"{stop_label}，续写中止 elapsed={elapsed:.2f}s "
                         f"tokens={prompt_tokens}/{completion_tokens}",
                     )
                 else:
@@ -252,6 +270,7 @@ def _generate_completion_events(
                         prompt_tokens,
                         completion_tokens,
                         bpe_strings,
+                        model_display=model_display,
                     )
                 )
                 return
@@ -286,6 +305,8 @@ def _completions_sse_response(
     prompt: str,
     request_id: int,
     *,
+    slot: ModelSlot,
+    model_display: str,
     max_tokens: Optional[int] = None,
     bypass_site_context_limit: bool = False,
 ):
@@ -293,6 +314,8 @@ def _completions_sse_response(
         lambda: _generate_completion_events(
             prompt,
             request_id,
+            slot=slot,
+            model_display=model_display,
             max_tokens=max_tokens,
             bypass_site_context_limit=bypass_site_context_limit,
         )
@@ -420,12 +443,19 @@ def completions(completions_request):
             ),
         }, 400
 
+    try:
+        slot = slot_for_prediction_attr_model(model)
+    except ValueError as e:
+        return {"success": False, "message": str(e)}, 400
+
     client_ip = get_client_ip()
     request_id = _log_request(model, prompt, client_ip)
 
     return _completions_sse_response(
         prompt,
         request_id,
+        slot=slot,
+        model_display=_model_display_name_for_slot(slot),
         max_tokens=max_tokens,
         bypass_site_context_limit=bypass_site,
     )

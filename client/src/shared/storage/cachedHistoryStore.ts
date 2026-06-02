@@ -195,6 +195,28 @@ export async function touchByContentKey(namespace: CacheNamespace, contentKey: s
     await promisifyTransaction(tx);
 }
 
+export async function patchPayloadRow(
+    namespace: CacheNamespace,
+    contentKey: string,
+    patch: { businessKeyJson?: string; listLabel?: string; payload?: unknown }
+): Promise<void> {
+    const db = await getDb();
+    const tx = db.transaction(STORE_PAYLOADS, 'readwrite');
+    const store = tx.objectStore(STORE_PAYLOADS);
+    const row = await promisifyRequest(
+        store.get(rowId(namespace, contentKey)) as IDBRequest<PayloadRow | undefined>
+    );
+    if (!row) {
+        await promisifyTransaction(tx);
+        return;
+    }
+    if (patch.businessKeyJson !== undefined) row.businessKeyJson = patch.businessKeyJson;
+    if (patch.listLabel !== undefined) row.listLabel = patch.listLabel;
+    if (patch.payload !== undefined) row.payload = patch.payload;
+    await promisifyRequest(store.put(row));
+    await promisifyTransaction(tx);
+}
+
 export async function removeByContentKey(namespace: CacheNamespace, contentKey: string): Promise<void> {
     const db = await getDb();
     const tx = db.transaction([STORE_PAYLOADS, STORE_MRU], 'readwrite');

@@ -8,9 +8,6 @@ import {
     validateTokenPredictions
 } from '../../shared/cross/dataValidation';
 
-/** 与手动 curl 调试一致的默认 model 字段 */
-export const CHAT_DEFAULT_COMPLETION_MODEL = 'instruct';
-
 function normalizeServerTokens(raw: TokenWithOffset[]): FrontendToken[] {
     return raw.map((t) => ({
         offset: t.offset,

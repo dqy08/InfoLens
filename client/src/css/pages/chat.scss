@@ -7,16 +7,6 @@
 @use 'generation-status';
 @use 'lmf-readout' as lmf;
 
-.chat-max-new-tokens-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.chat-max-new-tokens-input {
-  min-width: 5em;
-}
-
 // 双实例：与下方 LMF 视觉上同一阅读区（同色、同字号行高、单一内边距，无分隔缝）
 .chat-right-stack {
   display: flex;

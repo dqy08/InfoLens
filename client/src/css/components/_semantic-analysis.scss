@@ -72,10 +72,13 @@
     min-width: 100px;
   }
 
-  .semantic-threshold-input {
+  // Max new tokens（completion-options-row partial）；须在 semantic-analysis 中定义——Chat 不加载 causal_flow.scss
+  .semantic-threshold-input,
+  .gen-attr-max-tokens-input {
     box-sizing: border-box;
+    flex: 0 0 auto;
+    min-width: 0;
     block-size: var(--semantic-submode-control-block-size);
-    width: 4em;
     padding: 3px 6px;
     font-size: inherit;
     line-height: 1.2;
@@ -83,6 +86,10 @@
     border-radius: 4px;
     background: var(--input-bg);
     color: var(--text-color);
+    text-align: right;
+    inline-size: 4rem;
+    max-inline-size: 100%;
+    width: 4em;
   }
 }
 

@@ -181823,7 +181823,6 @@
     "hideInactiveEdges": true,
     "showDownstreamInfluence": false,
     "recursiveAttributionEnabled": true,
-    "recursiveEdgeBatchAnimationEnabled": true,
     "recursiveEdgeBatchAnimationDirection": "forward",
     "showTokenInfoOnSelected": true,
     "replayPacingMode": "total",

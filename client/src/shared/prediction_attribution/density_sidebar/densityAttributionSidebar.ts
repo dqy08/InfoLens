@@ -71,10 +71,17 @@ export type DensityAttributionSidebarOptions = {
      * Chat 页传 `() => prompt_used`，首页不传（默认空串）。
      */
     getContextPrefix?: () => string;
-    /** 首页 base；Chat instruct */
+    /** 首页 base；Chat 与续写槽位一致时可传 getter */
     predictionModelVariant: PredictionAttributeModelVariant;
+    getPredictionModelVariant?: () => PredictionAttributeModelVariant;
     sourcePage: 'analysis' | 'chat';
 };
+
+function resolvePredictionModelVariant(
+    options: DensityAttributionSidebarOptions
+): PredictionAttributeModelVariant {
+    return options.getPredictionModelVariant?.() ?? options.predictionModelVariant;
+}
 
 /**
  * 首页信息密度：点击 token → 确认 → 打开右侧归因面板；可跳转完整归因页（带缓存键）。
@@ -290,17 +297,17 @@ export function initDensityAttributionSidebar(options: DensityAttributionSidebar
                 void (async () => {
                     const hit = await takeSuccessfulAttributionFromCache(context, selectedTarget);
                     if (hit) {
-                        finish(hit);
+                        finish(hit.response);
                         return;
                     }
                     const prevBodyCursor = document.body.style.cursor;
                     document.body.style.cursor = 'wait';
                     try {
-                        const json = await loadPredictionAttributeWithCache({
+                        const { response: json } = await loadPredictionAttributeWithCache({
                             apiBaseForRequests,
                             context,
                             targetPrediction: selectedTarget,
-                            model: options.predictionModelVariant,
+                            model: resolvePredictionModelVariant(options),
                             sourcePage: options.sourcePage,
                             forceRefresh: false,
                         });

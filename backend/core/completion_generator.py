@@ -19,7 +19,7 @@ from transformers import StoppingCriteria, StoppingCriteriaList, TextStreamer
 from backend.platform.format import round_to_sig_figs
 from backend.platform.app_context import get_verbose
 from backend.models.device import DeviceManager
-from backend.models.model_manager import ModelSlot, ensure_instruct_slot_ready, ensure_slot_weights_loaded
+from backend.models.model_manager import ModelSlot, ensure_slot_ready, ensure_slot_weights_loaded
 from .pred_topk_format import pred_topk_pairs_from_probs_1d
 from backend.platform.runtime_config import DEFAULT_TOPK
 
@@ -412,6 +412,7 @@ def core_generate_from_text(
     stream_delta: Optional[Callable[[str, bool], None]] = None,
     max_tokens: Optional[int] = None,
     bypass_site_context_limit: bool = False,
+    slot: ModelSlot = ModelSlot.INSTRUCT,
 ) -> Tuple[str, str, int, int, List[Dict[str, Any]], Optional[float]]:
     """
     对一段已确定的模型输入字符串做自回归续写（默认贪心；函数内 ``_use_low_temp_sampling`` 可临时切到低温采样）。
@@ -429,7 +430,7 @@ def core_generate_from_text(
         (续写文本, finish_reason, prompt_tokens, completion_tokens, 续写段 bpe_strings, ttft_s)。
         ttft_s 为自 ``model.generate`` 起至首次产出续写片段的秒数；仅取消时为 ``None``。
     """
-    tokenizer, model, device = ensure_instruct_slot_ready()
+    tokenizer, model, device = ensure_slot_ready(slot)
 
     model.eval()
     enc = tokenizer(formatted_text, return_tensors="pt")
@@ -574,16 +575,19 @@ def generate_completion_text(
     *,
     max_tokens: Optional[int] = None,
     bypass_site_context_limit: bool = False,
+    slot: ModelSlot = ModelSlot.INSTRUCT,
 ) -> Tuple[str, str, int, int, List[Dict[str, Any]], Optional[float]]:
     """
     ``prompt`` 须为已确定的完整模型输入（不再在服务端套用 chat template）。
 
     流式可传 stream_delta；中止由 ``completion_cancel_requested()`` 统一判断。
     ``max_tokens`` 为可选的正整数续写上限（与 API 约定一致）。
+    ``slot`` 与 API 请求体 ``model``（base / instruct）对应。
     """
     return core_generate_from_text(
         prompt,
         stream_delta=stream_delta,
         max_tokens=max_tokens,
         bypass_site_context_limit=bypass_site_context_limit,
+        slot=slot,
     )

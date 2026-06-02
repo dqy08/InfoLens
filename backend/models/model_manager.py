@@ -3,7 +3,7 @@
 加载约定（由简到繁）：
 - ``ensure_slot_weights_loaded(slot)``：仅保证该槽位 HF 权重在 ``_hf_loaded`` 中（归因、tokenize）。
 - ``ensure_slot_ready(slot)``：槽位可推理；base 另挂 ``project_registry`` / QwenLM（信息密度）。
-- 业务入口：信息密度 ``ensure_base_slot_ready()``；语义 / 续写 ``ensure_instruct_slot_ready()``。
+- 业务入口：信息密度 ``ensure_base_slot_ready()``；语义分析默认 instruct；续写由请求 ``model`` 选槽位（``ensure_slot_ready``）。
 """
 from enum import Enum
 import threading

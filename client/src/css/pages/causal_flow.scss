@@ -414,8 +414,7 @@ $gen-attr-cached-demos-panel-width: 21em;
   opacity: 1;
 }
 
-// 紧凑数字输入（Max tokens、DAG Text width / compactness / 回放时长等共用）
-.gen-attr-max-tokens-input,
+// 紧凑数字输入（DAG Text width / compactness / 回放时长等；Max tokens 见 _semantic-analysis.scss）
 .gen-attr-dag-measure-width-input {
   box-sizing: border-box;
   flex: 0 0 auto;

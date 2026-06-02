@@ -72,7 +72,7 @@ export type GenAttrDemoUiOptions = {
     decayAttributionToHighSurprisalTargetEnabled: boolean;
     hideInactiveEdges: boolean;
     showDownstreamInfluence: boolean;
-    /** 传播归因（UI: Propagated attribution mode；与 `recursiveAttribution*` 同义）。 */
+    /** 因果流模式（UI: Causal Flow Mode ↯；与 `recursiveAttribution*` 同义）。 */
     recursiveAttributionEnabled: boolean;
     /** 传播链播放方向（▶ 在传播模式下、有用户焦点时）。 */
     recursiveEdgeBatchAnimationDirection: 'backward' | 'forward';
@@ -363,7 +363,7 @@ export async function save(
     status: 'partial' | 'complete' = steps.length > 0 ? 'partial' : 'complete',
     completionReason?: CompletionFinishReason,
     draft?: GenAttrRunDraft
-): Promise<void> {
+): Promise<{ contentKey: string }> {
     const { initialContext } = key;
     const payload = buildGenAttrCachedRunContentPayload({
         initialContext,
@@ -372,7 +372,7 @@ export async function save(
         completionReason,
         draft,
     });
-    await upsertEntry({
+    return upsertEntry({
         namespace: NAMESPACE,
         businessKeyJson: JSON.stringify(normalizeKey(key)),
         listLabel: initialContext,
@@ -395,6 +395,7 @@ export async function getCachedEntryByContentKey(raw: string): Promise<GenAttrCa
     return parseGenAttrCachedRunPayload(row.payload, `contentKey=${raw}`);
 }
 
+/** 与 upsert 写入键一致；`?content=` 应使用 save 返回值或 MRU 的 contentKey，勿在 UI 层单独调用 */
 export function buildCachedContentUrlParam(key: GenAttrCacheKey): string {
     return keyHash(key);
 }

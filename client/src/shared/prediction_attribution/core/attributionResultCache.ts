@@ -49,9 +49,15 @@ function formatAttributionListLabel(context: string, targetPrediction: string): 
     return `${c} → ${targetPrediction}`;
 }
 
+/** 与 upsert 写入键一致；`?content=` 应使用 save 返回值或 MRU 的 contentKey，勿在 UI 层单独调用 */
 export function buildCachedContentUrlParam(context: string, targetPrediction: string): string {
     return entryKey(context, targetPrediction);
 }
+
+export type AttributionCacheHit = {
+    response: AttributionApiResponse;
+    contentKey: string;
+};
 
 export async function get(key: AttributionCacheKey): Promise<AttributionCachedEntry | undefined> {
     const entry = await getByContentKey<AttributionCachedEntry>(
@@ -65,8 +71,8 @@ export async function save(
     key: AttributionCacheKey,
     response: AttributionApiResponse,
     status: 'partial' | 'complete' = response.success ? 'complete' : 'partial'
-): Promise<void> {
-    await upsertEntry({
+): Promise<{ contentKey: string }> {
+    return upsertEntry({
         namespace: NAMESPACE,
         businessKeyJson: JSON.stringify({ context: key.context, targetPrediction: key.targetPrediction }),
         listLabel: formatAttributionListLabel(key.context, key.targetPrediction),
@@ -111,11 +117,12 @@ export async function touchCachedEntryByContentKey(contentKey: string): Promise<
 export async function takeSuccessfulAttributionFromCache(
     context: string,
     targetPrediction: string
-): Promise<AttributionApiResponse | undefined> {
-    const cached = await get({ context, targetPrediction });
-    if (!cached?.response?.success) {
+): Promise<AttributionCacheHit | undefined> {
+    const contentKey = entryKey(context, targetPrediction);
+    const row = await getByContentKey<AttributionCachedEntry>(NAMESPACE, contentKey);
+    if (!row?.payload?.response?.success) {
         return undefined;
     }
-    await touch({ context, targetPrediction });
-    return cached.response;
+    await touchByContentKey(NAMESPACE, contentKey);
+    return { response: row.payload.response, contentKey: row.contentKey };
 }

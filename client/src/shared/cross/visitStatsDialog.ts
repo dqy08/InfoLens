@@ -34,7 +34,10 @@ const GEN_ATTR_OPT_ORDER = [
     'downstream', 'token_tooltip',
 ] as const;
 
-/** 上报键更名前写入 Hub 的别名；展示时并入新键 */
+/**
+ * 上报键更名前写入 Hub 的别名；展示时并入新键。
+ * 不再单独统计「开因果流但未点 ↯ 播放」：`propagated_anim` 已移除（动画改由 DAG ↯ 显式触发）。
+ */
 const GEN_ATTR_OPT_LEGACY_KEYS: Record<string, (typeof GEN_ATTR_OPT_ORDER)[number]> = {
     propagated: 'causal_flow',
     propagated_anim_backward: 'causal_flow_anim_backward',
@@ -128,6 +131,7 @@ function visitStatsHtml(data: VisitStatsRow): string {
     };
 
     const genAttrOpts = mergeLegacyGenAttrOptSec(data.gen_attr_opt_sec ?? {});
+    // sb = reset_base 或 startup_base（见 visitStatsHtml 开头）；delta 对比时对 base 同样做 legacy 合并
     const genAttrOptsBase = mergeLegacyGenAttrOptSec(sb.gen_attr_opt_sec ?? {});
     const genAttrTotalSec = pg['causal_flow.html'] ?? 0;
     const genAttrOptKeys = orderedKeysGt0(GEN_ATTR_OPT_ORDER, genAttrOpts);
@@ -192,6 +196,8 @@ export async function showVisitStatsDialog(api: TextAnalysisAPI): Promise<void> 
     showDialog({
         title: 'Visit Stats',
         content: (dialog) => {
+            // 依赖 showDialog 外壳 DOM：.dialog-content 的 parent 含 .dialog-title（见 dialog.scss）。
+            // 将标题与刷新按钮并入同一行；若 dialog 组件改结构，需同步调整此处。
             const shell = d3.select(dialog.node()!.parentElement!);
             const titleText = shell.select('.dialog-title').text();
             shell.select('.dialog-title').remove();

@@ -1657,6 +1657,7 @@ export function initGenAttributeDagView(
         }
         selectedId = id;
         refreshNodeLinkHighlight();
+        syncDagPlayButtonImpl();
     }
 
     function clearNodeSelection(): void {
@@ -2187,9 +2188,9 @@ export function initGenAttributeDagView(
         syncDagPlayButton();
     }
 
+    /** 仅动画定时器在跑时视为 busy；`paused`/`ended` 不阻塞页面侧重放 DAG。 */
     function isPropagationPlaybackEngaged(): boolean {
-        const phase = recursiveEdgeAnimation.getPlaybackPhase();
-        return phase !== 'idle';
+        return recursiveEdgeAnimation.isPlaybackActive();
     }
 
     function stopPropagationPlayback(): void {

@@ -27,7 +27,6 @@ import { translateApiErrorMessage } from '../../shared/core/errorUtils';
 import { createAttributionInspector } from '../../shared/prediction_attribution/inspector/attributionInspector';
 import type { AttributionDisplayOptions } from '../../shared/prediction_attribution/core/attributionDisplayModel';
 import {
-    buildCachedContentUrlParam,
     getCachedEntryByContentKey,
     listCachedHistoryRows,
     removeCachedEntryByContentKey,
@@ -207,8 +206,7 @@ function readAttributionColorRangeMax(): number | null {
     return n;
 }
 
-// --- 应用归因结果到 UI ---
-function applyAttributionResponse(context: string, response: AttributionApiResponse): void {
+function renderAttributionResult(context: string, response: AttributionApiResponse): void {
     attributionInspector.apply(context, response, readAttributionDisplayOptions());
     updateResultInfo(response);
     lastCommittedInputs = {
@@ -216,11 +214,16 @@ function applyAttributionResponse(context: string, response: AttributionApiRespo
         target: (targetField.node() as HTMLTextAreaElement | null)?.value ?? '',
     };
     syncAnalyzeButtonState();
-    replaceContentUrlParam(
-        buildCachedContentUrlParam(lastCommittedInputs.context, lastCommittedInputs.target),
-        DEFAULT_CONTENT_URL_PARAM,
-        'attribution'
-    );
+}
+
+/** Analyze 成功或 Cached history 恢复：contentUrlKey 须来自 save / MRU / `?content=` hydrate */
+function applyAttributionResponse(
+    context: string,
+    response: AttributionApiResponse,
+    contentUrlKey: string
+): void {
+    renderAttributionResult(context, response);
+    replaceContentUrlParam(contentUrlKey, DEFAULT_CONTENT_URL_PARAM, 'attribution');
 }
 
 function reapplyAttributionColorsIfPossible(): void {
@@ -250,7 +253,7 @@ async function runAnalyze(options?: { forceRefresh?: boolean }): Promise<void> {
     if (!forceRefresh) {
         const hit = await takeSuccessfulAttributionFromCache(context, target);
         if (hit) {
-            applyAttributionResponse(context, hit);
+            applyAttributionResponse(context, hit.response, hit.contentKey);
             saveHistory(context, CONTEXT_HISTORY_KEY);
             saveHistory(target, TARGET_HISTORY_KEY);
             return;
@@ -259,7 +262,7 @@ async function runAnalyze(options?: { forceRefresh?: boolean }): Promise<void> {
 
     setAnalyzeLoading(true);
     try {
-        const json = await loadPredictionAttributeWithCache({
+        const { response: json, contentKey } = await loadPredictionAttributeWithCache({
             apiBaseForRequests,
             context,
             targetPrediction: target,
@@ -267,7 +270,7 @@ async function runAnalyze(options?: { forceRefresh?: boolean }): Promise<void> {
             sourcePage: 'attribution',
             forceRefresh,
         });
-        applyAttributionResponse(context, json);
+        applyAttributionResponse(context, json, contentKey);
         saveHistory(context, CONTEXT_HISTORY_KEY);
         saveHistory(target, TARGET_HISTORY_KEY);
     } catch (err: unknown) {
@@ -322,7 +325,7 @@ async function restoreAttributionFromCachedEntry(
         contextTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
         targetTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
         syncAnalyzeButtonState();
-        applyAttributionResponse(entry.context, entry.response);
+        applyAttributionResponse(entry.context, entry.response, options.contentKey);
         if (options.shouldTouch && options.ctx) {
             await touchCachedEntryByContentKey(options.contentKey);
             await options.ctx.refreshList();

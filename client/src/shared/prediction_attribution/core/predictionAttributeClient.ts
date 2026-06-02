@@ -76,12 +76,18 @@ export type LoadPredictionAttributeWithCacheOptions = {
     forceRefresh?: boolean;
 };
 
+export type LoadPredictionAttributeResult = {
+    response: AttributionApiResponse;
+    /** IndexedDB 条目的 contentKey；与 `?content=` 一致 */
+    contentKey: string;
+};
+
 /**
  * 未强制刷新时：命中成功缓存则 touch 后返回；否则请求并 save。
  */
 export async function loadPredictionAttributeWithCache(
     options: LoadPredictionAttributeWithCacheOptions
-): Promise<AttributionApiResponse> {
+): Promise<LoadPredictionAttributeResult> {
     const { apiBaseForRequests, context, targetPrediction, model, sourcePage, forceRefresh } = options;
     if (forceRefresh) {
         await removeCachedEntryByContentKey(entryKey(context, targetPrediction));
@@ -93,8 +99,8 @@ export async function loadPredictionAttributeWithCache(
         }
     }
     const json = await fetchPredictionAttribute(apiBaseForRequests, context, targetPrediction, model, sourcePage);
-    await save({ context, targetPrediction }, json, 'complete');
-    return json;
+    const { contentKey } = await save({ context, targetPrediction }, json, 'complete');
+    return { response: json, contentKey };
 }
 
 /**

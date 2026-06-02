@@ -39,6 +39,7 @@ _STATS_API_ORDER = (
     "prediction_attribute__analysis.html",
 )
 _STATS_OS_ORDER = ("ios", "android", "windows", "macos", "linux", "unknown")
+# causal_flow* 取代 propagated*；不再上报 propagated_anim（传播链改由 DAG ↯ 显式播放，无独立开关统计）。
 _STATS_GEN_ATTR_OPT_ORDER = (
     "layout_linear_arc", "layout_step_down", "layout_spiral",
     "causal_flow", "causal_flow_anim_backward",

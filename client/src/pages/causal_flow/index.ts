@@ -41,17 +41,11 @@ import {
     type TokenGenAttributionHandle,
     type TokenGenStep,
 } from '../../shared/prediction_attribution/causal_flow/tokenGenAttributionRunner';
-import {
-    DEFAULT_MAX_NEW_TOKENS,
-    finalizeMaxNewTokensInput,
-    isMaxNewTokensRawValid,
-    parseMaxNewTokens,
-    syncMaxNewTokensInputSiteMax,
-} from '../../shared/cross/maxNewTokensConfig';
+import { DEFAULT_MAX_NEW_TOKENS, parseMaxNewTokens } from '../../shared/cross/maxNewTokensConfig';
+import { createCompletionOptionsRow } from '../../shared/cross/completionOptionsRow';
 import { fetchTokenize } from '../../shared/prediction_attribution/core/predictionAttributeClient';
 import { completionFinishReasonLabel, type CompletionFinishReason } from '../../shared/cross/generationEndReasonLabel';
 import {
-    buildCachedContentUrlParam,
     buildGenAttrExportedDemoPayload,
     getCachedEntryByContentKey,
     listCachedHistoryRows,
@@ -95,6 +89,8 @@ import {
 } from '../../shared/cross/queryHistory';
 import {
     GEN_ATTR_ENABLE_THINKING_STORAGE_KEY,
+    GEN_ATTR_MAX_NEW_TOKENS_STORAGE_KEY,
+    GEN_ATTR_MODEL_VARIANT_STORAGE_KEY,
     LS_SKIP_CHAT_TEMPLATE,
 } from '../../features/chat/chatPromptTemplateMode';
 import { postCompletionsPrompt, postCompletionsStop } from '../../shared/api/completionsClient';
@@ -116,8 +112,6 @@ initI18n();
 
 const showToast = createToast('#toast').show;
 
-const GEN_ATTR_MODEL_VARIANT_STORAGE_KEY = 'info_radar_gen_attr_model_variant';
-const GEN_ATTR_MAX_TOKENS_STORAGE_KEY = 'info_radar_gen_attr_max_tokens';
 const GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY = 'info_radar_gen_attr_dag_measure_width';
 const GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_mode';
 const GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_step_ms';
@@ -195,17 +189,6 @@ function createFlowId(): string {
     const timePart = Date.now().toString(36).slice(-6);
     const randPart = Math.random().toString(36).slice(2, 6);
     return `${timePart}-${randPart}`;
-}
-
-function readStoredModelVariant(): PredictionAttributeModelVariant {
-    return lsReadEnum(GEN_ATTR_MODEL_VARIANT_STORAGE_KEY, ['base', 'instruct'] as const, 'instruct');
-}
-
-function readStoredMaxTokens(): number {
-    const admin = adminManager.isInAdminMode();
-    return lsReadNumber(GEN_ATTR_MAX_TOKENS_STORAGE_KEY, DEFAULT_MAX_NEW_TOKENS, {
-        validate: (n) => isMaxNewTokensRawValid(String(n), admin),
-    });
 }
 
 function clampDagMeasureWidth(n: number): number {
@@ -349,8 +332,6 @@ const metricUsage = d3.select('#gen_attr_metric_usage');
 const metricModel = d3.select('#gen_attr_metric_model');
 const genAttrResultsEl = d3.select('#results.gen-attr-results-surface');
 
-const modelVariantSelect = document.getElementById('gen_attr_model_variant') as HTMLSelectElement | null;
-const maxTokensInput = document.getElementById('gen_attr_max_tokens') as HTMLInputElement | null;
 const dagLayoutModeSelect = document.getElementById('gen_attr_dag_layout_mode') as HTMLSelectElement | null;
 const dagMeasureWidthGroup = document.getElementById('gen_attr_dag_measure_width_group');
 const dagCompactnessGroup = document.getElementById('gen_attr_dag_compactness_group');
@@ -531,10 +512,6 @@ function genAttrEffectiveExcludeGeneratedPatternsText(): string {
     return genAttrExcludeGeneratedPatternsTa?.value ?? '';
 }
 
-if (maxTokensInput) {
-    maxTokensInput.value = String(readStoredMaxTokens());
-    syncMaxNewTokensInputSiteMax(maxTokensInput, adminManager.isInAdminMode());
-}
 const initialDagLayoutMode = readStoredDagLayoutMode();
 if (dagLayoutModeSelect) dagLayoutModeSelect.value = initialDagLayoutMode;
 applyDagLayoutModeUi();
@@ -721,26 +698,6 @@ setPageOptsGetter(() => {
     };
 });
 
-modelVariantSelect?.addEventListener('change', () => {
-    if (!isSkipChatTemplate()) return;
-    lsWriteString(GEN_ATTR_MODEL_VARIANT_STORAGE_KEY, currentModelVariant());
-    syncIdleModelMetric();
-    syncSubmitButtonState();
-});
-
-maxTokensInput?.addEventListener('change', () => {
-    if (!normalizeGenAttrMaxTokensField()) return;
-    lsSet(
-        GEN_ATTR_MAX_TOKENS_STORAGE_KEY,
-        maxTokensInput?.value ?? String(DEFAULT_MAX_NEW_TOKENS),
-    );
-    syncSubmitButtonState();
-});
-maxTokensInput?.addEventListener('input', () => syncSubmitButtonState());
-maxTokensInput?.addEventListener('blur', () => {
-    normalizeGenAttrMaxTokensField();
-});
-
 // DAG 回放节奏（与上节「DAG 测量宽度」无关；宽度 listener 在后文）
 dagPlaybackStepMsInput?.addEventListener('change', () => {
     const raw = parseInt(dagPlaybackStepMsInput.value, 10);
@@ -770,6 +727,28 @@ function isSkipChatTemplate(): boolean {
     return skipChatTemplateInput?.checked ?? false;
 }
 
+const completionOptions = createCompletionOptionsRow({
+    isSkipChatTemplate,
+    metricModel,
+    alertDialogTitle: tr('LLM Causal Flow'),
+    onStateChange: () => syncSubmitButtonState(),
+    adminMode: () => adminManager.isInAdminMode(),
+    modelVariantStorageKey: GEN_ATTR_MODEL_VARIANT_STORAGE_KEY,
+    maxNewTokensStorageKey: GEN_ATTR_MAX_NEW_TOKENS_STORAGE_KEY,
+});
+
+const {
+    modelVariantSelect,
+    maxTokensInput,
+    currentModelVariant,
+    currentMaxTokens,
+    isMaxNewTokensInputValid: isCompletionMaxNewTokensInputValid,
+    syncModelVariantUi,
+    syncIdleModelMetric,
+    syncMaxTokensUi,
+    normalizeMaxTokensField: normalizeGenAttrMaxTokensField,
+} = completionOptions;
+
 function isGenAttrUseSystemPrompt(): boolean {
     return genAttrUseSystemPromptInput?.checked ?? true;
 }
@@ -797,20 +776,6 @@ function syncPromptPanelVisibility(): void {
     const skip = isSkipChatTemplate();
     if (rawInputPanel) rawInputPanel.hidden = !skip;
     if (chatInputPanel) chatInputPanel.hidden = skip;
-}
-
-/** Chat template 下 model 恒为 instruct 且下拉仅展示；Raw 下读写 localStorage 偏好。 */
-function syncModelVariantUi(): void {
-    if (!modelVariantSelect) return;
-    const skip = isSkipChatTemplate();
-    if (skip) {
-        modelVariantSelect.disabled = false;
-        modelVariantSelect.value = readStoredModelVariant();
-    } else {
-        modelVariantSelect.disabled = true;
-        modelVariantSelect.value = 'instruct';
-    }
-    syncIdleModelMetric();
 }
 
 function getActivePromptValue(): string {
@@ -1033,7 +998,8 @@ function stopDagPlayback(): void {
 }
 
 function handleDagPlaybackToggle(wantPlay: boolean): void {
-    if (dagHandle.getUserFocusId() != null) return;
+    const userFocusId = dagHandle.getUserFocusId();
+    if (userFocusId != null) return;
     const h = runnerHandle;
     if (!wantPlay) {
         stopDagPlayback();
@@ -1180,10 +1146,12 @@ function isDagBusy(): boolean {
  * `refit: false` 时 `reset(true)` 保留 pan/zoom（仅边集/样式类变更）。
  */
 function tryResetAndReplayDag(opts?: { preserveNodeSelection?: boolean; refit?: boolean }): void {
+    dagHandle.stopPropagationPlayback();
     if (isDagBusy()) return;
     const refit = opts?.refit !== false;
     const preserveSelection = opts?.preserveNodeSelection !== false;
     const preservedSelectedId = preserveSelection ? dagHandle.getSelectedNodeId() : null;
+    const preservedUserFocusId = preserveSelection ? dagHandle.getUserFocusId() : null;
     const h = runnerHandle;
     dagHandle.reset(!refit);
     if (h && h.tokenCount > 0) {
@@ -1192,7 +1160,9 @@ function tryResetAndReplayDag(opts?: { preserveNodeSelection?: boolean; refit?: 
     if (refit) {
         dagHandle.fitViewportToContent();
     }
-    if (preservedSelectedId != null) {
+    if (preservedUserFocusId != null) {
+        dagHandle.setUserFocusNodeId(preservedUserFocusId);
+    } else if (preservedSelectedId != null) {
         dagHandle.setSelectedNodeId(preservedSelectedId);
     } else {
         dagHandle.clearNodeSelection();
@@ -1558,37 +1528,6 @@ bindExcludePatternControls(
     GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY,
 );
 
-function currentModelVariant(): PredictionAttributeModelVariant {
-    if (!isSkipChatTemplate()) return 'instruct';
-    const v = modelVariantSelect?.value;
-    return v === 'base' || v === 'instruct' ? v : 'instruct';
-}
-
-function currentMaxTokens(): number {
-    return parseMaxNewTokens(
-        maxTokensInput?.value ?? String(DEFAULT_MAX_NEW_TOKENS),
-        adminManager.isInAdminMode()
-    );
-}
-
-function normalizeGenAttrMaxTokensField(): boolean {
-    const ok = finalizeMaxNewTokensInput(
-        maxTokensInput,
-        adminManager.isInAdminMode(),
-        (msg) => showAlertDialog(tr('LLM Causal Flow'), msg),
-        tr,
-        trf
-    );
-    syncSubmitButtonState();
-    return ok;
-}
-
-function syncIdleModelMetric(): void {
-    if (!validateMetricsElements(metricModel)) return;
-    const slot = currentModelVariant();
-    metricModel.text(`${tr('model')}: ${slot}`);
-}
-
 // --- 状态 ---
 
 /** 供导出 demo JSON；从缓存恢复时由 applyGenAttrCachedRun 写入 */
@@ -1640,10 +1579,7 @@ function isInputReadyForRun(): boolean {
     const forcing = teacherForcingContinuationForRun();
     if (prompt.length === 0 && forcing === undefined) return false;
     if (prompt.length > 0 && isGenAttrTeacherForcingUiOn() && forcing === undefined) return false;
-    return isMaxNewTokensRawValid(
-        maxTokensInput?.value ?? '',
-        adminManager.isInAdminMode()
-    );
+    return isCompletionMaxNewTokensInputValid();
 }
 
 function syncSubmitButtonState(): void {
@@ -1769,13 +1705,10 @@ initQueryHistoryDropdown({
 });
 
 
-function syncGenAttrContentUrl(key: GenAttrCacheKey): void {
+/** `?content=` 仅写入 IndexedDB 条目的 contentKey（save 返回值或 MRU id） */
+function syncGenAttrContentUrl(contentKey: string): void {
     replaceDemoUrlParam(null, DEFAULT_DEMO_URL_PARAM, 'causal_flow');
-    replaceContentUrlParam(
-        buildCachedContentUrlParam(key),
-        DEFAULT_CONTENT_URL_PARAM,
-        'causal_flow'
-    );
+    replaceContentUrlParam(contentKey, DEFAULT_CONTENT_URL_PARAM, 'causal_flow');
 }
 
 function syncGenAttrDemoUrl(slug: string): void {
@@ -2269,8 +2202,8 @@ async function runGeneration(): Promise<void> {
                         } : {}),
                     };
                     void save(cacheKey, stepsToStore, currentRunPromptSpans, cacheStatus, reason, runDraft)
-                        .then(() => genCachedHistory.refreshList())
-                        .then(() => syncGenAttrContentUrl(cacheKey))
+                        .then(({ contentKey }) => genCachedHistory.refreshList().then(() => contentKey))
+                        .then((contentKey) => syncGenAttrContentUrl(contentKey))
                         .catch((e) => console.warn('[causal_flow] save cached run failed:', e));
                 }
                 completeReasonEl.text(completionFinishReasonLabel(reason));
@@ -2349,10 +2282,7 @@ function syncGenAttrExportDemoBtn(): void {
 }
 function syncGenAttrAdminUi(): void {
     syncGenAttrExportDemoBtn();
-    syncMaxNewTokensInputSiteMax(maxTokensInput, adminManager.isInAdminMode());
-    if (maxTokensInput) {
-        maxTokensInput.value = String(readStoredMaxTokens());
-    }
+    syncMaxTokensUi();
     normalizeGenAttrMaxTokensField();
 }
 syncGenAttrAdminUi();
