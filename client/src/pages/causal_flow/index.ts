@@ -1709,11 +1709,13 @@ initQueryHistoryDropdown({
 function syncGenAttrContentUrl(contentKey: string): void {
     replaceDemoUrlParam(null, DEFAULT_DEMO_URL_PARAM, 'causal_flow');
     replaceContentUrlParam(contentKey, DEFAULT_CONTENT_URL_PARAM, 'causal_flow');
+    syncGenAttrCachedDemosValueDisplay();
 }
 
 function syncGenAttrDemoUrl(slug: string): void {
     replaceContentUrlParam(null, DEFAULT_CONTENT_URL_PARAM, 'causal_flow');
     replaceDemoUrlParam(slug, DEFAULT_DEMO_URL_PARAM, 'causal_flow');
+    syncGenAttrCachedDemosValueDisplay();
 }
 
 /** demo / cached history / `?content=` / `?demo=` 并发恢复时只采纳最后一次意图 */
@@ -1849,12 +1851,10 @@ async function applyGenAttrCachedRun(
         return;
     }
     if (options.afterUrl.kind === 'content') {
-        replaceDemoUrlParam(null, DEFAULT_DEMO_URL_PARAM, 'causal_flow');
-        replaceContentUrlParam(options.afterUrl.contentKey, DEFAULT_CONTENT_URL_PARAM, 'causal_flow');
+        syncGenAttrContentUrl(options.afterUrl.contentKey);
     } else {
         syncGenAttrDemoUrl(options.afterUrl.slug);
     }
-    syncGenAttrCachedDemosValueDisplay();
 }
 
 /** 从缓存恢复运行；`shouldTouch` 为 true 时 touch MRU（下拉选中恒为 false，↑ 置顶走单独路径）。 */

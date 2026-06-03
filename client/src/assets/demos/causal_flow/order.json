@@ -28,6 +28,10 @@
     "label": "CoT | 多跳推理中“跳”的具象化"
   },
   {
+    "slug": "strawberry里有几个r",
+    "label": "CoT | strawberry里有几个r"
+  },
+  {
     "slug": "过拟合｜李白 将进酒",
     "label": "过拟合｜李白 将进酒",
     "featured": "bold"
