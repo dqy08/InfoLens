@@ -1,10 +1,11 @@
 /**
- * Visit Stats 弹窗（backend/visit_stats.py：_STATS_PAGE_ORDER / _STATS_API_ORDER / _STATS_OS_ORDER）
+ * Visit Stats 弹窗（backend/visit_stats.py：_STATS_PAGE_ORDER / …；周期 visitStatsContract.ts）
  */
 import * as d3 from 'd3';
 import { showDialog } from '../../shared/ui/dialog';
 import { tr } from '../../shared/lang/i18n-lite';
 import type { TextAnalysisAPI } from '../../shared/api/GLTR_API';
+import { showVisitStatsTimelineDialog } from './visitStatsTimelineDialog';
 
 const PAGE_ORDER = [
     'index.html',
@@ -243,6 +244,18 @@ export async function showVisitStatsDialog(api: TextAnalysisAPI): Promise<void> 
                 .attr('class', 'dialog-form-container dialog-form-container--fill');
             scrollBody = wrap.append('div').attr('class', 'dialog-scroll-region');
             fetchAndRender(scrollBody);
+
+            shell
+                .select('.dialog-buttons')
+                .insert('button', '.dialog-button.cancel')
+                .attr('type', 'button')
+                .attr('class', 'dialog-button cancel')
+                .attr('title', 'Visit stats timeline (local time)')
+                .text('Timeline')
+                .on('click', () => {
+                    void showVisitStatsTimelineDialog(api);
+                });
+
             return { focus: () => {} };
         },
         cancelText: tr('Exit'),

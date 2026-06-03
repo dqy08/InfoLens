@@ -25,6 +25,7 @@ from model_paths import (
 ENV_HELP = """
 环境变量:
   INFORADAR_ADMIN_TOKEN  管理员 token，用于 check_admin、切换模型、demo 管理；未设置则禁用
+  HF_ENDPOINT_MIRROR    可选，公开模型 snapshot 下载镜像（如 https://hf-mirror.com）；勿设 HF_ENDPOINT
   FORCE_CPU=1           强制使用 CPU，忽略 CUDA/MPS
   FORCE_INT8=1          启用 INT8 量化（CPU/CUDA 支持，MPS 不支持）
   CPU_FORCE_BFLOAT16=1  CPU 使用 bfloat16

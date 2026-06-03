@@ -877,6 +877,36 @@ paths:
                 type: integer
                 description: 在线估计滑动窗口秒数（当前为 20）。
 
+  /visit_stats/active_visits_timeline:
+    get:
+      tags:
+        - all
+      summary: active visits and active time per UTC hour (admin only)
+      operationId: server.get_visit_stats_active_visits_timeline
+      responses:
+        200:
+          description: hourly bins from stats_delta and unpersisted session increment
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              bins:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    hour:
+                      type: string
+                      description: UTC hour start, e.g. 2025-06-03T12:00:00Z
+                    active_visits:
+                      type: integer
+                    active_sec:
+                      type: integer
+                      description: sum of page active seconds in this UTC hour bucket
+        503:
+          description: HF token missing or Hub unavailable
+
   /visit_stats/reset:
     post:
       tags:

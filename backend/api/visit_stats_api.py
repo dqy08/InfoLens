@@ -1,11 +1,18 @@
 """访问统计 API（仅管理员可用）"""
-from backend.platform.visit_stats import get_stats_snapshot, reset_delta_base
+from backend.platform.visit_stats import get_active_visits_timeline, get_stats_snapshot, reset_delta_base
 from backend.api.utils import require_admin
 
 
 @require_admin
 def get_visit_stats():
     return get_stats_snapshot(), 200
+
+
+@require_admin
+def get_visit_stats_active_visits_timeline():
+    body = get_active_visits_timeline()
+    status = 200 if body.get("success") else 503
+    return body, status
 
 
 @require_admin

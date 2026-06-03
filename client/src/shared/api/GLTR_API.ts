@@ -276,6 +276,17 @@ export class TextAnalysisAPI {
         });
     }
 
+    /** bins[].hour 格式见 visitStatsContract.ts STATS_UTC_HOUR_FMT */
+    public getVisitStatsActiveVisitsTimeline(): Promise<{
+        success: boolean,
+        bins?: { hour: string, active_visits: number, active_sec: number }[],
+        error?: string,
+    }> {
+        return d3.json(this.baseURL + '/api/visit_stats/active_visits_timeline', {
+            headers: this.getHeaders(),
+        });
+    }
+
     /**
      * 获取可用模型列表
      */

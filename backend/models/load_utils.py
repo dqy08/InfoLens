@@ -49,15 +49,19 @@ def ensure_model_local(model_path: str, *, force_download: bool = False) -> str:
         return model_path
     if "/" in model_path and not os.path.exists(model_path):
         from huggingface_hub import snapshot_download
+
+        from backend.platform.hf_hub_endpoint import hf_hub_endpoint
+
+        dl_kw = {"endpoint": hf_hub_endpoint(mirror=True)}
         if force_download:
-            return snapshot_download(model_path)
+            return snapshot_download(model_path, **dl_kw)
         try:
-            path = snapshot_download(model_path, local_files_only=True)
+            path = snapshot_download(model_path, local_files_only=True, **dl_kw)
             if not _is_model_cache_complete(path):
-                return snapshot_download(model_path)
+                return snapshot_download(model_path, **dl_kw)
             return path
         except Exception:
-            return snapshot_download(model_path)
+            return snapshot_download(model_path, **dl_kw)
     return model_path
 
 
