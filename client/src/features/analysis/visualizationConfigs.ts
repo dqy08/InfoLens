@@ -74,11 +74,11 @@ export const getSurprisalProgressConfig = (): ScatterPlotBaseConfig => ({
 });
 
 /**
- * 获取 Match score per chunk progress 配置（支持国际化）
+ * 获取 semantic match progress 配置（支持国际化）
  * x 轴为字符偏移，y 轴为 chunk 匹配度
  */
 export const getMatchScoreProgressConfig = (): ScatterPlotBaseConfig => ({
-  label: tr("semantic match per chunk progress"),
+  label: tr("semantic match progress"),
   xLabel: tr("character offset"),
   yLabel: tr("chunk match degree"),
 });

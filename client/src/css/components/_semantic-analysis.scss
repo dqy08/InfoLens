@@ -14,14 +14,11 @@
   gap: 6px;
 
   .semantic-submode-group {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-
-    // `.semantic-submode-row .semantic-submode-group`（两档类）特异性高于 UA 里单独的 `[hidden]`，
-    // 会把本应隐藏的组仍排成 flex；配合 TS 的 element.hidden 需强制盖住自身 flex。
-    &[hidden] {
-      display: none !important;
+    // 仅非 hidden 时设 flex，否则会覆盖浏览器对 [hidden] 的 display:none（同 gen-attr-dag-replay-value-wrap）
+    &:not([hidden]) {
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
 
     &.semantic-submode-group-right {
@@ -42,7 +39,7 @@
     color: var(--text-muted);
   }
 
-  label.semantic-submode-label:has(> input[type='checkbox']) {
+  label.semantic-submode-label:has(> input[type='checkbox']):not([hidden]) {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -74,7 +71,8 @@
 
   // Max new tokens（completion-options-row partial）；须在 semantic-analysis 中定义——Chat 不加载 causal_flow.scss
   .semantic-threshold-input,
-  .gen-attr-max-tokens-input {
+  .gen-attr-max-tokens-input,
+  .gen-attr-dag-measure-width-input {
     box-sizing: border-box;
     flex: 0 0 auto;
     min-width: 0;
@@ -90,6 +88,11 @@
     inline-size: 4rem;
     max-inline-size: 100%;
     width: 4em;
+
+    &:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
   }
 }
 

@@ -5,7 +5,7 @@
 
 import { lsGet, lsSetCatch } from '../storage/localStorageHelpers';
 
-const MAX_SIZE = 50;
+const MAX_SIZE = 100;
 const STORAGE_KEY = 'info_radar_semantic_result_cache';
 
 export type SemanticCacheResult = {

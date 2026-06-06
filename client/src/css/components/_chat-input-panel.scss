@@ -79,6 +79,13 @@
   margin-bottom: 12px;
 }
 
+.input-section .attribution-exclude-prompt-patterns-input {
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+}
+
 .chat-cached-history-bar .chat-prompt-history-wrapper {
   width: 100%;
   display: flex;
@@ -117,4 +124,35 @@
     height: auto;
     field-sizing: content;
   }
+}
+
+// Teacher forcing（Chat / Causal flow 共用）
+.teacher-forcing-row {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.input-section .textarea-wrapper textarea.teacher-forcing-text {
+  height: 90px;
+  min-height: 60px;
+  max-height: 250px;
+}
+
+.teacher-forcing-toggle-row label.semantic-submode-label,
+.teacher-forcing-block.chat-prompt-panel .stop-after-tf-row label.semantic-submode-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.teacher-forcing-block.chat-prompt-panel .stop-after-tf-row {
+  margin-top: 8px;
+}
+
+.input-section > .textarea-wrapper.chat-prompt-actions-row {
+  margin-top: 10px;
 }

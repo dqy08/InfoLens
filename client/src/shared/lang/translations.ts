@@ -29,7 +29,7 @@ export const translations: Translations = {
         '- attribute a predicted token to its context': '- 将预测 token 归因到上下文',
         'LLM Causal Flow': 'LLM Causal Flow 因果流',
         '- explore the context-attribution DAG': '- 探索上下文归因的 DAG 关系图',
-        '500K+ plays on RedNote': '小红书 50万+次播放',
+        '700K+ plays on RedNote': '小红书 70万+次播放',
         'Go to demo on RedNote: xhslink.com': '在小红书打开demo：xhslink.com',
         // 合成标题串（<title>）：英文 key 与 injectPageMeta documentTitleEn 拼接一致
         'Info Lens - A toolbox for exploring the informational nature of LLMs and language': 'Info Lens 信息透镜 - 用于探索 LLM 与语言的信息本质的工具箱',
@@ -161,6 +161,10 @@ export const translations: Translations = {
             '期望模型在完整 prompt 之后生成的文字；每一步对当前剩余串的第一个 token 做归因目标。',
         'When unchecked, generation continues with top-1 after teacher forcing tokens are exhausted, up to Max tokens.':
             '未勾选时，teacher forcing 续写用完后将继续以 top-1 贪心生成，直到 Max tokens 或 EOS。',
+        'When enabled, this text is appended to the assembled prompt (raw or chat template) before completion. GLTR colors apply only to newly generated tokens, not the appended suffix.':
+            '启用后，该文本会拼接到已组装的 prompt（原始或 chat 模板）之后、再调用 completion。GLTR 着色仅作用于新生成的 token，不包含拼接的续写后缀。',
+        'Text appended to the full prompt before calling /v1/completions. The suffix is part of the input, not model-generated output.':
+            '调用 /v1/completions 前拼接到完整 prompt 末尾的文本；属于输入的一部分，而非模型生成结果。',
         'Ask': '提问',
         'Force retry': '强制重试',
         'Retry': '重试',
@@ -311,7 +315,7 @@ export const translations: Translations = {
         'information per byte histogram': '字节信息量直方图',
         'information per token histogram': 'token信息量直方图',
         'information per token progress': 'token信息量进度图',
-        'semantic match per chunk progress': 'chunk匹配度进度图',
+        'semantic match progress': '匹配度进度图',
         'chunk match degree': 'chunk匹配度',
         'token index': 'token索引',
         'character offset': '字符偏移',

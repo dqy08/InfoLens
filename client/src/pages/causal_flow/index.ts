@@ -24,6 +24,15 @@ import {
     type PromptTokenSpan,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagPreprocess';
 import {
+    clampDimInactiveTokensThreshold,
+    dimInactiveThresholdFractionToUiPercent,
+    dimInactiveThresholdUiPercentToFraction,
+    dimInactiveThresholdUiStepForPercent,
+    DIM_INACTIVE_THRESHOLD_UI_PERCENT_DEFAULT,
+    DIM_INACTIVE_TOKENS_THRESHOLD_DEFAULT,
+    formatDimInactiveThresholdPercentForInput,
+} from '../../shared/prediction_attribution/causal_flow/genAttributeDagNodeDim';
+import {
     initGenAttributeDagView,
     setDagNodeCiVisualScaleEnabled,
     setDagDecayAttributionToHighSurprisalTargetEnabled,
@@ -130,6 +139,11 @@ const GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY = 'info_radar_gen_attr_dag_
 const GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_DIRECTION_STORAGE_KEY =
     'info_radar_gen_attr_dag_recursive_edge_animation_direction';
 const GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY = 'info_radar_gen_attr_dag_hide_excluded_tokens';
+const GEN_ATTR_DAG_DIM_INACTIVE_TOKENS_STORAGE_KEY = 'info_radar_gen_attr_dag_dim_inactive_tokens';
+const GEN_ATTR_DAG_DIM_INACTIVE_TOKENS_THRESHOLD_STORAGE_KEY =
+    'info_radar_gen_attr_dag_dim_inactive_tokens_threshold';
+const GEN_ATTR_DAG_DIM_INACTIVE_NOT_IN_ANIMATION_STORAGE_KEY =
+    'info_radar_gen_attr_dag_dim_inactive_not_in_animation';
 const GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY = 'info_radar_gen_attr_dag_show_topk_on_selected';
 const GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY =
     'info_radar_gen_attr_dag_linear_arc_adjacent_gap';
@@ -165,9 +179,12 @@ const DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS: GenAttrDemoUiOptions = {
     dagCompactness: DAG_COMPACTNESS_DEFAULT,
     linearArcAdjacentGapPx: LINEAR_ARC_ADJACENT_GAP_DEFAULT,
     hideExcludedTokens: false,
+    dimInactiveTokens: false,
+    dimInactiveTokensThreshold: DIM_INACTIVE_TOKENS_THRESHOLD_DEFAULT,
+    dimInactiveNotDuringAnimation: false,
     edgeTopPCoverage: DAG_EDGE_TOP_P_COVERAGE_DEFAULT,
-    nodeCiVisualScaleEnabled: true,
-    decayAttributionToHighSurprisalTargetEnabled: true,
+    nodeCiVisualScaleEnabled: false,
+    decayAttributionToHighSurprisalTargetEnabled: false,
     hideInactiveEdges: false,
     showDownstreamInfluence: false,
     recursiveAttributionEnabled: false,
@@ -444,6 +461,19 @@ const dagRecursiveEdgeAnimationDirectionGroup = document.getElementById(
 const dagRecursiveEdgeAnimationDirectionSelect = document.getElementById(
     'gen_attr_dag_recursive_edge_animation_direction'
 ) as HTMLSelectElement | null;
+const dagDimInactiveTokensGroup = document.getElementById('gen_attr_dag_dim_inactive_tokens_group');
+const dagDimInactiveTokensInput = document.getElementById(
+    'gen_attr_dag_dim_inactive_tokens'
+) as HTMLInputElement | null;
+const dagDimInactiveTokensThresholdInput = document.getElementById(
+    'gen_attr_dag_dim_inactive_tokens_threshold'
+) as HTMLInputElement | null;
+const dagDimInactiveNotInAnimationWrap = document.getElementById(
+    'gen_attr_dag_dim_inactive_not_in_animation_wrap',
+);
+const dagDimInactiveNotInAnimationInput = document.getElementById(
+    'gen_attr_dag_dim_inactive_not_in_animation',
+) as HTMLInputElement | null;
 const genAttrExcludePromptPatternsTa = document.getElementById(
     'gen_attr_exclude_prompt_patterns'
 ) as HTMLTextAreaElement | null;
@@ -607,6 +637,47 @@ dagShowDownstreamInfluenceInput?.addEventListener('change', () => {
     dagHandle.setShowDownstreamInfluence(show);
 });
 
+function syncDimInactiveTokensThresholdInputUi(): void {
+    const show = dagDimInactiveTokensInput?.checked ?? false;
+    if (dagDimInactiveTokensThresholdInput) {
+        dagDimInactiveTokensThresholdInput.disabled = !show;
+    }
+    if (dagDimInactiveNotInAnimationWrap) {
+        dagDimInactiveNotInAnimationWrap.hidden = !show;
+    }
+}
+
+function syncDimInactiveTokensThresholdControlStep(): void {
+    if (!dagDimInactiveTokensThresholdInput) return;
+    const raw = parseFloat(dagDimInactiveTokensThresholdInput.value);
+    const percent = Number.isFinite(raw)
+        ? raw
+        : DIM_INACTIVE_THRESHOLD_UI_PERCENT_DEFAULT;
+    dagDimInactiveTokensThresholdInput.step = dimInactiveThresholdUiStepForPercent(percent);
+}
+
+function setDimInactiveTokensThresholdControlFromFraction(fraction: number): void {
+    if (!dagDimInactiveTokensThresholdInput) return;
+    const percent = dimInactiveThresholdFractionToUiPercent(fraction);
+    dagDimInactiveTokensThresholdInput.value = formatDimInactiveThresholdPercentForInput(percent);
+    syncDimInactiveTokensThresholdControlStep();
+}
+
+function readDimInactiveTokensThresholdFromControl(): number {
+    const raw = parseFloat(dagDimInactiveTokensThresholdInput?.value ?? '');
+    return dimInactiveThresholdUiPercentToFraction(
+        Number.isFinite(raw) ? raw : DIM_INACTIVE_THRESHOLD_UI_PERCENT_DEFAULT,
+    );
+}
+
+function applyDagDimInactiveTokensFromControls(): void {
+    dagHandle.setDimInactiveTokens(dagDimInactiveTokensInput?.checked ?? false);
+    dagHandle.setDimInactiveTokensThreshold(readDimInactiveTokensThresholdFromControl());
+    dagHandle.setDimInactiveNotDuringAnimation(
+        dagDimInactiveNotInAnimationInput?.checked ?? false,
+    );
+}
+
 /** 传播归因相关控件可见性：仅在适用时显示。 */
 function applyDagRecursiveAttributionSubmodeUi(): void {
     const recursive = dagRecursiveAttributionInput?.checked ?? false;
@@ -616,6 +687,34 @@ function applyDagRecursiveAttributionSubmodeUi(): void {
     if (dagRecursiveEdgeAnimationDirectionGroup) {
         dagRecursiveEdgeAnimationDirectionGroup.hidden = !recursive;
     }
+    if (dagDimInactiveTokensGroup) {
+        dagDimInactiveTokensGroup.hidden = !recursive;
+    }
+    syncDimInactiveTokensThresholdInputUi();
+}
+
+function readStoredDagDimInactiveTokens(): boolean {
+    return lsReadBool(
+        GEN_ATTR_DAG_DIM_INACTIVE_TOKENS_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.dimInactiveTokens,
+        { encoding: '1' },
+    );
+}
+
+function readStoredDagDimInactiveTokensThreshold(): number {
+    return lsReadNumber(
+        GEN_ATTR_DAG_DIM_INACTIVE_TOKENS_THRESHOLD_STORAGE_KEY,
+        DIM_INACTIVE_TOKENS_THRESHOLD_DEFAULT,
+        { parse: 'float', clamp: clampDimInactiveTokensThreshold },
+    );
+}
+
+function readStoredDagDimInactiveNotDuringAnimation(): boolean {
+    return lsReadBool(
+        GEN_ATTR_DAG_DIM_INACTIVE_NOT_IN_ANIMATION_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.dimInactiveNotDuringAnimation,
+        { encoding: '1' },
+    );
 }
 
 function readStoredDagRecursiveAttribution(): boolean {
@@ -641,7 +740,17 @@ if (dagRecursiveEdgeAnimationDirectionSelect) {
     dagRecursiveEdgeAnimationDirectionSelect.value = initialDagRecursiveEdgeAnimationDirection;
 }
 
+const initialDagDimInactiveTokens = readStoredDagDimInactiveTokens();
+const initialDagDimInactiveTokensThreshold = readStoredDagDimInactiveTokensThreshold();
+const initialDagDimInactiveNotDuringAnimation = readStoredDagDimInactiveNotDuringAnimation();
+if (dagDimInactiveTokensInput) dagDimInactiveTokensInput.checked = initialDagDimInactiveTokens;
+if (dagDimInactiveNotInAnimationInput) {
+    dagDimInactiveNotInAnimationInput.checked = initialDagDimInactiveNotDuringAnimation;
+}
+setDimInactiveTokensThresholdControlFromFraction(initialDagDimInactiveTokensThreshold);
+
 applyDagRecursiveAttributionSubmodeUi();
+syncDimInactiveTokensThresholdInputUi();
 dagRecursiveAttributionInput?.addEventListener('change', () => {
     const enabled = dagRecursiveAttributionInput.checked;
     lsWriteBool(GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY, enabled, '1');
@@ -653,6 +762,32 @@ dagRecursiveEdgeAnimationDirectionSelect?.addEventListener('change', () => {
     dagRecursiveEdgeAnimationDirectionSelect.value = direction;
     lsWriteString(GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_DIRECTION_STORAGE_KEY, direction);
     dagHandle.setRecursiveEdgeBatchAnimationDirection(direction);
+});
+
+dagDimInactiveTokensInput?.addEventListener('change', () => {
+    const enabled = dagDimInactiveTokensInput.checked;
+    lsWriteBool(GEN_ATTR_DAG_DIM_INACTIVE_TOKENS_STORAGE_KEY, enabled, '1');
+    syncDimInactiveTokensThresholdInputUi();
+    applyDagDimInactiveTokensFromControls();
+    syncGenAttrResetUiOptionsButtonState();
+});
+
+dagDimInactiveTokensThresholdInput?.addEventListener('input', () => {
+    syncDimInactiveTokensThresholdControlStep();
+});
+dagDimInactiveTokensThresholdInput?.addEventListener('change', () => {
+    const t = readDimInactiveTokensThresholdFromControl();
+    setDimInactiveTokensThresholdControlFromFraction(t);
+    lsSet(GEN_ATTR_DAG_DIM_INACTIVE_TOKENS_THRESHOLD_STORAGE_KEY, String(t));
+    applyDagDimInactiveTokensFromControls();
+    syncGenAttrResetUiOptionsButtonState();
+});
+
+dagDimInactiveNotInAnimationInput?.addEventListener('change', () => {
+    const enabled = dagDimInactiveNotInAnimationInput.checked;
+    lsWriteBool(GEN_ATTR_DAG_DIM_INACTIVE_NOT_IN_ANIMATION_STORAGE_KEY, enabled, '1');
+    applyDagDimInactiveTokensFromControls();
+    syncGenAttrResetUiOptionsButtonState();
 });
 
 function readStoredDagHideExcludedTokens(): boolean {
@@ -1108,6 +1243,9 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
     dagCompactness: initialDagCompactness,
     linearArcAdjacentGapPx: initialDagLinearArcGap,
     hideExcludedTokens: initialDagHideExcludedTokens,
+    dimInactiveTokens: initialDagDimInactiveTokens,
+    dimInactiveTokensThreshold: initialDagDimInactiveTokensThreshold,
+    dimInactiveNotDuringAnimation: initialDagDimInactiveNotDuringAnimation,
     showTokenInfoOnSelected: initialDagShowTopkOnSelected,
     showDownstreamInfluence: initialDagShowDownstreamInfluence,
     recursiveAttributionEnabled: initialDagRecursiveAttribution,
@@ -1239,10 +1377,15 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
         dagCompactness,
         linearArcAdjacentGapPx,
         hideExcludedTokens: dagHideExcludedTokensInput?.checked ?? false,
+        dimInactiveTokens: dagDimInactiveTokensInput?.checked ?? false,
+        dimInactiveTokensThreshold: readDimInactiveTokensThresholdFromControl(),
+        dimInactiveNotDuringAnimation: dagDimInactiveNotInAnimationInput?.checked ?? false,
         edgeTopPCoverage,
-        nodeCiVisualScaleEnabled: dagNodeCiVisualScaleInput?.checked ?? true,
+        nodeCiVisualScaleEnabled:
+            dagNodeCiVisualScaleInput?.checked ?? DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.nodeCiVisualScaleEnabled,
         decayAttributionToHighSurprisalTargetEnabled:
-            dagDecayAttributionHighSurprisalInput?.checked ?? true,
+            dagDecayAttributionHighSurprisalInput?.checked ??
+            DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.decayAttributionToHighSurprisalTargetEnabled,
         hideInactiveEdges: dagHideInactiveEdgesInput?.checked ?? false,
         showDownstreamInfluence: dagShowDownstreamInfluenceInput?.checked ?? false,
         recursiveAttributionEnabled: dagRecursiveAttributionInput?.checked ?? false,
@@ -1358,6 +1501,23 @@ function applyGenAttrDemoUiOptionsSnap(snap: Partial<GenAttrDemoUiOptions>): voi
     if (snap.hideExcludedTokens !== undefined) {
         if (dagHideExcludedTokensInput) dagHideExcludedTokensInput.checked = snap.hideExcludedTokens;
         dagHandle.setHideExcludedTokens(snap.hideExcludedTokens);
+    }
+    if (snap.dimInactiveTokens !== undefined) {
+        if (dagDimInactiveTokensInput) dagDimInactiveTokensInput.checked = snap.dimInactiveTokens;
+        syncDimInactiveTokensThresholdInputUi();
+        dagHandle.setDimInactiveTokens(snap.dimInactiveTokens);
+    }
+    if (snap.dimInactiveTokensThreshold !== undefined) {
+        const t = clampDimInactiveTokensThreshold(snap.dimInactiveTokensThreshold);
+        setDimInactiveTokensThresholdControlFromFraction(t);
+        dagHandle.setDimInactiveTokensThreshold(t);
+    }
+    if (snap.dimInactiveNotDuringAnimation !== undefined) {
+        if (dagDimInactiveNotInAnimationInput) {
+            dagDimInactiveNotInAnimationInput.checked = snap.dimInactiveNotDuringAnimation;
+        }
+        syncDimInactiveTokensThresholdInputUi();
+        dagHandle.setDimInactiveNotDuringAnimation(snap.dimInactiveNotDuringAnimation);
     }
     if (snap.nodeCiVisualScaleEnabled !== undefined) {
         if (dagNodeCiVisualScaleInput) dagNodeCiVisualScaleInput.checked = snap.nodeCiVisualScaleEnabled;

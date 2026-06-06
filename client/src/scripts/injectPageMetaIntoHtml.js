@@ -97,7 +97,7 @@ function injectPageMeta(html, pageKey, doc) {
                     : `<div class="nav-landing-card-shot" aria-hidden="true"></div>`;
             const badge =
                 navKey === 'causalFlow'
-                    ? `<span class="nav-landing-card-badge" title="Go to demo on RedNote: xhslink.com" data-i18n="text,title">500K+ plays on RedNote</span>`
+                    ? `<span class="nav-landing-card-badge" title="Go to demo on RedNote: xhslink.com" data-i18n="text,title">700K+ plays on RedNote</span>`
                     : '';
 
             if (navKey === 'causalFlow') {

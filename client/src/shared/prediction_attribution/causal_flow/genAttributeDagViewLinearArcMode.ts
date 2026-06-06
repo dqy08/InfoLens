@@ -143,6 +143,9 @@ export function paintLinearArcLayout<
 
     linkSel.each(function(d) {
         const { src, tgt } = getLinkNodes(d);
+        if (!centerXByNode.has(src) || !centerXByNode.has(tgt)) {
+            return; // 端点未参与布局（Hide exclude/inactive 等），路径由 highlight 隐藏
+        }
         d3.select(this)
             .selectAll('path.gen-attr-dag-link-visible')
             .attr('d', arcPathBetweenNodes(src, tgt));

@@ -296,7 +296,7 @@ export class VisualizationUpdater {
         /** 直方图仅在整段模式显示，chunk 模式下不显示 */
         const showRawScoreHistogram = showSemantic && !willBeChunked;
         if (rawScoreNormedItem) rawScoreNormedItem.style.display = showRawScoreHistogram ? '' : 'none';
-        /** semantic match per chunk progress 仅 chunk 模式显示 */
+        /** semantic match progress 仅 chunk 模式显示 */
         if (matchScoreProgressItem) matchScoreProgressItem.style.display = showSemantic && !!willBeChunked ? '' : 'none';
 
         // pending 时渲染空统计图（坐标轴 + 空柱体/散点），避免空白
@@ -513,7 +513,7 @@ export class VisualizationUpdater {
             } else {
                 if (rawScoreNormedItem) rawScoreNormedItem.style.display = 'none';
             }
-            /** semantic match per chunk progress：仅 chunk 模式，仅绘制 chunk 匹配线，不绘制点 */
+            /** semantic match progress：仅 chunk 模式，仅绘制 chunk 匹配线，不绘制点 */
             if (isChunkMode) {
                 const matchScoreProgressConfig = getMatchScoreProgressConfig();
                 const docLen = (displayResult?.originalText ?? '').length;
@@ -554,7 +554,7 @@ export class VisualizationUpdater {
             } else {
                 if (rawScoreNormedItem) rawScoreNormedItem.style.display = 'none';
             }
-            /** semantic match per chunk progress 无数据时显示空占位（仅 chunk 模式） */
+            /** semantic match progress 无数据时显示空占位（仅 chunk 模式） */
             if (getSemanticAnalysisEnabled() && isChunkMode) {
                 const matchScoreProgressConfig = getMatchScoreProgressConfig();
                 const docLen = (displayResult?.originalText ?? '').length;

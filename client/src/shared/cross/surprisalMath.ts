@@ -14,7 +14,7 @@ export const ZERO_CONFIDENCE_PROBABILITY_BASELINE = 2 ** -18;
 export const REFERENCE_MAX_SURPRISAL_BITS = Math.log2(1 / ZERO_CONFIDENCE_PROBABILITY_BASELINE);
 
 /**
- * 全信心概率阈值 p₁（3 bit，p > 1/8）：surprisal 足够低时视为充分自信、DAG 传导节点（非信息来源）。
+ * 全信心概率阈值 p₁（2 bit，p > 1/4）：surprisal 足够低时视为充分自信、DAG 传导节点（非信息来源）。
  *
  * 硬截断仅经本文件三个 `dag*` 函数进入 Generate & Attribute DAG：
  * - {@link dagCiVisualScaleFromTargetProb} → `genAttributeDagView`：生成节点框/标签不放大（1×）
@@ -23,7 +23,7 @@ export const REFERENCE_MAX_SURPRISAL_BITS = Math.log2(1 / ZERO_CONFIDENCE_PROBAB
  *
  * 不用于 tooltip 与边上的 CI/MI 展示（仍 {@link computeMutualInformationRatio} / {@link computeConditionalInformationRatio}）。
  */
-export const FULL_CONFIDENCE_PROBABILITY_BASELINE = 2 ** -3;
+export const FULL_CONFIDENCE_PROBABILITY_BASELINE = 2 ** -2;
 
 /** 与 p₁ 对应的 surprisal 上界（bit）；surprisal ≤ 此值即满足「充分自信」截断条件。 */
 export const REFERENCE_NO_SURPRISAL_BITS = Math.log2(1 / FULL_CONFIDENCE_PROBABILITY_BASELINE);

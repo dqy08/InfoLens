@@ -221,7 +221,7 @@ export class ScatterPlot extends VComponent<ScatterPlotData> {
 
         const yExtent: [number, number] = rd.extent?.y ?? [0, 20];
 
-        // semantic match per chunk progress：x=字符偏移，但希望 x 轴刻度显示为“全文位置百分比”
+        // semantic match progress：x=字符偏移，但希望 x 轴刻度显示为“全文位置百分比”
         const showXAsPercent = !!rd.chunkInteraction;
         const xDomainSpan = xExtent[1] - xExtent[0];
         const xAxisDefaultTickFormat = d3.format('d');

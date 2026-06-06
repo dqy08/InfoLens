@@ -85,8 +85,7 @@ export class HighlightController {
         this.options.stats_frac.clearSelection();
         this.options.stats_raw_score_normed?.clearSelection();
 
-        this.options.lmf.setChunkCharRangeHighlight(ev.x0, ev.x1);
-        this.options.lmf.scrollToUnicodeCharOffset(ev.x0);
+        this.options.lmf.jumpToChunkHighlight(ev.x0, ev.x1);
     }
 
     /** 获取当前高亮数据 */

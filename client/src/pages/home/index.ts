@@ -21,7 +21,7 @@ import { DEFAULT_DEMO_URL_PARAM } from '../../shared/cross/contentUrl';
 const GEN_ATTRIBUTE_CAROUSEL_DEMO_SLUG = {
     flow: { en: 'Write a sonnet about love', zh: '写一首绝句，主题是春天' },
     spiral: { en: '过拟合｜李白 将进酒', zh: '过拟合｜李白 将进酒' },
-    cot: { en: 'CoT | 苏州所在省的省会', zh: 'CoT | 苏州所在省的省会' },
+    cot: { en: 'CoT｜苏州所在省的省会', zh: 'CoT｜苏州所在省的省会' },
 } as const;
 
 type GenAttributeCarouselSlide = keyof typeof GEN_ATTRIBUTE_CAROUSEL_DEMO_SLUG;

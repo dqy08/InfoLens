@@ -17,6 +17,7 @@ export class HighlightManager {
     /** rect 缓存未就绪时的重试计数（与直方图 / 区间下划线分开，避免互相打断） */
     private rectCacheWait = { indices: 0, interval: 0 };
     private intervalUnderlineLines: SVGLineElement[] = [];
+    private charIntervalFadeTimeout: number | undefined;
 
     constructor(
         svgOverlay: SVGSVGElement,
@@ -151,6 +152,7 @@ export class HighlightManager {
      * 清除所有高亮（token 边框/下划线 + 字符区间下划线）
      */
     clearHighlight(): void {
+        this.cancelCharIntervalFade();
         this.clearRectHighlightsOnly();
         this.removeIntervalSvgLines();
     }
@@ -176,7 +178,40 @@ export class HighlightManager {
 
     /** 仅移除 chunk 字符区间下划线（不碰直方图 token 高亮） */
     clearCharIntervalUnderlines(): void {
+        this.cancelCharIntervalFade();
         this.removeIntervalSvgLines();
+    }
+
+    cancelCharIntervalFade(): void {
+        if (this.charIntervalFadeTimeout !== undefined) {
+            window.clearTimeout(this.charIntervalFadeTimeout);
+            this.charIntervalFadeTimeout = undefined;
+        }
+    }
+
+    /** 字符区间下划线缓慢淡出后移除 */
+    fadeOutCharIntervalUnderlines(durationMs: number, onComplete?: () => void): void {
+        this.cancelCharIntervalFade();
+        const lines = this.intervalUnderlineLines;
+        if (lines.length === 0) {
+            onComplete?.();
+            return;
+        }
+        for (const line of lines) {
+            line.style.transition = '';
+            line.setAttribute('stroke-opacity', '1');
+        }
+        requestAnimationFrame(() => {
+            for (const line of lines) {
+                line.style.transition = `stroke-opacity ${durationMs}ms ease-out`;
+                line.setAttribute('stroke-opacity', '0');
+            }
+            this.charIntervalFadeTimeout = window.setTimeout(() => {
+                this.charIntervalFadeTimeout = undefined;
+                this.removeIntervalSvgLines();
+                onComplete?.();
+            }, durationMs);
+        });
     }
 
     /**
@@ -184,6 +219,7 @@ export class HighlightManager {
      */
     setCharIntervalUnderlines(segments: CharIntervalUnderlineSeg[]): void {
         this.whenRectCacheReady('interval', 'HighlightManager: 区间下划线缓存未就绪，已达最大重试', () => {
+            this.cancelCharIntervalFade();
             this.clearRectHighlightsOnly();
             this.removeIntervalSvgLines();
             this.appendIntervalUnderlineLines(segments);

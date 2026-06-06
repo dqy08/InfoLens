@@ -127,8 +127,8 @@
                         </div>
                     </div>
 
-                    <div class="attribution-exclude-prompt-patterns-row">
-                        <div class="semantic-submode-row gen-attr-teacher-forcing-toggle-row">
+                    <div class="teacher-forcing-row">
+                        <div class="semantic-submode-row teacher-forcing-toggle-row">
                             <span class="semantic-submode-group">
                                 <label class="semantic-submode-label"
                                     title="When enabled, type the exact continuation after the assembled prompt. Each step attributes the next token toward that text (same tokenizer as Model), then stops when the continuation is consumed or EOS."
@@ -138,7 +138,7 @@
                                 </label>
                             </span>
                         </div>
-                        <div id="gen_attr_teacher_forcing_block" class="chat-prompt-panel" hidden>
+                        <div id="gen_attr_teacher_forcing_block" class="chat-prompt-panel teacher-forcing-block" hidden>
                             <div class="input-header">
                                 <span class="semantic-submode-label" data-i18n>Forced continuation</span>
                                 <div class="text-action-buttons-top">
@@ -152,14 +152,14 @@
                             </div>
                             <div class="textarea-wrapper chat-prompt-textarea-block">
                                 <div class="semantic-search-input-wrapper chat-prompt-history-wrapper">
-                                    <textarea id="gen_attr_teacher_forcing_text"
+                                    <textarea id="gen_attr_teacher_forcing_text" class="teacher-forcing-text"
                                         spellcheck="false" autocomplete="off"
                                         title="Expected generated text after the full prompt. Each API step uses the first token of what remains here as the attribution target."
                                         data-i18n="title"></textarea>
                                     <ul id="gen_attr_teacher_forcing_history_dropdown" class="semantic-search-history-dropdown"></ul>
                                 </div>
                             </div>
-                            <div class="semantic-submode-row gen-attr-stop-after-tf-row">
+                            <div class="semantic-submode-row stop-after-tf-row">
                                 <label class="semantic-submode-label"
                                     title="When unchecked, generation continues with top-1 after teacher forcing tokens are exhausted, up to Max tokens."
                                     data-i18n="title">
@@ -207,7 +207,7 @@
                                 data-i18n="title">
                                 <option value="text-flow">text</option>
                                 <option value="linear-arc">linear-arc</option>
-                                <option value="linear-arc-step-down">step-down</option>
+                                <option value="linear-arc-step-down">step-down(beta)</option>
                                 <option value="spiral">spiral (for fun)</option>
                             </select>
                         </span>
@@ -238,7 +238,7 @@
                     <div class="gen-attr-dag-measure-width-row gen-attr-dag-surprisal-toggles-row semantic-submode-row">
                         <span class="semantic-submode-group">
                             <label class="semantic-submode-label">
-                                <input type="checkbox" id="gen_attr_dag_node_ci_visual_scale" checked
+                                <input type="checkbox" id="gen_attr_dag_node_ci_visual_scale"
                                     title="When checked, generated nodes are visually enlarged based on their conditional information (surprisal). Takes effect on next generation."
                                     data-i18n="title">
                                 Enlarge high-surprisal nodes
@@ -246,7 +246,7 @@
                         </span>
                         <span class="semantic-submode-group">
                             <label class="semantic-submode-label">
-                                <input type="checkbox" id="gen_attr_dag_decay_attribution_high_surprisal" checked
+                                <input type="checkbox" id="gen_attr_dag_decay_attribution_high_surprisal"
                                     title="When checked, recursive trace decays propagated attribution at high-surprisal generated tokens (MI discount), so surprising or teacher-forced tokens can act as sources. Unchecked: all generated tokens are transparent conduits; trace continues to prompt only."
                                     data-i18n="title">
                                 Decay attribution to high-surprisal targets
@@ -273,6 +273,27 @@
                                 <option value="forward">forward</option>
                                 <option value="backward">backward</option>
                             </select>
+                        </span>
+                        <span class="semantic-submode-group" id="gen_attr_dag_dim_inactive_tokens_group" hidden>
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_dim_inactive_tokens"
+                                    title="When checked in Causal Flow Mode, generated tokens whose Attribution share (Total) from the current focus is below the threshold are further dimmed to 0.1 (on top of the usual focus dimming); their edges and propagation animation are hidden. Prompt tokens are not affected."
+                                    data-i18n="title">
+                                <span data-i18n>Dim inactive tokens: share &lt;</span>
+                            </label>
+                            <span class="gen-attr-dag-replay-value-wrap">
+                                <input type="number" id="gen_attr_dag_dim_inactive_tokens_threshold" class="gen-attr-dag-measure-width-input"
+                                    value="1" min="0" max="100" step="1"
+                                    title="Attribution share (Total) threshold (%): generated tokens with share strictly below this percentage are inactive."
+                                    data-i18n="title">
+                                <span class="semantic-submode-label">%</span>
+                            </span>
+                            <label class="semantic-submode-label" id="gen_attr_dag_dim_inactive_not_in_animation_wrap" hidden>
+                                <input type="checkbox" id="gen_attr_dag_dim_inactive_not_in_animation"
+                                    title="When checked, inactive-token dimming is suspended while propagation animation is playing or paused; it resumes when playback ends or stops."
+                                    data-i18n="title">
+                                <span data-i18n>Not in animation</span>
+                            </label>
                         </span>
                         <span class="semantic-submode-group" id="gen_attr_dag_show_downstream_influence_group">
                             <label class="semantic-submode-label">
@@ -348,9 +369,9 @@
                         <span class="semantic-submode-group">
                             <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_hide_excluded_tokens"
-                                    title="When checked, tokens fully covered by an exclude pattern are hidden from the DAG (linear-arc: also excluded from layout)."
+                                    title="When checked, tokens at 0.1 opacity (exclude matches and inactive tokens when Dim inactive tokens is on) are hidden from the DAG (linear-arc: also excluded from layout)."
                                     data-i18n="title">
-                                <span data-i18n>Hide excluded tokens</span>
+                                <span data-i18n>Hide exclude/inactive tokens</span>
                             </label>
                         </span>
                     </div>

@@ -75,6 +75,8 @@ export type DensityAttributionSidebarOptions = {
     predictionModelVariant: PredictionAttributeModelVariant;
     getPredictionModelVariant?: () => PredictionAttributeModelVariant;
     sourcePage: 'analysis' | 'chat';
+    /** 为 false 时忽略 token 点击（如首页 Semantic Query 模式）；默认允许 */
+    isTokenClickAttributionEnabled?: () => boolean;
 };
 
 function resolvePredictionModelVariant(
@@ -215,6 +217,9 @@ export function initDensityAttributionSidebar(options: DensityAttributionSidebar
     });
 
     eventHandler.bind(GLTR_Text_Box.events.tokenClicked, (ev: GLTR_TokenClickEvent) => {
+        if (options.isTokenClickAttributionEnabled && !options.isTokenClickAttributionEnabled()) {
+            return;
+        }
         if (ev.tokenIndex < 0) {
             return;
         }

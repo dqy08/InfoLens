@@ -181813,25 +181813,25 @@
   },
   "demoUiOptions": {
     "layoutMode": "text-flow",
-    "measureWidthPx": 500,
+    "measureWidthPx": 400,
     "dagCompactness": 0.9,
     "linearArcAdjacentGapPx": 0,
     "hideExcludedTokens": false,
     "edgeTopPCoverage": 0.6,
-    "nodeCiVisualScaleEnabled": true,
-    "decayAttributionToHighSurprisalTargetEnabled": true,
+    "nodeCiVisualScaleEnabled": false,
+    "decayAttributionToHighSurprisalTargetEnabled": false,
     "hideInactiveEdges": true,
     "showDownstreamInfluence": false,
     "recursiveAttributionEnabled": true,
-    "recursiveEdgeBatchAnimationDirection": "backward",
+    "recursiveEdgeBatchAnimationDirection": "forward",
     "showTokenInfoOnSelected": true,
     "replayPacingMode": "total",
-    "playbackTotalS": 10,
+    "playbackTotalS": 8,
     "playbackStepMs": 1000,
     "excludePromptPatternsEnabled": true,
     "excludePromptPatternsText": "先一步步[\\s\\S]*?。\n#comment# use '#comment#' to comment lines; support regex\n<\\|im_start\\|>system\\n\n<\\|im_start\\|>user\\n\n<\\|im_start\\|>assistant\\n\n<\\|im_start\\|>assistant\\n\\n\n<\\|im_end\\|>\\n\n<think>\\n\\n\n</think>\\n\\n\n<\\|im_start\\|>system\\n[\\s\\S]*?<\\|im_end\\|>#comment# all system prompt",
     "excludeGeneratedPatternsEnabled": true,
     "excludeGeneratedPatternsText": "[\\s\\S]*?推理[\\s\\S]*?：\\n\\n\n<think>\\n\n</think>\\n\\n",
-    "selectedNodeId": "409_410"
+    "selectedNodeId": "410_412"
   }
 }

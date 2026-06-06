@@ -19,7 +19,7 @@
     "watch": "webpack --mode development --devtool=inline-source-map --watch",
     "start": "webpack serve --mode development --devtool=inline-source-map"
   },
-  "author": "",
+  "author": "dqy <xiaoyundqy@qq.com>",
   "license": "Apache-2.0",
   "dependencies": {
     "@types/d3": "^7.4.3",

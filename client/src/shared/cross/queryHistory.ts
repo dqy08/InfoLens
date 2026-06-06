@@ -13,6 +13,8 @@ export const CHAT_RAW_INPUT_HISTORY_KEY = 'info_radar_chat_raw_input_history';
 export const CHAT_USER_INPUT_HISTORY_KEY = 'info_radar_chat_user_input_history';
 /** Chat 模板模式下「System」输入框 input history */
 export const CHAT_SYSTEM_INPUT_HISTORY_KEY = 'info_radar_chat_system_input_history';
+/** Chat 页 Teacher forcing 续写框（拼接到 prompt 后） */
+export const CHAT_TEACHER_FORCING_INPUT_HISTORY_KEY = 'info_radar_chat_teacher_forcing_input_history';
 /** Generate & Attribute 页 Raw 输入框（与 Chat 分库） */
 export const GEN_ATTR_RAW_INPUT_HISTORY_KEY = 'info_radar_gen_attr_raw_input_history';
 /** Generate & Attribute 页 User 输入框 */

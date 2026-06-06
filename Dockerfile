@@ -49,7 +49,7 @@ ENV PYTHONUNBUFFERED=1
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
 # App source（仅复制运行时需要的路径）
-COPY --chown=user:users *.py *.yaml ./
+COPY --chown=user:users LICENSE NOTICE *.py *.yaml ./
 COPY --chown=user:users backend/ ./backend/
 COPY --chown=user:users data/demo/public/ ./data/demo/public/
 

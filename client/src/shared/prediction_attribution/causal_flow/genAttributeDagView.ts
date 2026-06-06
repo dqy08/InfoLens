@@ -28,6 +28,12 @@ import {
     type DagFocusAttributionState,
     type DagRecursiveEdgeAnimationDirection,
 } from './genAttributeDagRecursiveEdgeAnimation';
+import {
+    clampDimInactiveTokensThreshold,
+    dagNodeLowVisibilityReason,
+    DIM_INACTIVE_TOKENS_THRESHOLD_DEFAULT,
+    isDagNodeInactiveByTotalShare,
+} from './genAttributeDagNodeDim';
 export type { DagRecursiveEdgeAnimationDirection };
 import {
     computeMutualInformationRatio,
@@ -91,7 +97,7 @@ export function clampDagCompactness(n: number): number {
 
 
 /** 节点 CI 视觉放大开关；`false` 时所有生成节点 ciVisualScale 恒为 1×，下次 update() 起生效。 */
-let dagNodeCiVisualScaleEnabled = true;
+let dagNodeCiVisualScaleEnabled = false;
 export function setDagNodeCiVisualScaleEnabled(enabled: boolean): void {
     dagNodeCiVisualScaleEnabled = enabled;
 }
@@ -103,14 +109,14 @@ export function setDagNodeCiVisualScaleEnabled(enabled: boolean): void {
  * 关闭：所有生成 token 视为透明管道，预算不衰减，链只止于 prompt。
  * `false` 时 `mutualInformationRatio` 仍按目标概率存储与展示，传播/边强度计算中 MI 系数恒为 1。
  */
-let dagDecayAttributionToHighSurprisalTargetEnabled = true;
+let dagDecayAttributionToHighSurprisalTargetEnabled = false;
 export function setDagDecayAttributionToHighSurprisalTargetEnabled(enabled: boolean): void {
     dagDecayAttributionToHighSurprisalTargetEnabled = enabled;
 }
 
 /**
  * DAG 生成节点矩形/标签缩放：CI=0→1×，CI=1→2×（prompt 节点恒用 1，见建点处）。
- * p > {@link FULL_CONFIDENCE_PROBABILITY_BASELINE}（surprisal < 3 bit）时截断为 1×，不放大。
+ * p > {@link FULL_CONFIDENCE_PROBABILITY_BASELINE}（surprisal < 2 bit）时截断为 1×，不放大。
  * {@link dagNodeCiVisualScaleEnabled} 为 false 时恒返回 1。
  */
 function dagGeneratedNodeCiVisualScale(targetProb: number | undefined): number {
@@ -477,10 +483,17 @@ const CSS_VAR_DAG_HIGHLIGHT_LINE_OUT = '--dag-highlight-line-color-out';
 /** 与 causal_flow.scss 中 `--recursive-chain` 的 `stroke-opacity` 一致（由 JS 写入 g 元素） */
 const CSS_VAR_DAG_NODE_RECURSIVE_SHARE = '--gen-attr-dag-node-recursive-share';
 
-/** 弱化：未排除的 prompt 无出边，或（prompt/生成区）邻域外且存在悬停/选中焦点时 */
-const DAG_NODE_WEAKEN_OPACITY = 0.5;
-/** 隐藏：节点 span 完全落在 exclude 规则命中区间内（prompt 与生成区各一套模式） */
-const DAG_NODE_HIDDEN_OPACITY = 0.1;
+/** DAG 节点 `opacity` 档位（exclude 完全隐藏时另用 `display:none`） */
+const DagNodeOpacityLevel = {
+    /** 全亮：归因链上高亮节点；无焦点时的默认 */
+    full: 1,
+    /** 弱化：存在焦点时链外，或无出边 prompt 叶子 */
+    weakened: 0.6,
+    /** 几乎隐藏：exclude 命中且保留占位 */
+    almostHidden: 0.1,
+    /** 隐藏：exclude 命中且完全隐藏 */
+    hidden: 0,
+} as const;
 
 /**
  * 边端在矩形边界外侧的留白，相对测量层「1em」的比例（无单位）；与箭头/描边衔接用。
@@ -623,11 +636,16 @@ export type GenAttributeDagHandle = {
     /** 更新边 Top-P 覆盖阈值；要重算当前 DAG 须 reset 后重放。 */
     setEdgeTopPCoverage(coverage: number): void;
     /**
-     * 切换 excluded 节点的隐藏模式：
+     * 切换 exclude / inactive（0.1 档）节点的隐藏模式（UI: Hide exclude/inactive tokens）：
      * - `true`：完全隐藏（`display:none`）；linear-arc 下同时不参与布局。
-     * - `false`（默认）：保留为低透明度（{@link DAG_NODE_HIDDEN_OPACITY}）占位。
+     * - `false`（默认）：保留为「几乎隐藏」（{@link DagNodeOpacityLevel.almostHidden}）占位。
      */
     setHideExcludedTokens(hide: boolean): void;
+    /** Causal Flow：按 Attribution share (Total) 将低份额节点降至 0.1。 */
+    setDimInactiveTokens(enabled: boolean): void;
+    setDimInactiveTokensThreshold(threshold: number): void;
+    /** Dim inactive 开启时：传播动画播放/暂停期间不 dim。 */
+    setDimInactiveNotDuringAnimation(enabled: boolean): void;
     /** 是否显示 token tooltip（UI: Show token tooltip；`showTokenInfoOnSelected`）。 */
     setShowTokenInfoOnSelected(show: boolean): void;
     /** 是否启用传播归因（UI: Propagated attribution mode；`recursiveAttributionEnabled`）。 */
@@ -925,8 +943,11 @@ export type InitGenAttributeDagViewOptions = {
      * 默认 {@link LINEAR_ARC_ADJACENT_GAP_DEFAULT}。
      */
     linearArcAdjacentGapPx?: number;
-    /** 被 exclude 规则命中的节点是否完全隐藏（true）还是仅降至 {@link DAG_NODE_HIDDEN_OPACITY}（false，默认）。 */
+    /** exclude / inactive（0.1）是否完全隐藏（true）还是 0.1 占位（false，默认）。 */
     hideExcludedTokens?: boolean;
+    dimInactiveTokens?: boolean;
+    dimInactiveTokensThreshold?: number;
+    dimInactiveNotDuringAnimation?: boolean;
     /** 是否显示 token tooltip（UI: Show token tooltip；`showTokenInfoOnSelected`）。 */
     showTokenInfoOnSelected?: boolean;
     /** 传播归因（UI: Propagated attribution mode；`recursiveAttributionEnabled`）；默认 `false`。 */
@@ -967,6 +988,11 @@ export function initGenAttributeDagView(
         linearArcAdjacentGapPx = clampLinearArcAdjacentGap(iv);
     }
     let hideExcludedTokens: boolean = options?.hideExcludedTokens ?? false;
+    let dimInactiveTokens: boolean = options?.dimInactiveTokens ?? false;
+    let dimInactiveTokensThreshold = clampDimInactiveTokensThreshold(
+        options?.dimInactiveTokensThreshold ?? DIM_INACTIVE_TOKENS_THRESHOLD_DEFAULT,
+    );
+    let dimInactiveNotDuringAnimation: boolean = options?.dimInactiveNotDuringAnimation ?? false;
     let showTokenInfoOnSelected: boolean = options?.showTokenInfoOnSelected ?? false;
     let recursiveAttributionEnabled: boolean = options?.recursiveAttributionEnabled ?? false;
     let showDownstreamInfluence: boolean = options?.showDownstreamInfluence ?? false;
@@ -1009,6 +1035,9 @@ export function initGenAttributeDagView(
             setDagCompactness: noop,
             setEdgeTopPCoverage: noop,
             setHideExcludedTokens: noop,
+            setDimInactiveTokens: noop,
+            setDimInactiveTokensThreshold: noop,
+            setDimInactiveNotDuringAnimation: noop,
             setShowTokenInfoOnSelected: noop,
             setRecursiveAttributionEnabled: noop,
             setRecursiveEdgeBatchAnimationDirection: noop,
@@ -1190,7 +1219,10 @@ export function initGenAttributeDagView(
 
     const recursiveEdgeAnimation = createDagRecursiveEdgeAnimationController({
         onTick: () => refreshNodeLinkHighlight(),
-        onPlaybackPhaseChange: () => syncDagPlayButtonImpl(),
+        onPlaybackPhaseChange: () => {
+            syncDagPlayButtonImpl();
+            refreshNodeLinkHighlight();
+        },
         computeFocusState: (focusId, options, ctx) =>
             computeFocusAttributionState(
                 graph,
@@ -1216,6 +1248,124 @@ export function initGenAttributeDagView(
     /** 归因预览焦点：用户播放焦点优先，否则选中 / 悬浮 */
     function effectiveFocusId(): string | null {
         return userFocusId ?? selectedId ?? hoveredId;
+    }
+
+    function dimInactiveTokensEffective(): boolean {
+        if (!recursiveAttributionEnabled || !dimInactiveTokens) return false;
+        if (dimInactiveNotDuringAnimation) {
+            const phase = recursiveEdgeAnimation.getPlaybackPhase();
+            if (phase === 'playing' || phase === 'paused') return false;
+        }
+        return true;
+    }
+
+    function nodeLowVisibilityReasonFor(
+        node: DagNode,
+        focusId: string | null,
+        focusState: FocusAttributionState | null,
+        dimEffective: boolean = dimInactiveTokensEffective(),
+    ) {
+        return dagNodeLowVisibilityReason(
+            node.id,
+            node.start,
+            node.end,
+            node.step,
+            dagExcludeIntervals,
+            focusId,
+            focusState,
+            dimEffective,
+            dimInactiveTokensThreshold,
+        );
+    }
+
+    /** Dim inactive：仅 inactive 节点裁边/动画；exclude 仍按原规则（0.1 占位时可保留灰边）。 */
+    function isNodeInactiveForDim(
+        nodeId: string,
+        focusId: string | null,
+        focusState: FocusAttributionState | null,
+        dimEffective: boolean = dimInactiveTokensEffective(),
+    ): boolean {
+        if (!graph.hasNode(nodeId)) return false;
+        const step = (graph.getNodeAttributes(nodeId) as DagNode).step;
+        return isDagNodeInactiveByTotalShare(
+            nodeId,
+            step,
+            focusId,
+            focusState,
+            dimEffective,
+            dimInactiveTokensThreshold,
+        );
+    }
+
+    function nodeIncludedInLayoutForFocus(
+        n: DagNode,
+        focusId: string | null,
+        focusState: FocusAttributionState | null,
+        dimEffective: boolean = dimInactiveTokensEffective(),
+    ): boolean {
+        if (!hideExcludedTokens) return true;
+        return nodeLowVisibilityReasonFor(n, focusId, focusState, dimEffective) == null;
+    }
+
+    function nodeIncludedInLayout(n: DagNode): boolean {
+        return nodeIncludedInLayoutForFocus(n, effectiveFocusId(), currentFocusState);
+    }
+
+    /** hide 关闭且已全量 paint 后的标记；与 {@link LAYOUT_INCLUDED_STALE_KEY}、过滤集 key 区分。 */
+    const LAYOUT_INCLUDED_ALL_KEY = '';
+    /** {@link invalidateLayoutIncludedNodeIdsKey}：强制下次 sync 重算几何（含 hide 关闭恢复全量布局）。 */
+    const LAYOUT_INCLUDED_STALE_KEY = '\x00';
+
+    /** {@link syncLayoutForLowVisibilityMembership} 上次已反映进 paint 的参与布局节点集。 */
+    let layoutIncludedNodeIdsKey = LAYOUT_INCLUDED_ALL_KEY;
+
+    function computeLayoutIncludedNodeIdsKey(
+        focusId: string | null,
+        focusState: FocusAttributionState | null,
+    ): string {
+        if (!hideExcludedTokens) return '';
+        const dimEffective = dimInactiveTokensEffective();
+        const ids: string[] = [];
+        for (const n of nodes) {
+            if (nodeIncludedInLayoutForFocus(n, focusId, focusState, dimEffective)) ids.push(n.id);
+        }
+        ids.sort();
+        return ids.join('\0');
+    }
+
+    function layoutModeExcludesLowVisibilityFromGeometry(): boolean {
+        return (
+            isLinearArcFamilyLayout(layoutMode) ||
+            layoutMode === 'spiral'
+        );
+    }
+
+    /**
+     * Hide exclude/inactive 时，参与布局的节点集随焦点 / dim 阈值变化；须重算 linear-arc / spiral 几何。
+     */
+    function syncLayoutForLowVisibilityMembership(
+        focusId: string | null,
+        focusState: FocusAttributionState | null,
+    ): void {
+        if (!layoutModeExcludesLowVisibilityFromGeometry() || batchDepth > 0 || nodes.length === 0) {
+            return;
+        }
+        if (!hideExcludedTokens) {
+            if (layoutIncludedNodeIdsKey === LAYOUT_INCLUDED_ALL_KEY) return;
+            layoutIncludedNodeIdsKey = LAYOUT_INCLUDED_ALL_KEY;
+            paint();
+            if (!layoutDirty) fitViewportToContent(true);
+            return;
+        }
+        const key = computeLayoutIncludedNodeIdsKey(focusId, focusState);
+        if (key === layoutIncludedNodeIdsKey) return;
+        layoutIncludedNodeIdsKey = key;
+        paint();
+        if (!layoutDirty) fitViewportToContent(true);
+    }
+
+    function invalidateLayoutIncludedNodeIdsKey(): void {
+        layoutIncludedNodeIdsKey = LAYOUT_INCLUDED_STALE_KEY;
     }
 
     /** 传播链动画当前帧应对应 tooltip 的节点；非播放中返回 null。 */
@@ -1324,9 +1474,7 @@ export function initGenAttributeDagView(
     function paint(): void {
         syncNodeStrokeRects(nodeSel, displayScale);
         if (layoutMode === 'linear-arc' || layoutMode === 'linear-arc-step-down') {
-            const layoutNodes = hideExcludedTokens
-                ? nodes.filter((n) => !isOffsetSpanFullyExcluded(n.start, n.end, dagExcludeIntervals))
-                : nodes;
+            const layoutNodes = nodes.filter((n) => nodeIncludedInLayout(n));
             paintLinearArcLayout({
                 linkSel,
                 nodeSel,
@@ -1336,9 +1484,7 @@ export function initGenAttributeDagView(
                 getLinkNodes: linkEndpointsForPaint,
             });
         } else if (layoutMode === 'spiral') {
-            const layoutNodes = hideExcludedTokens
-                ? nodes.filter((n) => !isOffsetSpanFullyExcluded(n.start, n.end, dagExcludeIntervals))
-                : nodes;
+            const layoutNodes = nodes.filter((n) => nodeIncludedInLayout(n));
             paintSpiralLayout({
                 linkSel,
                 nodeSel,
@@ -1398,13 +1544,20 @@ export function initGenAttributeDagView(
             })
             : null;
         currentFocusState = focusState;
+        const dimEffective = dimInactiveTokensEffective();
+        const suppressPropagationNode = (nodeId: string): boolean =>
+            isNodeInactiveForDim(nodeId, focusId, focusState, dimEffective);
         const animOverlay = recursiveEdgeAnimation.resolveRenderOverlay({
             effectiveFocusId: focusId,
             focusState,
             recursiveAttributionEnabled,
             ctx: focusAttributionCtx(),
+            isPropagationNodeSuppressed: suppressPropagationNode,
         });
-        const playbackNodeId = resolvePropagationPlaybackTooltipNodeId(animOverlay, focusId);
+        let playbackNodeId = resolvePropagationPlaybackTooltipNodeId(animOverlay, focusId);
+        if (playbackNodeId != null && suppressPropagationNode(playbackNodeId)) {
+            playbackNodeId = null;
+        }
         propagationPlaybackTooltip =
             playbackNodeId != null && animOverlay.anim != null
                 ? { nodeId: playbackNodeId, direction: animOverlay.anim.direction }
@@ -1444,7 +1597,7 @@ export function initGenAttributeDagView(
         grayRenderCache ??= buildGrayRenderStrengthByEdgeKey(graph, incomingLinksByTarget);
         const grayRenderByKey = grayRenderCache;
         const {
-            propagationSlideTgtId,
+            propagationSlideTgtId: propagationSlideTgtIdFromAnim,
             forwardPromptOnlyFrame,
             deferFocusHighlightDuringAnim,
             suppressFocusSelectedStroke,
@@ -1452,6 +1605,11 @@ export function initGenAttributeDagView(
             anim,
             animationFrontierPartial,
         } = animOverlay;
+        const propagationSlideTgtId =
+            propagationSlideTgtIdFromAnim != null &&
+            suppressPropagationNode(propagationSlideTgtIdFromAnim)
+                ? null
+                : propagationSlideTgtIdFromAnim;
         let backwardSlideIncomingRenderByKey: Map<string, number> | null = null;
         if (
             animationFrontierPartial &&
@@ -1483,15 +1641,23 @@ export function initGenAttributeDagView(
             if (!forwardPromptOnlyFrame) return nodeStrokeShareById?.has(d.id) ?? false;
             return d.step === -1 && (nodeStrokeShareById?.has(d.id) ?? false);
         };
+        const nodeLowVisReasonById = new Map(
+            nodes.map(
+                (n) => [n.id, nodeLowVisibilityReasonFor(n, focusId, focusState, dimEffective)] as const,
+            ),
+        );
         const nodeDisplay = (d: DagNode): string | null =>
-            hideExcludedTokens && isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)
-                ? 'none'
-                : null;
+            hideExcludedTokens && nodeLowVisReasonById.get(d.id) != null ? 'none' : null;
         nodeSel
             .classed('gen-attr-dag-node--hover', (d) => hoveredId === d.id)
             .classed('gen-attr-dag-node--selected', showFocusSelectedStroke)
             .style('display', nodeDisplay)
             .attr('opacity', (d) => {
+                const lowVis = nodeLowVisReasonById.get(d.id) ?? null;
+                if (hideExcludedTokens && lowVis != null) return DagNodeOpacityLevel.hidden;
+                if (isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)) {
+                    return DagNodeOpacityLevel.almostHidden;
+                }
                 const nodeFullyHighlighted = recursiveAttributionEnabled
                     ? forwardPromptOnlyFrame
                         ? nodeOnChainForRender(d)
@@ -1499,14 +1665,19 @@ export function initGenAttributeDagView(
                           (nodeStrokeShareById?.has(d.id) ?? false) ||
                           isPropagationSlide(d)
                     : (focusNodeIds?.has(d.id) ?? false);
-                if (nodeFullyHighlighted) return 1;
-                if (isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)) {
-                    return hideExcludedTokens ? 0 : DAG_NODE_HIDDEN_OPACITY;
+                let opacity: number = DagNodeOpacityLevel.full;
+                if (nodeFullyHighlighted) {
+                    opacity = DagNodeOpacityLevel.full;
+                } else {
+                    const hasGenTokens = nodes.some((n) => n.step >= 0);
+                    const isPromptLeaf =
+                        hasGenTokens && d.step === -1 && graph.outDegree(d.id) === 0;
+                    if (focusId || isPromptLeaf) opacity = DagNodeOpacityLevel.weakened;
                 }
-                const hasGenTokens = nodes.some((n) => n.step >= 0);
-                const isPromptLeaf = hasGenTokens && d.step === -1 && graph.outDegree(d.id) === 0;
-                if (focusId || isPromptLeaf) return DAG_NODE_WEAKEN_OPACITY;
-                return 1;
+                if (lowVis === 'inactive') {
+                    return DagNodeOpacityLevel.almostHidden;
+                }
+                return opacity;
             })
             .classed(
                 'gen-attr-dag-node--recursive-chain',
@@ -1576,6 +1747,7 @@ export function initGenAttributeDagView(
             }
         });
 
+        syncLayoutForLowVisibilityMembership(focusId, focusState);
         syncGenAttrDagTopkTooltipImpl();
     }
 
@@ -2011,6 +2183,7 @@ export function initGenAttributeDagView(
         nodeG.selectAll('*').remove();
         nodeGHit.selectAll('*').remove();
         dagExcludeIntervals = [];
+        layoutIncludedNodeIdsKey = LAYOUT_INCLUDED_ALL_KEY;
         linkSel = rootG
             .selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link')
             .data<DagLink>([], dagLinkDataKey);
@@ -2224,9 +2397,30 @@ export function initGenAttributeDagView(
         if (hideExcludedTokens === hide) return;
         hideExcludedTokens = hide;
         if (batchDepth > 0 || nodes.length === 0) return;
-        paint();
+        invalidateLayoutIncludedNodeIdsKey();
         refreshNodeLinkHighlight();
-        fitViewportToContent(true);
+    }
+
+    function setDimInactiveTokens(enabled: boolean): void {
+        if (dimInactiveTokens === enabled) return;
+        dimInactiveTokens = enabled;
+        invalidateLayoutIncludedNodeIdsKey();
+        refreshNodeLinkHighlight();
+    }
+
+    function setDimInactiveTokensThreshold(threshold: number): void {
+        const next = clampDimInactiveTokensThreshold(threshold);
+        if (dimInactiveTokensThreshold === next) return;
+        dimInactiveTokensThreshold = next;
+        invalidateLayoutIncludedNodeIdsKey();
+        refreshNodeLinkHighlight();
+    }
+
+    function setDimInactiveNotDuringAnimation(enabled: boolean): void {
+        if (dimInactiveNotDuringAnimation === enabled) return;
+        dimInactiveNotDuringAnimation = enabled;
+        invalidateLayoutIncludedNodeIdsKey();
+        refreshNodeLinkHighlight();
     }
 
     function setShowTokenInfoOnSelected(show: boolean): void {
@@ -2359,6 +2553,9 @@ export function initGenAttributeDagView(
         setDagCompactness,
         setEdgeTopPCoverage,
         setHideExcludedTokens,
+        setDimInactiveTokens,
+        setDimInactiveTokensThreshold,
+        setDimInactiveNotDuringAnimation,
         setShowTokenInfoOnSelected,
         setRecursiveAttributionEnabled,
         setRecursiveEdgeBatchAnimationDirection,

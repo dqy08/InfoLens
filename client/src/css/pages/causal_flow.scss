@@ -440,10 +440,9 @@ $gen-attr-cached-demos-panel-width: 21em;
   height: 50px;
 }
 
-// Raw / User / Forced continuation：统一高度（不占 chat 默认 250px 主 prompt 区）
+// Raw / User：统一高度（不占 chat 默认 250px 主 prompt 区；Forced continuation 见 _chat-input-panel .teacher-forcing-text）
 .input-section .textarea-wrapper textarea#gen_attr_raw_text,
-.input-section .textarea-wrapper textarea#gen_attr_user_text,
-.input-section .textarea-wrapper textarea#gen_attr_teacher_forcing_text {
+.input-section .textarea-wrapper textarea#gen_attr_user_text {
   height: 90px;
   min-height: 60px;
   max-height: 250px;
@@ -459,30 +458,6 @@ body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row
   display: flex;
   flex-direction: column;
   gap: 4px;
-
-  // 勾选行 ↔ Forced continuation：间距仅来自 .input-header padding-top（避免与本行 gap 叠成双份）
-  &:has(.gen-attr-teacher-forcing-toggle-row) {
-    gap: 0;
-  }
-}
-
-// Teacher forcing / Stop after：勾选行与同页 semantic-submode 一致（字号、未勾选灰色）；勾选+文本 inline-flex 对齐
-.gen-attr-teacher-forcing-toggle-row label.semantic-submode-label,
-#gen_attr_teacher_forcing_block.chat-prompt-panel .gen-attr-stop-after-tf-row label.semantic-submode-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  user-select: none;
-}
-
-// 强制续写块内 textarea 与「Stop after teacher forcing」；整块与下方 Model / Start 行的节奏（比照本列其它块 margin-top 10px）
-#gen_attr_teacher_forcing_block.chat-prompt-panel .gen-attr-stop-after-tf-row {
-  margin-top: 8px;
-}
-
-.gen-attribute-page .input-section > .textarea-wrapper.chat-prompt-actions-row {
-  margin-top: 10px;
 }
 
 // Start / Model 行与 Reset UI options 之间略加大；“重置”与下方 DAG layout 一行紧凑
@@ -588,11 +563,6 @@ body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row
   border-radius: 4px;
   background: var(--input-bg);
   color: var(--text-color);
-
-  &:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
 }
 
 // --- WORKAROUND：伪全屏时锁 body 滚动（同 ts/ui/cssPseudoFullscreen.ts） ---

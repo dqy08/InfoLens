@@ -18,5 +18,15 @@ export const HIGHLIGHT_CONSTANTS = {
     BORDER_WIDTH: '1.5',
     /** 下划线宽度 */
     UNDERLINE_WIDTH: '2',
+    /** chunk 进度图跳转：滚动结束后保持高亮时长 */
+    CHUNK_HIGHLIGHT_HOLD_MS: 1000,
+    /** chunk 进度图跳转：保持结束后的淡出时长 */
+    CHUNK_HIGHLIGHT_FADE_MS: 1400,
 } as const;
+
+/** 分块语义搜索：每块上色后、滚到下一块前的停留时长 */
+export const CHUNK_SEARCH_HOLD_MS = 400;
+
+/** 分块语义搜索跟随：chunk 起点在视口中的纵向位置（0=顶，1=底） */
+export const CHUNK_SEARCH_FOLLOW_VIEWPORT_Y_RATIO = 0.6;
 

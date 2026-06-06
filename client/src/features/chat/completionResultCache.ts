@@ -31,6 +31,8 @@ export type ChatCompletionDraft = {
     user?: string;
     useSystem?: boolean;
     enableThinking?: boolean;
+    /** 非空表示启用：拼接到 prompt 后的强制续写原文 */
+    teacherForcing?: string;
 };
 
 export type CompletionCachedEntry = {

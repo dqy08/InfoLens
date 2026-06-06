@@ -402,6 +402,7 @@ export class ToolTip {
         const isFixedPosition = window.getComputedStyle(tooltipNode).position === 'fixed';
 
         let anchorRect: { left: number; top: number; width: number; height: number };
+        let anchor: HTMLElement | null = null;
         if (isFixedPosition) {
             anchorRect = {
                 left: 0,
@@ -410,7 +411,7 @@ export class ToolTip {
                 height: viewport.height,
             };
         } else {
-            const anchor = tooltipNode.offsetParent as HTMLElement | null;
+            anchor = tooltipNode.offsetParent as HTMLElement | null;
             if (!anchor) {
                 throw new Error(
                     '[ToolTip] position:absolute 的 tooltip 必须有 offsetParent（请为祖先设置 position 等定位上下文）'
@@ -437,10 +438,11 @@ export class ToolTip {
             tokenTop = tokenRect.top;
             tokenBottom = tokenRect.bottom;
         } else {
-            tokenLeft = tokenRect.left - anchorRect.left;
-            tokenRight = tokenRect.right - anchorRect.left;
-            tokenTop = tokenRect.top - anchorRect.top;
-            tokenBottom = tokenRect.bottom - anchorRect.top;
+            // 祖先滚动在 getBoundingClientRect 差值中已抵消；仅需 offsetParent 自身 scrollTop
+            tokenLeft = tokenRect.left - anchorRect.left + anchor!.scrollLeft;
+            tokenRight = tokenRect.right - anchorRect.left + anchor!.scrollLeft;
+            tokenTop = tokenRect.top - anchorRect.top + anchor!.scrollTop;
+            tokenBottom = tokenRect.bottom - anchorRect.top + anchor!.scrollTop;
         }
 
         // 获取tooltip尺寸
@@ -467,12 +469,12 @@ export class ToolTip {
                 y = Math.max(5, tokenTop - tooltipHeight - offset);
             }
         } else {
-            const yInViewport = y + anchorRect.top;
+            let yInViewport = anchorRect.top + y - anchor!.scrollTop;
             if (yInViewport + tooltipHeight > viewport.height) {
                 y = tokenTop - tooltipHeight - offset;
-                const yTopInViewport = y + anchorRect.top;
-                if (yTopInViewport < 0) {
-                    y = -anchorRect.top + 5;
+                yInViewport = anchorRect.top + y - anchor!.scrollTop;
+                if (yInViewport < 0) {
+                    y = -anchorRect.top + anchor!.scrollTop + 5;
                 }
             }
         }

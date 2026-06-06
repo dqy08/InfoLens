@@ -9,6 +9,8 @@ import {SvgOverlayManager} from "./SvgOverlayManager";
 import {TokenPositionCalculator} from "./TokenPositionCalculator";
 import {ResizeHandler} from "./ResizeHandler";
 import {TokenFragmentRect, HighlightStyle} from "./types";
+import { waitForSmoothScrollEnd } from '../core/waitForSmoothScrollEnd';
+import { CHUNK_SEARCH_FOLLOW_VIEWPORT_Y_RATIO, HIGHLIGHT_CONSTANTS } from './constants';
 import {ScrollbarMinimap} from "./ScrollbarMinimap";
 import {isNarrowScreen} from "../core/responsive";
 import {getTokenRenderStyle} from "../cross/tokenRenderStyle";
@@ -170,6 +172,11 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
     
     // 高亮管理器
     private highlightManager?: HighlightManager;
+    private chunkScrollEndCancel: (() => void) | undefined;
+    private chunkHighlightHoldTimer: number | undefined;
+    /** 分块语义搜索：用户已手动滚动，后续不再自动跟随 */
+    private chunkSearchAutoScrollUserCancelled = false;
+    private chunkSearchAutoScrollCleanup: (() => void) | undefined;
     
     // 下划线元素缓存，用于第二个直方图的高亮样式（由HighlightManager管理，但需要在这里初始化）
     private underlineCache: Map<string, SVGLineElement> = new Map();
@@ -1230,6 +1237,16 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
         }
     }
 
+    private cancelChunkHighlightFade(): void {
+        this.chunkScrollEndCancel?.();
+        this.chunkScrollEndCancel = undefined;
+        if (this.chunkHighlightHoldTimer !== undefined) {
+            window.clearTimeout(this.chunkHighlightHoldTimer);
+            this.chunkHighlightHoldTimer = undefined;
+        }
+        this.highlightManager?.cancelCharIntervalFade();
+    }
+
     /**
      * chunk 点击：Unicode 半开区间 [x0,x1) 下划线（DOM Range → 与直方图 token 高亮互斥）
      */
@@ -1252,6 +1269,76 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
 
         const segments = this.computeCharIntervalUnderlineSegments(x0i, x1i);
         this.highlightManager.setCharIntervalUnderlines(segments);
+    }
+
+    /** 分块语义搜索开始：wheel / 触摸即视为用户接管滚动 */
+    beginChunkSearchAutoScroll(): void {
+        this.endChunkSearchAutoScroll();
+        this.chunkSearchAutoScrollUserCancelled = false;
+
+        const container = isNarrowScreen()
+            ? window
+            : (document.querySelector('.right_panel') as HTMLElement | null);
+        if (!container) return;
+
+        const opts = { passive: true, capture: true } as const;
+        const onUserScroll = () => {
+            if (this.chunkSearchAutoScrollUserCancelled) return;
+            this.chunkSearchAutoScrollUserCancelled = true;
+            this.chunkScrollEndCancel?.();
+            this.chunkScrollEndCancel = undefined;
+        };
+
+        container.addEventListener('wheel', onUserScroll, opts);
+        container.addEventListener('touchstart', onUserScroll, opts);
+        this.chunkSearchAutoScrollCleanup = () => {
+            container.removeEventListener('wheel', onUserScroll, opts);
+            container.removeEventListener('touchstart', onUserScroll, opts);
+        };
+    }
+
+    endChunkSearchAutoScroll(): void {
+        this.chunkSearchAutoScrollCleanup?.();
+        this.chunkSearchAutoScrollCleanup = undefined;
+        this.chunkSearchAutoScrollUserCancelled = false;
+    }
+
+    /** 滚到 chunk 起点（分析结束、直方图 bin 点击，视口 0.2） */
+    scrollToChunkStart(charOffset: number, onScrollEnd?: () => void): void {
+        this.scrollToUnicodeCharOffset(Math.max(0, Math.floor(charOffset)), onScrollEnd);
+    }
+
+    /** 分块语义搜索进行中：滚动跟随当前 chunk 起点（视口 0.6） */
+    followSearchingChunk(charOffset: number): void {
+        if (this.chunkSearchAutoScrollUserCancelled) return;
+        this.scrollToUnicodeCharOffset(
+            Math.max(0, Math.floor(charOffset)),
+            undefined,
+            CHUNK_SEARCH_FOLLOW_VIEWPORT_Y_RATIO
+        );
+    }
+
+    /**
+     * semantic match per chunk：高亮区间 → 滚到 chunk 起点 → 滚完保持 → 淡出
+     */
+    jumpToChunkHighlight(x0: number, x1: number): void {
+        this.cancelChunkHighlightFade();
+        this.setChunkCharRangeHighlight(x0, x1);
+        const x0i = Math.max(0, Math.floor(x0));
+        this.scrollToChunkStart(x0i, () => {
+            this.chunkHighlightHoldTimer = window.setTimeout(() => {
+                this.chunkHighlightHoldTimer = undefined;
+                this.fadeCurrentChunkHighlight();
+            }, HIGHLIGHT_CONSTANTS.CHUNK_HIGHLIGHT_HOLD_MS);
+        });
+    }
+
+    private fadeCurrentChunkHighlight(): void {
+        if (!this._current.chunkCharRange || !this.highlightManager) return;
+        const fadeMs = HIGHLIGHT_CONSTANTS.CHUNK_HIGHLIGHT_FADE_MS;
+        this.highlightManager.fadeOutCharIntervalUnderlines(fadeMs, () => {
+            this._current.chunkCharRange = null;
+        });
     }
 
     /** DOM 矩形（视口）→ SVG overlay 下划线一段；坐标与 TokenPositionCalculator 一致 */
@@ -1314,16 +1401,28 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
         );
     }
 
-    /** 滚动至 Unicode 偏移；桌面滚动 `.right_panel`，窄屏为 `window` */
-    scrollToUnicodeCharOffset(charOffset: number): void {
+    /**
+     * 滚动至 Unicode 偏移；桌面滚动 `.right_panel`，窄屏为 `window`
+     * @param viewportYRatio 目标点在视口中的纵向位置（0=顶部，1=底部），默认 0.2
+     */
+    scrollToUnicodeCharOffset(charOffset: number, onScrollEnd?: () => void, viewportYRatio = 0.2): void {
+        this.chunkScrollEndCancel?.();
+        this.chunkScrollEndCancel = undefined;
+
         requestAnimationFrame(() => {
             const baseNode = this.base.node();
-            if (!baseNode) return;
+            if (!baseNode) {
+                onScrollEnd?.();
+                return;
+            }
 
             const calculator = this.positionCalculator ?? new TokenPositionCalculator(baseNode);
             const safeOffset = Math.max(0, Math.floor(charOffset));
             const found = calculator.findNodeAndOffset(safeOffset);
-            if (!found) return;
+            if (!found) {
+                onScrollEnd?.();
+                return;
+            }
 
             const range = document.createRange();
             range.setStart(found.node, found.offset);
@@ -1332,25 +1431,36 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
             let rect = range.getBoundingClientRect();
             if (rect.width === 0 && rect.height === 0) {
                 const rects = range.getClientRects();
-                if (!rects.length) return;
+                if (!rects.length) {
+                    onScrollEnd?.();
+                    return;
+                }
                 rect = rects[0];
             }
 
-            const marginRatio = 0.2;
             if (isNarrowScreen()) {
-                const y = window.scrollY + rect.top - window.innerHeight * marginRatio;
+                const y = window.scrollY + rect.top - window.innerHeight * viewportYRatio;
                 window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+                if (onScrollEnd) {
+                    this.chunkScrollEndCancel = waitForSmoothScrollEnd(window, onScrollEnd);
+                }
                 return;
             }
 
             const panel = document.querySelector('.right_panel') as HTMLElement | null;
-            if (!panel) return;
+            if (!panel) {
+                onScrollEnd?.();
+                return;
+            }
 
             const panelRect = panel.getBoundingClientRect();
             const topInPanel = rect.top - panelRect.top + panel.scrollTop;
-            const target = topInPanel - panel.clientHeight * marginRatio;
+            const target = topInPanel - panel.clientHeight * viewportYRatio;
             const maxScroll = Math.max(0, panel.scrollHeight - panel.clientHeight);
             panel.scrollTo({ top: Math.max(0, Math.min(target, maxScroll)), behavior: 'smooth' });
+            if (onScrollEnd) {
+                this.chunkScrollEndCancel = waitForSmoothScrollEnd(panel, onScrollEnd);
+            }
         });
     }
 
@@ -1360,6 +1470,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
      * @param highlightStyle 高亮样式：'border' 使用边框，'underline' 使用下划线
      */
     setHighlightedIndices(indices: Set<number>, highlightStyle: HighlightStyle = 'border') {
+        this.cancelChunkHighlightFade();
         this._current.chunkCharRange = null;
         this._current.highlightedIndices = indices;
         this._current.highlightStyle = highlightStyle;
@@ -1379,6 +1490,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
      * 清除所有高亮
      */
     clearHighlight() {
+        this.cancelChunkHighlightFade();
         this._current.highlightedIndices.clear();
         this._current.chunkCharRange = null;
 

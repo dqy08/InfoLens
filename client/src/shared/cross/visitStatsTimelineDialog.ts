@@ -391,6 +391,7 @@ function renderTimelineChart(
         .join('rect')
         .attr('class', 'visit-stats-timeline-bar')
         .attr('fill', BAR_COLOR)
+        .style('cursor', 'pointer')
         .attr('opacity', (d) => (d.value > 0 ? 0.85 : 0.15))
         .on('mouseenter', function (_event, d) {
             d3.select(this).attr('opacity', 1);

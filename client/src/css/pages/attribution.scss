@@ -122,11 +122,6 @@
   border-radius: 4px;
   background: var(--input-bg);
   color: var(--text-color);
-
-  &:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
 }
 
 // 保持在本文件末尾；说明见 responsive.narrow-ios-form-font

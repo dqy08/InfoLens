@@ -56,6 +56,7 @@ import { getSemanticMatchThreshold, setSemanticMatchThreshold } from '../../shar
 import { lsGet, lsSet, lsWriteBool } from '../../shared/storage/localStorageHelpers';
 import { SEMANTIC_MATCH_THRESHOLD } from '../../shared/core/constants';
 import { SemanticSearchController } from '../../shared/controllers/semanticSearchController';
+import { getSemanticAnalysisEnabled } from '../../shared/cross/semanticAnalysisManager';
 import { initDensityAttributionSidebar } from '../../shared/prediction_attribution/density_sidebar/densityAttributionSidebar';
 
 const current = {
@@ -1014,6 +1015,7 @@ window.onload = () => {
         showToast,
         predictionModelVariant: 'base',
         sourcePage: 'analysis',
+        isTokenClickAttributionEnabled: () => !getSemanticAnalysisEnabled(),
     });
 
     // 高亮清除事件监听已由 initHighlightClearListeners 处理

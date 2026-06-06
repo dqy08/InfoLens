@@ -54,5 +54,5 @@ cd client/src && npm install && npm run build
 
 ## 📜 License
 
-Apache 2.0
+Apache 2.0. Copyright and attribution: see [NOTICE](NOTICE).
 

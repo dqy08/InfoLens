@@ -113,6 +113,40 @@
                             </span>
                         </div>
                     </div>
+                    <div class="teacher-forcing-row">
+                        <div class="semantic-submode-row teacher-forcing-toggle-row">
+                            <span class="semantic-submode-group">
+                                <label class="semantic-submode-label"
+                                    title="When enabled, this text is appended to the assembled prompt (raw or chat template) before completion. GLTR colors apply only to newly generated tokens, not the appended suffix."
+                                    data-i18n="title">
+                                    <input type="checkbox" id="chat_teacher_forcing_enable">
+                                    <span data-i18n>Teacher forcing</span>
+                                </label>
+                            </span>
+                        </div>
+                        <div id="chat_teacher_forcing_block" class="chat-prompt-panel teacher-forcing-block" hidden>
+                            <div class="input-header">
+                                <span class="semantic-submode-label" data-i18n>Forced continuation</span>
+                                <div class="text-action-buttons-top">
+                                    <div class="textarea-counter" id="chat_teacher_forcing_text_count_display">
+                                        <span id="chat_teacher_forcing_text_count_value">0</span> <span data-i18n>chars</span>
+                                    </div>
+                                    <button type="button" id="chat_clear_teacher_forcing_btn" class="text-action-btn" data-i18n>Clear</button>
+                                    <button type="button" id="chat_paste_teacher_forcing_btn" class="text-action-btn" data-i18n>Paste</button>
+                                    <button type="button" id="chat_teacher_forcing_history_btn" class="text-action-btn" data-i18n>History</button>
+                                </div>
+                            </div>
+                            <div class="textarea-wrapper chat-prompt-textarea-block">
+                                <div class="semantic-search-input-wrapper chat-prompt-history-wrapper">
+                                    <textarea id="chat_teacher_forcing_text" class="teacher-forcing-text"
+                                        spellcheck="false" autocomplete="off"
+                                        title="Text appended to the full prompt before calling /v1/completions. The suffix is part of the input, not model-generated output."
+                                        data-i18n="title"></textarea>
+                                    <ul id="chat_teacher_forcing_history_dropdown" class="semantic-search-history-dropdown"></ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     <div class="textarea-wrapper chat-prompt-actions-row">
                         <!-- INCLUDE partials/completion-options-row.html -->
                         <div class="button-group">

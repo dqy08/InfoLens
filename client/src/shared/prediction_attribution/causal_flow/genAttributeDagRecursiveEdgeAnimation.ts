@@ -1,4 +1,5 @@
 import { DAG_MIN_ATTRIBUTION_SHARE } from './genAttributeDagEdgeDisplay';
+import { parseDagLinkEndpointKey } from './genAttributeDagNodeDim';
 import {
     DAG_PROP_LOG_W,
     dagPropLogFmtNodeShareList,
@@ -110,7 +111,7 @@ const DAG_RECURSIVE_EDGE_BATCH_STEP_MS_FALLBACK = 500;
  *
  * **播放停留（见 {@link batchPlaybackDelayMs}）**
  * - 对 `propagationWeight` 连续；权重为 0 时停留恰为 0（`step` 下 0ms，不设最小间隔）。
- * - `total` 模式：UI `totalS` 中预留 {@link FORWARD_PROMPT_FRAME_DWELL_MS} 给 forward prompt / backward 首帧，其余按权重分配。
+ * - `total` 模式：UI `totalS` 中预留 {@link FORWARD_PROMPT_FRAME_DWELL_MS} 给 forward prompt / backward 首帧；forward 末帧另计同长度固定停留，其余按权重分配。
  */
 /** 传播链动画的一批：同一生成 offset 的入边组 + 播放元数据。 */
 export type DagRecursiveIncomingEdgeBatch = {
@@ -544,6 +545,8 @@ export function resolveRecursiveEdgeAnimationRenderOverlay(args: {
     computeFocusState: ComputeFocusStateFn;
     computeSteadyStateStayShareById: ComputeSteadyStateStayShareByIdFn;
     ctx: DagFocusAttributionGraphContext;
+    /** 传播描边/蓝边/动画不展示涉及该节点的部分（如 inactive）。 */
+    isPropagationNodeSuppressed?: (nodeId: string) => boolean;
 }): RecursiveEdgeAnimationRenderOverlay {
     const {
         effectiveFocusId: focusId,
@@ -554,7 +557,17 @@ export function resolveRecursiveEdgeAnimationRenderOverlay(args: {
         computeFocusState,
         computeSteadyStateStayShareById,
         ctx,
+        isPropagationNodeSuppressed,
     } = args;
+
+    const edgeTouchesSuppressedNode = (edgeKey: string): boolean => {
+        if (!isPropagationNodeSuppressed) return false;
+        const ends = parseDagLinkEndpointKey(edgeKey);
+        if (ends == null) return false;
+        return (
+            isPropagationNodeSuppressed(ends.srcId) || isPropagationNodeSuppressed(ends.tgtId)
+        );
+    };
 
     const emptyIncoming = new Map<string, number>();
     if (
@@ -593,7 +606,7 @@ export function resolveRecursiveEdgeAnimationRenderOverlay(args: {
         animationFrontierPartial && anim != null
             ? frontierEdgeKeysAtBatch(anim.plan, anim.direction, anim.batchIndex)
             : null;
-    const nodeStrokeShareById = resolveEffectiveStayShareByIdForStroke(
+    let nodeStrokeShareById = resolveEffectiveStayShareByIdForStroke(
         focusState,
         focusId,
         anim,
@@ -601,6 +614,13 @@ export function resolveRecursiveEdgeAnimationRenderOverlay(args: {
         computeSteadyStateStayShareById,
         ctx,
     );
+    if (isPropagationNodeSuppressed && nodeStrokeShareById != null) {
+        const filtered = new Map<string, number>();
+        for (const [nodeId, stay] of nodeStrokeShareById) {
+            if (!isPropagationNodeSuppressed(nodeId)) filtered.set(nodeId, stay);
+        }
+        nodeStrokeShareById = filtered;
+    }
     const nodeStrokeMaxForRender =
         animationFrontierPartial && anim?.direction === 'backward'
             ? maxHighlightEdgeShare(computeSteadyStateStayShareById(focusState.nodeShareById, focusId))
@@ -625,6 +645,7 @@ export function resolveRecursiveEdgeAnimationRenderOverlay(args: {
         focusId != null &&
         (forwardPartial || propagationSlideTgtId === focusId);
     const edgeVisibility = (edgeKey: string, inPropagationChain: boolean): number => {
+        if (edgeTouchesSuppressedNode(edgeKey)) return 0;
         if (!animationFrontierPartial || !inPropagationChain) {
             return 1;
         }
@@ -704,6 +725,7 @@ export type DagRecursiveEdgeAnimationController = {
         focusState: DagFocusAttributionState | null;
         recursiveAttributionEnabled: boolean;
         ctx: DagFocusAttributionGraphContext;
+        isPropagationNodeSuppressed?: (nodeId: string) => boolean;
     }): RecursiveEdgeAnimationRenderOverlay;
     dispose(): void;
 };
@@ -874,7 +896,8 @@ export function createDagRecursiveEdgeAnimationController(
     function delayMsForCurrentBatch(state: DagEdgeBatchAnimationState): number {
         if (
             isForwardPromptOnlyBatchIndex(state.direction, state.batchIndex) ||
-            (state.direction === 'backward' && state.batchIndex === 0)
+            (state.direction === 'backward' && state.batchIndex === 0) ||
+            (state.direction === 'forward' && state.batchIndex === 0)
         ) {
             return FORWARD_PROMPT_FRAME_DWELL_MS;
         }
@@ -883,12 +906,8 @@ export function createDagRecursiveEdgeAnimationController(
         return batchPlaybackDelayMs(batch, state.plan, getReplayPacing());
     }
 
-    /**
-     * 展示当前帧后的停留（ms）。
-     * forward 稳态末帧（batchIndex 0）为 0；forward prompt / backward 首帧为固定值。
-     */
+    /** 展示当前帧后的停留（ms）；forward prompt / backward 首帧 / forward 稳态末帧均为 {@link FORWARD_PROMPT_FRAME_DWELL_MS}。 */
     function dwellMsAfterCurrentFrame(state: DagEdgeBatchAnimationState): number {
-        if (state.direction === 'forward' && state.batchIndex === 0) return 0;
         return delayMsForCurrentBatch(state);
     }
 

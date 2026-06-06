@@ -67,6 +67,11 @@ export type GenAttrDemoUiOptions = {
     dagCompactness: number;
     linearArcAdjacentGapPx: number;
     hideExcludedTokens: boolean;
+    /** Causal Flow：按 Attribution share (Total) 将低份额节点降至 0.1。 */
+    dimInactiveTokens: boolean;
+    dimInactiveTokensThreshold: number;
+    /** Dim inactive 开启时：传播动画播放/暂停期间不 dim，结束或停止后恢复。 */
+    dimInactiveNotDuringAnimation: boolean;
     edgeTopPCoverage: number;
     nodeCiVisualScaleEnabled: boolean;
     decayAttributionToHighSurprisalTargetEnabled: boolean;
@@ -229,6 +234,20 @@ function isValidDemoUiOptionsPayload(v: unknown): v is Partial<GenAttrDemoUiOpti
         return false;
     }
     if (d.hideExcludedTokens !== undefined && typeof d.hideExcludedTokens !== 'boolean') return false;
+    if (d.dimInactiveTokens !== undefined && typeof d.dimInactiveTokens !== 'boolean') return false;
+    if (
+        d.dimInactiveTokensThreshold !== undefined &&
+        (typeof d.dimInactiveTokensThreshold !== 'number' ||
+            !Number.isFinite(d.dimInactiveTokensThreshold))
+    ) {
+        return false;
+    }
+    if (
+        d.dimInactiveNotDuringAnimation !== undefined &&
+        typeof d.dimInactiveNotDuringAnimation !== 'boolean'
+    ) {
+        return false;
+    }
     if (
         d.edgeTopPCoverage !== undefined &&
         (typeof d.edgeTopPCoverage !== 'number' || !Number.isFinite(d.edgeTopPCoverage))

@@ -32,6 +32,7 @@ import { addDigitsMergeRenderListener } from '../../shared/cross/digitsMergeMana
 import {
     CHAT_RAW_INPUT_HISTORY_KEY,
     CHAT_SYSTEM_INPUT_HISTORY_KEY,
+    CHAT_TEACHER_FORCING_INPUT_HISTORY_KEY,
     CHAT_USER_INPUT_HISTORY_KEY,
     initQueryHistoryDropdown,
     saveHistory
@@ -116,6 +117,15 @@ const chatSystemPromptPanel = document.getElementById('chat_system_prompt_panel'
 const enableThinkingInput = document.getElementById(
     'chat_enable_thinking'
 ) as HTMLInputElement | null;
+const teacherForcingTextField = d3.select('#chat_teacher_forcing_text');
+const teacherForcingTextCountValue = d3.select('#chat_teacher_forcing_text_count_value');
+const clearTeacherForcingBtn = d3.select('#chat_clear_teacher_forcing_btn');
+const pasteTeacherForcingBtn = d3.select('#chat_paste_teacher_forcing_btn');
+const teacherForcingHistoryBtn = document.getElementById('chat_teacher_forcing_history_btn');
+const chatTeacherForcingEnable = document.getElementById(
+    'chat_teacher_forcing_enable'
+) as HTMLInputElement | null;
+const chatTeacherForcingBlock = document.getElementById('chat_teacher_forcing_block');
 
 function isSkipChatTemplate(): boolean {
     return skipChatTemplateInput?.checked ?? false;
@@ -127,6 +137,23 @@ function isChatUseSystemPrompt(): boolean {
 
 function isEnableThinking(): boolean {
     return enableThinkingInput?.checked ?? false;
+}
+
+function isChatTeacherForcingUiOn(): boolean {
+    return chatTeacherForcingEnable?.checked ?? false;
+}
+
+/** 勾选 Teacher forcing 且续写非空时返回原文；未勾选或空串时返回 `undefined`。 */
+function teacherForcingContinuationForRun(): string | undefined {
+    if (!isChatTeacherForcingUiOn()) return undefined;
+    const t = (teacherForcingTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
+    return t.length > 0 ? t : undefined;
+}
+
+function syncTeacherForcingRow(): void {
+    if (chatTeacherForcingBlock) {
+        chatTeacherForcingBlock.hidden = !isChatTeacherForcingUiOn();
+    }
 }
 
 function syncChatSystemPromptSuppressedUi(): void {
@@ -212,6 +239,17 @@ new TextInputController({
     showAlertDialog
 });
 
+new TextInputController({
+    textField: teacherForcingTextField,
+    textCountValue: teacherForcingTextCountValue,
+    clearBtn: clearTeacherForcingBtn,
+    submitBtn,
+    saveBtn: forceRetryBtn,
+    pasteBtn: pasteTeacherForcingBtn,
+    totalSurprisalFormat,
+    showAlertDialog
+});
+
 const toolTip = new ToolTip(d3.select('#major_tooltip'), eventHandler, {
     surprisalRowLabel: tr('log perplexity:')
 });
@@ -263,17 +301,23 @@ let lastCompletionForRerender: {
     contentUrlKey: string;
 } | null = null;
 
+type ChatTfFingerprintFields = {
+    tfOn: boolean;
+    tfText: string;
+};
+
 /** 右侧已展示结果对应的左侧输入快照（与 Context Attribution 页 lastCommittedInputs 同类） */
 type ChatCommittedFingerprint =
-    | { skipTemplate: true; raw: string; maxTokens: string; model: PredictionAttributeModelVariant }
-    | {
+    | ({ skipTemplate: true; raw: string; maxTokens: string; model: PredictionAttributeModelVariant } &
+          ChatTfFingerprintFields)
+    | ({
           skipTemplate: false;
           user: string;
           system: string;
           useSystem: boolean;
           maxTokens: string;
           model: PredictionAttributeModelVariant;
-      };
+      } & ChatTfFingerprintFields);
 
 let lastCommittedFingerprint: ChatCommittedFingerprint | null = null;
 
@@ -303,12 +347,16 @@ const {
 
 function buildChatRunDraftForCache(): ChatCompletionDraft {
     const maxTokens = currentMaxTokens();
+    const teacherForcingText = teacherForcingContinuationForRun();
+    const tfDraftFields =
+        teacherForcingText !== undefined ? { teacherForcing: teacherForcingText } : {};
     if (isSkipChatTemplate()) {
         return {
             mode: 'raw',
             model: currentModelVariant(),
             maxTokens,
             raw: (textField.node() as HTMLTextAreaElement | null)?.value ?? '',
+            ...tfDraftFields,
         };
     }
     return {
@@ -319,6 +367,7 @@ function buildChatRunDraftForCache(): ChatCompletionDraft {
         user: (chatUserTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
         useSystem: isChatUseSystemPrompt(),
         enableThinking: isEnableThinking(),
+        ...tfDraftFields,
     };
 }
 
@@ -368,17 +417,34 @@ function applyChatDraftFromCache(draft: ChatCompletionDraft, entry: CompletionCa
         syncMaxTokensUi();
     }
     normalizeMaxTokensField();
+
+    const tfFromRec = draft?.teacherForcing ?? '';
+    if (chatTeacherForcingEnable) {
+        chatTeacherForcingEnable.checked = tfFromRec.length > 0;
+    }
+    teacherForcingTextField.property('value', tfFromRec);
+    teacherForcingTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    syncTeacherForcingRow();
+}
+
+function chatTfFingerprintFields(): ChatTfFingerprintFields {
+    return {
+        tfOn: isChatTeacherForcingUiOn(),
+        tfText: (teacherForcingTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
+    };
 }
 
 function getCurrentFingerprint(): ChatCommittedFingerprint {
     const maxTokens = maxTokensInput?.value ?? '';
     const model = currentModelVariant();
+    const tf = chatTfFingerprintFields();
     if (isSkipChatTemplate()) {
         return {
             skipTemplate: true,
             raw: (textField.node() as HTMLTextAreaElement | null)?.value ?? '',
             maxTokens,
             model,
+            ...tf,
         };
     }
     return {
@@ -388,10 +454,14 @@ function getCurrentFingerprint(): ChatCommittedFingerprint {
         useSystem: isChatUseSystemPrompt(),
         maxTokens,
         model,
+        ...tf,
     };
 }
 
 function fingerprintsEqual(a: ChatCommittedFingerprint, b: ChatCommittedFingerprint): boolean {
+    if (a.tfOn !== b.tfOn || a.tfText !== b.tfText) {
+        return false;
+    }
     if (a.skipTemplate && b.skipTemplate) {
         return a.raw === b.raw && a.maxTokens === b.maxTokens && a.model === b.model;
     }
@@ -409,10 +479,19 @@ function fingerprintsEqual(a: ChatCommittedFingerprint, b: ChatCommittedFingerpr
     return false;
 }
 
+/** 当前输入是否满足可以发起 Ask（不含 inFlight）。 */
+function isAskInputsReady(): boolean {
+    if (!isMaxNewTokensInputValid()) return false;
+    const prompt = getActivePromptValue();
+    const forcing = teacherForcingContinuationForRun();
+    if (prompt.length === 0 && forcing === undefined) return false;
+    if (prompt.length > 0 && isChatTeacherForcingUiOn() && forcing === undefined) return false;
+    return true;
+}
+
 function syncAskButtonState(): void {
     const fp = getCurrentFingerprint();
-    const idleInputsReady =
-        ('raw' in fp ? fp.raw.length > 0 : fp.user.length > 0) && isMaxNewTokensInputValid();
+    const idleInputsReady = isAskInputsReady();
     const hasUncommittedDraft =
         lastCommittedFingerprint === null ||
         !fingerprintsEqual(lastCommittedFingerprint, fp);
@@ -545,8 +624,9 @@ registerPageBusy(() => askInFlight);
 
 const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
     const prompt = getActivePromptValue();
-    if (askInFlight || prompt.length === 0) return;
+    if (askInFlight || !isAskInputsReady()) return;
     const forceRefresh = options?.forceRefresh === true;
+    const teacherForcingText = teacherForcingContinuationForRun();
 
     let maxTokensOpt: number;
     try {
@@ -569,7 +649,6 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
         let modelPrompt: string;
         if (skipTemplate) {
             modelPrompt = prompt;
-            chatPromptUsedEl.text(prompt).attr('hidden', null);
         } else {
             const useSystem = isChatUseSystemPrompt();
             const systemRaw =
@@ -588,8 +667,12 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
                 signal: askAbort.signal
             });
             modelPrompt = assembled.prompt_used;
-            chatPromptUsedEl.text(modelPrompt).attr('hidden', null);
         }
+
+        if (teacherForcingText !== undefined) {
+            modelPrompt += teacherForcingText;
+        }
+        chatPromptUsedEl.text(modelPrompt).attr('hidden', null);
 
         if (skipTemplate) {
             saveHistory(prompt, CHAT_RAW_INPUT_HISTORY_KEY);
@@ -602,6 +685,9 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
                     saveHistory(systemForHistory, CHAT_SYSTEM_INPUT_HISTORY_KEY);
                 }
             }
+        }
+        if (teacherForcingText !== undefined) {
+            saveHistory(teacherForcingText, CHAT_TEACHER_FORCING_INPUT_HISTORY_KEY);
         }
 
         const cacheKey: CompletionResultCacheKey = { prompt: modelPrompt, model };
@@ -684,9 +770,21 @@ chatUseSystemPromptInput?.addEventListener('change', () => {
 });
 syncAskButtonState();
 
+chatTeacherForcingEnable?.addEventListener('change', () => {
+    syncTeacherForcingRow();
+    syncAskButtonState();
+});
+syncTeacherForcingRow();
+
+const teacherForcingTextarea = teacherForcingTextField.node() as HTMLTextAreaElement | null;
 const promptTextarea = textField.node() as HTMLTextAreaElement | null;
 const chatSystemPromptTextarea = chatSystemTextField.node() as HTMLTextAreaElement | null;
 const chatUserPromptTextarea = chatUserTextField.node() as HTMLTextAreaElement | null;
+if (teacherForcingTextarea) {
+    teacherForcingTextarea.addEventListener('input', () => {
+        syncAskButtonState();
+    });
+}
 if (promptTextarea) {
     promptTextarea.addEventListener('input', () => {
         syncAskButtonState();
@@ -831,6 +929,17 @@ initQueryHistoryDropdown({
     filterHistoryByInput: false,
     onSelect: syncAskButtonState,
     historyButton: chatUserHistoryBtn,
+    applyHistoryOnHover: true
+});
+
+initQueryHistoryDropdown({
+    input: teacherForcingTextarea,
+    dropdownId: 'chat_teacher_forcing_history_dropdown',
+    storageKey: CHAT_TEACHER_FORCING_INPUT_HISTORY_KEY,
+    openDropdownOnFocusInput: false,
+    filterHistoryByInput: false,
+    onSelect: syncAskButtonState,
+    historyButton: teacherForcingHistoryBtn,
     applyHistoryOnHover: true
 });
 
