@@ -1,0 +1,6 @@
+// 多轮 mock tool 轮间占位文案（Chat / Causal Flow 共用）
+
+@mixin tool-calling-pending-text {
+  font-style: italic;
+  color: var(--token-truncated-color);
+}

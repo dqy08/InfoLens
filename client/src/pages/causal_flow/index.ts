@@ -21,6 +21,7 @@ import {
     clampDagEdgeTopPCoverage,
     DAG_EDGE_TOP_P_COVERAGE_DEFAULT,
     extractPromptTokenSpans,
+    filterPromptSpansInInputRanges,
     type PromptTokenSpan,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagPreprocess';
 import {
@@ -45,11 +46,22 @@ import {
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagView';
 import type { DagRecursiveEdgeReplayPacing } from '../../shared/prediction_attribution/causal_flow/genAttributeDagRecursiveEdgeAnimation';
 import {
+    buildDagStepPlaybackEvents,
+    resolveDagStepPlaybackDelaysFromPacing,
+    resolveDagStepPlaybackStart,
+    runDagStepPlaybackLoop,
+} from '../../shared/prediction_attribution/causal_flow/genAttributeDagStepPlayback';
+import {
     createHydratedTokenGenHandle,
     startTokenGenAttribution,
+    type CharRange,
     type TokenGenAttributionHandle,
     type TokenGenStep,
 } from '../../shared/prediction_attribution/causal_flow/tokenGenAttributionRunner';
+import {
+    runMultiTurnAttribution,
+    type MultiTurnAttributionHandle,
+} from '../../shared/prediction_attribution/causal_flow/multiTurnAttribution';
 import { DEFAULT_MAX_NEW_TOKENS, parseMaxNewTokens } from '../../shared/cross/maxNewTokensConfig';
 import { createCompletionOptionsRow } from '../../shared/cross/completionOptionsRow';
 import { fetchTokenize } from '../../shared/prediction_attribution/core/predictionAttributeClient';
@@ -70,6 +82,11 @@ import {
     DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT,
     DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT,
 } from '../../shared/prediction_attribution/core/attributionExcludePromptPatternsStorage';
+import {
+    bindExcludePatternsUi,
+    syncEnableGatedTextInputVisibility,
+} from '../../shared/prediction_attribution/core/excludePromptPatternsUi';
+import { syncChatPromptPanelEnableGatedBody } from '../../features/chat/chatPromptPanelUi';
 import { initCachedHistoryQueryDropdown, type CachedHistorySelectContext } from '../../shared/cross/cachedHistoryUi';
 import {
     DEFAULT_CONTENT_URL_PARAM,
@@ -98,11 +115,19 @@ import {
 } from '../../shared/cross/queryHistory';
 import {
     GEN_ATTR_ENABLE_THINKING_STORAGE_KEY,
+    GEN_ATTR_ENABLE_TOOL_CALLING_STORAGE_KEY,
+    GEN_ATTR_ENABLE_MULTI_TURN_STORAGE_KEY,
     GEN_ATTR_MAX_NEW_TOKENS_STORAGE_KEY,
     GEN_ATTR_MODEL_VARIANT_STORAGE_KEY,
     LS_SKIP_CHAT_TEMPLATE,
 } from '../../features/chat/chatPromptTemplateMode';
 import { postCompletionsPrompt, postCompletionsStop } from '../../shared/api/completionsClient';
+import { createToolCallingOptionsRow } from '../../features/chat/toolCallingOptionsRow';
+import { cloneToolConfig, toolConfigFingerprint } from '../../features/chat/toolConfig';
+import {
+    attachToolCallingPendingLine,
+    type ToolCallingPendingLine,
+} from '../../features/chat/toolCallingPendingUi';
 import { updateApiUsageDisplay, updateModel, validateMetricsElements } from '../../shared/cross/textMetricsUpdater';
 import {
     lsGet,
@@ -156,6 +181,9 @@ const GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY =
 const GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY = 'info_radar_gen_attr_exclude_generated_patterns';
 const GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY =
     'info_radar_gen_attr_exclude_generated_patterns_enabled';
+const GEN_ATTR_DELETE_PROMPT_PATTERNS_STORAGE_KEY = 'info_radar_gen_attr_delete_prompt_patterns';
+const GEN_ATTR_DELETE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY =
+    'info_radar_gen_attr_delete_prompt_patterns_enabled';
 
 /** 步进回放节奏：`total`＝整段剩余回放总时长内均分间隔；`step`＝固定每步间隔（ms）。 */
 type DagReplayPacingMode = 'total' | 'step';
@@ -197,6 +225,8 @@ const DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS: GenAttrDemoUiOptions = {
     excludePromptPatternsText: DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT,
     excludeGeneratedPatternsEnabled: true,
     excludeGeneratedPatternsText: DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT,
+    deletePromptPatternsEnabled: false,
+    deletePromptPatternsText: '',
 };
 
 const GENERATE_BTN_LABEL = 'Start';
@@ -342,7 +372,6 @@ const genAttrStopAfterTeacherForcing = document.getElementById(
 const genAttrEnableThinkingInput = document.getElementById(
     'gen_attr_enable_thinking'
 ) as HTMLInputElement | null;
-
 const submitBtn = d3.select('#gen_attr_submit_btn');
 const loaderSmall = d3.select('.loadersmall');
 const metricUsage = d3.select('#gen_attr_metric_usage');
@@ -474,6 +503,12 @@ const dagDimInactiveNotInAnimationWrap = document.getElementById(
 const dagDimInactiveNotInAnimationInput = document.getElementById(
     'gen_attr_dag_dim_inactive_not_in_animation',
 ) as HTMLInputElement | null;
+const genAttrDeletePromptPatternsTa = document.getElementById(
+    'gen_attr_delete_prompt_patterns',
+) as HTMLTextAreaElement | null;
+const genAttrDeletePromptPatternsEnable = document.getElementById(
+    'gen_attr_delete_prompt_patterns_enable',
+) as HTMLInputElement | null;
 const genAttrExcludePromptPatternsTa = document.getElementById(
     'gen_attr_exclude_prompt_patterns'
 ) as HTMLTextAreaElement | null;
@@ -491,47 +526,50 @@ const genAttrResetUiOptionsBtn = document.getElementById(
 ) as HTMLButtonElement | null;
 const completeReasonEl = d3.select('#gen_attr_complete_reason');
 
-function syncGenAttrExcludePatternTextareasDisabled(): void {
-    if (genAttrExcludePromptPatternsTa) {
-        genAttrExcludePromptPatternsTa.disabled = !genAttrExcludePromptPatternsEnable?.checked;
-    }
-    if (genAttrExcludeGeneratedPatternsTa) {
-        genAttrExcludeGeneratedPatternsTa.disabled = !genAttrExcludeGeneratedPatternsEnable?.checked;
-    }
+function onExcludePatternsEffectiveChange(): void {
+    const h = runnerHandle;
+    if (!h || h.tokenCount === 0) return;
+    tryResetAndReplayDag();
 }
 
-function hydrateGenAttrExcludePatternsFromGenAttrStorage(): void {
-    const savedPrompt = lsGet(GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY);
-    if (genAttrExcludePromptPatternsTa) {
-        genAttrExcludePromptPatternsTa.value =
-            savedPrompt !== null ? savedPrompt : DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT;
-    }
-    if (genAttrExcludePromptPatternsEnable) {
-        genAttrExcludePromptPatternsEnable.checked = lsReadBool(
-            GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
-            true,
-            { encoding: '1' },
-        );
-    }
-
-    const savedGen = lsGet(GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY);
-    if (genAttrExcludeGeneratedPatternsTa) {
-        genAttrExcludeGeneratedPatternsTa.value =
-            savedGen !== null ? savedGen : DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT;
-    }
-    if (genAttrExcludeGeneratedPatternsEnable) {
-        genAttrExcludeGeneratedPatternsEnable.checked = lsReadBool(
-            GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY,
-            true,
-            { encoding: '1' },
-        );
-    }
-    syncGenAttrExcludePatternTextareasDisabled();
-}
-
-hydrateGenAttrExcludePatternsFromGenAttrStorage();
+bindExcludePatternsUi({
+    storageKeys: {
+        textKey: GEN_ATTR_DELETE_PROMPT_PATTERNS_STORAGE_KEY,
+        enabledKey: GEN_ATTR_DELETE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
+    },
+    textInput: genAttrDeletePromptPatternsTa,
+    enableCheckbox: genAttrDeletePromptPatternsEnable,
+    onEffectiveChange: onExcludePatternsEffectiveChange,
+    defaultTextWhenKeyAbsent: '',
+    defaultEnabledWhenKeyAbsent: false,
+});
+bindExcludePatternsUi({
+    storageKeys: {
+        textKey: GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY,
+        enabledKey: GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
+    },
+    textInput: genAttrExcludePromptPatternsTa,
+    enableCheckbox: genAttrExcludePromptPatternsEnable,
+    onEffectiveChange: onExcludePatternsEffectiveChange,
+    defaultTextWhenKeyAbsent: DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT,
+});
+bindExcludePatternsUi({
+    storageKeys: {
+        textKey: GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY,
+        enabledKey: GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY,
+    },
+    textInput: genAttrExcludeGeneratedPatternsTa,
+    enableCheckbox: genAttrExcludeGeneratedPatternsEnable,
+    onEffectiveChange: onExcludePatternsEffectiveChange,
+    defaultTextWhenKeyAbsent: DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT,
+});
 
 /** 与 DAG 同源：DAG 预处理按当前控件即时读取，不读 Attribution 的 localStorage。 */
+function genAttrEffectiveDeletePromptPatternsText(): string {
+    if (!genAttrDeletePromptPatternsEnable?.checked) return '';
+    return genAttrDeletePromptPatternsTa?.value ?? '';
+}
+
 function genAttrEffectiveExcludePromptPatternsText(): string {
     if (!genAttrExcludePromptPatternsEnable?.checked) return '';
     return genAttrExcludePromptPatternsTa?.value ?? '';
@@ -884,6 +922,19 @@ const {
     normalizeMaxTokensField: normalizeGenAttrMaxTokensField,
 } = completionOptions;
 
+const toolCallingOptions = createToolCallingOptionsRow({
+    enableToolCallingStorageKey: GEN_ATTR_ENABLE_TOOL_CALLING_STORAGE_KEY,
+    multiTurnStorageKey: GEN_ATTR_ENABLE_MULTI_TURN_STORAGE_KEY,
+    onStateChange: () => syncSubmitButtonState(),
+});
+
+const {
+    isToolCallingEnabled,
+    isMultiTurnEnabled,
+    getCurrentToolConfig,
+    restoreFromDraft: restoreToolCallingFromDraft,
+} = toolCallingOptions;
+
 function isGenAttrUseSystemPrompt(): boolean {
     return genAttrUseSystemPromptInput?.checked ?? true;
 }
@@ -892,19 +943,12 @@ function isEnableThinking(): boolean {
     return genAttrEnableThinkingInput?.checked ?? false;
 }
 
+function useMultiTurnAttribution(): boolean {
+    return !isSkipChatTemplate() && isToolCallingEnabled() && isMultiTurnEnabled();
+}
+
 function syncGenAttrSystemPromptSuppressedUi(): void {
-    const on = isGenAttrUseSystemPrompt();
-    genAttrSystemPromptPanel?.classList.toggle('chat-system-prompt-suppressed', !on);
-    const ta = systemTextField.node() as HTMLTextAreaElement | null;
-    if (ta) {
-        ta.disabled = !on;
-    }
-    const dis = !on;
-    clearSystemBtn.property('disabled', dis);
-    pasteSystemBtn.property('disabled', dis);
-    if (systemHistoryBtn instanceof HTMLButtonElement) {
-        systemHistoryBtn.disabled = dis;
-    }
+    syncChatPromptPanelEnableGatedBody(genAttrSystemPromptPanel, isGenAttrUseSystemPrompt());
 }
 
 function syncPromptPanelVisibility(): void {
@@ -965,6 +1009,9 @@ function buildGenAttrRunDraftForCache(): GenAttrRunDraft {
               user: userPromptTextarea?.value ?? '',
               useSystem: isGenAttrUseSystemPrompt(),
               enableThinking: isEnableThinking(),
+              toolCallingEnabled: isToolCallingEnabled(),
+              multiTurnEnabled: isMultiTurnEnabled(),
+              toolConfig: cloneToolConfig(getCurrentToolConfig()),
               ...tfDraftFields,
           };
 }
@@ -1019,13 +1066,6 @@ new TextInputController({
     showAlertDialog,
 });
 
-/** 与 DAG 节点 offset 同源的累积串，供跨 token 闭合后的排除区间（`excludeNodeAggregatedEntries`）。 */
-function excludeIntervalContextFromSteps(steps: TokenGenStep[]): string | undefined {
-    if (steps.length === 0) return undefined;
-    const last = steps[steps.length - 1]!;
-    return last.context + last.token;
-}
-
 /** （第 0 步先）setPromptTokenSpans →（按需 fit）→ update；view 内部负责 exclude / 对齐 / Top-N / β / cumP */
 function pushDagFromPreprocess(
     step: TokenGenStep,
@@ -1047,33 +1087,69 @@ function pushDagFromPreprocess(
 /** 下一步要 `pushDagFromPreprocess` 的步下标；与当前 DAG 前缀一致（暂停不重置） */
 let dagPlaybackNextIndex = 0;
 
+/** 在 {@link dagHandle} 初始化后赋值；回放 stop 等路径用 `?.hide()` 避免初始化顺序问题。 */
+let toolCallingPendingLine: ToolCallingPendingLine | null = null;
+
 /** 当前 run 的 token 归因步序；须在 `initGenAttributeDagView` 之前声明（init 会同步调用 `onDagCanPlay`） */
 let runnerHandle: TokenGenAttributionHandle | null = null;
+let multiTurnAttributionHandle: MultiTurnAttributionHandle | null = null;
 
 /**
- * 当前 run 的 prompt token spans：tokenize 先行写入，或 step 0 归因兜底，或历史加载时赋值。
- * 步进回放从头开始时作为 prompt 帧数据源，独立于 token_attribution 完整性。
+ * 当前 run 的累积 input token spans（prompt + tool response）；缓存与步进回放数据源。
  */
 let currentRunPromptSpans: PromptTokenSpan[] = [];
+/** 首轮 prompt input spans（不含 tool response）；供多轮编排拼接全量 input spans。 */
+let initialPromptInputSpans: PromptTokenSpan[] = [];
+
+/**
+ * 按当前步的 `inputRanges` 与 `layoutWire` 同步 prompt 层（live 与 ▶ 共用）。
+ * ▶ 在 prompt（t=0）与 tool response **内容出现**时调用；其后 1× 才等到下一 output gen。
+ * `layoutWire` 为本步 `update` 之前的累积全文（即 `step.context`）。
+ */
+function syncDagInputLayerAtStep(opts: {
+    catalogSpans: PromptTokenSpan[];
+    layoutWire: string;
+    inputRanges: CharRange[];
+    fitViewport?: boolean;
+}): void {
+    const visible = filterPromptSpansInInputRanges(opts.catalogSpans, opts.inputRanges);
+    dagHandle.setPromptTokenSpans(visible, opts.layoutWire, { inputRanges: opts.inputRanges });
+    if (opts.fitViewport && !dagHandle.isBatching()) {
+        dagHandle.fitViewportToContent();
+    }
+}
 
 /**
  * 将 handle 中已存步序按序重放进 DAG（调用方负责先 {@link dagHandle.reset} 等）。
  * @param promptSpans prompt 层节点数据；在批内最先注入，与归因裁剪无关。
  *   未传入时从 step 0 归因降级（旧缓存 / 非生成路径兼容）。
  */
-function replayRunnerStepsIntoDag(h: TokenGenAttributionHandle, promptSpans?: PromptTokenSpan[]): void {
+function replayRunnerStepsIntoDag(h: TokenGenAttributionHandle, catalogSpans?: PromptTokenSpan[]): void {
     if (h.tokenCount === 0) {
         dagPlaybackNextIndex = 0;
         return;
     }
     const steps = h.getAllSteps();
-    const spans = promptSpans ?? extractPromptTokenSpans(steps[0]!);
-    const excludeCtx = excludeIntervalContextFromSteps(steps);
+    const catalog = catalogSpans ?? extractPromptTokenSpans(steps[0]!);
+    const lastStep = steps[steps.length - 1]!;
+    const excludeCtx = lastStep.context + lastStep.token;
     // 整段回放期间中间帧不可见：批处理内只维护图数据，结束时统一刷一次 svg。
     dagHandle.beginBatch();
     try {
-        dagHandle.setPromptTokenSpans(spans, steps[0]!.context);
+        // 从初始 prompt 出发，让 textMeasure 随 gen token 自然增长；轮间边界按需追加 tool response spans。
+        syncDagInputLayerAtStep({
+            catalogSpans: catalog,
+            layoutWire: steps[0]!.context,
+            inputRanges: steps[0]!.inputRanges,
+        });
         steps.forEach((step, i) => {
+            if (i > 0 && step.inputRanges.length > steps[i - 1]!.inputRanges.length) {
+                syncDagInputLayerAtStep({
+                    catalogSpans: catalog,
+                    layoutWire: step.context,
+                    inputRanges: step.inputRanges,
+                });
+            }
             pushDagFromPreprocess(step, i, true, excludeCtx);
         });
     } finally {
@@ -1082,7 +1158,7 @@ function replayRunnerStepsIntoDag(h: TokenGenAttributionHandle, promptSpans?: Pr
     dagPlaybackNextIndex = h.tokenCount;
 }
 
-/** 实际生成结束与 DAG 回放结束时：末 token 选中再保留多久后执行收尾（清选中等） */
+/** 末 output gen 后的收尾停留（ms）；不参与「等到下一段内容」的 1× 时钟，纯 UI 特例。 */
 const DAG_LAST_TOKEN_DWELL_MS = 500;
 
 let dagPlaybackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1107,28 +1183,13 @@ function scheduleDagLastTokenDwell(action: () => void, dwellMs: number = DAG_LAS
     }, dwellMs);
 }
 
-/**
- * 点击播放时：读界面值并写回规范化结果，得到本轮「相邻两帧 DAG 更新」之间的延时（ms）。
- * - `step`：固定间隔。
- * - `total`：`totalS` 按**整段帧数（含 prompt 帧）**均分，共 `fullStepCount` 段等权间隔。
- *   `fullStepCount` 即生成 token 步数；prompt 帧 → step0 占一段，step0 → step1 占一段，依此类推。
- */
-function resolveDagPlaybackStepDelayMsOnPlay(fullStepCount: number): number {
-    const pacing = readDagReplayPacingFromControls({ writeBack: true });
-    if (pacing.mode === 'step') return pacing.stepMs;
-
-    // prompt 帧作为等权第一段，共 fullStepCount 段（比原来的 fullStepCount-1 多一段）
-    const transitionCount = Math.max(0, fullStepCount);
-    if (transitionCount <= 0) return 0;
-    return Math.round((pacing.totalS * 1000) / transitionCount);
-}
-
 function stopDagPlayback(): void {
     if (dagPlaybackTimer !== null) {
         clearTimeout(dagPlaybackTimer);
         dagPlaybackTimer = null;
     }
     cancelDagLastTokenDwell();
+    toolCallingPendingLine?.hide();
     dagHandle.setDagPlaybackPlaying(false);
 }
 
@@ -1153,11 +1214,17 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
         dagHandle.reset(true);
         dagPlaybackNextIndex = 0;
     }
-    const stepDelayMs = resolveDagPlaybackStepDelayMsOnPlay(steps.length);
+    const pacing = readDagReplayPacingFromControls({ writeBack: true });
+    const delays = resolveDagStepPlaybackDelaysFromPacing(steps, pacing);
+    const includePrompt = dagPlaybackNextIndex === 0 && currentRunPromptSpans.length > 0;
+    const events = buildDagStepPlaybackEvents(steps, includePrompt);
+    const start = resolveDagStepPlaybackStart(
+        events,
+        steps,
+        dagPlaybackNextIndex,
+        includePrompt,
+    );
     dagHandle.setDagPlaybackPlaying(true);
-
-    /** 相邻两步「理想触发」之间的名义间隔；与 {@link resolveDagPlaybackStepDelayMsOnPlay} 一致。 */
-    let nextDue = performance.now();
 
     const isStalePlaybackHandle = (): boolean => {
         if (runnerHandle === h) return false;
@@ -1169,61 +1236,73 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
     const finishDagPlayback = (): void => {
         cancelDagLastTokenDwell();
         dagPlaybackTimer = null;
+        toolCallingPendingLine?.hide();
         dagHandle.clearNodeSelection();
         dagHandle.setDagPlaybackPlaying(false);
     };
 
-    /**
-     * 步间节拍：理想时刻 `nextDue` 每次前进 `stepDelayMs`，实际等待 `max(0, nextDue - now)`。
-     * 若已迟到（`delay === 0`），则 `nextDue = now + stepDelayMs` 重锚，避免长时间暂停 / 后台节流后连发多步。
-     */
-    const scheduleNextPlaybackTick = (): void => {
-        const now = performance.now();
-        nextDue += stepDelayMs;
-        let delay = Math.max(0, nextDue - now);
-        if (delay === 0) {
-            nextDue = now + stepDelayMs;
-        }
-        dagPlaybackTimer = setTimeout(() => {
-            dagPlaybackTimer = null;
-            if (isStalePlaybackHandle()) return;
-            tick();
-        }, delay);
-    };
+    if (start.eventIndex >= events.length) {
+        finishDagPlayback();
+        return;
+    }
 
-    const tick = (): void => {
-        if (isStalePlaybackHandle()) return;
-        const all = h.getAllSteps();
-        if (dagPlaybackNextIndex >= all.length) {
-            finishDagPlayback();
-            return;
-        }
-        const excludeCtx = excludeIntervalContextFromSteps(all);
-        pushDagFromPreprocess(all[dagPlaybackNextIndex], dagPlaybackNextIndex, false, excludeCtx);
-        dagPlaybackNextIndex++;
-        const done = dagPlaybackNextIndex >= all.length;
-        if (done) {
+    runDagStepPlaybackLoop({
+        events,
+        start,
+        delays,
+        isStale: isStalePlaybackHandle,
+        setTimer: (cb, delayMs) => {
+            dagPlaybackTimer = setTimeout(() => {
+                dagPlaybackTimer = null;
+                cb();
+            }, delayMs);
+        },
+        setToolPendingVisible: (visible) => {
+            if (visible) toolCallingPendingLine?.show();
+            else toolCallingPendingLine?.hide();
+        },
+        showPrompt: (fitViewport) => {
+            const firstStep = steps[0]!;
+            syncDagInputLayerAtStep({
+                catalogSpans: currentRunPromptSpans,
+                layoutWire: firstStep.context,
+                inputRanges: firstStep.inputRanges,
+                fitViewport,
+            });
+        },
+        showToolResponse: (stepIndex) => {
+            const step = steps[stepIndex]!;
+            syncDagInputLayerAtStep({
+                catalogSpans: currentRunPromptSpans,
+                layoutWire: step.context,
+                inputRanges: step.inputRanges,
+            });
+        },
+        showOutputGen: (stepIndex) => {
+            const playbackStep = steps[stepIndex]!;
+            const excludeCtx = playbackStep.context + playbackStep.token;
+            syncDagInputLayerAtStep({
+                catalogSpans: currentRunPromptSpans,
+                layoutWire: playbackStep.context,
+                inputRanges: playbackStep.inputRanges,
+            });
+            pushDagFromPreprocess(playbackStep, stepIndex, false, excludeCtx);
+        },
+        onOutputGenShown: (stepIndex) => {
+            dagPlaybackNextIndex = stepIndex + 1;
+        },
+        onAllOutputGensShown: () => {
             scheduleDagLastTokenDwell(() => {
                 if (runnerHandle !== h) {
                     dagHandle.setDagPlaybackPlaying(false);
                     return;
                 }
+                toolCallingPendingLine?.hide();
                 dagHandle.clearNodeSelection();
                 dagHandle.setDagPlaybackPlaying(false);
             });
-            return;
-        }
-        scheduleNextPlaybackTick();
-    };
-    // 从头开始（index 为 0）时先展示 prompt 帧，再等一个步进间隔后触发 step 0；
-    // 中途恢复（index > 0）则直接续播，不重复 prompt 帧。
-    if (dagPlaybackNextIndex === 0 && currentRunPromptSpans.length > 0) {
-        dagHandle.setPromptTokenSpans(currentRunPromptSpans, steps[0]!.context);
-        dagHandle.fitViewportToContent();
-        scheduleNextPlaybackTick();
-    } else {
-        tick();
-    }
+        },
+    });
 }
 
 const dagHandle = initGenAttributeDagView(d3.select('#results'), {
@@ -1255,7 +1334,12 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
     onFullscreenError: (message) => showToast(message, 'error'),
     getEffectiveExcludePromptPatternsText: genAttrEffectiveExcludePromptPatternsText,
     getEffectiveExcludeGeneratedPatternsText: genAttrEffectiveExcludeGeneratedPatternsText,
+    getEffectiveDeletePromptPatternsText: genAttrEffectiveDeletePromptPatternsText,
 });
+
+toolCallingPendingLine = attachToolCallingPendingLine(
+    document.querySelector('#results .gen-attr-dag-stack') as HTMLElement,
+);
 
 dagLayoutModeSelect?.addEventListener('change', () => {
     const mode = currentDagLayoutMode();
@@ -1398,6 +1482,8 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
         excludePromptPatternsText: genAttrExcludePromptPatternsTa?.value ?? '',
         excludeGeneratedPatternsEnabled: genAttrExcludeGeneratedPatternsEnable?.checked ?? true,
         excludeGeneratedPatternsText: genAttrExcludeGeneratedPatternsTa?.value ?? '',
+        deletePromptPatternsEnabled: genAttrDeletePromptPatternsEnable?.checked ?? false,
+        deletePromptPatternsText: genAttrDeletePromptPatternsTa?.value ?? '',
         selectedNodeId: dagHandle.getSelectedNodeId(),
     };
 }
@@ -1428,18 +1514,28 @@ function syncGenAttrResetUiOptionsButtonState(): void {
  */
 function applyGenAttrExcludePatternsFromDemoUiSnap(snap: Partial<GenAttrDemoUiOptions>): void {
     const {
+        deletePromptPatternsEnabled,
+        deletePromptPatternsText,
         excludePromptPatternsEnabled,
         excludePromptPatternsText,
         excludeGeneratedPatternsEnabled,
         excludeGeneratedPatternsText,
     } = snap;
     if (
+        deletePromptPatternsEnabled === undefined &&
+        deletePromptPatternsText === undefined &&
         excludePromptPatternsEnabled === undefined &&
         excludePromptPatternsText === undefined &&
         excludeGeneratedPatternsEnabled === undefined &&
         excludeGeneratedPatternsText === undefined
     ) {
         return;
+    }
+    if (deletePromptPatternsEnabled !== undefined && genAttrDeletePromptPatternsEnable) {
+        genAttrDeletePromptPatternsEnable.checked = deletePromptPatternsEnabled;
+    }
+    if (deletePromptPatternsText !== undefined && genAttrDeletePromptPatternsTa) {
+        genAttrDeletePromptPatternsTa.value = deletePromptPatternsText;
     }
     if (excludePromptPatternsEnabled !== undefined && genAttrExcludePromptPatternsEnable) {
         genAttrExcludePromptPatternsEnable.checked = excludePromptPatternsEnabled;
@@ -1453,7 +1549,9 @@ function applyGenAttrExcludePatternsFromDemoUiSnap(snap: Partial<GenAttrDemoUiOp
     if (excludeGeneratedPatternsText !== undefined && genAttrExcludeGeneratedPatternsTa) {
         genAttrExcludeGeneratedPatternsTa.value = excludeGeneratedPatternsText;
     }
-    syncGenAttrExcludePatternTextareasDisabled();
+    syncEnableGatedTextInputVisibility(genAttrDeletePromptPatternsEnable, genAttrDeletePromptPatternsTa);
+    syncEnableGatedTextInputVisibility(genAttrExcludePromptPatternsEnable, genAttrExcludePromptPatternsTa);
+    syncEnableGatedTextInputVisibility(genAttrExcludeGeneratedPatternsEnable, genAttrExcludeGeneratedPatternsTa);
 }
 
 /** demo 快照未写入的键用 {@link DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS} 补齐（仅打包 demo 加载路径）。 */
@@ -1615,6 +1713,8 @@ const GEN_ATTR_DEMO_UI_LOCAL_STORAGE_KEYS: readonly string[] = [
     GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY,
     GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY,
     GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY,
+    GEN_ATTR_DELETE_PROMPT_PATTERNS_STORAGE_KEY,
+    GEN_ATTR_DELETE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
     GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY,
     GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
     GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY,
@@ -1651,43 +1751,6 @@ window.addEventListener('pagehide', (ev) => {
     dagHandle.detach();
 });
 
-function onExcludePatternsEffectiveChange(): void {
-    const h = runnerHandle;
-    if (!h || h.tokenCount === 0) return;
-    tryResetAndReplayDag();
-}
-
-function bindExcludePatternControls(
-    enableEl: HTMLInputElement | null,
-    textEl: HTMLTextAreaElement | null,
-    textKey: string,
-    enabledKey: string,
-): void {
-    enableEl?.addEventListener('change', () => {
-        if (textEl) lsSet(textKey, textEl.value);
-        lsWriteBool(enabledKey, enableEl.checked, '1');
-        syncGenAttrExcludePatternTextareasDisabled();
-        onExcludePatternsEffectiveChange();
-    });
-    textEl?.addEventListener('blur', () => {
-        lsSet(textKey, textEl.value);
-        onExcludePatternsEffectiveChange();
-    });
-}
-
-bindExcludePatternControls(
-    genAttrExcludePromptPatternsEnable,
-    genAttrExcludePromptPatternsTa,
-    GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY,
-    GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
-);
-bindExcludePatternControls(
-    genAttrExcludeGeneratedPatternsEnable,
-    genAttrExcludeGeneratedPatternsTa,
-    GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY,
-    GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY,
-);
-
 // --- 状态 ---
 
 /** 供导出 demo JSON；从缓存恢复时由 applyGenAttrCachedRun 写入 */
@@ -1720,6 +1783,9 @@ function getInputSnapshotForRun(): string {
         sys: (systemTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
         user: (userTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
         think: isEnableThinking(),
+        toolCalling: isToolCallingEnabled(),
+        multiTurn: isMultiTurnEnabled(),
+        toolConfig: toolConfigFingerprint(getCurrentToolConfig()),
         ...runOpts,
     });
 }
@@ -1930,6 +1996,7 @@ async function applyGenAttrCachedRun(
                 genAttrEnableThinkingInput.checked,
             );
         }
+        restoreToolCallingFromDraft(draft);
     } else {
         if (skipChatTemplateInput) {
             skipChatTemplateInput.checked = true;
@@ -2219,17 +2286,23 @@ async function resolveInitialContext(signal: AbortSignal): Promise<string> {
     const user = (userTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
     const useSystem = isGenAttrUseSystemPrompt();
     const systemRaw = (systemTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
-    const promptReq: { model: string; prompt: string; system?: string; enable_thinking?: boolean } = {
-        model: currentModelVariant(),
-        prompt: user,
-    };
+    const messages: {
+        role: 'system' | 'user';
+        content: string;
+    }[] = [];
     if (useSystem) {
-        promptReq.system = systemRaw;
+        messages.push({ role: 'system', content: systemRaw });
     }
-    if (isEnableThinking()) {
-        promptReq.enable_thinking = true;
-    }
-    const assembled = await postCompletionsPrompt(promptReq, { signal });
+    messages.push({ role: 'user', content: user });
+    const assembled = await postCompletionsPrompt(
+        {
+            model: currentModelVariant(),
+            messages,
+            tools: isToolCallingEnabled() ? getCurrentToolConfig().tools_schema : undefined,
+            enable_thinking: isEnableThinking() ? true : undefined,
+        },
+        { signal }
+    );
     return assembled.prompt_used;
 }
 
@@ -2259,10 +2332,71 @@ async function autoMoveFirstTeacherForcingTokenToPromptIfNeeded(): Promise<void>
     teacherForcingTextarea?.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function buildGenAttrCacheKeyForRun(params: {
+    initialContext: string;
+    model: string;
+    maxTokens: number;
+    teacherForcingText?: string;
+    stopAfterTF: boolean;
+    multiTurn: boolean;
+}): GenAttrCacheKey {
+    return {
+        initialContext: params.initialContext,
+        model: params.model,
+        maxTokens: params.maxTokens,
+        ...(params.teacherForcingText !== undefined
+            ? {
+                  teacherForcing: params.teacherForcingText,
+                  stopAfterTeacherForcing: params.stopAfterTF,
+              }
+            : {}),
+        ...(params.multiTurn
+            ? { toolConfigFingerprint: toolConfigFingerprint(getCurrentToolConfig()) }
+            : {}),
+    };
+}
+
+function persistGenAttrRunToCache(
+    reason: CompletionFinishReason,
+    stepsToStore: TokenGenStep[],
+    cacheKey: GenAttrCacheKey,
+    runDraft: GenAttrRunDraft,
+): void {
+    if (stepsToStore.length < 1) return;
+    const cacheStatus: 'partial' | 'complete' =
+        reason === 'stop' || reason === 'length' ? 'complete' : 'partial';
+    void save(cacheKey, stepsToStore, currentRunPromptSpans, cacheStatus, reason, runDraft)
+        .then(({ contentKey }) => genCachedHistory.refreshList().then(() => contentKey))
+        .then((contentKey) => syncGenAttrContentUrl(contentKey))
+        .catch((e) => console.warn('[causal_flow] save cached run failed:', e));
+}
+
+function finishAttributionRun(
+    reason: CompletionFinishReason,
+    stepsToStore: TokenGenStep[],
+    cacheKey: GenAttrCacheKey,
+    runDraft: GenAttrRunDraft,
+): void {
+    genAbort = null;
+    multiTurnAttributionHandle = null;
+    toolCallingPendingLine?.hide();
+    setGenLoading(false);
+    lastRunCompletionReason = reason;
+    if (stepsToStore.length >= 1) {
+        runnerHandle = createHydratedTokenGenHandle(stepsToStore);
+        persistGenAttrRunToCache(reason, stepsToStore, cacheKey, runDraft);
+    }
+    completeReasonEl.text(completionFinishReasonLabel(reason));
+    scheduleDagLastTokenDwell(() => {
+        dagHandle.clearNodeSelection();
+    });
+}
+
 async function runGeneration(): Promise<void> {
     if (inFlight || !isInputReadyForRun()) return;
 
     genAbort?.abort();
+    multiTurnAttributionHandle?.abort();
     genAbort = new AbortController();
     const { signal } = genAbort;
 
@@ -2270,7 +2404,9 @@ async function runGeneration(): Promise<void> {
     dagPlaybackNextIndex = 0;
 
     setGenLoading(true);
+    toolCallingPendingLine?.hide();
     runnerHandle = null;
+    multiTurnAttributionHandle = null;
     lastRunInitialContext = '';
     lastRunInputSnapshot = null;
     lastRunCompletionReason = null;
@@ -2285,6 +2421,7 @@ async function runGeneration(): Promise<void> {
         const maxTokens = currentMaxTokens();
         const tokenizeModel = currentModelVariant();
         const runDraft = buildGenAttrRunDraftForCache();
+        const multiTurn = useMultiTurnAttribution();
         const prompt = getActivePromptValue();
         initialContext = await resolveInitialContext(signal);
         lastRunInitialContext = initialContext;
@@ -2307,69 +2444,114 @@ async function runGeneration(): Promise<void> {
         }
 
         let initialPromptTokens: number | undefined;
+        const allSteps: TokenGenStep[] = [];
         currentRunPromptSpans = [];
+        initialPromptInputSpans = [];
         setGenAttrUsageMetric(undefined, 0);
 
-        dagHandle.reset();
-        void fetchTokenize(apiBaseForRequests, initialContext, tokenizeModel).then((spans) => {
-            currentRunPromptSpans = spans;
-            if (spans.length > 0) {
-                dagHandle.setPromptTokenSpans(spans, initialContext);
-                dagHandle.fitViewportToContent();
+        const cacheKey = buildGenAttrCacheKeyForRun({
+            initialContext,
+            model: tokenizeModel,
+            maxTokens,
+            teacherForcingText,
+            stopAfterTF,
+            multiTurn,
+        });
+        const flowId = createFlowId();
+
+        const onAttributionStep = (step: TokenGenStep, stepIndex: number): void => {
+            if (stepIndex === 0) {
+                initialPromptTokens = initialPromptTokensFromFirstStep(step);
+                if (currentRunPromptSpans.length === 0) {
+                    const fallbackSpans = extractPromptTokenSpans(step);
+                    currentRunPromptSpans = fallbackSpans;
+                    if (initialPromptInputSpans.length === 0) {
+                        initialPromptInputSpans = fallbackSpans;
+                    }
+                }
             }
-        }).catch(() => { /* 失败静默，step 0 回调兜底 */ });
+            const excludeCtx = step.context + step.token;
+            pushDagFromPreprocess(step, stepIndex, true, excludeCtx);
+            dagPlaybackNextIndex = stepIndex + 1;
+            setGenAttrUsageMetric(initialPromptTokens, stepIndex + 1);
+            showAttributionForStepIndex(stepIndex);
+        };
+
+        dagHandle.reset();
+        const tokenizeText = initialContext;
+        void fetchTokenize(apiBaseForRequests, tokenizeText, tokenizeModel)
+            .then((spans) => {
+                initialPromptInputSpans = spans;
+                // 仅在 onAttributionStep / onInputSpansAppended 尚未更新时设为初始值；
+                // 避免多轮场景下 tokenize 延迟返回时覆盖 tool response spans。
+                if (currentRunPromptSpans.length === 0) {
+                    currentRunPromptSpans = spans;
+                }
+                if (spans.length > 0) {
+                    syncDagInputLayerAtStep({
+                        catalogSpans: spans,
+                        layoutWire: tokenizeText,
+                        inputRanges: [[0, tokenizeText.length]],
+                        fitViewport: true,
+                    });
+                }
+            })
+            .catch(() => {
+                /* 失败静默，step 0 回调兜底 */
+            });
+
+        if (multiTurn) {
+            multiTurnAttributionHandle = runMultiTurnAttribution({
+                apiPrefix: apiBaseForRequests,
+                model: tokenizeModel,
+                maxTokens,
+                initialContext,
+                teacherForcing: teacherForcingText,
+                toolConfig: getCurrentToolConfig(),
+                enableThinking: isEnableThinking(),
+                flowId,
+                signal,
+                onStep(step) {
+                    allSteps.push(step);
+                    runnerHandle = createHydratedTokenGenHandle(allSteps);
+                    onAttributionStep(step, allSteps.length - 1);
+                },
+                getPromptInputSpans: () => initialPromptInputSpans,
+                onInputSpansAppended(allInputSpans, fullWire, inputRanges) {
+                    currentRunPromptSpans = allInputSpans;
+                    syncDagInputLayerAtStep({
+                        catalogSpans: allInputSpans,
+                        layoutWire: fullWire,
+                        inputRanges,
+                        fitViewport: true,
+                    });
+                },
+                mockToolGapUi: toolCallingPendingLine,
+                onAllComplete(reason) {
+                    finishAttributionRun(reason, allSteps, cacheKey, runDraft);
+                },
+                onError(err) {
+                    showToast(err.message, 'error');
+                },
+            });
+            return;
+        }
+
         runnerHandle = startTokenGenAttribution({
             initialContext,
             apiPrefix: apiBaseForRequests,
             model: tokenizeModel,
             maxTokens,
-            flowId: createFlowId(),
+            flowId,
             teacherForcingContinuation: teacherForcingText,
             stopAfterTeacherForcing: stopAfterTF,
             onStep(step, stepIndex) {
-                if (stepIndex === 0) {
-                    initialPromptTokens = initialPromptTokensFromFirstStep(step);
-                    // tokenize 失败时兜底：从 step 0 归因派生 spans
-                    if (currentRunPromptSpans.length === 0) {
-                        currentRunPromptSpans = extractPromptTokenSpans(step);
-                    }
-                }
-                const h = runnerHandle;
-                if (!h) return;
-                const excludeCtx = excludeIntervalContextFromSteps(h.getAllSteps());
-                pushDagFromPreprocess(step, stepIndex, true, excludeCtx);
-                dagPlaybackNextIndex = stepIndex + 1;
-                setGenAttrUsageMetric(initialPromptTokens, stepIndex + 1);
-                showAttributionForStepIndex(stepIndex);
+                allSteps.push(step);
+                runnerHandle = createHydratedTokenGenHandle(allSteps);
+                onAttributionStep(step, stepIndex);
             },
             onComplete(reason) {
-                genAbort = null;
-                setGenLoading(false);
-                const h = runnerHandle;
-                const ic = lastRunInitialContext;
-                lastRunCompletionReason = reason;
-                if (h && ic && h.tokenCount >= 1) {
-                    const stepsToStore = h.getAllSteps();
-                    const cacheStatus: 'partial' | 'complete' =
-                        reason === 'stop' || reason === 'length' ? 'complete' : 'partial';
-                    const cacheKey: GenAttrCacheKey = {
-                        initialContext: ic,
-                        model: tokenizeModel,
-                        maxTokens,
-                        ...(teacherForcingText !== undefined ? {
-                            teacherForcing: teacherForcingText,
-                            stopAfterTeacherForcing: stopAfterTF,
-                        } : {}),
-                    };
-                    void save(cacheKey, stepsToStore, currentRunPromptSpans, cacheStatus, reason, runDraft)
-                        .then(({ contentKey }) => genCachedHistory.refreshList().then(() => contentKey))
-                        .then((contentKey) => syncGenAttrContentUrl(contentKey))
-                        .catch((e) => console.warn('[causal_flow] save cached run failed:', e));
-                }
-                completeReasonEl.text(completionFinishReasonLabel(reason));
-                scheduleDagLastTokenDwell(() => {
-                    dagHandle.clearNodeSelection();
-                });
+                finishAttributionRun(reason, allSteps, cacheKey, runDraft);
             },
             onError(err) {
                 showToast(err.message, 'error');
@@ -2393,6 +2575,7 @@ submitBtn.on('click', () => {
         postCompletionsStop();
         genAbort?.abort();
         runnerHandle?.abort();
+        multiTurnAttributionHandle?.abort();
         return;
     }
     void runGeneration();

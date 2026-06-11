@@ -55,7 +55,7 @@ function buildFromServerBpeStrings(
 
 /**
  * 将 completions 结果转为 GLTR_Text_Box 所需数据结构（仅续写段；offset 与后端一致，不经平移）。
- * 实际 prompt 由 Chat 页另一 DOM（#chat_prompt_used）单独展示。
+ * 实际 prompt 由 Chat 页 segments 区的 input 段单独展示。
  * 续写非空时**必须**提供有效 `info_radar.bpe_strings`。
  */
 export function buildCompletionDisplayResult(

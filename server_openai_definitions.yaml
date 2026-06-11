@@ -7,25 +7,34 @@ definitions:
 
   # --- Completions /v1/completions ---
 
-  # POST /v1/completions/prompt：将用户原文套用 chat template，返回实际送入续写接口的字符串
+  # POST /v1/completions/prompt
   OpenAICompletionsPromptRequest:
     type: object
     additionalProperties: true
     required:
       - model
-      - prompt
+      - messages
     properties:
       model:
         type: string
         description: Model ID
-      prompt:
-        description: 用户输入原文（非已格式化全文）
-        type: string
-      system:
-        description: 可选；chat template 的 system 段。省略时不拼装 system（仅 user）；传入字符串时原样作为 system 段（含空字符串、仅空白等）
-        type: string
+      messages:
+        description: OpenAI 形状消息数组；含 system/user/assistant/tool
+        type: array
+        items:
+          type: object
+          additionalProperties: true
+      tools:
+        description: 可选；注入 chat template 的工具 JSON schema 数组；省略时不注入
+        type: array
+        items:
+          type: object
+          additionalProperties: true
       enable_thinking:
         description: 可选；是否启用 Qwen3 chat template 的 thinking 模式；省略或 false 时不插入 thinking 块
+        type: boolean
+      enable_tool_calling:
+        description: 已废弃；请传 tools 数组
         type: boolean
 
   OpenAICompletionsPromptResponse:
@@ -36,6 +45,35 @@ definitions:
       prompt_used:
         type: string
         description: 套用 chat template 后、与 POST /v1/completions 的 prompt 字段同义的完整模型输入
+
+  # POST /v1/completions/prompt-incremental
+  OpenAICompletionsPromptIncrementalRequest:
+    type: object
+    required:
+      - model
+      - tool_content
+    properties:
+      model:
+        type: string
+        description: Model ID
+      tool_content:
+        type: string
+        description: tool 消息的 content（mock 返回值）
+      tool_name:
+        type: string
+        description: 可选；tool 消息的 name 字段
+      enable_thinking:
+        description: 可选；与生成时一致；控制 generation scaffold 是否含 thinking 块
+        type: boolean
+
+  OpenAICompletionsPromptIncrementalResponse:
+    type: object
+    required:
+      - incremental_suffix
+    properties:
+      incremental_suffix:
+        type: string
+        description: wire 追加 tool response 及下一轮 generation scaffold 的字面量后缀
 
   OpenAICompletionsRequest:
     type: object

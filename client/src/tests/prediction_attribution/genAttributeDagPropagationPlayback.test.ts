@@ -5,8 +5,11 @@
 import {
     batchPlaybackDelayMs,
     computePropagationGroupPacings,
+    DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS,
+    DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS,
     FORWARD_PROMPT_FRAME_DWELL_MS,
     propagationRunningMaxLookaheadForGroupCount,
+    resolveDagStepPlaybackDelays,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagPropagationPlaybackPacing';
 import { buildMaxNormalizedRenderStrengthByKey } from '../../shared/prediction_attribution/causal_flow/genAttributeDagEdgeRenderStrength';
 import {
@@ -148,6 +151,32 @@ assertEq(
     batchPlaybackDelayMs({ propagationWeight: 0 }, plan, totalPacing),
     0,
 );
+
+// ── resolveDagStepPlaybackDelays ────────────────────────────────────────────
+console.log('3b. resolveDagStepPlaybackDelays');
+{
+    const step = resolveDagStepPlaybackDelays(10, 1, { mode: 'step', stepMs: 200, totalS: 7 });
+    assertEq('step：gen 间隔', step.stepDelayMs, 200);
+    assertEq(
+        'step：等 response = 3× step',
+        step.waitUntilResponseMs,
+        200 * DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS,
+    );
+    assertEq(
+        'step：input 后首 gen = 2× step',
+        step.waitAfterInputMs,
+        200 * DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS,
+    );
+    const total = resolveDagStepPlaybackDelays(10, 1, { mode: 'total', stepMs: 200, totalS: 7 });
+    const weightTotal =
+        10 + DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS + DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS;
+    assertEq('total：stepDelay 按权重分母', total.stepDelayMs, Math.round(7000 / weightTotal));
+    assertEq(
+        'total：等 response = 3× step',
+        total.waitUntilResponseMs,
+        total.stepDelayMs * DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS,
+    );
+}
 
 // ── buildPropagationPlaybackPlan ────────────────────────────────────────────
 console.log('4. buildPropagationPlaybackPlan');

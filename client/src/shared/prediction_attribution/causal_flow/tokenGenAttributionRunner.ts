@@ -21,6 +21,8 @@ function splitCodePointPrefix(text: string, prefixLength: number): { prefix: str
     };
 }
 
+export type CharRange = [number, number];
+
 export type TokenGenStep = {
     /** 本步归因所用的 context（不含新 token） */
     context: string;
@@ -28,6 +30,8 @@ export type TokenGenStep = {
      * 静态初始 prompt 在 `context` 中的 exclusive 结尾下标；`context.slice(0, promptRegionEnd)` 为不含已生成后缀的 prompt。
      */
     promptRegionEnd: number;
+    /** `context` 中属于 input（prompt + tool response）的区间；output 为其余部分。 */
+    inputRanges: CharRange[];
     response: AttributionApiResponse;
     /** 本步生成的 token 字符串（即 response.target_token） */
     token: string;
@@ -226,6 +230,7 @@ export function startTokenGenAttribution(opts: TokenGenAttributionOptions): Toke
             const step: TokenGenStep = {
                 context,
                 promptRegionEnd,
+                inputRanges: [[0, promptRegionEnd]],
                 response,
                 token,
                 currentText: generatedText,

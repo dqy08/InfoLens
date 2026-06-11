@@ -268,21 +268,25 @@ def log_prediction_attribute_request(
 
 def log_openai_completions_prompt_request(
     model: str,
-    user_prompt: str,
-    system: Optional[str] = None,
+    *,
+    messages: list,
     enable_thinking: bool = False,
+    tools_count: int = 0,
     client_ip: str = None,
 ) -> None:
     """记录 POST /v1/completions/prompt（仅拼装 chat template，不分配 req_id）。"""
     preview = 50
-
-    up = _log_str_preview(user_prompt, preview)
-    if system is None:
-        details = f"model='{model}', enable_thinking={enable_thinking}, user_prompt='{up}'"
-    else:
-        details = (
-            f"model='{model}', enable_thinking={enable_thinking}, "
-            f"system='{_log_str_preview(system, preview)}', user_prompt='{up}'"
-        )
+    user_msgs = [
+        m["content"]
+        for m in messages
+        if isinstance(m, dict) and m.get("role") == "user" and isinstance(m.get("content"), str)
+    ]
+    last_user = user_msgs[-1] if user_msgs else ""
+    flags = (
+        f"enable_thinking={enable_thinking}, messages={len(messages)}, tools={tools_count}"
+    )
+    details = (
+        f"model='{model}', {flags}, user_prompt='{_log_str_preview(last_user, preview)}'"
+    )
     log_request("📥 openai completions/prompt 请求", details, client_ip)
 

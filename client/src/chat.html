@@ -85,6 +85,7 @@
                                 </div>
                             </div>
                         </div>
+                        <div id="tool_calling_options_mount"></div>
                         <div class="chat-prompt-panel">
                             <div class="input-header">
                                 <span class="semantic-submode-label" data-i18n>User</span>
@@ -177,19 +178,17 @@
 
         <section class="right_panel">
             <div class="chat-right-stack">
-                <div id="chat_prompt_used" class="chat-prompt-used truncated-text" hidden></div>
-                <div id="chat_streaming_preview" class="chat-streaming-preview" hidden></div>
-                <div id="results">
+                <div class="chat-readout-body">
+                    <div id="chat_segments_container" class="chat-segments-container"></div>
+                    <div id="chat_streaming_preview" class="chat-streaming-preview" hidden></div>
+                </div>
                 <div id="major_tooltip" class="tooltip">
                     <div class="currentToken"></div>
                     <div class="myDetail"></div>
                     <br />
                     <div class="predictions predictions-table"></div>
                 </div>
-                </div>
-                <div class="chat-copy-fulltext-row">
-                    <button type="button" id="chat_copy_fulltext_btn" class="text-action-btn">Copy full text</button>
-                </div>
+                <button type="button" id="chat_copy_fulltext_btn" class="text-action-btn chat-copy-fulltext-btn" data-i18n>Copy full text</button>
             </div>
         </section>
     </main>

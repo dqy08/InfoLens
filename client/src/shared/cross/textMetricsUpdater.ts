@@ -10,7 +10,7 @@ export type ApiTokenUsage = {
 };
 
 function usageTokenLabel(n: unknown): string {
-    return typeof n === 'number' && Number.isFinite(n) ? String(n) : 'unknown';
+    return typeof n === 'number' && Number.isFinite(n) ? String(n) : '-';
 }
 
 function formatApiUsageLine(usage: ApiTokenUsage | null | undefined): string | null {

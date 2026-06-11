@@ -10,23 +10,43 @@ type BindExcludePatternsUiStorageKeys = {
     enabledKey: string;
 };
 
-type BindExcludePatternsUiOptions = {
+export type BindExcludePatternsUiOptions = {
     storageKeys: BindExcludePatternsUiStorageKeys;
     textInput: HTMLInputElement | HTMLTextAreaElement | null;
     enableCheckbox: HTMLInputElement | null;
-    /** 列表在失焦提交后、或使能变化后触发（如 inspector.reapply） */
+    /** 列表在失焦提交后、或使能变化后触发（如 inspector.reapply / DAG 回放） */
     onEffectiveChange: () => void;
     /** 键从未写入（`null`）时填充，与持久化 `''`（用户清空）区分 */
     defaultTextWhenKeyAbsent?: string;
+    /** enable 键从未写入时的默认勾选态；缺省 `true`（与 Attribution Exclude 一致） */
+    defaultEnabledWhenKeyAbsent?: boolean;
 };
 
-export type BindExcludePromptPatternsUiOptions = Omit<BindExcludePatternsUiOptions, 'storageKeys' | 'defaultTextWhenKeyAbsent'>;
+export type BindExcludePromptPatternsUiOptions = Omit<
+    BindExcludePatternsUiOptions,
+    'storageKeys' | 'defaultTextWhenKeyAbsent' | 'defaultEnabledWhenKeyAbsent'
+>;
+
+export function syncEnableGatedTextInputVisibility(
+    enableCheckbox: HTMLInputElement | null,
+    textInput: HTMLElement | null,
+): void {
+    if (!textInput) return;
+    textInput.hidden = !enableCheckbox?.checked;
+}
 
 /**
- * 从 localStorage 回填、同步文本框禁用态、绑定持久化与回调（多组 key 共用实现）。
+ * 从 localStorage 回填、同步输入框可见性、绑定持久化与回调（多组 key 共用实现）。
  */
-function bindExcludePatternsUi(options: BindExcludePatternsUiOptions): void {
-    const { storageKeys, textInput, enableCheckbox, onEffectiveChange, defaultTextWhenKeyAbsent } = options;
+export function bindExcludePatternsUi(options: BindExcludePatternsUiOptions): void {
+    const {
+        storageKeys,
+        textInput,
+        enableCheckbox,
+        onEffectiveChange,
+        defaultTextWhenKeyAbsent,
+        defaultEnabledWhenKeyAbsent = true,
+    } = options;
     const { textKey, enabledKey } = storageKeys;
 
     try {
@@ -39,24 +59,22 @@ function bindExcludePatternsUi(options: BindExcludePatternsUiOptions): void {
             }
         }
         if (enableCheckbox) {
-            enableCheckbox.checked = lsReadBool(enabledKey, true, { encoding: '1' });
+            enableCheckbox.checked = lsReadBool(enabledKey, defaultEnabledWhenKeyAbsent, {
+                encoding: '1',
+            });
         }
     } catch {
         // 读取失败则保持 HTML 默认
     }
 
-    function syncTextInputDisabled(): void {
-        if (!textInput) return;
-        textInput.disabled = !enableCheckbox?.checked;
-    }
-    syncTextInputDisabled();
+    syncEnableGatedTextInputVisibility(enableCheckbox, textInput);
 
     enableCheckbox?.addEventListener('change', () => {
         if (textInput) {
             lsSet(textKey, textInput.value);
         }
         lsWriteBool(enabledKey, enableCheckbox.checked, '1');
-        syncTextInputDisabled();
+        syncEnableGatedTextInputVisibility(enableCheckbox, textInput);
         onEffectiveChange();
     });
 
@@ -73,16 +91,17 @@ function bindExcludePatternsUi(options: BindExcludePatternsUiOptions): void {
         }
         if (k === textKey && textInput) textInput.value = event.newValue ?? '';
         if (k === enabledKey && enableCheckbox) {
-            enableCheckbox.checked = event.newValue === null ? true : event.newValue === '1';
+            enableCheckbox.checked =
+                event.newValue === null ? defaultEnabledWhenKeyAbsent : event.newValue === '1';
         }
-        syncTextInputDisabled();
+        syncEnableGatedTextInputVisibility(enableCheckbox, textInput);
         onEffectiveChange();
     });
 }
 
 /**
- * Exclude prompt patterns：归因页绑定；键名见 {@link ./attributionExcludePromptPatternsStorage}。
- * Generate & Attribute 页的排除在 `gen_attribute.ts` 内单独绑定（`info_radar_gen_attr_exclude_*`）。
+ * Attribution 页 Exclude prompt；键名见 {@link ./attributionExcludePromptPatternsStorage}。
+ * Generate & Attribute 三行（Delete / Exclude prompt / Exclude generated）用 {@link bindExcludePatternsUi}。
  */
 export function bindExcludePromptPatternsUi(options: BindExcludePromptPatternsUiOptions): void {
     bindExcludePatternsUi({

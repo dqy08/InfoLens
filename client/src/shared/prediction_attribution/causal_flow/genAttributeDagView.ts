@@ -4,12 +4,14 @@ import type { D3Sel } from '../../core/Util';
 import { visualizeSpecialChars } from '../../cross/tokenDisplayUtils';
 import {
     clampDagEdgeTopPCoverage,
+    collectDeletePromptIntervals,
     collectGenAttrDagExcludeIntervals,
     DAG_EDGE_TOP_P_COVERAGE_DEFAULT,
     excludeNodeAggregatedEntries,
     phase2RankAndSparsify,
     type PromptTokenSpan,
 } from './genAttributeDagPreprocess';
+import type { CharRange } from './tokenGenAttributionRunner';
 import {
     DAG_EDGE_MIN_NORMALIZED_SCORE,
     DAG_MIN_ATTRIBUTION_SHARE,
@@ -560,12 +562,18 @@ function syncNodeStrokeRects(
         .attr('ry', (d) => nodeRx(d) + p);
 }
 
+export type SetPromptTokenSpansOpts = {
+    /** exclude 语义；未传时默认 `[[0, layoutWire.length)]` */
+    inputRanges?: CharRange[];
+};
+
 export type GenAttributeDagHandle = {
     /**
-     * 在首帧 `update`（第一步生成 token）之前调用一次：用全量 prompt token spans 建 prompt 层节点。
-     * @param promptText 本步 `context` 全文（与 offsets 一致）
+     * 在首帧 `update`（第一步生成 token）之前调用：用累积 input token spans 建 prompt 层节点。
+     * 可多次调用；每次传入全量 input spans 与 layout wire，view 内部 diff 追加新节点。
+     * @param layoutWire 与 offsets 同系的累积全文（首帧可为纯 prompt；回放/追加时为完整 wire）
      */
-    setPromptTokenSpans(spans: PromptTokenSpan[], promptText: string): void;
+    setPromptTokenSpans(spans: PromptTokenSpan[], layoutWire: string, opts?: SetPromptTokenSpansOpts): void;
     /**
      * 每生成一个 token 后调用，增量更新图；传入原始 {@link TokenGenStep}，view 内部完成 exclude / 对齐 / 筛选。
      * @param excludeIntervalContext 与 {@link ./genAttributeDagPreprocess excludeNodeAggregatedEntries} 一致：当前已写出的累积全文（如 `steps[last].context + steps[last].token`）。
@@ -968,6 +976,12 @@ export type InitGenAttributeDagViewOptions = {
     getEffectiveExcludePromptPatternsText: () => string;
     /** 已生成后缀区排除正则的生效全文（勾选关则 `''`）。 */
     getEffectiveExcludeGeneratedPatternsText: () => string;
+    /**
+     * DAG prompt 删除正则的生效全文（勾选关则 `''`）。
+     * 命中的 prompt token 从 DAG 中彻底移除，不占布局空间（比 exclude+hide 更严格）。
+     * 每次 {@link GenAttributeDagHandle.setPromptTokenSpans} 按当前 input 区间重算。
+     */
+    getEffectiveDeletePromptPatternsText: () => string;
 };
 
 export function initGenAttributeDagView(
@@ -1049,7 +1063,11 @@ export function initGenAttributeDagView(
         };
     }
 
-    const { getEffectiveExcludePromptPatternsText, getEffectiveExcludeGeneratedPatternsText } = options;
+    const {
+        getEffectiveExcludePromptPatternsText,
+        getEffectiveExcludeGeneratedPatternsText,
+        getEffectiveDeletePromptPatternsText,
+    } = options;
 
     detachGenAttributeDagPanel.get(rootEl)?.();
     resultsRoot
@@ -1117,7 +1135,7 @@ export function initGenAttributeDagView(
         setMeasureWidthPx(options.measureWidthPx);
     }
 
-    const textMeasure = createGenAttributeDagTextMeasure(measureRoot);
+    let textMeasure = createGenAttributeDagTextMeasure(measureRoot);
 
     /**
      * 与 `--gen-attr-dag-display-scale` 一致；`setDagCompactness` 会更新（并同步 `linkEndInsetPx`）。
@@ -1406,6 +1424,11 @@ export function initGenAttributeDagView(
      * {@link update} 中刷新；{@link reset} 清空。
      */
     let dagExcludeIntervals: [number, number][] = [];
+    /**
+     * 每次 {@link setPromptTokenSpans} 按当前 `layoutWire` + `inputRanges` 重算（与 exclude 一致；多轮追加 input 区时扩展）。
+     * 命中区间内的 prompt token 不进入图也不进入测量层（textMeasure 物理压缩布局空间）。
+     */
+    let dagDeleteIntervals: [number, number][] = [];
     /**
      * 用户是否手动改动过布局：拖节点 或 用户手势 zoom/pan。
      * - true 时：容器尺寸变化（窗口 resize / 侧栏）不再自动 fit，保留用户视图
@@ -1981,13 +2004,34 @@ export function initGenAttributeDagView(
         return batchDepth > 0;
     }
 
-    function setPromptTokenSpans(spans: PromptTokenSpan[], promptText: string): void {
-        const geomByKey = textMeasure.setPrompt(promptText, spans);
+    function setPromptTokenSpans(
+        allInputSpans: PromptTokenSpan[],
+        layoutWire: string,
+        opts?: SetPromptTokenSpansOpts,
+    ): void {
+        const inputRanges = opts?.inputRanges ?? [[0, layoutWire.length] as [number, number]];
+        dagDeleteIntervals = collectDeletePromptIntervals(
+            layoutWire,
+            inputRanges,
+            getEffectiveDeletePromptPatternsText(),
+        );
+        if (textMeasure.isEmpty()) {
+            textMeasure = createGenAttributeDagTextMeasure(measureRoot, dagDeleteIntervals);
+        } else {
+            textMeasure.setDeleteIntervals(dagDeleteIntervals);
+        }
+        // 排除已在图中的节点，以及落入删除区间的节点（不加入图，也不加入测量层）。
+        const newSpans = allInputSpans.filter((attr) => {
+            const [ns, ne] = attr.offset;
+            return !graph.hasNode(`${ns}_${ne}`) && !isOffsetSpanFullyExcluded(ns, ne, dagDeleteIntervals);
+        });
+        const geomByKey = textMeasure.isEmpty()
+            ? textMeasure.setPrompt(layoutWire, allInputSpans)
+            : textMeasure.appendInputSpans(layoutWire, newSpans);
         const addedNodes: DagNode[] = [];
-        for (const attr of spans) {
+        for (const attr of newSpans) {
             const [ns, ne] = attr.offset;
             const srcId = `${ns}_${ne}`;
-            if (graph.hasNode(srcId)) continue;
             const g = geomByKey.get(srcId);
             if (!g) {
                 throw new Error(`genAttributeDagView: missing layout for prompt node ${srcId}`);
@@ -2019,12 +2063,12 @@ export function initGenAttributeDagView(
             snapSubwordNode(addedNodes[i]!, prevIdx >= 0 ? nodes[prevIdx]! : null);
         }
         dagExcludeIntervals = collectGenAttrDagExcludeIntervals(
-            promptText,
-            promptText.length,
+            layoutWire,
+            inputRanges,
             getEffectiveExcludePromptPatternsText(),
             getEffectiveExcludeGeneratedPatternsText(),
         );
-        // prompt 节点 step=-1 始终排在末尾；重建一次即可（setPromptTokenSpans 只调一次）。
+        // prompt 节点 step=-1 始终排在末尾；可多次调用（已有节点跳过）。
         nodesSortedByStepDesc = [...nodes].sort((a, b) => b.step - a.step || b.start - a.start);
         if (batchDepth === 0) syncGraphToSvg();
     }
@@ -2142,7 +2186,7 @@ export function initGenAttributeDagView(
 
         const excludeIntervals = collectGenAttrDagExcludeIntervals(
             intervalCtx,
-            step.promptRegionEnd,
+            step.inputRanges,
             getEffectiveExcludePromptPatternsText(),
             getEffectiveExcludeGeneratedPatternsText(),
         );
@@ -2166,6 +2210,7 @@ export function initGenAttributeDagView(
         clearGenAttributeDagAlignmentWarnDedupe();
         recursiveEdgeAnimation.onClear();
         textMeasure.reset();
+        textMeasure = createGenAttributeDagTextMeasure(measureRoot);
         graph.clear();
         nodes = [];
         nodesSortedByStepDesc = [];
@@ -2183,6 +2228,7 @@ export function initGenAttributeDagView(
         nodeG.selectAll('*').remove();
         nodeGHit.selectAll('*').remove();
         dagExcludeIntervals = [];
+        dagDeleteIntervals = [];
         layoutIncludedNodeIdsKey = LAYOUT_INCLUDED_ALL_KEY;
         linkSel = rootG
             .selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link')

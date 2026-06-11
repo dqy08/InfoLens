@@ -763,9 +763,8 @@ paths:
         - openai
       summary: Apply chat template to user text (completion prompt assembly)
       description: |
-        将 prompt 作为单条 user 经 tokenizer.apply_chat_template 封装，返回实际送入 POST /v1/completions 的完整字符串（JSON 字段 prompt_used）。
-        可选 system 字段：省略时仅拼装 user；传入时原样作为 system 段（含空字符串）。
-        与续写共用 semantic 模型/tokenizer；过长时返回 400。
+        将 messages 经 tokenizer.apply_chat_template 封装，返回实际送入 POST /v1/completions 的完整字符串（JSON 字段 prompt_used）。
+        可选 tools、enable_thinking。与续写共用 semantic 模型/tokenizer；过长时返回 400。
       operationId: server.completions_prompt
       parameters:
         - in: body
@@ -780,6 +779,31 @@ paths:
             $ref: "server_openai_definitions.yaml#/definitions/OpenAICompletionsPromptResponse"
         400:
           description: invalid body or prompt too long
+
+  /v1/completions/prompt-incremental:
+    post:
+      tags:
+        - openai
+      summary: Compute wire incremental suffix for a tool response
+      description: |
+        多轮 wire 模式下，计算追加 tool response 及下一轮 generation scaffold 的字面量后缀（incremental_suffix）。
+        仅依赖 tool_content 和 enable_thinking，与前序 wire 历史内容无关。
+      operationId: server.completions_prompt_incremental
+      parameters:
+        - in: body
+          name: completions_prompt_incremental_request
+          required: true
+          schema:
+            $ref: "server_openai_definitions.yaml#/definitions/OpenAICompletionsPromptIncrementalRequest"
+      responses:
+        200:
+          description: ok
+          schema:
+            $ref: "server_openai_definitions.yaml#/definitions/OpenAICompletionsPromptIncrementalResponse"
+        400:
+          description: invalid body
+        500:
+          description: template extraction failed
 
   /v1/completions:
     post:

@@ -540,33 +540,73 @@ def core_generate_from_text(
 
 
 def apply_chat_template_for_completion(
-    user_content: str,
-    system: Optional[str] = None,
+    messages: List[Dict[str, Any]],
     *,
     slot: ModelSlot = ModelSlot.INSTRUCT,
     enable_thinking: bool = False,
+    tools: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """
-    将单条 user 文本套用到 tokenizer chat template，返回实际送入 core_generate_from_text 的字符串。
+    将 messages 套用到 tokenizer chat template，返回实际送入 core_generate_from_text 的字符串。
 
-    调用方未传入 ``system``（即 ``None``）时仅拼装单条 user 消息；传入字符串时（含 ``\"\"``、仅空白）
-    原样作为 chat template 的 system 段，不做裁剪或改写。长度与上下文上限由 ``core_generate_from_text``
-    在生成前校验。slot 控制使用哪个槽位的 tokenizer（base 传 ModelSlot.BASE）。
+    ``messages`` 为 OpenAI 形状（role/content；tool 消息可含 name）。长度与上下文上限由
+    ``core_generate_from_text`` 在生成前校验。slot 控制使用哪个槽位的 tokenizer（base 传 ModelSlot.BASE）。
     """
     tokenizer, _, _ = ensure_slot_weights_loaded(slot)
-    if system is None:
-        messages = [{"role": "user", "content": user_content}]
-    else:
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_content},
-        ]
-    return tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-        enable_thinking=enable_thinking,
+    template_kw: Dict[str, Any] = {
+        "tokenize": False,
+        "add_generation_prompt": True,
+        "enable_thinking": enable_thinking,
+    }
+    if tools:
+        template_kw["tools"] = tools
+    return tokenizer.apply_chat_template(messages, **template_kw)
+
+
+_IM_END = "<|im_end|>"
+
+# 不含特殊字符、不会被 template 处理掉的占位串，用于定位 assistant block 边界
+_ASSISTANT_PLACEHOLDER = "\x00__DUMMY_ASST__\x00"
+
+
+def compute_tool_append_suffix(
+    tool_content: str,
+    *,
+    enable_thinking: bool = False,
+    tool_name: Optional[str] = None,
+    slot: ModelSlot = ModelSlot.INSTRUCT,
+) -> str:
+    """
+    返回多轮 tool use 中，wire 追加 tool response 及下一轮 generation scaffold 的字面量后缀。
+
+    wire 在上一轮模型输出（O₁）结束后已包含 <|im_end|>（因为 _COMPLETION_DECODE_SKIP_SPECIAL=False）。
+    本函数返回的 suffix 需紧接 O₁ 追加，形成下一轮完整输入 wire₂ = wire₁ + suffix。
+
+    suffix 仅取决于 tool_content 和 enable_thinking，与 wire 前序历史内容无关。
+    """
+    tokenizer, _, _ = ensure_slot_weights_loaded(slot)
+    tool_msg: Dict[str, Any] = {"role": "tool", "content": tool_content}
+    if tool_name:
+        tool_msg["name"] = tool_name
+    dummy = [
+        {"role": "user", "content": "x"},
+        {"role": "assistant", "content": _ASSISTANT_PLACEHOLDER},
+        tool_msg,
+    ]
+    full = tokenizer.apply_chat_template(
+        dummy, tokenize=False, add_generation_prompt=True, enable_thinking=enable_thinking
     )
+    idx = full.find(_ASSISTANT_PLACEHOLDER)
+    if idx == -1:
+        raise RuntimeError("compute_tool_append_suffix: placeholder not found in template output")
+    after_placeholder = full[idx + len(_ASSISTANT_PLACEHOLDER):]
+    if not after_placeholder.startswith(_IM_END):
+        raise RuntimeError(
+            f"compute_tool_append_suffix: expected {_IM_END!r} after placeholder, "
+            f"got: {after_placeholder[:80]!r}"
+        )
+    # O₁ 已包含 <|im_end|>，suffix 从其后开始
+    return after_placeholder[len(_IM_END):]
 
 
 def generate_completion_text(

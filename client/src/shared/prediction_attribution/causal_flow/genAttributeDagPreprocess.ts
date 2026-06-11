@@ -107,27 +107,74 @@ export function extractPromptTokenSpans(step: TokenGenStep): PromptTokenSpan[] {
     return [...byKey.values()];
 }
 
+/** 保留完全落在任一 input 区间内的 span（步进回放 / 轮间追加时从全量 catalog 裁剪）。 */
+export function filterPromptSpansInInputRanges(
+    spans: PromptTokenSpan[],
+    inputRanges: [number, number][],
+): PromptTokenSpan[] {
+    if (inputRanges.length === 0) return [];
+    return spans.filter(({ offset: [s, e] }) =>
+        inputRanges.some(([rs, re]) => s >= rs && e <= re),
+    );
+}
+
+/** 从 input 区间补集得到 output 区间（`[0, totalLength)` 内）。 */
+export function outputRangesFromInputRanges(
+    inputRanges: [number, number][],
+    totalLength: number,
+): [number, number][] {
+    if (totalLength <= 0) return [];
+    const sorted = [...inputRanges]
+        .filter(([s, e]) => e > s)
+        .sort((a, b) => a[0] - b[0]);
+    const output: [number, number][] = [];
+    let cursor = 0;
+    for (const [start, end] of sorted) {
+        const clampedStart = Math.max(0, Math.min(start, totalLength));
+        const clampedEnd = Math.max(clampedStart, Math.min(end, totalLength));
+        if (clampedStart > cursor) {
+            output.push([cursor, clampedStart]);
+        }
+        cursor = Math.max(cursor, clampedEnd);
+    }
+    if (cursor < totalLength) {
+        output.push([cursor, totalLength]);
+    }
+    return output;
+}
+
+/**
+ * 在 `intervalCtx` 上收集**删除**区间（全串下标）；仅在 input 区间内匹配（prompt-only 单套正则）。
+ * 命中的 prompt token 在 DAG 中不存在、不占布局（与 exclude 的「score 置 0 + 降透明」不同）。
+ */
+export function collectDeletePromptIntervals(
+    intervalCtx: string,
+    inputRanges: [number, number][],
+    deletePromptPatternsText: string,
+): [number, number][] {
+    return inputRanges.flatMap(([start, end]) =>
+        collectExcludeRegexMatchIntervals(intervalCtx, deletePromptPatternsText, { start, end }),
+    );
+}
+
 /**
  * 在 `intervalCtx` 上收集排除区间（全串下标）；正则全文由调用方提供（Gen Attribute 页与控件一致）。
  * 与 {@link excludeNodeAggregatedEntries} 须传入同一套 `excludePromptPatternsText` / `excludeGeneratedPatternsText`。
  */
 export function collectGenAttrDagExcludeIntervals(
     intervalCtx: string,
-    promptRegionEnd: number,
+    inputRanges: [number, number][],
     excludePromptPatternsText: string,
     excludeGeneratedPatternsText: string,
 ): [number, number][] {
-    const pe = promptRegionEnd;
-    return [
-        ...collectExcludeRegexMatchIntervals(intervalCtx, excludePromptPatternsText, {
-            start: 0,
-            end: pe,
-        }),
-        ...collectExcludeRegexMatchIntervals(intervalCtx, excludeGeneratedPatternsText, {
-            start: pe,
-            end: intervalCtx.length,
-        }),
-    ];
+    const promptExcludes = inputRanges.flatMap(([start, end]) =>
+        collectExcludeRegexMatchIntervals(intervalCtx, excludePromptPatternsText, { start, end }),
+    );
+    const outputRanges = outputRangesFromInputRanges(inputRanges, intervalCtx.length);
+    const generatedExcludes = outputRanges.flatMap(([start, end]) =>
+        collectExcludeRegexMatchIntervals(intervalCtx, excludeGeneratedPatternsText, { start, end }),
+    );
+    return [...promptExcludes, ...generatedExcludes];
 }
 
 /**
@@ -148,11 +195,10 @@ export function excludeNodeAggregatedEntries(
 ): NodeAggregatedEntry[] {
     if (!entries.length) return [];
 
-    const pe = step.promptRegionEnd;
     const intervalCtx = excludeIntervalContext ?? step.context;
     const excludeIntervals = collectGenAttrDagExcludeIntervals(
         intervalCtx,
-        pe,
+        step.inputRanges,
         excludePromptPatternsText,
         excludeGeneratedPatternsText,
     );

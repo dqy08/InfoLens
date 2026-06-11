@@ -8,6 +8,7 @@ import { initI18n, tr } from '../../shared/lang/i18n-lite';
 import { AdminManager } from '../../shared/cross/adminManager';
 import { SettingsMenuManager } from '../../shared/cross/settingsMenuManager';
 import { initCachedHistoryQueryDropdown, type CachedHistorySelectContext } from '../../shared/cross/cachedHistoryUi';
+import { syncChatPromptPanelEnableGatedBody } from '../../features/chat/chatPromptPanelUi';
 import { initChatPanelLayout } from '../../shared/ui/chat_panel_layout';
 import { PANEL_SPLIT_STORAGE_KEY_CHAT } from '../../shared/cross/panelSplitStorage';
 import { TextInputController } from '../../shared/controllers/textInputController';
@@ -16,7 +17,7 @@ import { registerPageBusy } from '../../shared/core/activitySession';
 import { showAlertDialog } from '../../shared/ui/dialog';
 import URLHandler from '../../shared/core/URLHandler';
 import { ToolTip } from '../../shared/vis/ToolTip';
-import { GLTR_HoverEvent, GLTR_Mode, GLTR_Text_Box } from '../../shared/vis/GLTR_Text_Box';
+import { GLTR_HoverEvent, GLTR_Text_Box } from '../../shared/vis/GLTR_Text_Box';
 import {
     postCompletions,
     postCompletionsPrompt,
@@ -24,7 +25,18 @@ import {
     type OpenAICompletionsResponse
 } from '../../shared/api/completionsClient';
 import { translateApiErrorMessage } from '../../shared/core/errorUtils';
-import { buildCompletionDisplayResult } from '../../features/chat/buildCompletionDisplayResult';
+import { buildInitialChatMessages } from '../../features/chat/chatMessages';
+import type { ChatDisplaySegment } from '../../features/chat/chatSegments';
+import {
+    MAX_TOOL_ROUNDS,
+    assembleFirstTurnPrompt,
+    runMultiTurnToolCalling,
+} from '../../features/chat/multiTurnToolCalling';
+import { aggregateUsageFromSegments } from '../../features/chat/chatCompletionUsage';
+import { assertStreamMatchesFinal } from '../../features/chat/completionStreamAssert';
+import { ChatTurnsView } from '../../features/chat/chatTurnsView';
+import { createToolCallingOptionsRow } from '../../features/chat/toolCallingOptionsRow';
+import { cloneToolConfig, toolConfigFingerprint } from '../../features/chat/toolConfig';
 import type { PredictionAttributeModelVariant } from '../../shared/prediction_attribution/core/attributionResultCache';
 import { createCompletionOptionsRow } from '../../shared/cross/completionOptionsRow';
 import { completionFinishReasonLabel } from '../../shared/cross/generationEndReasonLabel';
@@ -38,10 +50,14 @@ import {
     saveHistory
 } from '../../shared/cross/queryHistory';
 import {
+    buildCompletionCacheKey,
     getCachedEntryByContentKey,
+    getEntry as getCompletionCacheEntry,
     listCachedHistoryRows,
     migrateLegacyChatCacheIfNeeded,
     removeCachedEntryByContentKey,
+    removeForCacheKey,
+    save as saveCompletionToCache,
     touchCachedEntryByContentKey,
     type ChatCompletionDraft,
     type CompletionCachedEntry,
@@ -53,13 +69,14 @@ import {
     replaceContentUrlParam,
     runContentUrlHydrate,
 } from '../../shared/cross/contentUrl';
-import { CHAT_SURPRISAL_COLOR_MAP_MAX } from '../../shared/cross/SurprisalColorConfig';
 import { updateChatCompletionMetrics } from '../../shared/cross/textMetricsUpdater';
 import { lsReadBool, lsSet, lsWriteBool, lsWriteString } from '../../shared/storage/localStorageHelpers';
 import {
     CHAT_ENABLE_THINKING_STORAGE_KEY,
+    CHAT_ENABLE_TOOL_CALLING_STORAGE_KEY,
     CHAT_MAX_NEW_TOKENS_STORAGE_KEY,
     CHAT_MODEL_VARIANT_STORAGE_KEY,
+    CHAT_MULTI_TURN_MOCK_STORAGE_KEY,
     LS_SKIP_CHAT_TEMPLATE,
 } from '../../features/chat/chatPromptTemplateMode';
 import { createToast } from '../../shared/ui/toast';
@@ -157,18 +174,7 @@ function syncTeacherForcingRow(): void {
 }
 
 function syncChatSystemPromptSuppressedUi(): void {
-    const on = isChatUseSystemPrompt();
-    chatSystemPromptPanel?.classList.toggle('chat-system-prompt-suppressed', !on);
-    const ta = chatSystemTextField.node() as HTMLTextAreaElement | null;
-    if (ta) {
-        ta.disabled = !on;
-    }
-    const dis = !on;
-    chatSystemClearBtn.property('disabled', dis);
-    chatSystemPasteBtn.property('disabled', dis);
-    if (chatSystemHistoryBtn instanceof HTMLButtonElement) {
-        chatSystemHistoryBtn.disabled = dis;
-    }
+    syncChatPromptPanelEnableGatedBody(chatSystemPromptPanel, isChatUseSystemPrompt());
 }
 
 function syncPromptPanelVisibility(): void {
@@ -184,16 +190,11 @@ function resolveStoredModelVariant(v?: PredictionAttributeModelVariant): Predict
 }
 
 const chatRightStack = d3.select('.chat-right-stack');
-const chatPromptUsedEl = d3.select('#chat_prompt_used');
 const chatStreamingPreviewEl = d3.select('#chat_streaming_preview');
+const chatSegmentsContainer = document.getElementById('chat_segments_container');
 
 async function copyChatFullText(): Promise<void> {
-    const pu = document.getElementById('chat_prompt_used');
-    const prompt =
-        pu && !pu.hasAttribute('hidden') ? (pu.textContent ?? '') : '';
-    const layer = document.querySelector('#results .text-layer');
-    const generated = layer?.textContent ?? '';
-    const text = prompt + generated;
+    const text = chatTurnsView.getFullTextForCopy();
     if (!text) {
         showToast('Nothing to copy', 'error');
         return;
@@ -254,18 +255,10 @@ const toolTip = new ToolTip(d3.select('#major_tooltip'), eventHandler, {
     surprisalRowLabel: tr('log perplexity:')
 });
 
-const lmf = new GLTR_Text_Box(d3.select('#results'), eventHandler);
-lmf.updateOptions(
-    {
-        gltrMode: GLTR_Mode.fract_p,
-        enableRenderAnimation: false,
-        enableMinimap: false,
-        overlayTokenRenderStyle: 'classic',
-        overlayIgnoreGlobalInfoDensityDisable: true,
-        surprisalColorMax: CHAT_SURPRISAL_COLOR_MAP_MAX
-    },
-    true
-);
+if (!chatSegmentsContainer) {
+    throw new Error('chat_segments_container missing');
+}
+const chatTurnsView = new ChatTurnsView(chatSegmentsContainer, eventHandler);
 
 eventHandler.bind(GLTR_Text_Box.events.tokenHovered, (ev: GLTR_HoverEvent) => {
     if (ev.hovered) {
@@ -299,6 +292,7 @@ let lastCompletionForRerender: {
     promptUsed: string;
     modelVariant?: PredictionAttributeModelVariant;
     contentUrlKey: string;
+    segments: ChatDisplaySegment[];
 } | null = null;
 
 type ChatTfFingerprintFields = {
@@ -315,6 +309,10 @@ type ChatCommittedFingerprint =
           user: string;
           system: string;
           useSystem: boolean;
+          enableThinking: boolean;
+          toolCallingEnabled: boolean;
+          multiTurnMockEnabled: boolean;
+          toolConfig: string;
           maxTokens: string;
           model: PredictionAttributeModelVariant;
       } & ChatTfFingerprintFields);
@@ -345,6 +343,19 @@ const {
     normalizeMaxTokensField,
 } = completionOptions;
 
+const toolCallingOptions = createToolCallingOptionsRow({
+    enableToolCallingStorageKey: CHAT_ENABLE_TOOL_CALLING_STORAGE_KEY,
+    multiTurnStorageKey: CHAT_MULTI_TURN_MOCK_STORAGE_KEY,
+    onStateChange: () => syncAskButtonState(),
+});
+
+const {
+    isToolCallingEnabled,
+    isMultiTurnEnabled: isMultiTurnMockEnabled,
+    getCurrentToolConfig,
+    restoreFromDraft: restoreToolCallingFromDraft,
+} = toolCallingOptions;
+
 function buildChatRunDraftForCache(): ChatCompletionDraft {
     const maxTokens = currentMaxTokens();
     const teacherForcingText = teacherForcingContinuationForRun();
@@ -367,6 +378,9 @@ function buildChatRunDraftForCache(): ChatCompletionDraft {
         user: (chatUserTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
         useSystem: isChatUseSystemPrompt(),
         enableThinking: isEnableThinking(),
+        toolCallingEnabled: isToolCallingEnabled(),
+        multiTurnMockEnabled: isMultiTurnMockEnabled(),
+        toolConfig: cloneToolConfig(getCurrentToolConfig()),
         ...tfDraftFields,
     };
 }
@@ -391,6 +405,7 @@ function applyChatDraftFromCache(draft: ChatCompletionDraft, entry: CompletionCa
             enableThinkingInput.checked = draft.enableThinking ?? false;
             lsWriteBool(CHAT_ENABLE_THINKING_STORAGE_KEY, enableThinkingInput.checked);
         }
+        restoreToolCallingFromDraft(draft);
     } else if (draft.mode === 'raw') {
         if (skipChatTemplateInput) {
             skipChatTemplateInput.checked = true;
@@ -452,6 +467,10 @@ function getCurrentFingerprint(): ChatCommittedFingerprint {
         user: (chatUserTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
         system: (chatSystemTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
         useSystem: isChatUseSystemPrompt(),
+        enableThinking: isEnableThinking(),
+        toolCallingEnabled: isToolCallingEnabled(),
+        multiTurnMockEnabled: isMultiTurnMockEnabled(),
+        toolConfig: toolConfigFingerprint(getCurrentToolConfig()),
         maxTokens,
         model,
         ...tf,
@@ -472,6 +491,10 @@ function fingerprintsEqual(a: ChatCommittedFingerprint, b: ChatCommittedFingerpr
             ta.user === tb.user &&
             ta.system === tb.system &&
             ta.useSystem === tb.useSystem &&
+            ta.enableThinking === tb.enableThinking &&
+            ta.toolCallingEnabled === tb.toolCallingEnabled &&
+            ta.multiTurnMockEnabled === tb.multiTurnMockEnabled &&
+            ta.toolConfig === tb.toolConfig &&
             ta.maxTokens === tb.maxTokens &&
             ta.model === tb.model
         );
@@ -507,23 +530,88 @@ function syncAskButtonState(): void {
     });
 }
 
-/** 仅重绘右侧可视化；不修改 `?content=`（主题 / digit merge 等） */
-function renderCompletionResultToUi(res: OpenAICompletionsResponse, promptUsed: string): void {
-    currentPromptUsed = promptUsed;
-    streamingPreviewLastFlush = 0;
-    chatStreamingPreviewEl.text('').attr('hidden', 'true');
-    chatPromptUsedEl.text(promptUsed).attr('hidden', null);
+function buildSingleTurnSegments(
+    modelPrompt: string,
+    res: OpenAICompletionsResponse,
+    model: PredictionAttributeModelVariant
+): ChatDisplaySegment[] {
     const finalText = res.choices?.[0]?.text;
     if (typeof finalText !== 'string') {
         throw new Error('续写响应缺少 choices[0].text');
     }
-    const display = buildCompletionDisplayResult(
-        finalText,
-        res.model,
-        res.info_radar?.bpe_strings ?? null
-    );
-    lmf.update(display);
-    updateChatCompletionMetrics(metricUsage, metricModel, res.model ?? null, res.usage ?? null);
+    return [
+        { kind: 'input', text: modelPrompt },
+        {
+            kind: 'output',
+            text: finalText,
+            promptUsed: modelPrompt,
+            response: res,
+            modelName: res.model ?? model,
+        },
+    ];
+}
+
+function segmentsFromEntryOrFallback(
+    res: OpenAICompletionsResponse,
+    promptUsed: string,
+    modelVariant?: PredictionAttributeModelVariant,
+    segments?: ChatDisplaySegment[]
+): ChatDisplaySegment[] {
+    if (segments && segments.length > 0) {
+        return segments;
+    }
+    return buildSingleTurnSegments(promptUsed, res, modelVariant ?? 'instruct');
+}
+
+function syncUsageMetricsFromSegments(
+    segments: ChatDisplaySegment[],
+    modelFallback: string | null
+): void {
+    const usage = aggregateUsageFromSegments(segments);
+    if (usage === null) return;
+    const lastModel =
+        [...segments]
+            .reverse()
+            .find((s): s is Extract<ChatDisplaySegment, { kind: 'output' }> => s.kind === 'output')
+            ?.modelName ?? modelFallback;
+    updateChatCompletionMetrics(metricUsage, metricModel, lastModel, usage);
+}
+
+function saveChatPromptHistories(
+    prompt: string,
+    skipTemplate: boolean,
+    teacherForcingText: string | undefined
+): void {
+    if (skipTemplate) {
+        saveHistory(prompt, CHAT_RAW_INPUT_HISTORY_KEY);
+    } else {
+        saveHistory(prompt, CHAT_USER_INPUT_HISTORY_KEY);
+        if (isChatUseSystemPrompt()) {
+            const systemForHistory =
+                (chatSystemTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
+            if (systemForHistory.length > 0) {
+                saveHistory(systemForHistory, CHAT_SYSTEM_INPUT_HISTORY_KEY);
+            }
+        }
+    }
+    if (teacherForcingText !== undefined) {
+        saveHistory(teacherForcingText, CHAT_TEACHER_FORCING_INPUT_HISTORY_KEY);
+    }
+}
+
+/** 仅重绘右侧可视化；不修改 `?content=`（主题 / digit merge 等） */
+function renderCompletionResultToUi(
+    res: OpenAICompletionsResponse,
+    promptUsed: string,
+    segments?: ChatDisplaySegment[],
+    modelVariant?: PredictionAttributeModelVariant
+): void {
+    currentPromptUsed = promptUsed;
+    clearStreamingPreview();
+    const segs = segmentsFromEntryOrFallback(res, promptUsed, modelVariant, segments);
+    chatTurnsView.render(segs);
+    const usage = aggregateUsageFromSegments(segs);
+    updateChatCompletionMetrics(metricUsage, metricModel, res.model ?? null, usage);
     chatCompleteReasonEl.text(completionFinishReasonLabel(res.choices?.[0]?.finish_reason));
 }
 
@@ -535,10 +623,18 @@ function applyCompletionResponseToUi(
     res: OpenAICompletionsResponse,
     promptUsed: string,
     contentUrlKey: string,
-    modelVariant?: PredictionAttributeModelVariant
+    modelVariant?: PredictionAttributeModelVariant,
+    segments?: ChatDisplaySegment[]
 ): void {
-    renderCompletionResultToUi(res, promptUsed);
-    lastCompletionForRerender = { res, promptUsed, modelVariant, contentUrlKey };
+    const segs = segmentsFromEntryOrFallback(res, promptUsed, modelVariant, segments);
+    renderCompletionResultToUi(res, promptUsed, segs, modelVariant);
+    lastCompletionForRerender = {
+        res,
+        promptUsed,
+        modelVariant,
+        contentUrlKey,
+        segments: segs,
+    };
     replaceContentUrlParam(contentUrlKey, DEFAULT_CONTENT_URL_PARAM, 'chat');
     lastCommittedFingerprint = getCurrentFingerprint();
     syncAskButtonState();
@@ -546,8 +642,8 @@ function applyCompletionResponseToUi(
 
 function rerenderLastCompletionResult(): void {
     if (!lastCompletionForRerender) return;
-    const { res, promptUsed } = lastCompletionForRerender;
-    renderCompletionResultToUi(res, promptUsed);
+    const { res, promptUsed, modelVariant, segments } = lastCompletionForRerender;
+    renderCompletionResultToUi(res, promptUsed, segments, modelVariant);
 }
 
 addDigitsMergeRenderListener(rerenderLastCompletionResult);
@@ -558,7 +654,7 @@ const themeManager = initThemeManager(
             if (lastCompletionForRerender) {
                 rerenderLastCompletionResult();
             } else {
-                lmf.reRenderCurrent();
+                chatTurnsView.rerender();
             }
         },
     },
@@ -586,6 +682,11 @@ adminManager.onAdminModeChange(() => {
     normalizeMaxTokensField();
 });
 
+const clearStreamingPreview = (): void => {
+    streamingPreviewLastFlush = 0;
+    chatStreamingPreviewEl.text('').attr('hidden', 'true');
+};
+
 const flushStreamingPreview = (text: string, streamEnd: boolean): void => {
     if (
         !streamEnd &&
@@ -610,17 +711,154 @@ const setAskLoading = (loading: boolean): void => {
     chatRightStack.classed('chat-ask-in-flight', loading);
     if (loading) {
         lastCompletionForRerender = null;
-        streamingPreviewLastFlush = 0;
-        chatPromptUsedEl.text('').attr('hidden', 'true');
-        chatStreamingPreviewEl.text('').attr('hidden', 'true');
+        clearStreamingPreview();
         chatCompleteReasonEl.text('');
-        // 新请求开始即清空主可视化，避免仍显示上一轮结果
-        lmf.update(buildCompletionDisplayResult('', currentModelVariant(), null));
+        chatTurnsView.clear();
     }
     syncAskButtonState();
 };
 
 registerPageBusy(() => askInFlight);
+
+async function executeMultiTurnAsk(options: {
+    prompt: string;
+    model: PredictionAttributeModelVariant;
+    maxTokens: number;
+    teacherForcingText: string | undefined;
+    forceRefresh: boolean;
+    signal: AbortSignal;
+}): Promise<void> {
+    const { prompt, model, maxTokens, teacherForcingText, forceRefresh, signal } = options;
+    const useSystem = isChatUseSystemPrompt();
+    const systemRaw = (chatSystemTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
+    const messages = buildInitialChatMessages({
+        user: prompt,
+        system: systemRaw,
+        useSystem,
+    });
+    const toolConfig = getCurrentToolConfig();
+    const modelPrompt = await assembleFirstTurnPrompt({
+        model,
+        messages,
+        toolConfig,
+        enableThinking: isEnableThinking(),
+        teacherForcing: teacherForcingText,
+        signal,
+    });
+    const cacheKey = buildCompletionCacheKey(modelPrompt, model, true);
+    const cacheDraft = buildChatRunDraftForCache();
+
+    if (forceRefresh) {
+        await removeForCacheKey(cacheKey);
+    } else {
+        const cached = await getCompletionCacheEntry(cacheKey);
+        if (cached?.segments?.length) {
+            const lastOutput = [...cached.segments]
+                .reverse()
+                .find(
+                    (s): s is Extract<ChatDisplaySegment, { kind: 'output' }> => s.kind === 'output'
+                );
+            if (lastOutput) {
+                const cachedText = lastOutput.response.choices?.[0]?.text;
+                if (typeof cachedText === 'string') {
+                    flushStreamingPreview(cachedText, true);
+                }
+                saveChatPromptHistories(prompt, false, teacherForcingText);
+                applyCompletionResponseToUi(
+                    lastOutput.response,
+                    modelPrompt,
+                    cached.contentKey,
+                    model,
+                    cached.segments
+                );
+                return;
+            }
+        }
+    }
+
+    let streamRound = 0;
+    let roundStreamed = '';
+    const run = await runMultiTurnToolCalling({
+        model,
+        messages,
+        toolConfig,
+        enableThinking: isEnableThinking(),
+        maxTokens,
+        teacherForcing: teacherForcingText,
+        signal,
+        onSegmentsUpdate: (segs) => {
+            clearStreamingPreview();
+            chatTurnsView.render(segs);
+            syncUsageMetricsFromSegments(segs, model);
+        },
+        onDelta: (chunk, streamEnd, roundIndex) => {
+            if (roundIndex !== streamRound) {
+                streamRound = roundIndex;
+                roundStreamed = '';
+                clearStreamingPreview();
+            }
+            roundStreamed += chunk;
+            flushStreamingPreview(roundStreamed, streamEnd);
+        },
+        onPartialAbort: ({ segments: partialSegs, inFlightText, inFlightPromptUsed }) => {
+            if (partialSegs.length === 0 && inFlightText.length === 0) {
+                return;
+            }
+            const segmentsToSave: ChatDisplaySegment[] = [...partialSegs];
+            let response: OpenAICompletionsResponse;
+            if (inFlightText.length > 0) {
+                response = {
+                    id: `partial-${Date.now()}`,
+                    object: 'text_completion',
+                    created: Math.floor(Date.now() / 1000),
+                    model,
+                    choices: [{ text: inFlightText, index: 0, finish_reason: 'abort' }],
+                };
+                segmentsToSave.push({
+                    kind: 'output',
+                    text: inFlightText,
+                    promptUsed: inFlightPromptUsed,
+                    response,
+                    modelName: model,
+                });
+            } else {
+                const lastOut = [...segmentsToSave]
+                    .reverse()
+                    .find(
+                        (s): s is Extract<ChatDisplaySegment, { kind: 'output' }> =>
+                            s.kind === 'output'
+                    );
+                if (!lastOut) return;
+                response = lastOut.response;
+            }
+            void saveCompletionToCache(cacheKey, response, 'partial', cacheDraft, {
+                segments: segmentsToSave,
+            });
+        },
+    });
+
+    const lastOutput = [...run.segments]
+        .reverse()
+        .find((s): s is Extract<ChatDisplaySegment, { kind: 'output' }> => s.kind === 'output');
+    if (!lastOutput) {
+        throw new Error('Multi-turn run missing output segment');
+    }
+    const res = lastOutput.response;
+
+    if (run.truncatedAtMaxRounds) {
+        showToast(
+            tr('Tool calling reached max rounds ({max})').replace('{max}', String(MAX_TOOL_ROUNDS)),
+            'success'
+        );
+    }
+
+    saveChatPromptHistories(prompt, false, teacherForcingText);
+
+    const { contentKey } = await saveCompletionToCache(cacheKey, res, 'complete', cacheDraft, {
+        segments: run.segments,
+    });
+    applyCompletionResponseToUi(res, modelPrompt, contentKey, model, run.segments);
+}
 
 const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
     const prompt = getActivePromptValue();
@@ -646,6 +884,21 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
         const skipTemplate = skipChatTemplateInput?.checked ?? false;
         const model = currentModelVariant();
 
+        const useMultiTurn =
+            !skipTemplate && isToolCallingEnabled() && isMultiTurnMockEnabled();
+
+        if (useMultiTurn) {
+            await executeMultiTurnAsk({
+                prompt,
+                model,
+                maxTokens: maxTokensOpt,
+                teacherForcingText,
+                forceRefresh,
+                signal: askAbort.signal,
+            });
+            return;
+        }
+
         let modelPrompt: string;
         if (skipTemplate) {
             modelPrompt = prompt;
@@ -653,47 +906,36 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
             const useSystem = isChatUseSystemPrompt();
             const systemRaw =
                 (chatSystemTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
-            const promptReq: { model: string; prompt: string; system?: string; enable_thinking?: boolean } = {
-                model,
-                prompt
-            };
-            if (useSystem) {
-                promptReq.system = systemRaw;
-            }
-            if (isEnableThinking()) {
-                promptReq.enable_thinking = true;
-            }
-            const assembled = await postCompletionsPrompt(promptReq, {
-                signal: askAbort.signal
+            const messages = buildInitialChatMessages({
+                user: prompt,
+                system: systemRaw,
+                useSystem,
             });
+            const tools = isToolCallingEnabled() ? getCurrentToolConfig().tools_schema : undefined;
+            const assembled = await postCompletionsPrompt(
+                {
+                    model,
+                    messages,
+                    tools,
+                    enable_thinking: isEnableThinking() ? true : undefined,
+                },
+                { signal: askAbort.signal }
+            );
             modelPrompt = assembled.prompt_used;
         }
 
         if (teacherForcingText !== undefined) {
             modelPrompt += teacherForcingText;
         }
-        chatPromptUsedEl.text(modelPrompt).attr('hidden', null);
 
-        if (skipTemplate) {
-            saveHistory(prompt, CHAT_RAW_INPUT_HISTORY_KEY);
-        } else {
-            saveHistory(prompt, CHAT_USER_INPUT_HISTORY_KEY);
-            if (isChatUseSystemPrompt()) {
-                const systemForHistory =
-                    (chatSystemTextField.node() as HTMLTextAreaElement | null)?.value ?? '';
-                if (systemForHistory.length > 0) {
-                    saveHistory(systemForHistory, CHAT_SYSTEM_INPUT_HISTORY_KEY);
-                }
-            }
-        }
-        if (teacherForcingText !== undefined) {
-            saveHistory(teacherForcingText, CHAT_TEACHER_FORCING_INPUT_HISTORY_KEY);
-        }
+        chatTurnsView.render([{ kind: 'input', text: modelPrompt }]);
 
-        const cacheKey: CompletionResultCacheKey = { prompt: modelPrompt, model };
+        saveChatPromptHistories(prompt, skipTemplate, teacherForcingText);
+
+        const cacheKey = buildCompletionCacheKey(modelPrompt, model, false);
         const cacheDraft = buildChatRunDraftForCache();
 
-        const { response: res, contentKey } = await postCompletions(
+        const { response: res, contentKey, cachedSegments } = await postCompletions(
             {
                 model,
                 prompt: modelPrompt,
@@ -717,15 +959,11 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
         if (typeof finalText !== 'string') {
             throw new Error('Completion response missing choices[0].text');
         }
-        // Stop 后服务端仍可能省略尾部若干 delta（见 completions stream_delta 在 cancel 后直接 return），
-        // 最终以 result 为准；仅拒绝明显不一致。
-        if (finalText !== streamedText && !finalText.startsWith(streamedText)) {
-            throw new Error(
-                'Streaming deltas do not match final text (retry or report): ' +
-                    `delta_len=${streamedText.length}, final_len=${finalText.length}`
-            );
-        }
-        applyCompletionResponseToUi(res, modelPrompt, contentKey, model);
+        assertStreamMatchesFinal(streamedText, finalText);
+        const segments = cachedSegments?.length
+            ? cachedSegments
+            : buildSingleTurnSegments(modelPrompt, res, model);
+        applyCompletionResponseToUi(res, modelPrompt, contentKey, model, segments);
     } catch (err: unknown) {
         if (
             err &&
@@ -834,7 +1072,8 @@ async function restoreChatFromCachedPrompt(
             res,
             promptUsed,
             contentKey,
-            resolveStoredModelVariant(entry.modelVariant)
+            resolveStoredModelVariant(entry.modelVariant),
+            entry.segments
         );
         if (!entry.draft && options.syncLegacyPromptToField && !isSkipChatTemplate()) {
             lastCommittedFingerprint = null;
@@ -954,10 +1193,10 @@ if (chatCopyFulltextBtn) {
 
 initDensityAttributionSidebar({
     eventHandler,
-    getCurrentAnalyzeResult: () => lmf.getCurrentAnalyzeResult(),
+    getCurrentAnalyzeResult: () => chatTurnsView.getActiveAnalyzeResult(),
     apiPrefix,
     showToast,
-    getContextPrefix: () => currentPromptUsed,
+    getContextPrefix: () => chatTurnsView.getPromptPrefixForSidebar() || currentPromptUsed,
     predictionModelVariant: 'instruct',
     getPredictionModelVariant: () => currentModelVariant(),
     sourcePage: 'chat',

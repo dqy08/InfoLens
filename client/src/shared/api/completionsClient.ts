@@ -1,5 +1,6 @@
 import URLHandler from '../core/URLHandler';
 import * as completionResultCache from '../../features/chat/completionResultCache';
+import type { ChatDisplaySegment } from '../../features/chat/chatSegments';
 import { AdminManager } from '../cross/adminManager';
 import type { TokenWithOffset } from './generatedSchemas';
 
@@ -18,6 +19,7 @@ function completionsRequestHeaders(): Record<string, string> {
 /** 与 server.yaml basePath `/api` + `/v1/completions` 一致 */
 const COMPLETIONS_PATH = '/api/v1/completions';
 const COMPLETIONS_PROMPT_PATH = '/api/v1/completions/prompt';
+const COMPLETIONS_PROMPT_INCREMENTAL_PATH = '/api/v1/completions/prompt-incremental';
 const COMPLETIONS_STOP_PATH = '/api/v1/completions/stop';
 
 /** 与 server_openai_definitions.yaml OpenAICompletionsRequest 对齐的最小类型 */
@@ -77,26 +79,32 @@ export type PostCompletionsPromptOptions = {
     signal?: AbortSignal;
 };
 
+export type CompletionsChatMessage = {
+    role: 'system' | 'user' | 'assistant' | 'tool';
+    content: string;
+    name?: string;
+};
+
 /**
- * POST /v1/completions/prompt：将用户原文套用 chat template，返回实际送入续写的完整 prompt。
+ * POST /v1/completions/prompt：将 messages 套用 chat template，返回完整 prompt_used。
  */
 export async function postCompletionsPrompt(
-    body: { model: string; prompt: string; system?: string; enable_thinking?: boolean },
+    body: {
+        model: string;
+        messages: CompletionsChatMessage[];
+        tools?: Record<string, unknown>[];
+        enable_thinking?: boolean;
+    },
     options: PostCompletionsPromptOptions = {}
 ): Promise<{ prompt_used: string }> {
     const { signal } = options;
     const url = URLHandler.basicURL() + COMPLETIONS_PROMPT_PATH;
-    const payload: {
-        model: string;
-        prompt: string;
-        system?: string;
-        enable_thinking?: boolean;
-    } = {
+    const payload: Record<string, unknown> = {
         model: body.model,
-        prompt: body.prompt
+        messages: body.messages,
     };
-    if (body.system !== undefined) {
-        payload.system = body.system;
+    if (body.tools !== undefined && body.tools.length > 0) {
+        payload.tools = body.tools;
     }
     if (body.enable_thinking === true) {
         payload.enable_thinking = true;
@@ -125,6 +133,54 @@ export async function postCompletionsPrompt(
     return { prompt_used: parsed.prompt_used };
 }
 
+/**
+ * POST /v1/completions/prompt-incremental：计算多轮 wire 模式下 tool response 的 incremental_suffix。
+ */
+export async function postCompletionsPromptIncremental(
+    body: {
+        model: string;
+        tool_content: string;
+        tool_name?: string;
+        enable_thinking?: boolean;
+    },
+    options: PostCompletionsPromptOptions = {}
+): Promise<{ incremental_suffix: string }> {
+    const { signal } = options;
+    const url = URLHandler.basicURL() + COMPLETIONS_PROMPT_INCREMENTAL_PATH;
+    const payload: Record<string, unknown> = {
+        model: body.model,
+        tool_content: body.tool_content,
+    };
+    if (body.tool_name !== undefined) {
+        payload.tool_name = body.tool_name;
+    }
+    if (body.enable_thinking === true) {
+        payload.enable_thinking = true;
+    }
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: completionsRequestHeaders(),
+        body: JSON.stringify(payload),
+        signal
+    });
+    const text = await res.text();
+    let parsed: { success?: boolean; message?: string; incremental_suffix?: string };
+    try {
+        parsed = JSON.parse(text) as typeof parsed;
+    } catch {
+        throw new Error(`POST ${COMPLETIONS_PROMPT_INCREMENTAL_PATH} failed: ${res.status} ${text.slice(0, 500)}`);
+    }
+    if (!res.ok) {
+        const msg =
+            typeof parsed.message === 'string' ? parsed.message : text.slice(0, 500);
+        throw new Error(msg || `POST ${COMPLETIONS_PROMPT_INCREMENTAL_PATH} failed: ${res.status}`);
+    }
+    if (typeof parsed.incremental_suffix !== 'string') {
+        throw new Error('completions/prompt-incremental response missing incremental_suffix');
+    }
+    return { incremental_suffix: parsed.incremental_suffix };
+}
+
 export type PostCompletionsOptions = {
     signal?: AbortSignal;
     /** 续写增量文本 */
@@ -141,6 +197,8 @@ export type PostCompletionsOptions = {
 export type PostCompletionsResult = {
     response: OpenAICompletionsResponse;
     contentKey?: string;
+    /** 缓存命中时携带已存 segments（多轮或单轮） */
+    cachedSegments?: ChatDisplaySegment[];
 };
 
 /**
@@ -165,9 +223,13 @@ export async function postCompletions(
             }
         };
 
-        const finishResolve = (response: OpenAICompletionsResponse, contentKey?: string) => {
+        const finishResolve = (
+            response: OpenAICompletionsResponse,
+            contentKey?: string,
+            cachedSegments?: ChatDisplaySegment[]
+        ) => {
             settled = true;
-            resolve({ response, contentKey });
+            resolve({ response, contentKey, cachedSegments });
         };
 
         const safeResolve = async (v: OpenAICompletionsResponse) => {
@@ -224,12 +286,15 @@ export async function postCompletions(
                     if (forceRefresh) {
                         await completionResultCache.removeForCacheKey(cacheKey);
                     }
-                    const cached = forceRefresh ? undefined : await completionResultCache.get(cacheKey);
-                    if (cached) {
+                    const cachedEntry = forceRefresh
+                        ? undefined
+                        : await completionResultCache.getEntry(cacheKey);
+                    if (cachedEntry) {
                         await completionResultCache.touch(cacheKey);
                         queueMicrotask(() => {
                             if (settled) return;
                             if (rejectIfAborted()) return;
+                            const cached = cachedEntry.response;
                             const text = cached.choices?.[0]?.text;
                             if (typeof text !== 'string') {
                                 safeReject(new Error('completions cache: invalid choices[0].text'));
@@ -241,7 +306,7 @@ export async function postCompletions(
                                 safeReject(new DOMException('Aborted', 'AbortError'));
                                 return;
                             }
-                            finishResolve(cached, completionResultCache.contentKeyForCacheKey(cacheKey));
+                            finishResolve(cached, cachedEntry.contentKey, cachedEntry.segments);
                         });
                         return;
                     }

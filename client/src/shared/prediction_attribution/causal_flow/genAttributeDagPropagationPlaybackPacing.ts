@@ -16,6 +16,28 @@ export function propagationRunningMaxLookaheadForGroupCount(groupCount: number):
 /** 与 UI「DAG replay speed」一致。 */
 export type DagReplayPacingMode = 'total' | 'step';
 
+/**
+ * DAG 步进回放（▶）：**间隔 = 下一段「内容」出现前还要多久**（不是当前画面自身的展示时长）。
+ *
+ * `stepDelayMs`（`stepMs` 或 total 折算）= 生成一个 **output gen token** 的模拟耗时（1× 时钟）。
+ *
+ * | 当前内容 | 等待 | 下一段内容 |
+ * |----------|------|------------|
+ * | prompt（回放 t=0 即存在） | {@link DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS}× | 首个 output gen |
+ * | output gen | 1× | 下一 output gen |
+ * | 末 gen（需 tool） | {@link DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS}× pending | tool response |
+ * | tool response | {@link DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS}× | 下轮首 output gen |
+ * | 末 gen（结束） | 500ms 固定 | —（收尾特例，见 `DAG_LAST_TOKEN_DWELL_MS`） |
+ *
+ * 3× 是等 **response 到达**（工具调用耗时），不是 response 帧自身的「生成时间」。
+ * 仅影响 ▶；事件调度见 {@link genAttributeDagStepPlayback}（与 ↯ 传播链无关）。
+ * live mock tool 仍用固定 1s（`toolCallingPendingUi`）。
+ */
+/** 末 gen 之后、response 出现前：等 response 的时钟数（pending 期间展示）。 */
+export const DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS = 3;
+/** input（prompt / tool response）出现后、紧跟的首个 output gen 前。 */
+export const DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS = 2;
+
 export type DagRecursiveEdgeReplayPacing = {
     mode: DagReplayPacingMode;
     /**
@@ -39,6 +61,40 @@ export type DagRecursiveEdgeReplayPacing = {
  * - `total`：`(propagationWeight / weightTotal) × (totalS×1000 − FORWARD_PROMPT_FRAME_DWELL_MS)`；
  *   假定 `weightTotal > 0`。
  */
+/**
+ * @returns `stepDelayMs` — 1× 时钟（等到下一 output gen）；
+ * `waitUntilResponseMs` — {@link DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS}×（等到 response 出现）。
+ *
+ * `total` 分母：每条已录 output gen 的 gen→gen 各 1 时钟；每个 tool 边界另加
+ * {@link DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS}（→response）+
+ * {@link DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS}（response→首 gen）。
+ * prompt 后的 {@link DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS}× 不计入分母。
+ */
+export function resolveDagStepPlaybackDelays(
+    outputGenStepCount: number,
+    toolBoundaryCount: number,
+    pacing: DagRecursiveEdgeReplayPacing,
+): { stepDelayMs: number; waitUntilResponseMs: number; waitAfterInputMs: number } {
+    const clocksPerToolBoundary =
+        DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS + DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS;
+    if (pacing.mode === 'step') {
+        const stepDelayMs = pacing.stepMs;
+        return {
+            stepDelayMs,
+            waitUntilResponseMs: stepDelayMs * DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS,
+            waitAfterInputMs: stepDelayMs * DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS,
+        };
+    }
+    const weightTotal = outputGenStepCount + toolBoundaryCount * clocksPerToolBoundary;
+    if (weightTotal <= 0) return { stepDelayMs: 0, waitUntilResponseMs: 0, waitAfterInputMs: 0 };
+    const stepDelayMs = Math.round((pacing.totalS * 1000) / weightTotal);
+    return {
+        stepDelayMs,
+        waitUntilResponseMs: stepDelayMs * DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS,
+        waitAfterInputMs: stepDelayMs * DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS,
+    };
+}
+
 export function batchPlaybackDelayMs(
     batch: { propagationWeight: number },
     plan: { weightTotal: number },

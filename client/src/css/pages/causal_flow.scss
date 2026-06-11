@@ -3,6 +3,7 @@
 @use "attribution-inspector";
 @use "chat-input-panel";
 @use "generation-status";
+@use "tool-calling-pending" as tcp;
 @use "lmf-readout" as lmf;
 @use '../base/narrow-ios-form-font-tail' as ios-form-font;
 
@@ -272,6 +273,12 @@ $gen-attr-cached-demos-panel-width: 21em;
     box-sizing: border-box;
   }
 
+  // mock tool 占位：与 .gen-attr-dag-node-text 同源字号，italic 色见 _tool-calling-pending
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node-text.tool-calling-pending-text {
+    @include tcp.tool-calling-pending-text;
+    fill: var(--token-truncated-color);
+  }
+
   #results.gen-attr-results-surface.LMF .gen-attr-dag-svg {
     position: absolute;
     left: 0;
@@ -435,11 +442,6 @@ $gen-attr-cached-demos-panel-width: 21em;
 
 // 与 Chat 共用的 .generation-status-slot 见 _generation-status.scss
 
-// 与 Chat 页一致：System 输入框较矮
-.input-section .textarea-wrapper textarea#gen_attr_system_text {
-  height: 50px;
-}
-
 // Raw / User：统一高度（不占 chat 默认 250px 主 prompt 区；Forced continuation 见 _chat-input-panel .teacher-forcing-text）
 .input-section .textarea-wrapper textarea#gen_attr_raw_text,
 .input-section .textarea-wrapper textarea#gen_attr_user_text {
@@ -476,9 +478,13 @@ body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row
   margin-top: 10px;
 }
 
-.attribution-exclude-prompt-patterns-header {
+.attribution-exclude-prompt-patterns-header,
+.attribution-exclude-generated-patterns-header,
+.attribution-delete-prompt-patterns-header {
   flex-wrap: wrap;
+}
 
+.attribution-exclude-prompt-patterns-header {
   &:not(:has(#gen_attr_exclude_prompt_patterns_enable:checked)) .semantic-submode-label {
     color: var(--text-muted);
   }
@@ -489,13 +495,21 @@ body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row
 }
 
 .attribution-exclude-generated-patterns-header {
-  flex-wrap: wrap;
-
   &:not(:has(#gen_attr_exclude_generated_patterns_enable:checked)) .semantic-submode-label {
     color: var(--text-muted);
   }
 
   &:has(#gen_attr_exclude_generated_patterns_enable:checked) .semantic-submode-label {
+    color: var(--text-primary);
+  }
+}
+
+.attribution-delete-prompt-patterns-header {
+  &:not(:has(#gen_attr_delete_prompt_patterns_enable:checked)) .semantic-submode-label {
+    color: var(--text-muted);
+  }
+
+  &:has(#gen_attr_delete_prompt_patterns_enable:checked) .semantic-submode-label {
     color: var(--text-primary);
   }
 }
@@ -553,16 +567,6 @@ body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row
   &:not([hidden]) {
     display: inline-flex;
   }
-}
-
-.attribution-exclude-prompt-patterns-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 6px 8px;
-  border: 1px solid var(--input-border);
-  border-radius: 4px;
-  background: var(--input-bg);
-  color: var(--text-color);
 }
 
 // --- WORKAROUND：伪全屏时锁 body 滚动（同 ts/ui/cssPseudoFullscreen.ts） ---

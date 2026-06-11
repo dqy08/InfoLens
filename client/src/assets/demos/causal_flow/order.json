@@ -37,6 +37,11 @@
     "label": "CoT | strawberry里有几个r"
   },
   {
+    "slug": "ReAct｜Tool-call｜北京天气",
+    "label": "ReAct｜Tool-call｜北京天气",
+    "featured": "bold"
+  },
+  {
     "slug": "过拟合｜李白 将进酒",
     "label": "过拟合｜李白 将进酒",
     "featured": "bold"
@@ -44,9 +49,5 @@
   {
     "slug": "CN-EN翻译",
     "label": "CN->EN | 翻译"
-  },
-  {
-    "slug": "CoT｜苏州……最高的山｜仅关键节点",
-    "label": "CoT | 苏州……最高的山｜仅关键节点"
   }
 ]

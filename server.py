@@ -52,6 +52,7 @@ from backend.api.visit_stats_api import (  # noqa: F401
 from backend.api.openai_completions import (  # noqa: F401
     completions,
     completions_prompt,
+    completions_prompt_incremental,
     completions_stop,
 )
 from backend.core.completion_generator import register_inference_shutdown_handlers

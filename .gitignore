@@ -1,4 +1,7 @@
 .cursor/
+.agents/
+.scratch/
+skills-lock.json
 .cache_huggingface
 # --- 核心语言与依赖 ---
 __pycache__/

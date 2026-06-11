@@ -98,6 +98,7 @@
                                 </div>
                             </div>
                         </div>
+                        <div id="tool_calling_options_mount"></div>
                         <div class="chat-prompt-panel">
                             <div class="input-header">
                                 <span class="semantic-submode-label" data-i18n>User</span>
@@ -322,6 +323,27 @@
                         </span>
                     </div>
                     <div class="attribution-exclude-prompt-patterns-row">
+                        <div class="semantic-submode-row attribution-delete-prompt-patterns-header">
+                            <span class="semantic-submode-group">
+                                <label class="attribution-use-mapping-label"
+                                    title="When enabled, each line below is a regex with the global flag, matched only within the initial static prompt prefix. Matched prompt tokens are physically removed from the DAG — they neither appear nor occupy layout space (stricter than Exclude + Hide)."
+                                    data-i18n="title">
+                                    <input type="checkbox" id="gen_attr_delete_prompt_patterns_enable">
+                                    <span></span>
+                                </label>
+                            </span>
+                            <span class="semantic-submode-group">
+                                <label class="semantic-submode-label" for="gen_attr_delete_prompt_patterns" data-i18n>Delete prompt patterns</label>
+                            </span>
+                        </div>
+                        <textarea id="gen_attr_delete_prompt_patterns" class="attribution-exclude-prompt-patterns-input" rows="1"
+                            placeholder="One regex per line — matched prompt tokens are removed from layout"
+                            spellcheck="false"
+                            autocomplete="off"
+                            title="One regex per line (global flag), matched only within the initial prompt prefix; matched tokens are deleted from the DAG and do not occupy layout space."
+                            data-i18n="placeholder,title"></textarea>
+                    </div>
+                    <div class="attribution-exclude-prompt-patterns-row">
                         <div class="semantic-submode-row attribution-exclude-prompt-patterns-header">
                             <span class="semantic-submode-group">
                                 <label class="attribution-use-mapping-label"
@@ -335,7 +357,7 @@
                                 <label class="semantic-submode-label" for="gen_attr_exclude_prompt_patterns" data-i18n>Exclude prompt patterns</label>
                             </span>
                         </div>
-                        <textarea id="gen_attr_exclude_prompt_patterns" class="attribution-exclude-prompt-patterns-input" rows="2"
+                        <textarea id="gen_attr_exclude_prompt_patterns" class="attribution-exclude-prompt-patterns-input" rows="1"
                             placeholder="One regex per line (prompt prefix only)"
                             spellcheck="false"
                             autocomplete="off"
@@ -357,7 +379,7 @@
                                 <label class="semantic-submode-label" for="gen_attr_exclude_generated_patterns" data-i18n>Exclude generated patterns</label>
                             </span>
                         </div>
-                        <textarea id="gen_attr_exclude_generated_patterns" class="attribution-exclude-prompt-patterns-input" rows="2"
+                        <textarea id="gen_attr_exclude_generated_patterns" class="attribution-exclude-prompt-patterns-input" rows="1"
                             placeholder="One regex per line (generated continuation only)"
                             spellcheck="false"
                             autocomplete="off"

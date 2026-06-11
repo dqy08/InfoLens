@@ -1,3 +1,4 @@
+import type { ToolConfig } from '../../features/chat/toolConfig';
 import type { DagLayoutMode } from '../prediction_attribution/causal_flow/genAttributeDagView';
 import type { TokenGenStep } from '../prediction_attribution/causal_flow/tokenGenAttributionRunner';
 import type { PromptTokenSpan } from '../prediction_attribution/causal_flow/genAttributeDagPreprocess';
@@ -35,6 +36,12 @@ export type GenAttrRunDraft = {
     useSystem?: boolean;
     /** chat 模式：是否启用 Qwen3 thinking chat template */
     enableThinking?: boolean;
+    /** chat 模式：是否向 chat template 注入 tool config schema */
+    toolCallingEnabled?: boolean;
+    /** chat 模式：多轮 mock tool calling */
+    multiTurnEnabled?: boolean;
+    /** chat 模式：tool config（与 Chat 页 draft 同源结构） */
+    toolConfig?: ToolConfig;
     /** Teacher forcing 续写原文；非空则表示已启用 teacher forcing。旧缓存无此字段时从根级 teacherForcingContinuation 降级读取。 */
     teacherForcing?: string;
     /** teacher forcing 结束后是否停止（而非继续 top-1 生成）。 */
@@ -86,6 +93,9 @@ export type GenAttrDemoUiOptions = {
     replayPacingMode: 'total' | 'step';
     playbackTotalS: number;
     playbackStepMs: number;
+    /** 删除 prompt token（物理移除，不占布局）：使能与正则文本（`info_radar_gen_attr_delete_prompt_*`）。 */
+    deletePromptPatternsEnabled: boolean;
+    deletePromptPatternsText: string;
     /** 排除 prompt token 归因：使能与正则文本（仅 Gen Attribute，`info_radar_gen_attr_exclude_prompt_*`）。 */
     excludePromptPatternsEnabled: boolean;
     excludePromptPatternsText: string;
@@ -113,6 +123,8 @@ export type GenAttrCacheKey = {
     teacherForcing?: string;
     /** teacher forcing 用尽后是否停止，仅在 teacherForcing 非空时有意义 */
     stopAfterTeacherForcing?: boolean;
+    /** 多轮 mock tool calling 开启时的 tool config fingerprint（含 mock_results） */
+    toolConfigFingerprint?: string;
 };
 
 /** 规范化 key，去除对结果无影响的冗余字段，保证相同语义的 key 生成相同 hash。 */
@@ -123,6 +135,9 @@ function normalizeKey(key: GenAttrCacheKey): object {
         model: key.model,
         maxTokens: key.maxTokens,
         ...(tf !== undefined ? { teacherForcing: tf, stopAfterTeacherForcing: key.stopAfterTeacherForcing ?? false } : {}),
+        ...(key.toolConfigFingerprint !== undefined
+            ? { toolConfigFingerprint: key.toolConfigFingerprint }
+            : {}),
     };
 }
 
@@ -205,7 +220,28 @@ function isValidGenAttrRunDraftPayload(v: unknown): boolean {
     if (d.stopAfterTeacherForcing !== undefined && typeof d.stopAfterTeacherForcing !== 'boolean') {
         return false;
     }
+    if (d.multiTurnEnabled !== undefined && typeof d.multiTurnEnabled !== 'boolean') {
+        return false;
+    }
     return true;
+}
+
+function migrateStepInputRanges(step: TokenGenStep): TokenGenStep {
+    if (Array.isArray(step.inputRanges) && step.inputRanges.length > 0) {
+        return step;
+    }
+    const pe = step.promptRegionEnd;
+    return { ...step, inputRanges: [[0, pe]] };
+}
+
+function migrateGenAttrCachedRun(rec: GenAttrCachedRun): GenAttrCachedRun {
+    let changed = false;
+    const steps = rec.steps.map((step) => {
+        const migrated = migrateStepInputRanges(step);
+        if (migrated !== step) changed = true;
+        return migrated;
+    });
+    return changed ? { ...rec, steps } : rec;
 }
 
 function isDagLayoutModePayload(v: unknown): v is DagLayoutMode {
@@ -303,6 +339,15 @@ function isValidDemoUiOptionsPayload(v: unknown): v is Partial<GenAttrDemoUiOpti
         return false;
     }
     if (
+        d.deletePromptPatternsEnabled !== undefined &&
+        typeof d.deletePromptPatternsEnabled !== 'boolean'
+    ) {
+        return false;
+    }
+    if (d.deletePromptPatternsText !== undefined && typeof d.deletePromptPatternsText !== 'string') {
+        return false;
+    }
+    if (
         d.excludePromptPatternsEnabled !== undefined &&
         typeof d.excludePromptPatternsEnabled !== 'boolean'
     ) {
@@ -372,7 +417,7 @@ export function parseGenAttrCachedRunPayload(
         console.warn(`[genAttributeRunCache] invalid GenAttrCachedRun payload${suffix}`);
         return undefined;
     }
-    return raw;
+    return migrateGenAttrCachedRun(raw);
 }
 
 export async function save(

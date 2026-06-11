@@ -5,6 +5,7 @@
 @use 'chat-input-panel';
 @use 'breakpoints' as *;
 @use 'generation-status';
+@use 'tool-calling-pending' as tcp;
 @use 'lmf-readout' as lmf;
 
 // 双实例：与下方 LMF 视觉上同一阅读区（同色、同字号行高、单一内边距，无分隔缝）
@@ -12,27 +13,65 @@
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-height: 0;
   width: 100%;
   box-sizing: border-box;
   background: var(--text-area-bg);
   color: var(--text-color);
   padding: 20px;
   overflow: visible;
+  position: relative;
+}
+
+.chat-readout-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  // 为右下角 Copy 按钮留白，避免挡住末行
+  padding-bottom: 2.5rem;
 }
 
 .chat-right-stack .semantic-debug-info {
   background-color: var(--panel-bg);
 }
 
-.chat-prompt-used {
-  @include lmf.lmf-readout-text;
+.chat-segments-container {
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-segment-input-text {
+  @include lmf.lmf-readout-text;
   margin: 0;
   padding: 0;
-  box-sizing: border-box;
   border: none;
-  background-color: transparent;
+  background: transparent;
   color: var(--token-truncated-color);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+
+  &.tool-calling-pending-text {
+    @include tcp.tool-calling-pending-text;
+  }
+}
+
+.chat-segment-output {
+  min-height: 0;
+}
+
+.chat-segment-output-host {
+  min-height: 0;
+}
+
+.chat-segment-output-host .LMF {
+  padding: 0;
+  // 多段连续阅读区：覆盖全局 min-height:350px，高度随续写内容收缩
+  min-height: 0;
 }
 
 .chat-streaming-preview {
@@ -41,47 +80,27 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  position: relative;
   background-color: transparent;
 }
 
-.chat-right-stack.chat-ask-in-flight #chat_streaming_preview:not([hidden]) {
-  flex: 1 1 auto;
-  overflow: visible;
-}
-
-.chat-right-stack.chat-ask-in-flight #chat_streaming_preview:not([hidden]) ~ #results {
-  flex: 0 0 0;
-  min-height: 0 !important;
-  max-height: 0;
-  overflow: hidden;
-  margin: 0;
-  padding: 0;
-}
-
 :root[data-theme='dark'] {
-  .chat-prompt-used,
+  .chat-segment-input-text,
   .chat-streaming-preview {
     font-weight: 300;
   }
 }
 
-.chat-right-stack #results {
-  flex: 1;
-  min-height: 0;
+.chat-copy-fulltext-btn {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  z-index: 50;
+  background-color: var(--text-area-bg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
 
-.chat-copy-fulltext-row {
-  flex: 0 0 auto;
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
-  display: flex;
-  justify-content: flex-end;
-}
-
-.chat-right-stack #results .LMF {
-  padding: 0;
+:root[data-theme='dark'] .chat-copy-fulltext-btn {
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
 }
 
 @media (max-width: $breakpoint-mobile) {
@@ -89,7 +108,12 @@
     padding: 15px 12px;
   }
 
-  .chat-right-stack #results .LMF.minimap-enabled {
+  .chat-copy-fulltext-btn {
+    right: 12px;
+    bottom: 15px;
+  }
+
+  .chat-segment-output-host .LMF.minimap-enabled {
     padding-right: calc(12px + var(--minimap-width));
   }
 }

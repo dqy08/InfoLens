@@ -114,15 +114,5 @@
   }
 }
 
-.attribution-exclude-prompt-patterns-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 6px 8px;
-  border: 1px solid var(--input-border);
-  border-radius: 4px;
-  background: var(--input-bg);
-  color: var(--text-color);
-}
-
 // 保持在本文件末尾；说明见 responsive.narrow-ios-form-font
 @include ios-form-font.apply;

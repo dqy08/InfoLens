@@ -20,6 +20,7 @@ from backend.core.completion_generator import (
     ModelContextLimitUnknownError,
     PromptTooLongError,
     apply_chat_template_for_completion,
+    compute_tool_append_suffix,
     completion_cancel_requested,
     completion_max_token_length,
     generate_completion_text,
@@ -331,12 +332,69 @@ def completions_stop():
     return {"ok": True}, 200
 
 
+def _parse_chat_messages_from_prompt_request(
+    body: Dict[str, Any],
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
+    """从 completions/prompt 请求体解析 messages。返回 (messages, error_response)。"""
+    raw_messages = body.get("messages")
+    if raw_messages is None:
+        return None, {"success": False, "message": "缺少 messages 字段"}
+    if not isinstance(raw_messages, list) or len(raw_messages) == 0:
+        return None, {"success": False, "message": "messages 须为非空数组"}
+    messages: List[Dict[str, Any]] = []
+    for i, item in enumerate(raw_messages):
+        if not isinstance(item, dict):
+            return None, {"success": False, "message": f"messages[{i}] 须为对象"}
+        role = item.get("role")
+        if role not in ("system", "user", "assistant", "tool"):
+            return None, {
+                "success": False,
+                "message": f"messages[{i}].role 无效: {role!r}",
+            }
+        content = item.get("content")
+        if not isinstance(content, str):
+            return None, {
+                "success": False,
+                "message": f"messages[{i}].content 须为字符串",
+            }
+        msg: Dict[str, Any] = {"role": role, "content": content}
+        if role == "tool":
+            name = item.get("name")
+            if not isinstance(name, str) or not name:
+                return None, {
+                    "success": False,
+                    "message": f"messages[{i}].name 在 role=tool 时必填",
+                }
+            msg["name"] = name
+        messages.append(msg)
+    return messages, None
+
+
+def _parse_tools_from_prompt_request(
+    body: Dict[str, Any],
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
+    """解析 tools 数组；``enable_tool_calling`` 已废弃，须显式传 tools。"""
+    tools_raw = body.get("tools")
+    if tools_raw is None:
+        enable_tool_calling_raw = body.get("enable_tool_calling")
+        if enable_tool_calling_raw is True:
+            return None, {
+                "success": False,
+                "message": "enable_tool_calling 已废弃，请传 tools 数组",
+            }
+        return None, None
+
+    if not isinstance(tools_raw, list):
+        return None, {"success": False, "message": "tools 须为数组"}
+    return tools_raw, None
+
+
 def completions_prompt(completions_prompt_request):
     """
-    将用户原文套用 chat template，返回实际送入续写接口的完整 prompt 字符串（JSON）。
+    将 messages 套用 chat template，返回实际送入续写接口的完整 prompt 字符串（JSON）。
 
     Args:
-        completions_prompt_request: 含 model、prompt（用户输入），见 server_openai_definitions.yaml
+        completions_prompt_request: 含 model、messages，见 server_openai_definitions.yaml
 
     Returns:
         (dict with prompt_used, 200) 或校验/过长错误
@@ -344,23 +402,17 @@ def completions_prompt(completions_prompt_request):
     if not isinstance(completions_prompt_request, dict):
         completions_prompt_request = {}
     model = completions_prompt_request.get("model")
-    prompt = completions_prompt_request.get("prompt")
 
     if not model:
         return {"success": False, "message": "缺少 model 字段"}, 400
-    if prompt is None:
-        return {"success": False, "message": "缺少 prompt 字段"}, 400
-    if not isinstance(prompt, str):
-        return {"success": False, "message": "prompt 必须为字符串"}, 400
 
-    system_opt: Optional[str]
-    if "system" not in completions_prompt_request:
-        system_opt = None
-    else:
-        system_raw = completions_prompt_request.get("system")
-        if not isinstance(system_raw, str):
-            return {"success": False, "message": "system 必须为字符串"}, 400
-        system_opt = system_raw
+    messages, msg_err = _parse_chat_messages_from_prompt_request(completions_prompt_request)
+    if msg_err is not None:
+        return msg_err, 400
+
+    tools, tools_err = _parse_tools_from_prompt_request(completions_prompt_request)
+    if tools_err is not None:
+        return tools_err, 400
 
     enable_thinking_raw = completions_prompt_request.get("enable_thinking")
     if enable_thinking_raw is None:
@@ -375,9 +427,9 @@ def completions_prompt(completions_prompt_request):
 
     log_openai_completions_prompt_request(
         model,
-        user_prompt=prompt,
-        system=system_opt,
+        messages=messages,
         enable_thinking=enable_thinking,
+        tools_count=len(tools) if tools else 0,
         client_ip=client_ip,
     )
 
@@ -388,12 +440,70 @@ def completions_prompt(completions_prompt_request):
 
     try:
         prompt_used = apply_chat_template_for_completion(
-            prompt, system_opt, slot=slot, enable_thinking=enable_thinking
+            messages,
+            slot=slot,
+            enable_thinking=enable_thinking,
+            tools=tools,
         )
     except PromptTooLongError as e:
         return {"success": False, "message": str(e)}, 400
 
     return {"prompt_used": prompt_used}, 200
+
+
+def completions_prompt_incremental(completions_prompt_incremental_request):
+    """
+    计算多轮 wire 模式下 tool response 的增量后缀（incremental_suffix）。
+
+    wire 在模型输出 O_n（含 <|im_end|>）后，需追加本函数返回的字符串，
+    以构成下一轮生成的完整输入。suffix 仅取决于 tool_content 和 enable_thinking，
+    与前序历史内容无关。
+
+    Args:
+        completions_prompt_incremental_request: 含 model、tool_content，见 server_openai_definitions.yaml
+
+    Returns:
+        (dict with incremental_suffix, 200) 或校验错误
+    """
+    if not isinstance(completions_prompt_incremental_request, dict):
+        completions_prompt_incremental_request = {}
+    model = completions_prompt_incremental_request.get("model")
+
+    if not model:
+        return {"success": False, "message": "缺少 model 字段"}, 400
+
+    tool_content = completions_prompt_incremental_request.get("tool_content")
+    if not isinstance(tool_content, str):
+        return {"success": False, "message": "tool_content 须为字符串"}, 400
+
+    tool_name = completions_prompt_incremental_request.get("tool_name")
+    if tool_name is not None and not isinstance(tool_name, str):
+        return {"success": False, "message": "tool_name 须为字符串"}, 400
+
+    enable_thinking_raw = completions_prompt_incremental_request.get("enable_thinking")
+    if enable_thinking_raw is None:
+        enable_thinking = False
+    elif not isinstance(enable_thinking_raw, bool):
+        return {"success": False, "message": "enable_thinking 必须为布尔值"}, 400
+    else:
+        enable_thinking = enable_thinking_raw
+
+    try:
+        slot = slot_for_prediction_attr_model(model)
+    except ValueError as e:
+        return {"success": False, "message": str(e)}, 400
+
+    try:
+        suffix = compute_tool_append_suffix(
+            tool_content,
+            enable_thinking=enable_thinking,
+            tool_name=tool_name or None,
+            slot=slot,
+        )
+    except RuntimeError as e:
+        return {"success": False, "message": str(e)}, 500
+
+    return {"incremental_suffix": suffix}, 200
 
 
 def completions(completions_request):
