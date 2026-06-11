@@ -91,6 +91,8 @@ export type GenAttrDemoUiOptions = {
     /** 是否显示 token tooltip（UI: Show token tooltip；`showTokenInfoOnSelected`）。 */
     showTokenInfoOnSelected: boolean;
     replayPacingMode: 'total' | 'step';
+    /** 步进重放（▶）每步是否自动 fit 视口。 */
+    replayAutoZoom: boolean;
     playbackTotalS: number;
     playbackStepMs: number;
     /** 删除 prompt token（物理移除，不占布局）：使能与正则文本（`info_radar_gen_attr_delete_prompt_*`）。 */
@@ -330,6 +332,9 @@ function isValidDemoUiOptionsPayload(v: unknown): v is Partial<GenAttrDemoUiOpti
         return false;
     }
     if (d.replayPacingMode !== undefined && d.replayPacingMode !== 'total' && d.replayPacingMode !== 'step') {
+        return false;
+    }
+    if (d.replayAutoZoom !== undefined && typeof d.replayAutoZoom !== 'boolean') {
         return false;
     }
     if (d.playbackTotalS !== undefined && (typeof d.playbackTotalS !== 'number' || !Number.isFinite(d.playbackTotalS))) {

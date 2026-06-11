@@ -326,7 +326,7 @@
                         <div class="semantic-submode-row attribution-delete-prompt-patterns-header">
                             <span class="semantic-submode-group">
                                 <label class="attribution-use-mapping-label"
-                                    title="When enabled, each line below is a regex with the global flag, matched only within the initial static prompt prefix. Matched prompt tokens are physically removed from the DAG — they neither appear nor occupy layout space (stricter than Exclude + Hide)."
+                                    title="When enabled, each line below is a regex with the global flag, matched only within input areas (excluding generated continuation). Matched prompt tokens are physically removed from the DAG — they neither appear nor occupy layout space (stricter than Exclude + Hide)."
                                     data-i18n="title">
                                     <input type="checkbox" id="gen_attr_delete_prompt_patterns_enable">
                                     <span></span>
@@ -340,14 +340,14 @@
                             placeholder="One regex per line — matched prompt tokens are removed from layout"
                             spellcheck="false"
                             autocomplete="off"
-                            title="One regex per line (global flag), matched only within the initial prompt prefix; matched tokens are deleted from the DAG and do not occupy layout space."
+                            title="One regex per line (global flag), matched only within input areas (excluding generated continuation); matched tokens are deleted from the DAG and do not occupy layout space."
                             data-i18n="placeholder,title"></textarea>
                     </div>
                     <div class="attribution-exclude-prompt-patterns-row">
                         <div class="semantic-submode-row attribution-exclude-prompt-patterns-header">
                             <span class="semantic-submode-group">
                                 <label class="attribution-use-mapping-label"
-                                    title="When enabled, each line below is a regex with the global flag, matched only within the initial static prompt prefix (excluding generated continuation). If a token offset lies fully inside a match, its score is treated as 0."
+                                    title="When enabled, each line below is a regex with the global flag, matched only within input areas (excluding generated continuation). If a token offset lies fully inside a match, its score is treated as 0."
                                     data-i18n="title">
                                     <input type="checkbox" id="gen_attr_exclude_prompt_patterns_enable" checked>
                                     <span></span>
@@ -358,10 +358,10 @@
                             </span>
                         </div>
                         <textarea id="gen_attr_exclude_prompt_patterns" class="attribution-exclude-prompt-patterns-input" rows="1"
-                            placeholder="One regex per line (prompt prefix only)"
+                            placeholder="One regex per line (input areas only)"
                             spellcheck="false"
                             autocomplete="off"
-                            title="One regex per line (global flag), matched only within the initial prompt prefix; if a token offset lies fully inside a match, its score is treated as 0."
+                            title="One regex per line (global flag), matched only within input areas (excluding generated continuation); if a token offset lies fully inside a match, its score is treated as 0."
                             data-i18n="placeholder,title"></textarea>
                     </div>
 
@@ -431,6 +431,16 @@
                                     data-i18n="title">
                                 <span class="semantic-submode-label">ms</span>
                             </span>
+                        </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row gen-attr-dag-replay-auto-zoom-row">
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_replay_auto_zoom"
+                                    title="When checked, step replay (▶) fits the viewport after each step (stops if you pan or zoom). Saved locally."
+                                    data-i18n="title">
+                                <span data-i18n>Auto zoom</span>
+                            </label>
                         </span>
                     </div>
                 </section>

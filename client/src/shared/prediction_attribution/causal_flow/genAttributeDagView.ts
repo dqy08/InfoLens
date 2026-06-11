@@ -592,8 +592,8 @@ export type GenAttributeDagHandle = {
     /**
      * 清空图与测量状态；不修改当前 SVG 上的 d3 zoom 变换（视口平移/缩放由 `layoutDirty` 与
      * `fitViewportToContent` 控制）。
-     * @param preserveUserViewport 为 `true` 时保留调用前的 `layoutDirty`：用于「从末尾重播前 reset」
-     * 时若用户已手动画布，重放后仍不自动 fit。默认 `false`（新一次 run 等场景仍从干净视口策略起算）。
+     * @param preserveUserViewport 为 `true` 时保留调用前的 `layoutDirty`：设置项切换后重放、
+     * 步进重放从末尾重头播放等保留用户 pan/zoom。默认 `false`（新一次 run 等场景仍从干净视口起算）。
      */
     reset(preserveUserViewport?: boolean): void;
     /**
@@ -1358,6 +1358,9 @@ export function initGenAttributeDagView(
         );
     }
 
+    /** 步进重放（▶）期间为 true；fit 由页面 `afterStepShown` + Auto zoom 统一处理，见 {@link syncLayoutForLowVisibilityMembership}。 */
+    let dagPlaybackPlaying = false;
+
     /**
      * Hide exclude/inactive 时，参与布局的节点集随焦点 / dim 阈值变化；须重算 linear-arc / spiral 几何。
      */
@@ -1372,14 +1375,14 @@ export function initGenAttributeDagView(
             if (layoutIncludedNodeIdsKey === LAYOUT_INCLUDED_ALL_KEY) return;
             layoutIncludedNodeIdsKey = LAYOUT_INCLUDED_ALL_KEY;
             paint();
-            if (!layoutDirty) fitViewportToContent(true);
+            if (!layoutDirty && !dagPlaybackPlaying) fitViewportToContent(true);
             return;
         }
         const key = computeLayoutIncludedNodeIdsKey(focusId, focusState);
         if (key === layoutIncludedNodeIdsKey) return;
         layoutIncludedNodeIdsKey = key;
         paint();
-        if (!layoutDirty) fitViewportToContent(true);
+        if (!layoutDirty && !dagPlaybackPlaying) fitViewportToContent(true);
     }
 
     function invalidateLayoutIncludedNodeIdsKey(): void {
@@ -1425,7 +1428,7 @@ export function initGenAttributeDagView(
      */
     let dagExcludeIntervals: [number, number][] = [];
     /**
-     * 每次 {@link setPromptTokenSpans} 按当前 `layoutWire` + `inputRanges` 重算（与 exclude 一致；多轮追加 input 区时扩展）。
+     * 每次 {@link setPromptTokenSpans} 按 `layoutWire` + `inputRanges` 重算（与 exclude 一致；多轮追加 input 区时扩展）。
      * 命中区间内的 prompt token 不进入图也不进入测量层（textMeasure 物理压缩布局空间）。
      */
     let dagDeleteIntervals: [number, number][] = [];
@@ -2199,9 +2202,10 @@ export function initGenAttributeDagView(
         recursiveEdgeAnimation.stopPlayback();
         if (batchDepth === 0) {
             syncGraphToSvg();
-            // 生成 / 单步回放 / DAG 步进播放（均非批内）每步 `fitViewportToContent()`；其内部在
-            // `layoutDirty` 时 no-op。整段批回放仅 `endBatch` → `syncGraphToSvg`，fit 由调用方或 RO。
-            fitViewportToContent();
+            // 生成时每步 fit；步进重放（▶）由页面按 Auto zoom 在 `afterStepShown` 统一处理。
+            if (!dagPlaybackPlaying) {
+                fitViewportToContent();
+            }
         }
     }
 
@@ -2330,7 +2334,6 @@ export function initGenAttributeDagView(
     });
     ro.observe(stackEl);
 
-    let dagPlaybackPlaying = false;
     const playBtn = resultsRoot
         .append('button')
         .attr('type', 'button')

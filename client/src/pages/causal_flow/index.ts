@@ -150,6 +150,7 @@ const GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY = 'info_radar_gen_attr_dag_measure_
 const GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_mode';
 const GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_step_ms';
 const GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_replay_pacing_mode';
+const GEN_ATTR_DAG_REPLAY_AUTO_ZOOM_STORAGE_KEY = 'info_radar_gen_attr_dag_replay_auto_zoom';
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_total_s';
 const GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY = 'info_radar_gen_attr_dag_node_ci_visual_scale';
 const GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY =
@@ -199,6 +200,8 @@ const GEN_ATTR_DAG_PLAYBACK_STEP_MS_MAX = 10000;
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT = 7;
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MIN = 1;
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MAX = 3600;
+/** 手输总量化的步长；原生 step=1 箭头在 `input` 里另取整。 */
+const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STEP = 0.1;
 
 /** 与无 demoUiOptions 本地缓存时「读出默认」对齐，供重置与可读性单一的来源 */
 const DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS: GenAttrDemoUiOptions = {
@@ -219,6 +222,7 @@ const DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS: GenAttrDemoUiOptions = {
     recursiveEdgeBatchAnimationDirection: 'forward',
     showTokenInfoOnSelected: false,
     replayPacingMode: 'total',
+    replayAutoZoom: false,
     playbackTotalS: GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT,
     playbackStepMs: GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT,
     excludePromptPatternsEnabled: true,
@@ -290,17 +294,36 @@ function readStoredDagPlaybackStepMs(): number {
 }
 
 function clampDagPlaybackTotalS(n: number): number {
+    const stepped =
+        Math.round(n / GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STEP) * GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STEP;
     return Math.max(
         GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MIN,
-        Math.min(GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MAX, Math.round(n))
+        Math.min(GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MAX, stepped),
     );
+}
+
+function formatDagPlaybackTotalS(n: number): string {
+    const s = clampDagPlaybackTotalS(n);
+    return Number.isInteger(s) ? String(s) : s.toFixed(1);
+}
+
+function readDagPlaybackTotalSFromInput(): number {
+    const raw = parseFloat(dagPlaybackTotalSInput?.value ?? '');
+    return Number.isFinite(raw)
+        ? clampDagPlaybackTotalS(raw)
+        : GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT;
+}
+
+function commitDagPlaybackTotalSInput(): void {
+    if (!dagPlaybackTotalSInput) return;
+    dagPlaybackTotalSInput.value = formatDagPlaybackTotalS(readDagPlaybackTotalSFromInput());
 }
 
 function readStoredDagPlaybackTotalS(): number {
     return lsReadNumber(
         GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY,
         GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT,
-        { clamp: clampDagPlaybackTotalS },
+        { parse: 'float', clamp: clampDagPlaybackTotalS },
     );
 }
 
@@ -309,6 +332,14 @@ function readStoredDagReplayPacingMode(): DagReplayPacingMode {
         GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY,
         ['total', 'step'] as const,
         DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.replayPacingMode,
+    );
+}
+
+function readStoredDagReplayAutoZoom(): boolean {
+    return lsReadBool(
+        GEN_ATTR_DAG_REPLAY_AUTO_ZOOM_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.replayAutoZoom,
+        { encoding: '1' },
     );
 }
 
@@ -406,6 +437,9 @@ const dagPlaybackTotalSInput = document.getElementById(
 ) as HTMLInputElement | null;
 const dagReplayTotalWrap = document.getElementById('gen_attr_dag_replay_total_wrap');
 const dagReplayStepWrap = document.getElementById('gen_attr_dag_replay_step_wrap');
+const dagReplayAutoZoomInput = document.getElementById(
+    'gen_attr_dag_replay_auto_zoom',
+) as HTMLInputElement | null;
 
 /** 与 `#gen_attr_dag_replay_mode` 同步；非法或缺失时视为 `total`。 */
 function currentDagReplayPacingMode(): DagReplayPacingMode {
@@ -418,13 +452,13 @@ function readDagReplayPacingFromControls(options?: { writeBack?: boolean }): Dag
     const stepMs = Number.isFinite(rawStep)
         ? clampDagPlaybackStepMs(rawStep)
         : readStoredDagPlaybackStepMs();
-    const rawS = parseInt(dagPlaybackTotalSInput?.value ?? '', 10);
+    const rawS = parseFloat(dagPlaybackTotalSInput?.value ?? '');
     const totalS = Number.isFinite(rawS)
         ? clampDagPlaybackTotalS(rawS)
         : readStoredDagPlaybackTotalS();
     if (options?.writeBack) {
         if (dagPlaybackStepMsInput) dagPlaybackStepMsInput.value = String(stepMs);
-        if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = String(totalS);
+        if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = formatDagPlaybackTotalS(totalS);
     }
     return { mode: currentDagReplayPacingMode(), stepMs, totalS };
 }
@@ -542,6 +576,7 @@ bindExcludePatternsUi({
     onEffectiveChange: onExcludePatternsEffectiveChange,
     defaultTextWhenKeyAbsent: '',
     defaultEnabledWhenKeyAbsent: false,
+    skipLocalStoragePersist: true,
 });
 bindExcludePatternsUi({
     storageKeys: {
@@ -552,6 +587,7 @@ bindExcludePatternsUi({
     enableCheckbox: genAttrExcludePromptPatternsEnable,
     onEffectiveChange: onExcludePatternsEffectiveChange,
     defaultTextWhenKeyAbsent: DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT,
+    skipLocalStoragePersist: true,
 });
 bindExcludePatternsUi({
     storageKeys: {
@@ -562,6 +598,7 @@ bindExcludePatternsUi({
     enableCheckbox: genAttrExcludeGeneratedPatternsEnable,
     onEffectiveChange: onExcludePatternsEffectiveChange,
     defaultTextWhenKeyAbsent: DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT,
+    skipLocalStoragePersist: true,
 });
 
 /** 与 DAG 同源：DAG 预处理按当前控件即时读取，不读 Attribution 的 localStorage。 */
@@ -598,7 +635,9 @@ if (dagPlaybackStepMsInput) dagPlaybackStepMsInput.value = String(initialDagPlay
 const initialDagReplayPacingMode = readStoredDagReplayPacingMode();
 if (dagReplayModeSelect) dagReplayModeSelect.value = initialDagReplayPacingMode;
 const initialDagPlaybackTotalS = readStoredDagPlaybackTotalS();
-if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = String(initialDagPlaybackTotalS);
+if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = formatDagPlaybackTotalS(initialDagPlaybackTotalS);
+const initialDagReplayAutoZoom = readStoredDagReplayAutoZoom();
+if (dagReplayAutoZoomInput) dagReplayAutoZoomInput.checked = initialDagReplayAutoZoom;
 applyDagReplaySpeedUi();
 
 const genAttrResultsNode = genAttrResultsEl.node() as HTMLElement | null;
@@ -613,9 +652,7 @@ const initialDagNodeCiVisualScale = readStoredDagNodeCiVisualScale();
 if (dagNodeCiVisualScaleInput) dagNodeCiVisualScaleInput.checked = initialDagNodeCiVisualScale;
 setDagNodeCiVisualScaleEnabled(initialDagNodeCiVisualScale);
 dagNodeCiVisualScaleInput?.addEventListener('change', () => {
-    const enabled = dagNodeCiVisualScaleInput.checked;
-    lsWriteBool(GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY, enabled, '1');
-    setDagNodeCiVisualScaleEnabled(enabled);
+    setDagNodeCiVisualScaleEnabled(dagNodeCiVisualScaleInput.checked);
     tryResetAndReplayDag();
 });
 
@@ -632,9 +669,7 @@ if (dagDecayAttributionHighSurprisalInput) {
 }
 setDagDecayAttributionToHighSurprisalTargetEnabled(initialDagDecayAttributionHighSurprisal);
 dagDecayAttributionHighSurprisalInput?.addEventListener('change', () => {
-    const enabled = dagDecayAttributionHighSurprisalInput.checked;
-    lsWriteBool(GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY, enabled, '1');
-    setDagDecayAttributionToHighSurprisalTargetEnabled(enabled);
+    setDagDecayAttributionToHighSurprisalTargetEnabled(dagDecayAttributionHighSurprisalInput.checked);
     tryResetAndReplayDag({ refit: false });
 });
 
@@ -653,9 +688,7 @@ const initialDagHideInactiveEdges = readStoredDagHideInactiveEdges();
 if (dagHideInactiveEdgesInput) dagHideInactiveEdgesInput.checked = initialDagHideInactiveEdges;
 applyDagHideInactiveEdges(initialDagHideInactiveEdges);
 dagHideInactiveEdgesInput?.addEventListener('change', () => {
-    const hide = dagHideInactiveEdgesInput.checked;
-    lsWriteBool(GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY, hide, '1');
-    applyDagHideInactiveEdges(hide);
+    applyDagHideInactiveEdges(dagHideInactiveEdgesInput.checked);
 });
 
 function readStoredDagShowDownstreamInfluence(): boolean {
@@ -670,9 +703,7 @@ if (dagShowDownstreamInfluenceInput) {
     dagShowDownstreamInfluenceInput.checked = initialDagShowDownstreamInfluence;
 }
 dagShowDownstreamInfluenceInput?.addEventListener('change', () => {
-    const show = dagShowDownstreamInfluenceInput.checked;
-    lsWriteBool(GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY, show, '1');
-    dagHandle.setShowDownstreamInfluence(show);
+    dagHandle.setShowDownstreamInfluence(dagShowDownstreamInfluenceInput.checked);
 });
 
 function syncDimInactiveTokensThresholdInputUi(): void {
@@ -790,24 +821,18 @@ setDimInactiveTokensThresholdControlFromFraction(initialDagDimInactiveTokensThre
 applyDagRecursiveAttributionSubmodeUi();
 syncDimInactiveTokensThresholdInputUi();
 dagRecursiveAttributionInput?.addEventListener('change', () => {
-    const enabled = dagRecursiveAttributionInput.checked;
-    lsWriteBool(GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY, enabled, '1');
     applyDagRecursiveAttributionSubmodeUi();
-    dagHandle.setRecursiveAttributionEnabled(enabled);
+    dagHandle.setRecursiveAttributionEnabled(dagRecursiveAttributionInput.checked);
 });
 dagRecursiveEdgeAnimationDirectionSelect?.addEventListener('change', () => {
     const direction = currentDagRecursiveEdgeAnimationDirection();
     dagRecursiveEdgeAnimationDirectionSelect.value = direction;
-    lsWriteString(GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_DIRECTION_STORAGE_KEY, direction);
     dagHandle.setRecursiveEdgeBatchAnimationDirection(direction);
 });
 
 dagDimInactiveTokensInput?.addEventListener('change', () => {
-    const enabled = dagDimInactiveTokensInput.checked;
-    lsWriteBool(GEN_ATTR_DAG_DIM_INACTIVE_TOKENS_STORAGE_KEY, enabled, '1');
     syncDimInactiveTokensThresholdInputUi();
     applyDagDimInactiveTokensFromControls();
-    syncGenAttrResetUiOptionsButtonState();
 });
 
 dagDimInactiveTokensThresholdInput?.addEventListener('input', () => {
@@ -816,16 +841,11 @@ dagDimInactiveTokensThresholdInput?.addEventListener('input', () => {
 dagDimInactiveTokensThresholdInput?.addEventListener('change', () => {
     const t = readDimInactiveTokensThresholdFromControl();
     setDimInactiveTokensThresholdControlFromFraction(t);
-    lsSet(GEN_ATTR_DAG_DIM_INACTIVE_TOKENS_THRESHOLD_STORAGE_KEY, String(t));
     applyDagDimInactiveTokensFromControls();
-    syncGenAttrResetUiOptionsButtonState();
 });
 
 dagDimInactiveNotInAnimationInput?.addEventListener('change', () => {
-    const enabled = dagDimInactiveNotInAnimationInput.checked;
-    lsWriteBool(GEN_ATTR_DAG_DIM_INACTIVE_NOT_IN_ANIMATION_STORAGE_KEY, enabled, '1');
     applyDagDimInactiveTokensFromControls();
-    syncGenAttrResetUiOptionsButtonState();
 });
 
 function readStoredDagHideExcludedTokens(): boolean {
@@ -847,15 +867,11 @@ function readStoredDagShowTopkOnSelected(): boolean {
 const initialDagShowTopkOnSelected = readStoredDagShowTopkOnSelected();
 if (dagShowTopkOnSelectedInput) dagShowTopkOnSelectedInput.checked = initialDagShowTopkOnSelected;
 dagHideExcludedTokensInput?.addEventListener('change', () => {
-    const hide = dagHideExcludedTokensInput.checked;
-    lsWriteBool(GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY, hide, '1');
-    dagHandle.setHideExcludedTokens(hide);
+    dagHandle.setHideExcludedTokens(dagHideExcludedTokensInput.checked);
 });
 
 dagShowTopkOnSelectedInput?.addEventListener('change', () => {
-    const show = dagShowTopkOnSelectedInput.checked;
-    lsWriteBool(GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY, show, '1');
-    dagHandle.setShowTokenInfoOnSelected(show);
+    dagHandle.setShowTokenInfoOnSelected(dagShowTopkOnSelectedInput.checked);
 });
 
 setPageOptsGetter(() => {
@@ -878,22 +894,28 @@ dagPlaybackStepMsInput?.addEventListener('change', () => {
         ? clampDagPlaybackStepMs(raw)
         : GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT;
     dagPlaybackStepMsInput.value = String(ms);
-    lsSet(GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY, String(ms));
 });
 
 dagReplayModeSelect?.addEventListener('change', () => {
-    const mode = currentDagReplayPacingMode();
-    lsWriteString(GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY, mode);
     applyDagReplaySpeedUi();
 });
 
+dagPlaybackTotalSInput?.addEventListener('input', (e) => {
+    if (!dagPlaybackTotalSInput) return;
+    if (!(e instanceof InputEvent) || (e.inputType !== 'increment' && e.inputType !== 'decrement')) {
+        return;
+    }
+    const raw = parseFloat(dagPlaybackTotalSInput.value);
+    if (!Number.isFinite(raw)) return;
+    dagPlaybackTotalSInput.value = formatDagPlaybackTotalS(clampDagPlaybackTotalS(Math.round(raw)));
+});
+
 dagPlaybackTotalSInput?.addEventListener('change', () => {
-    const raw = parseInt(dagPlaybackTotalSInput.value, 10);
-    const s = Number.isFinite(raw)
-        ? clampDagPlaybackTotalS(raw)
-        : GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT;
-    dagPlaybackTotalSInput.value = String(s);
-    lsSet(GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY, String(s));
+    commitDagPlaybackTotalSInput();
+});
+
+dagPlaybackTotalSInput?.addEventListener('blur', () => {
+    commitDagPlaybackTotalSInput();
 });
 
 function isSkipChatTemplate(): boolean {
@@ -1210,7 +1232,7 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
     cancelDagLastTokenDwell();
     const steps = h.getAllSteps();
     if (dagPlaybackNextIndex >= steps.length) {
-        // `reset()` 默认会清 `layoutDirty`，每步 `update` 就会 fit；重放前需保留用户 pan/zoom 时保留 dirty。
+        // 保留 `layoutDirty`：用户 pan/zoom 后 Auto zoom 仍应停止 fit。
         dagHandle.reset(true);
         dagPlaybackNextIndex = 0;
     }
@@ -1261,14 +1283,18 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
             if (visible) toolCallingPendingLine?.show();
             else toolCallingPendingLine?.hide();
         },
-        showPrompt: (fitViewport) => {
+        showPrompt: () => {
             const firstStep = steps[0]!;
             syncDagInputLayerAtStep({
                 catalogSpans: currentRunPromptSpans,
                 layoutWire: firstStep.context,
                 inputRanges: firstStep.inputRanges,
-                fitViewport,
             });
+        },
+        afterStepShown: () => {
+            if (dagReplayAutoZoomInput?.checked) {
+                dagHandle.fitViewportToContent();
+            }
         },
         showToolResponse: (stepIndex) => {
             const step = steps[stepIndex]!;
@@ -1342,10 +1368,8 @@ toolCallingPendingLine = attachToolCallingPendingLine(
 );
 
 dagLayoutModeSelect?.addEventListener('change', () => {
-    const mode = currentDagLayoutMode();
-    lsWriteString(GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY, mode);
     applyDagLayoutModeUi();
-    dagHandle.setLayoutMode(mode);
+    dagHandle.setLayoutMode(currentDagLayoutMode());
 });
 
 /**
@@ -1397,7 +1421,6 @@ dagMeasureWidthInput?.addEventListener('change', () => {
         ? clampDagMeasureWidth(raw)
         : GEN_ATTR_DAG_MEASURE_WIDTH_DEFAULT;
     dagMeasureWidthInput.value = String(w);
-    lsSet(GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY, String(w));
     dagHandle.setMeasureWidthPx(w);
     tryResetAndReplayDag();
 });
@@ -1406,7 +1429,6 @@ dagCompactnessInput?.addEventListener('change', () => {
     const raw = parseFloat(dagCompactnessInput.value);
     const c = Number.isFinite(raw) ? clampDagCompactness(raw) : DAG_COMPACTNESS_DEFAULT;
     dagCompactnessInput.value = String(c);
-    lsSet(GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY, String(c));
     dagHandle.setDagCompactness(c);
     tryResetAndReplayDag();
 });
@@ -1417,7 +1439,6 @@ dagEdgeTopPCoverageInput?.addEventListener('change', () => {
         ? clampDagEdgeTopPCoverage(raw)
         : DAG_EDGE_TOP_P_COVERAGE_DEFAULT;
     dagEdgeTopPCoverageInput.value = String(c);
-    lsSet(GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY, String(c));
     dagHandle.setEdgeTopPCoverage(c);
     tryResetAndReplayDag({ refit: false });
 });
@@ -1428,7 +1449,6 @@ dagLinearArcIntervalInput?.addEventListener('change', () => {
         ? clampLinearArcAdjacentGap(raw)
         : LINEAR_ARC_ADJACENT_GAP_DEFAULT;
     dagLinearArcIntervalInput.value = String(n);
-    lsSet(GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY, String(n));
     dagHandle.setLinearArcAdjacentGapPx(n, { skipRefit: isDagBusy() });
 });
 
@@ -1476,6 +1496,7 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
         recursiveEdgeBatchAnimationDirection: currentDagRecursiveEdgeAnimationDirection(),
         showTokenInfoOnSelected: dagShowTopkOnSelectedInput?.checked ?? false,
         replayPacingMode,
+        replayAutoZoom: dagReplayAutoZoomInput?.checked ?? false,
         playbackTotalS,
         playbackStepMs,
         excludePromptPatternsEnabled: genAttrExcludePromptPatternsEnable?.checked ?? true,
@@ -1510,8 +1531,133 @@ function syncGenAttrResetUiOptionsButtonState(): void {
 }
 
 /**
- * 从 `demoUiOptions` 还原排除控件（仅 DOM）；与施加 DAG demo 不回写 GEN_ATTR_LS 的策略一致，`replay` 读当前控件生效。
+ * 演示 UI 控件 id ↔ localStorage 键：面板委托识别、批量清除 LS。
+ * 新增控件须同步改：本表、`persistGenAttrDemoUiOptionsToLocalStorage`、
+ * {@link readGenAttrDemoUiOptionsFromControls}、`applyGenAttrDemoUiOptionsSnap`、
+ * {@link DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS}（不含 Model、Max tokens、prompt 正文）。
  */
+const GEN_ATTR_DEMO_UI_PERSIST_SPECS: ReadonlyArray<{
+    readonly controlId: string;
+    readonly storageKey: string;
+}> = [
+    { controlId: 'gen_attr_dag_layout_mode', storageKey: GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_compactness', storageKey: GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_measure_width', storageKey: GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_linear_arc_interval', storageKey: GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_node_ci_visual_scale', storageKey: GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY },
+    {
+        controlId: 'gen_attr_dag_decay_attribution_high_surprisal',
+        storageKey: GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY,
+    },
+    { controlId: 'gen_attr_dag_recursive_attribution', storageKey: GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY },
+    {
+        controlId: 'gen_attr_dag_recursive_edge_animation_direction',
+        storageKey: GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_DIRECTION_STORAGE_KEY,
+    },
+    { controlId: 'gen_attr_dag_dim_inactive_tokens', storageKey: GEN_ATTR_DAG_DIM_INACTIVE_TOKENS_STORAGE_KEY },
+    {
+        controlId: 'gen_attr_dag_dim_inactive_tokens_threshold',
+        storageKey: GEN_ATTR_DAG_DIM_INACTIVE_TOKENS_THRESHOLD_STORAGE_KEY,
+    },
+    {
+        controlId: 'gen_attr_dag_dim_inactive_not_in_animation',
+        storageKey: GEN_ATTR_DAG_DIM_INACTIVE_NOT_IN_ANIMATION_STORAGE_KEY,
+    },
+    {
+        controlId: 'gen_attr_dag_show_downstream_influence',
+        storageKey: GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY,
+    },
+    { controlId: 'gen_attr_dag_edge_top_p_coverage', storageKey: GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_hide_inactive_edges', storageKey: GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_hide_excluded_tokens', storageKey: GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_show_topk_on_selected', storageKey: GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_replay_mode', storageKey: GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_replay_auto_zoom', storageKey: GEN_ATTR_DAG_REPLAY_AUTO_ZOOM_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_playback_total_s', storageKey: GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_playback_step_ms', storageKey: GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY },
+    {
+        controlId: 'gen_attr_delete_prompt_patterns_enable',
+        storageKey: GEN_ATTR_DELETE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
+    },
+    { controlId: 'gen_attr_delete_prompt_patterns', storageKey: GEN_ATTR_DELETE_PROMPT_PATTERNS_STORAGE_KEY },
+    {
+        controlId: 'gen_attr_exclude_prompt_patterns_enable',
+        storageKey: GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
+    },
+    { controlId: 'gen_attr_exclude_prompt_patterns', storageKey: GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY },
+    {
+        controlId: 'gen_attr_exclude_generated_patterns_enable',
+        storageKey: GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY,
+    },
+    { controlId: 'gen_attr_exclude_generated_patterns', storageKey: GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY },
+];
+
+const GEN_ATTR_DEMO_UI_CONTROL_IDS = new Set(GEN_ATTR_DEMO_UI_PERSIST_SPECS.map((s) => s.controlId));
+
+const GEN_ATTR_DEMO_UI_LOCAL_STORAGE_KEYS: readonly string[] = GEN_ATTR_DEMO_UI_PERSIST_SPECS.map(
+    (s) => s.storageKey,
+);
+
+function isGenAttrDemoUiControl(target: EventTarget | null): boolean {
+    return target instanceof HTMLElement && GEN_ATTR_DEMO_UI_CONTROL_IDS.has(target.id);
+}
+
+function removeGenAttrDemoUiOptionsFromLocalStorage(): void {
+    for (const k of GEN_ATTR_DEMO_UI_LOCAL_STORAGE_KEYS) {
+        lsRemove(k);
+    }
+}
+
+function persistGenAttrDemoUiOptionsToLocalStorage(snap: GenAttrDemoUiOptions): void {
+    lsWriteString(GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY, snap.layoutMode);
+    lsSet(GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY, String(snap.measureWidthPx));
+    lsSet(GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY, String(snap.dagCompactness));
+    lsSet(GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY, String(snap.linearArcAdjacentGapPx));
+    lsSet(GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY, String(snap.edgeTopPCoverage));
+    lsWriteBool(GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY, snap.hideExcludedTokens, '1');
+    lsWriteBool(GEN_ATTR_DAG_DIM_INACTIVE_TOKENS_STORAGE_KEY, snap.dimInactiveTokens, '1');
+    lsSet(GEN_ATTR_DAG_DIM_INACTIVE_TOKENS_THRESHOLD_STORAGE_KEY, String(snap.dimInactiveTokensThreshold));
+    lsWriteBool(
+        GEN_ATTR_DAG_DIM_INACTIVE_NOT_IN_ANIMATION_STORAGE_KEY,
+        snap.dimInactiveNotDuringAnimation,
+        '1',
+    );
+    lsWriteBool(GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY, snap.nodeCiVisualScaleEnabled, '1');
+    lsWriteBool(
+        GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY,
+        snap.decayAttributionToHighSurprisalTargetEnabled,
+        '1',
+    );
+    lsWriteBool(GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY, snap.hideInactiveEdges, '1');
+    lsWriteBool(GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY, snap.showDownstreamInfluence, '1');
+    lsWriteBool(GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY, snap.recursiveAttributionEnabled, '1');
+    lsWriteString(
+        GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_DIRECTION_STORAGE_KEY,
+        snap.recursiveEdgeBatchAnimationDirection,
+    );
+    lsWriteBool(GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY, snap.showTokenInfoOnSelected, '1');
+    lsWriteString(GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY, snap.replayPacingMode);
+    lsWriteBool(GEN_ATTR_DAG_REPLAY_AUTO_ZOOM_STORAGE_KEY, snap.replayAutoZoom, '1');
+    lsSet(GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY, String(snap.playbackTotalS));
+    lsSet(GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY, String(snap.playbackStepMs));
+    lsSet(GEN_ATTR_DELETE_PROMPT_PATTERNS_STORAGE_KEY, snap.deletePromptPatternsText);
+    lsWriteBool(GEN_ATTR_DELETE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY, snap.deletePromptPatternsEnabled, '1');
+    lsSet(GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY, snap.excludePromptPatternsText);
+    lsWriteBool(GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY, snap.excludePromptPatternsEnabled, '1');
+    lsSet(GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY, snap.excludeGeneratedPatternsText);
+    lsWriteBool(
+        GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY,
+        snap.excludeGeneratedPatternsEnabled,
+        '1',
+    );
+}
+
+/** 演示用 UI：DOM → localStorage 的唯一写路径（用户改控件经面板委托；程序化 apply 末尾调用）。 */
+function syncGenAttrDemoUiOptionsToLocalStorage(): void {
+    persistGenAttrDemoUiOptionsToLocalStorage(readGenAttrDemoUiOptionsFromControls());
+}
+
+/** 从 `demoUiOptions` 还原排除控件（仅 DOM）；`replay` 读当前控件生效。 */
 function applyGenAttrExcludePatternsFromDemoUiSnap(snap: Partial<GenAttrDemoUiOptions>): void {
     const {
         deletePromptPatternsEnabled,
@@ -1663,9 +1809,12 @@ function applyGenAttrDemoUiOptionsSnap(snap: Partial<GenAttrDemoUiOptions>): voi
         if (dagReplayModeSelect) dagReplayModeSelect.value = snap.replayPacingMode;
         applyDagReplaySpeedUi();
     }
+    if (snap.replayAutoZoom !== undefined) {
+        if (dagReplayAutoZoomInput) dagReplayAutoZoomInput.checked = snap.replayAutoZoom;
+    }
     if (snap.playbackTotalS !== undefined) {
         const s = clampDagPlaybackTotalS(snap.playbackTotalS);
-        if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = String(s);
+        if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = formatDagPlaybackTotalS(s);
     }
     if (snap.playbackStepMs !== undefined) {
         const ms = clampDagPlaybackStepMs(snap.playbackStepMs);
@@ -1673,6 +1822,7 @@ function applyGenAttrDemoUiOptionsSnap(snap: Partial<GenAttrDemoUiOptions>): voi
     }
 
     applyGenAttrExcludePatternsFromDemoUiSnap(snap);
+    syncGenAttrDemoUiOptionsToLocalStorage();
     syncGenAttrResetUiOptionsButtonState();
 }
 
@@ -1695,38 +1845,6 @@ function applyGenAttrDemoUiOptionsFromRecord(rec: GenAttrCachedRun): void {
     applyGenAttrDemoUiOptionsSnap(rec.demoUiOptions);
 }
 
-/** Gen Attribute demo-UI scope：与 {@link readGenAttrDemoUiOptionsFromControls} / IndexedDB demo 快照一致（不含 Model、Max tokens、prompt 正文）。 */
-const GEN_ATTR_DEMO_UI_LOCAL_STORAGE_KEYS: readonly string[] = [
-    GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY,
-    GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY,
-    GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY,
-    GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY,
-    GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY,
-    GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY,
-    GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY,
-    GEN_ATTR_DAG_HIDE_INACTIVE_EDGES_STORAGE_KEY,
-    GEN_ATTR_DAG_SHOW_DOWNSTREAM_INFLUENCE_STORAGE_KEY,
-    GEN_ATTR_DAG_RECURSIVE_ATTRIBUTION_STORAGE_KEY,
-    GEN_ATTR_DAG_RECURSIVE_EDGE_ANIMATION_DIRECTION_STORAGE_KEY,
-    GEN_ATTR_DAG_HIDE_EXCLUDED_TOKENS_STORAGE_KEY,
-    GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY,
-    GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY,
-    GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY,
-    GEN_ATTR_DAG_EDGE_TOP_P_COVERAGE_STORAGE_KEY,
-    GEN_ATTR_DELETE_PROMPT_PATTERNS_STORAGE_KEY,
-    GEN_ATTR_DELETE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
-    GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY,
-    GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
-    GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_STORAGE_KEY,
-    GEN_ATTR_EXCLUDE_GENERATED_PATTERNS_ENABLED_STORAGE_KEY,
-];
-
-function removeGenAttrDemoUiOptionsFromLocalStorage(): void {
-    for (const k of GEN_ATTR_DEMO_UI_LOCAL_STORAGE_KEYS) {
-        lsRemove(k);
-    }
-}
-
 /** 重置「DAG 演示用 UI」：清 LS 后以 {@link DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS} 全量套用。 */
 function resetGenAttrDemoUiOptionsToDefaults(): void {
     stopDagPlayback();
@@ -1740,10 +1858,18 @@ genAttrResetUiOptionsBtn?.addEventListener('click', resetGenAttrDemoUiOptionsToD
 (() => {
     const panel = document.querySelector('.gen-attribute-page .input-section');
     if (!panel) return;
-    const sync = () => syncGenAttrResetUiOptionsButtonState();
-    panel.addEventListener('change', sync);
-    panel.addEventListener('input', sync);
-    sync();
+    const onDemoUiPersist = (e: Event) => {
+        if (!isGenAttrDemoUiControl(e.target)) return;
+        syncGenAttrDemoUiOptionsToLocalStorage();
+        syncGenAttrResetUiOptionsButtonState();
+    };
+    panel.addEventListener('change', onDemoUiPersist);
+    panel.addEventListener('blur', onDemoUiPersist, true);
+    panel.addEventListener('input', (e) => {
+        if (!isGenAttrDemoUiControl(e.target)) return;
+        syncGenAttrResetUiOptionsButtonState();
+    });
+    syncGenAttrResetUiOptionsButtonState();
 })();
 
 window.addEventListener('pagehide', (ev) => {

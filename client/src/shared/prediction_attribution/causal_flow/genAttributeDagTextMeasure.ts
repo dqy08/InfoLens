@@ -199,12 +199,15 @@ export function createGenAttributeDagTextMeasure(
 } {
     // 合并重叠区间，保证 originalToCompacted 与 compactText 行为一致。
     let mergedDeleteIntervals = mergeDeleteIntervals(deleteIntervals);
-    /** 当前测量层中的完整文本（prompt 部分已压缩 + 生成 token 原样拼接）。 */
+    /** 当前测量层中的完整文本（prompt 前缀已压缩 + 生成 token 原样拼接）。 */
     let fullText = '';
-    /** 原始 prompt 长度（即 setPrompt/appendInputSpans 最后一次传入的 promptText/layoutText 长度）。 */
-    let originalPromptLength = 0;
-    /** 压缩后 prompt 的长度（deleteIntervals 已移除部分不计）。 */
-    let compactedPromptLength = 0;
+    /**
+     * 最近一次 input 同步时 `layoutWire` 在原始坐标系下的长度（`setPrompt` 为 prompt 长度；
+     * `appendInputSpans` 为含 tool response 等的全长）。供 {@link appendGeneratedToken} 锚定生成区起点。
+     */
+    let layoutAnchorLength = 0;
+    /** 与 {@link layoutAnchorLength} 同锚点、经 delete 压缩后的坐标长度。 */
+    let compactedLayoutAnchorLength = 0;
     let bpeStrings: FrontendToken[] = [];
     const calculator = new TokenPositionCalculator(measureRoot);
 
@@ -229,8 +232,8 @@ export function createGenAttributeDagTextMeasure(
     return {
         reset(): void {
             fullText = '';
-            originalPromptLength = 0;
-            compactedPromptLength = 0;
+            layoutAnchorLength = 0;
+            compactedLayoutAnchorLength = 0;
             bpeStrings = [];
             while (measureRoot.firstChild) measureRoot.removeChild(measureRoot.firstChild);
             calculator.resetIndex();
@@ -247,8 +250,8 @@ export function createGenAttributeDagTextMeasure(
         setPrompt(promptText: string, spans: PromptTokenSpan[]): Map<string, GenAttrDagTokenGeom> {
             // 将被删区间字符物理移除，DOM 里不留空洞。
             const compactedPrompt = compactText(promptText, mergedDeleteIntervals);
-            originalPromptLength = promptText.length;
-            compactedPromptLength = compactedPrompt.length;
+            layoutAnchorLength = promptText.length;
+            compactedLayoutAnchorLength = compactedPrompt.length;
             fullText = compactedPrompt;
 
             // 过滤掉被删 span（调用方也会跳过，双重保险）。
@@ -291,8 +294,8 @@ export function createGenAttributeDagTextMeasure(
                     'genAttributeDagTextMeasure: appendInputSpans layoutText must extend current fullText prefix',
                 );
             }
-            originalPromptLength = layoutText.length;
-            compactedPromptLength = compactedLayout.length;
+            layoutAnchorLength = layoutText.length;
+            compactedLayoutAnchorLength = compactedLayout.length;
             fullText = compactedLayout;
 
             const keptNew = newSpans.filter(
@@ -328,9 +331,9 @@ export function createGenAttributeDagTextMeasure(
 
         appendGeneratedToken(token: string, offset: [number, number]): GenAttrDagTokenGeom {
             // offset[0] 是原始坐标系下该 token 在全文中的起点（= context.length at generation time）。
-            // 映射到压缩坐标系：prompt 外的字符无删除，仅需减去 prompt 被删除的总字符数。
-            const generatedRelative = offset[0] - originalPromptLength;
-            const compactedStart = compactedPromptLength + generatedRelative;
+            // 映射到压缩坐标系：自 layoutAnchor 之后的生成区无 delete，按锚点相对偏移平移。
+            const generatedRelative = offset[0] - layoutAnchorLength;
+            const compactedStart = compactedLayoutAnchorLength + generatedRelative;
             const compactedOffset: [number, number] = [compactedStart, compactedStart + token.length];
 
             fullText += token;

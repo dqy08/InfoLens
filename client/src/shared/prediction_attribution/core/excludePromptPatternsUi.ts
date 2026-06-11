@@ -20,6 +20,8 @@ export type BindExcludePatternsUiOptions = {
     defaultTextWhenKeyAbsent?: string;
     /** enable 键从未写入时的默认勾选态；缺省 `true`（与 Attribution Exclude 一致） */
     defaultEnabledWhenKeyAbsent?: boolean;
+    /** 为 true 时不写 localStorage（由调用方统一 sync，如 Gen Attribute demo UI 面板委托） */
+    skipLocalStoragePersist?: boolean;
 };
 
 export type BindExcludePromptPatternsUiOptions = Omit<
@@ -46,6 +48,7 @@ export function bindExcludePatternsUi(options: BindExcludePatternsUiOptions): vo
         onEffectiveChange,
         defaultTextWhenKeyAbsent,
         defaultEnabledWhenKeyAbsent = true,
+        skipLocalStoragePersist = false,
     } = options;
     const { textKey, enabledKey } = storageKeys;
 
@@ -70,16 +73,20 @@ export function bindExcludePatternsUi(options: BindExcludePatternsUiOptions): vo
     syncEnableGatedTextInputVisibility(enableCheckbox, textInput);
 
     enableCheckbox?.addEventListener('change', () => {
-        if (textInput) {
-            lsSet(textKey, textInput.value);
+        if (!skipLocalStoragePersist) {
+            if (textInput) {
+                lsSet(textKey, textInput.value);
+            }
+            lsWriteBool(enabledKey, enableCheckbox.checked, '1');
         }
-        lsWriteBool(enabledKey, enableCheckbox.checked, '1');
         syncEnableGatedTextInputVisibility(enableCheckbox, textInput);
         onEffectiveChange();
     });
 
     textInput?.addEventListener('blur', () => {
-        lsSet(textKey, textInput.value);
+        if (!skipLocalStoragePersist) {
+            lsSet(textKey, textInput.value);
+        }
         onEffectiveChange();
     });
 

@@ -140,9 +140,11 @@ export type RunDagStepPlaybackLoopOptions = {
     isStale: () => boolean;
     setTimer: (cb: () => void, delayMs: number) => void;
     setToolPendingVisible: (visible: boolean) => void;
-    showPrompt: (fitViewport: boolean) => void;
+    showPrompt: () => void;
     showToolResponse: (stepIndex: number) => void;
     showOutputGen: (stepIndex: number) => void;
+    /** 每段内容展示后调用（如步进重放开启 Auto zoom 时 fit 视口）。 */
+    afterStepShown?: () => void;
     onOutputGenShown: (stepIndex: number) => void;
     onAllOutputGensShown: () => void;
 };
@@ -168,7 +170,7 @@ export function runDagStepPlaybackLoop(opts: RunDagStepPlaybackLoopOptions): voi
 
             switch (event.kind) {
                 case 'prompt':
-                    opts.showPrompt(true);
+                    opts.showPrompt();
                     break;
                 case 'toolResponse':
                     opts.showToolResponse(event.stepIndex);
@@ -182,6 +184,7 @@ export function runDagStepPlaybackLoop(opts: RunDagStepPlaybackLoopOptions): voi
                     void _exhaustive;
                 }
             }
+            opts.afterStepShown?.();
 
             const nextIndex = eventIndex + 1;
             if (nextIndex >= opts.events.length) {

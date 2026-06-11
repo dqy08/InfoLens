@@ -40,11 +40,15 @@ export const translations: Translations = {
         'Max new tokens must not exceed {limit}': 'Max new tokens 不得超过 {limit}',
         'Max new tokens must be a positive integer': 'Max new tokens 须为正整数',
         // LLM Causal Flow（gen_attribute）页：placeholder / title 文案
-        'When enabled, each line below is a regex with the global flag, matched only within the initial static prompt prefix (excluding generated continuation). If a token offset lies fully inside a match, its score is treated as 0.':
-            '启用后仅在初始静态 prompt 前缀内按下列正则匹配（不含已生成 continuation）；token 的 offset 完全落在某次匹配区间内则 score 视为 0。',
-        'One regex per line (prompt prefix only)': '每行一条正则（仅 prompt 前缀）',
-        'One regex per line (global flag), matched only within the initial prompt prefix; if a token offset lies fully inside a match, its score is treated as 0.':
-            '每行一条正则，`g`，仅在初始 prompt 前缀内匹配；token 的 offset 完全落在某次匹配区间内则 score 视为 0。',
+        'When enabled, each line below is a regex with the global flag, matched only within input areas (excluding generated continuation). Matched prompt tokens are physically removed from the DAG — they neither appear nor occupy layout space (stricter than Exclude + Hide).':
+            '启用后仅在 input 区（不含已生成 continuation）内按下列正则匹配；命中的 prompt token 从 DAG 物理移除，不占布局（比 Exclude + Hide 更严格）。',
+        'One regex per line (global flag), matched only within input areas (excluding generated continuation); matched tokens are deleted from the DAG and do not occupy layout space.':
+            '每行一条正则，`g`，仅在 input 区（不含已生成 continuation）内匹配；命中的 token 从 DAG 删除且不占布局空间。',
+        'When enabled, each line below is a regex with the global flag, matched only within input areas (excluding generated continuation). If a token offset lies fully inside a match, its score is treated as 0.':
+            '启用后仅在 input 区（不含已生成 continuation）内按下列正则匹配；token 的 offset 完全落在某次匹配区间内则 score 视为 0。',
+        'One regex per line (input areas only)': '每行一条正则（仅 input 区）',
+        'One regex per line (global flag), matched only within input areas (excluding generated continuation); if a token offset lies fully inside a match, its score is treated as 0.':
+            '每行一条正则，`g`，仅在 input 区（不含已生成 continuation）内匹配；token 的 offset 完全落在某次匹配区间内则 score 视为 0。',
         'When enabled, each line below is a regex with the global flag, matched only within the model-generated continuation (excluding the initial static prompt). If a token offset lies fully inside a match, its score is treated as 0.':
             '启用后仅在模型已生成的 continuation（不含初始静态 prompt）内按下列正则匹配；token 的 offset 完全落在某次匹配区间内则 score 视为 0。',
         'One regex per line (generated continuation only)': '每行一条正则（仅已生成 continuation）',
@@ -127,6 +131,9 @@ export const translations: Translations = {
         'Restore DAG options, play speed, exclusions, etc. to defaults and clear saved preferences for those controls.':
             '将 DAG 参数、播放速度、排除正则等恢复为默认值，并清除这些控件的本地保存项。',
         'Play speed': '播放速度',
+        'Auto zoom': '自动缩放',
+        'When checked, step replay (▶) fits the viewport after each step (stops if you pan or zoom). Saved locally.':
+            '勾选后，步进重放（▶）每步自动适配视口（手动平移/缩放后停止）。本地保存。',
         'Causal Flow Mode': '因果流模式',
         'Unchecked: direct attribution — immediate predecessors only (default). Checked: Causal Flow Mode (↯) — trace from the focused token back to information sources. Sources: prompt; surprising or teacher-forced generated tokens (MI decay stops the chain). Conduits: high-confidence middle tokens—attribution passes through. Blue edges: propagated share; node ring: attribution stay (strong where explanation lands). Use with Decay attribution to high-surprisal targets. On the DAG, ↯ plays the focus propagation chain; ▶ replays generation steps when no token is focused.':
             '未勾选：原始直接归因（仅一跳前驱，默认）。勾选：因果流模式（↯）— 从焦点 token 向上追溯到信息来源。来源：prompt；高惊讶或 teacher-forced 的生成 token（MI 衰减可截断链）。传导：高置信中间 token，归因穿过。蓝边：传播份额；节点环：归因停留（解释落点处更强）。建议与「向高惊讶目标衰减归因」配合使用。DAG 上：↯ 播放焦点传播链；无焦点时 ▶ 步进重放生成过程。',
