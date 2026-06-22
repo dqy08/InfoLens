@@ -1,7 +1,7 @@
 import type { OpenAICompletionsResponse } from '../../shared/api/completionsClient';
 import type { PredictionAttributeModelVariant } from '../../shared/prediction_attribution/core/attributionResultCache';
 import type { ChatDisplaySegment } from './chatSegments';
-import type { ToolConfig } from './toolConfig';
+import { toolConfigCacheKeyFields, toolConfigFingerprint, type ToolConfig } from './toolConfig';
 import {
     buildContentKeyFromBusinessKey,
     getByContentKey,
@@ -22,6 +22,8 @@ export type CompletionResultCacheKey = {
     model: PredictionAttributeModelVariant;
     /** true = 多轮 mock；省略或 false = 单轮 tool calling */
     multiTurn?: boolean;
+    /** 多轮 mock 开启时的 tool config fingerprint（含 mock_results） */
+    toolConfigFingerprint?: string;
 };
 
 function businessObjectForCacheKey(key: CompletionResultCacheKey) {
@@ -29,6 +31,9 @@ function businessObjectForCacheKey(key: CompletionResultCacheKey) {
         prompt: key.prompt,
         model: key.model,
         multiTurn: key.multiTurn ?? false,
+        ...(key.toolConfigFingerprint !== undefined
+            ? { toolConfigFingerprint: key.toolConfigFingerprint }
+            : {}),
     };
 }
 
@@ -44,6 +49,15 @@ function entryMatchesCacheKey(
     const draftMulti = entry.draft?.multiTurnMockEnabled === true;
     if (wantMulti !== draftMulti) {
         return false;
+    }
+    if (key.toolConfigFingerprint !== undefined) {
+        const draftFp =
+            entry.draft?.toolConfig !== undefined
+                ? toolConfigFingerprint(entry.draft.toolConfig)
+                : undefined;
+        if (draftFp !== key.toolConfigFingerprint) {
+            return false;
+        }
     }
     return true;
 }
@@ -84,9 +98,15 @@ export function contentKeyForCacheKey(key: CompletionResultCacheKey): string {
 export function buildCompletionCacheKey(
     prompt: string,
     model: PredictionAttributeModelVariant,
-    multiTurn: boolean
+    multiTurn: boolean,
+    toolConfig?: ToolConfig,
 ): CompletionResultCacheKey {
-    return { prompt, model, multiTurn };
+    return {
+        prompt,
+        model,
+        multiTurn,
+        ...(toolConfig !== undefined ? toolConfigCacheKeyFields(multiTurn, toolConfig) : {}),
+    };
 }
 
 /** 旧版仅含 prompt 的 businessKey 对应 contentKey（升级前 Ask 缓存） */

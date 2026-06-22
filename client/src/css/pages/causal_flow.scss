@@ -175,6 +175,11 @@ $gen-attr-cached-demos-panel-width: 21em;
     display: none;
   }
 
+  // 合成边稳态灰边不画；仅在焦点传播链高亮时可见，用虚线区分 API 归因边（genAttributeDagView DagLink.synthetic）
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-link--synthetic .gen-attr-dag-link-visible {
+    stroke-dasharray: calc(8px * var(--gen-attr-dag-compactness, 0.5)) calc(6px * var(--gen-attr-dag-compactness, 0.5));
+  }
+
   // 节点标签：与测量层同源 1em × display-scale × node-text-font-scale（后者略小于 1 替代固定 padding）
   #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node-text {
     font-size: calc(
@@ -199,7 +204,7 @@ $gen-attr-cached-demos-panel-width: 21em;
     pointer-events: all;
   }
 
-  // 节点 fill/stroke 分层：stroke rect 外扩见 syncNodeStrokeRects（屏上描边约 2px）。
+  // 节点 fill/stroke 分层：置灰仅作用于 fill/text（genAttributeDagView）；stroke 不受 fill opacity 影响。
   #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node {
     .gen-attr-dag-node-stroke {
       fill: none;
@@ -217,7 +222,7 @@ $gen-attr-cached-demos-panel-width: 21em;
       fill: var(--gen-attr-dag-prompt-node-fill);
     }
 
-    // 递归追因链上游节点描边（直接模式仅一跳，由蓝/红边表达）；opacity 见 genAttributeDagView 中 stay→[0.3,1] 映射。
+    // 递归追因链上游描边（直接模式仅一跳，由蓝/红边表达）；stroke-opacity 见 stay→[0.3,1] 映射。
     &--recursive-chain .gen-attr-dag-node-stroke {
       stroke: var(--dag-highlight-line-color-in);
       stroke-width: calc(2 * var(--gen-attr-dag-display-scale, 1));
@@ -548,6 +553,11 @@ body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 10px;
+
+  > #gen_attr_dag_disable_smart_step_time_wrap {
+    font-weight: normal;
+    margin-inline-start: 12px;
+  }
 }
 
 // DAG 两行下拉：仅按英文选项收合宽度（不专门为译文留宽）。

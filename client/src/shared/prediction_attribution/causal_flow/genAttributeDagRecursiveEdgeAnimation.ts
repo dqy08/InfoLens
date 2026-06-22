@@ -12,18 +12,21 @@ import {
     nodesAtNodeShareTotalForPlaybackLog,
 } from './genAttributeDagPropagationPlaybackLog';
 import {
-    batchPlaybackDelayMs,
+    batchAppearanceCostMs,
     computePropagationGroupPacings,
+    effectivePropagationWeightTotal,
     FORWARD_PROMPT_FRAME_DWELL_MS,
     type DagRecursiveEdgeReplayPacing,
     type DagReplayPacingMode,
     type PropagationGroupPrep,
+    type PropagationPlaybackWeightScope,
 } from './genAttributeDagPropagationPlaybackPacing';
 
-export type { DagRecursiveEdgeReplayPacing, DagReplayPacingMode } from './genAttributeDagPropagationPlaybackPacing';
+export type { DagRecursiveEdgeReplayPacing, DagReplayPacingMode, PropagationPlaybackWeightScope } from './genAttributeDagPropagationPlaybackPacing';
 export {
-    batchPlaybackDelayMs,
+    batchAppearanceCostMs,
     computePropagationGroupPacings,
+    effectivePropagationWeightTotal,
     DAG_PROPAGATION_WEIGHT_RUNNING_MAX_LOOKAHEAD_MIN,
     DAG_PROPAGATION_WEIGHT_RUNNING_MAX_LOOKAHEAD_RATIO,
     FORWARD_PROMPT_FRAME_DWELL_MS,
@@ -37,16 +40,10 @@ export {
 
 export type DagRecursiveEdgeAnimationDirection = 'backward' | 'forward';
 
-/** forward 专有第 0 帧：仅 prompt（稳态描边/归一），无传播链边。 */
-export const FORWARD_PROMPT_BATCH_INDEX = -1;
-
-/** forward {@link FORWARD_PROMPT_BATCH_INDEX} 帧：仅展示 prompt，外观与稳态一致。 */
-export function isForwardPromptOnlyBatchIndex(
-    direction: DagRecursiveEdgeAnimationDirection,
-    batchIndex: number,
-): boolean {
-    return direction === 'forward' && batchIndex === FORWARD_PROMPT_BATCH_INDEX;
-}
+export type DagPropagationPlaybackOptions = {
+    /** forward：prompt 等有 share 节点纳入 batch slide；默认 false → 500ms prompt 首帧后跳过 prompt 批。 */
+    forwardSlideSharedNodes: boolean;
+};
 
 /** 与 {@link genAttributeDagView} 内焦点归因快照同形；供动画 overlay 消费。 */
 export type DagFocusAttributionState = {
@@ -90,35 +87,43 @@ const DAG_RECURSIVE_EDGE_BATCH_STEP_MS_FALLBACK = 500;
  * - 蓝边 opacity：帧内 max 归一 × 焦点 MI 上限 × floor；tooltip Link strength 用原始 share。
  *
  * **forward**
- * - 第 0 帧 {@link FORWARD_PROMPT_BATCH_INDEX}：无传播链边，仅 prompt 节点按稳态 stay 描边/归一；固定停留 {@link FORWARD_PROMPT_FRAME_DWELL_MS}ms。
- * - 其后从最远 batch 递减；share 始终用全量焦点快照，动画只改「可见边集合」与归一分母（前沿内 max share）。
+ * - 计划始终含全部有 share 的 token（含 prompt）；勾选 slide prompt 时从 `batches[末]` 递减，各批按 {@link batchAppearanceCostMs}。
+ * - 未勾选时：先 {@link FORWARD_PROMPT_FRAME_DWELL_MS}ms prompt 稳态首帧（跳过 prompt-only 批），再从首个 gen 批递减至 `batchIndex === 0`。
+ * - share 始终用全量焦点快照，动画只改「可见边集合」与归一分母（前沿内 max share）。
  * - 部分帧内焦点不提前高亮/描边（render 延后至末帧 `batchIndex === 0` 稳态），与反向首帧才亮焦点对称。
  * - 同一帧内，已可见边的相对强弱 = share 相对强弱；绝对 opacity 可因分母随新批次变大而变暗。
  * - 末帧 `batchIndex === 0` 时前沿 = 全链、分母 = 全链 max、可见性全开，与无动画稳定态数值一致（收敛）。
  *
  * **backward**
- * - 首帧 `batchIndex === 0`（焦点侧）：固定停留 {@link FORWARD_PROMPT_FRAME_DWELL_MS}ms，焦点红色 slide；与 forward prompt 首帧对称，不参与权重分配。
+ * - 首帧 `batchIndex === 0`（焦点侧）：固定模拟开销 {@link FORWARD_PROMPT_FRAME_DWELL_MS}ms，焦点红色 slide；与 forward prompt 首帧对称，不参与权重分配。
  * - 蓝线从焦点侧逐批显现：稳态 share + {@link backwardFrontierByBatchIndex} 门控（`batches[0..i]` 递增）。
  * - 未滑过：live stay；已滑过 batch：稳态 stay；非播放链生成 token 不描边；prompt（`step === -1`）若在候选集中则用 live stay（可不在传播链上）。
+ * - 首个 prompt 区不参与 slide（无红框）；滑完 gen 链后一跳至末批稳态（全链蓝边），与 forward 跳过 prompt 批对称。
  * - 描边分母为稳态 `max(stay)`。
  * - 当前帧 slide 节点（`--backward-slide`）的入边：红色，强度在本批指向 slide 的入边集合内 max 归一 × 焦点 MI。
  *
  * **播放计划（见 {@link DagPropagationPlaybackPlan}）**
- * - 一批 = 同一生成 offset 的入边组；`groupOffset` + `tgtId` 标识该组代表 token。
+ * - 一批 = 同一 `start` offset 上的节点组 + 该组入边；节点 = 有 Total share 的 token ∪ 入边 tgt（去重）。
+ * - 仅作 src 的 prompt 等无入边时仍成批，供 slide / 权重节拍；蓝边仍只来自 `edgeKeys`。
  * - 播放间隔权重（准备阶段一遍）：按**文字顺序**对非焦点 `groupShare/weightMax` 做 running max 归一化；向后看组数 = max({@link DAG_PROPAGATION_WEIGHT_RUNNING_MAX_LOOKAHEAD_MIN}, round(比例×组数))；与播放方向无关。组内含焦点则无 `shareNorm`。
+ * - 文序**首部连续** prompt-only 组（首个 prompt 区）：prompt 区内 max 归一；不参与 gen `weightMax` / running max。
  * - `backwardFrontierByBatchIndex` / `forwardFrontierByBatchIndex`：各方向蓝线可见边并集，render 热路径 O(1)。
  * - forward / backward 共用同一 plan；不用 backward 部分快照的 nodeShare 定权重。
  *
- * **播放停留（见 {@link batchPlaybackDelayMs}）**
- * - 对 `propagationWeight` 连续；权重为 0 时停留恰为 0（`step` 下 0ms，不设最小间隔）。
- * - `total` 模式：UI `totalS` 中预留 {@link FORWARD_PROMPT_FRAME_DWELL_MS} 给 forward prompt / backward 首帧；forward 末帧另计同长度固定停留，其余按权重分配。
+ * **播放间隔（见 {@link batchAppearanceCostMs}）**
+ * - 间隔 = 当前帧的模拟开销；由本帧 `propagationWeight` 或固定帧类型决定。
+ * - 调度：展示本帧 → 等待其开销 → 下一帧（与步进回放「展示前等待」在相邻帧时刻上等价）。
+ * - 权重为 0 时开销恰为 0（`step` 下 0ms，不设最小间隔）。
+ * - `total` 模式：UI `totalS` 中预留 {@link FORWARD_PROMPT_FRAME_DWELL_MS} 给 backward 首帧；forward 末帧另计同长度固定收尾，其余按权重分配。
  */
-/** 传播链动画的一批：同一生成 offset 的入边组 + 播放元数据。 */
+/** 传播链动画的一批：同一 offset 上有份额的节点 + 该组传播入边 + 播放元数据。 */
 export type DagRecursiveIncomingEdgeBatch = {
-    /** 与 {@link buildPropagationPlaybackPlan} 分批键一致（`start(tgt)`）。 */
+    /** 与 {@link buildPropagationPlaybackPlan} 分批键一致（组内节点 `start`）。 */
     groupOffset: number;
-    /** 本组代表 token（forward 高亮）。 */
+    /** 本组代表 token（slide / tooltip）。 */
     tgtId: string;
+    /** 本组全部有份额节点（含仅作 src、无入边的 prompt 等）。 */
+    nodeIds: readonly string[];
     /** 本组传播链入边（`src->tgt`）。 */
     edgeKeys: string[];
     /**
@@ -126,22 +131,32 @@ export type DagRecursiveIncomingEdgeBatch = {
      */
     propagationWeight: number;
     /**
-     * 非焦点 `groupShare / weightMax`（playback 日志 share_norm）。
+     * playback 日志 `share_norm`：prompt 区为 share/promptRegionMax；gen/input 为 share/weightMax。
      * 组内含焦点时为 undefined。
      */
     shareNorm?: number;
-    /** 准备阶段：截至本组（含 lookahead 窗口）的链序 running max。 */
-    runningMaxNorm: number;
+    /** 准备阶段：截至本组（含 lookahead 窗口）的链序 running max；prompt 区不适用。 */
+    runningMaxNorm?: number;
+    /** 组内非焦点 max Total share（prompt 区 playback 日志 `share=`）。 */
+    groupShare?: number;
+    /** 文序首部连续 prompt-only 组（首个 prompt 区）；playback 日志 `running_max` 打印为 `-`。 */
+    isFirstPromptRegion?: boolean;
 };
 
 /** 点击焦点时生成的不可变播放计划（批次 + 预计算前沿 + 播放权重）。 */
 export type DagPropagationPlaybackPlan = {
     focusId: string;
     batches: DagRecursiveIncomingEdgeBatch[];
-    /** 全链非焦点组 Total share 上限（日志 / 对照；量纲同 Total share）。 */
+    /** gen / input 区非焦点组 Total share 上限（不含 prompt 区；日志 / 对照）。 */
     weightMax: number;
-    /** Σ `batches[].propagationWeight`；total 模式分母。 */
+    /** Σ 全部 `batches[].propagationWeight`；total 模式分母。 */
     weightTotal: number;
+    /** prompt 区组内 max Total share；无 prompt 区时为 0。 */
+    promptRegionMax: number;
+    /** Σ prompt 区 propagationWeight（日志）。 */
+    promptWeightTotal: number;
+    /** Σ gen / input 区 propagationWeight（日志）。 */
+    chainWeightTotal: number;
     /** 本计划 running max 前瞻组数（max(MIN, round(比例×组数))）。 */
     runningMaxLookahead: number;
     /** backward：`batchIndex = i` 时可见边 = `batches[0..i]` 并集。 */
@@ -150,11 +165,15 @@ export type DagPropagationPlaybackPlan = {
     forwardFrontierByBatchIndex: ReadonlyArray<ReadonlySet<string>>;
 };
 
-/** 进行中的播放状态：仅 batchIndex 与 direction 可变。 */
+/** 进行中的播放状态：batchIndex / direction / forwardPromptPreamblePending 可变。 */
 export type DagEdgeBatchAnimationState = {
     plan: DagPropagationPlaybackPlan;
     direction: DagRecursiveEdgeAnimationDirection;
     batchIndex: number;
+    /** forward 未 slide prompt：首播 500ms 稳态 prompt，再从此 index 递减（已跳过 prompt-only 批）。 */
+    forwardPromptPreamblePending: boolean;
+    /** 开播时固化；`total` 模式加权分母见 {@link effectivePropagationWeightTotal}。 */
+    weightScope: PropagationPlaybackWeightScope;
 };
 
 export function tgtIdFromEdgeKey(edgeKey: string): string | null {
@@ -186,8 +205,9 @@ function frontierEdgeKeysAtBatch(
     plan: DagPropagationPlaybackPlan,
     direction: DagRecursiveEdgeAnimationDirection,
     batchIndex: number,
+    forwardPromptPreamblePending: boolean,
 ): ReadonlySet<string> {
-    if (isForwardPromptOnlyBatchIndex(direction, batchIndex)) {
+    if (direction === 'forward' && forwardPromptPreamblePending) {
         return EMPTY_EDGE_KEY_SET;
     }
     const table =
@@ -253,7 +273,7 @@ export function isRecursiveEdgeAnimationFrontierPartial(
         if (lastBatch <= 0) return false;
         return animation.batchIndex < lastBatch;
     }
-    // forward：batchIndex===0 为稳态终帧；其余含 prompt(-1) 均属「动画未结束」（边/焦点行为由专帧 flag 区分）
+    // forward：batchIndex===0 为稳态终帧；其余均属「动画未结束」
     return animation.batchIndex !== 0;
 }
 
@@ -268,13 +288,8 @@ function isBackwardRecursiveEdgeAnimationInProgress(
     );
 }
 
-function tgtIdsInBatch(batch: DagRecursiveIncomingEdgeBatch): Set<string> {
-    const ids = new Set<string>();
-    for (const edgeKey of batch.edgeKeys) {
-        const tgtId = tgtIdFromEdgeKey(edgeKey);
-        if (tgtId != null) ids.add(tgtId);
-    }
-    return ids;
+function nodeIdsInBatch(batch: DagRecursiveIncomingEdgeBatch): Set<string> {
+    return new Set(batch.nodeIds);
 }
 
 function batchesInTextOrder(
@@ -283,18 +298,74 @@ function batchesInTextOrder(
     return [...batches].sort((a, b) => a.groupOffset - b.groupOffset);
 }
 
-/** 组内代表 tgt；并列时取 id 字典序最小。 */
-function primaryTgtIdForGroup(
-    tgtIds: Iterable<string>,
+/** 文序 prompt-only 组：无传播入边且组内全是 prompt。 */
+export function isPromptOnlyPropagationGroup(
+    nodeIds: Iterable<string>,
+    edgeKeyCount: number,
+    isPromptNode: (id: string) => boolean,
+): boolean {
+    if (edgeKeyCount > 0) return false;
+    let hasNode = false;
+    for (const id of nodeIds) {
+        hasNode = true;
+        if (!isPromptNode(id)) return false;
+    }
+    return hasNode;
+}
+
+/**
+ * 文序 ASC：从首部起连续 prompt-only 组标记为首个 prompt 区；遇首个非 prompt-only 即结束。
+ */
+export function markFirstPromptRegionGroupsInTextOrder(
+    sortedOffsetsAsc: readonly number[],
+    groupAt: (offset: number) => { edgeKeys: string[]; nodeIds: Set<string> },
+    isPromptNode: (id: string) => boolean,
+): boolean[] {
+    let inPrefix = true;
+    return sortedOffsetsAsc.map((groupOffset) => {
+        const group = groupAt(groupOffset);
+        const promptOnly = isPromptOnlyPropagationGroup(
+            group.nodeIds,
+            group.edgeKeys.length,
+            isPromptNode,
+        );
+        const isFirstPromptRegion = inPrefix && promptOnly;
+        if (inPrefix && !promptOnly) inPrefix = false;
+        return isFirstPromptRegion;
+    });
+}
+
+/** 播放序（DESC）下首个 prompt 区之前的最后一批 index；无 prompt 区时为末批。 */
+export function lastNonFirstPromptRegionBatchIndex(
+    plan: { batches: readonly { isFirstPromptRegion?: boolean }[] },
+): number {
+    for (let i = plan.batches.length - 1; i >= 0; i--) {
+        if (!plan.batches[i]!.isFirstPromptRegion) return i;
+    }
+    return 0;
+}
+
+/** forward 播放序：从末批向 0 递减，跳过文序首部 prompt 区后的首个 gen 批 index。 */
+function firstNonPromptRegionBatchIndexFromEnd(plan: DagPropagationPlaybackPlan): number {
+    return lastNonFirstPromptRegionBatchIndex(plan);
+}
+
+function planHasFirstPromptRegionBatch(plan: DagPropagationPlaybackPlan): boolean {
+    return plan.batches.some((batch) => batch.isFirstPromptRegion === true);
+}
+
+/** 组内代表 token；并列时取 share 最大，同 share 取 id 字典序最小。 */
+function primaryNodeIdForGroup(
+    nodeIds: Iterable<string>,
     nodeShareById: ReadonlyMap<string, number>,
 ): string {
     let bestId = '';
     let bestShare = -1;
-    for (const tgtId of tgtIds) {
-        const share = nodeShareById.get(tgtId) ?? 0;
-        if (share > bestShare || (share === bestShare && tgtId < bestId)) {
+    for (const nodeId of nodeIds) {
+        const share = nodeShareById.get(nodeId) ?? 0;
+        if (share > bestShare || (share === bestShare && nodeId < bestId)) {
             bestShare = share;
-            bestId = tgtId;
+            bestId = nodeId;
         }
     }
     return bestId;
@@ -302,18 +373,22 @@ function primaryTgtIdForGroup(
 
 function incomingEdgeBatchFromGroup(
     groupOffset: number,
-    group: { edgeKeys: string[]; tgtIds: Set<string> },
+    group: { edgeKeys: string[]; nodeIds: Set<string> },
     prep: PropagationGroupPrep,
     nodeShareById: ReadonlyMap<string, number>,
 ): DagRecursiveIncomingEdgeBatch {
     group.edgeKeys.sort();
+    const nodeIds = [...group.nodeIds].sort();
     return {
         groupOffset,
-        tgtId: primaryTgtIdForGroup(group.tgtIds, nodeShareById),
+        tgtId: primaryNodeIdForGroup(nodeIds, nodeShareById),
+        nodeIds,
         edgeKeys: group.edgeKeys,
         propagationWeight: prep.propagationWeight,
-        runningMaxNorm: prep.runningMaxNorm,
+        ...(prep.runningMaxNorm != null ? { runningMaxNorm: prep.runningMaxNorm } : {}),
         ...(prep.shareNorm != null ? { shareNorm: prep.shareNorm } : {}),
+        ...(prep.groupShare != null ? { groupShare: prep.groupShare } : {}),
+        ...(prep.isFirstPromptRegion ? { isFirstPromptRegion: true } : {}),
     };
 }
 
@@ -339,7 +414,7 @@ function buildFrontierEdgeKeysByBatchIndex(
 }
 
 /**
- * 传播链播放计划：入边按 `start(tgt)` 分批（offset 降序），并预计算双向前沿。
+ * 传播链播放计划：按 offset 分组；组内节点 = 有 Total share 的 token（非焦点），并并入入边 tgt。
  * backward 从 index 0 递增（蓝线递增），forward 从末批递减（蓝线递增）。
  */
 export function buildPropagationPlaybackPlan(
@@ -347,30 +422,57 @@ export function buildPropagationPlaybackPlan(
     offsetOf: (id: string) => number,
     nodeShareById: ReadonlyMap<string, number>,
     focusId: string,
+    isPromptNode: (id: string) => boolean,
 ): DagPropagationPlaybackPlan | null {
     if (incomingEdgeShareByKey.size === 0) return null;
 
-    const byOffset = new Map<number, { edgeKeys: string[]; tgtIds: Set<string> }>();
+    const byOffset = new Map<number, { edgeKeys: string[]; nodeIds: Set<string> }>();
+
+    const ensureGroup = (offset: number) => {
+        let group = byOffset.get(offset);
+        if (group == null) {
+            group = { edgeKeys: [], nodeIds: new Set() };
+            byOffset.set(offset, group);
+        }
+        return group;
+    };
+
     for (const edgeKey of incomingEdgeShareByKey.keys()) {
         const tgtId = tgtIdFromEdgeKey(edgeKey);
         if (tgtId == null) continue;
-        const offset = offsetOf(tgtId);
-        let group = byOffset.get(offset);
-        if (group == null) {
-            group = { edgeKeys: [], tgtIds: new Set() };
-            byOffset.set(offset, group);
-        }
+        const group = ensureGroup(offsetOf(tgtId));
         group.edgeKeys.push(edgeKey);
-        group.tgtIds.add(tgtId);
+        group.nodeIds.add(tgtId);
     }
+
+    for (const [nodeId, share] of nodeShareById) {
+        if (nodeId === focusId) continue;
+        if (share < DAG_MIN_ATTRIBUTION_SHARE) continue;
+        ensureGroup(offsetOf(nodeId)).nodeIds.add(nodeId);
+    }
+
+    if (byOffset.size === 0) return null;
 
     const sortedOffsetsAsc = [...byOffset.keys()].sort((a, b) => a - b);
     const sortedOffsetsDesc = [...sortedOffsetsAsc].reverse();
-    const { groupPreps, weightMax, weightTotal, runningMaxLookahead } = computePropagationGroupPacings(
-        sortedOffsetsAsc.map((groupOffset) => byOffset.get(groupOffset)!),
-        nodeShareById,
-        focusId,
+    const firstPromptRegionFlags = markFirstPromptRegionGroupsInTextOrder(
+        sortedOffsetsAsc,
+        (offset) => byOffset.get(offset)!,
+        isPromptNode,
     );
+    const weightGroups = sortedOffsetsAsc.map((groupOffset, i) => ({
+        tgtIds: byOffset.get(groupOffset)!.nodeIds,
+        isFirstPromptRegion: firstPromptRegionFlags[i],
+    }));
+    const {
+        groupPreps,
+        weightMax,
+        weightTotal,
+        runningMaxLookahead,
+        promptRegionMax,
+        promptWeightTotal,
+        chainWeightTotal,
+    } = computePropagationGroupPacings(weightGroups, nodeShareById, focusId);
     // groupPreps 按文序 ASC；batches 按播放序 DESC（远→近），故播放序下标 j 对应文序下标 n-1-j
     const batches: DagRecursiveIncomingEdgeBatch[] = sortedOffsetsDesc.map((groupOffset, j) => {
         const prep = groupPreps[sortedOffsetsAsc.length - 1 - j]!;
@@ -382,6 +484,9 @@ export function buildPropagationPlaybackPlan(
         batches,
         weightMax,
         weightTotal,
+        promptRegionMax,
+        promptWeightTotal,
+        chainWeightTotal,
         runningMaxLookahead,
         ...buildFrontierEdgeKeysByBatchIndex(batches),
     };
@@ -410,6 +515,7 @@ function resolveFocusAttributionAtFrontier(
         animation.plan,
         animation.direction,
         animation.batchIndex,
+        animation.forwardPromptPreamblePending,
     );
     if (allowedEdgeKeys.size >= fullState.incomingEdgeShareByKey.size) {
         return fullState;
@@ -432,7 +538,7 @@ function passedBatchTgtIdsBeforeIndex(
 ): Set<string> {
     const ids = new Set<string>();
     for (let i = 0; i < batchIndex; i++) {
-        for (const id of tgtIdsInBatch(batches[i]!)) ids.add(id);
+        for (const id of nodeIdsInBatch(batches[i]!)) ids.add(id);
     }
     return ids;
 }
@@ -441,7 +547,7 @@ function passedBatchTgtIdsBeforeIndex(
 function playbackChainNodeIds(batches: readonly DagRecursiveIncomingEdgeBatch[]): Set<string> {
     const onChain = new Set<string>();
     for (const batch of batches) {
-        for (const id of tgtIdsInBatch(batch)) onChain.add(id);
+        for (const id of nodeIdsInBatch(batch)) onChain.add(id);
     }
     return onChain;
 }
@@ -511,9 +617,9 @@ export type RecursiveEdgeAnimationRenderOverlay = {
     nodeStrokeMaxForRender?: number;
     incomingShareForRender: Map<string, number>;
     incomingMaxForRender: number;
-    /** forward {@link FORWARD_PROMPT_BATCH_INDEX}：仅 prompt 稳态描边，无链边、无 slide 高亮。 */
-    forwardPromptOnlyFrame: boolean;
-    /** 当前帧 slide token：forward 为 batch 代表；backward 首帧为焦点。不含 forward prompt 专帧。 */
+    /** forward 首开帧（未 slide 共享节点）：仅 prompt 稳态描边，无链边、无 slide。 */
+    forwardPromptPreambleFrame: boolean;
+    /** 当前帧 slide token：forward 为 batch 代表；backward 首帧为焦点。 */
     propagationSlideTgtId: string | null;
     /** 正向传播部分帧：焦点不提前全亮（末帧 partial 结束即恢复）。 */
     deferFocusHighlightDuringAnim: boolean;
@@ -524,16 +630,19 @@ export type RecursiveEdgeAnimationRenderOverlay = {
 
 const INACTIVE_EDGE_VISIBILITY = (_edgeKey: string, _inPropagationChain: boolean): number => 1;
 
-/** backward 首帧 slide = 焦点；forward prompt 专帧和无动画 = null；其余 = 当前批代表 token。 */
+/** backward 首帧 slide = 焦点；无动画 = null；forward 与其余 backward 批 = 当前批代表 token。 */
 function resolvePropagationSlideTgtId(
     anim: DagEdgeBatchAnimationState | null,
     animationFrontierPartial: boolean,
-    forwardPromptOnlyFrame: boolean,
     focusId: string,
 ): string | null {
-    if (anim == null || !animationFrontierPartial || forwardPromptOnlyFrame) return null;
+    if (anim == null || !animationFrontierPartial || anim.forwardPromptPreamblePending) {
+        return null;
+    }
     if (anim.direction === 'backward' && anim.batchIndex === 0) return focusId;
-    return anim.plan.batches[anim.batchIndex]?.tgtId ?? null;
+    const batch = anim.plan.batches[anim.batchIndex];
+    if (anim.direction === 'backward' && batch?.isFirstPromptRegion) return null;
+    return batch?.tgtId ?? null;
 }
 
 export function resolveRecursiveEdgeAnimationRenderOverlay(args: {
@@ -590,8 +699,8 @@ export function resolveRecursiveEdgeAnimationRenderOverlay(args: {
             nodeStrokeShareById,
             incomingShareForRender: focusState?.incomingEdgeShareByKey ?? emptyIncoming,
             incomingMaxForRender: maxHighlightEdgeShare(focusState?.incomingEdgeShareByKey ?? emptyIncoming),
-            forwardPromptOnlyFrame: false,
             propagationSlideTgtId: null,
+            forwardPromptPreambleFrame: false,
             deferFocusHighlightDuringAnim: false,
             suppressFocusSelectedStroke: false,
             edgeVisibility: INACTIVE_EDGE_VISIBILITY,
@@ -604,7 +713,12 @@ export function resolveRecursiveEdgeAnimationRenderOverlay(args: {
         isRecursiveEdgeAnimationFrontierPartial(anim, userAnimationFocusId);
     const frontierEdgeKeys =
         animationFrontierPartial && anim != null
-            ? frontierEdgeKeysAtBatch(anim.plan, anim.direction, anim.batchIndex)
+            ? frontierEdgeKeysAtBatch(
+                  anim.plan,
+                  anim.direction,
+                  anim.batchIndex,
+                  anim.forwardPromptPreamblePending,
+              )
             : null;
     let nodeStrokeShareById = resolveEffectiveStayShareByIdForStroke(
         focusState,
@@ -630,13 +744,11 @@ export function resolveRecursiveEdgeAnimationRenderOverlay(args: {
         animationFrontierPartial && frontierEdgeKeys != null
             ? maxShareInEdgeKeySet(incomingShareForRender, frontierEdgeKeys)
             : maxHighlightEdgeShare(incomingShareForRender);
-    const forwardPromptOnlyFrame =
-        anim != null && isForwardPromptOnlyBatchIndex(anim.direction, anim.batchIndex);
+    const forwardPromptPreambleFrame = anim != null && anim.forwardPromptPreamblePending;
     const forwardPartial = animationFrontierPartial && anim?.direction === 'forward';
     const propagationSlideTgtId = resolvePropagationSlideTgtId(
         anim,
         animationFrontierPartial,
-        forwardPromptOnlyFrame,
         focusId,
     );
     const deferFocusHighlightDuringAnim = forwardPartial;
@@ -660,7 +772,7 @@ export function resolveRecursiveEdgeAnimationRenderOverlay(args: {
         nodeStrokeMaxForRender,
         incomingShareForRender,
         incomingMaxForRender,
-        forwardPromptOnlyFrame,
+        forwardPromptPreambleFrame,
         propagationSlideTgtId,
         deferFocusHighlightDuringAnim,
         suppressFocusSelectedStroke,
@@ -685,23 +797,39 @@ function logPropagationPlaybackPlanOnStart(args: {
     logDagPropagationPlaybackLine(
         `${dagPropLogPad('start', DAG_PROP_LOG_W.event)} | focus=${dagPropLogPad(dagPropLogFmtToken(tokenLabelOf(focusId)), DAG_PROP_LOG_W.focus)} | direction=${dagPropLogPad(direction, DAG_PROP_LOG_W.direction)} | batches=${dagPropLogPadInt(plan.batches.length, DAG_PROP_LOG_W.int3)} | initial=${dagPropLogPadInt(initialBatchIndex, DAG_PROP_LOG_W.int3)} | ${pacingLine}`,
     );
+    const planTextOrder = batchesInTextOrder(plan.batches);
+    const promptBatches = planTextOrder.filter((b) => b.isFirstPromptRegion);
+    const chainBatches = planTextOrder.filter((b) => !b.isFirstPromptRegion);
+
+    if (promptBatches.length > 0) {
+        logDagPropagationPlaybackLine(
+            `${dagPropLogPad('pacing:prompt', DAG_PROP_LOG_W.event)} | regionMax=${dagPropLogPadWeight(plan.promptRegionMax)} | weightTotal=${dagPropLogPadWeight(plan.promptWeightTotal)} | batches=${dagPropLogPadInt(promptBatches.length, DAG_PROP_LOG_W.int3)}`,
+        );
+        for (let i = 0; i < promptBatches.length; i++) {
+            const b = promptBatches[i]!;
+            const token = dagPropLogFmtToken(tokenLabelOf(b.tgtId));
+            logDagPropagationPlaybackLine(
+                `${dagPropLogPad(`plan:prompt[${i}]`, DAG_PROP_LOG_W.event)} | token=${dagPropLogPad(token, DAG_PROP_LOG_W.token)} | share=${dagPropLogPadWeight(b.groupShare)} | weight=${dagPropLogPadWeight(b.propagationWeight)}`,
+            );
+        }
+    }
+
     const batchTgtIds = new Set<string>();
-    for (const b of plan.batches) {
-        for (const tgtId of tgtIdsInBatch(b)) batchTgtIds.add(tgtId);
+    for (const b of chainBatches) {
+        for (const nodeId of b.nodeIds) batchTgtIds.add(nodeId);
     }
     const refNodes = nodesAtNodeShareTotalForPlaybackLog(nodeShareById, plan.weightMax, {
         excludeFocusId: focusId,
         onlyNodeIds: batchTgtIds,
     });
     logDagPropagationPlaybackLine(
-        `${dagPropLogPad('pacing', DAG_PROP_LOG_W.event)} | weightMax=${dagPropLogPadWeight(plan.weightMax)} | weightTotal=${dagPropLogPadWeight(plan.weightTotal)} | lookahead=${dagPropLogPadInt(plan.runningMaxLookahead, DAG_PROP_LOG_W.int3)} | nodes=${dagPropLogFmtNodeShareList(refNodes, tokenLabelOf)}`,
+        `${dagPropLogPad('pacing', DAG_PROP_LOG_W.event)} | weightMax=${dagPropLogPadWeight(plan.weightMax)} | weightTotal=${dagPropLogPadWeight(plan.chainWeightTotal)} | lookahead=${dagPropLogPadInt(plan.runningMaxLookahead, DAG_PROP_LOG_W.int3)} | nodes=${dagPropLogFmtNodeShareList(refNodes, tokenLabelOf)}`,
     );
-    const planTextOrder = batchesInTextOrder(plan.batches);
-    for (let chainStep = 0; chainStep < planTextOrder.length; chainStep++) {
-        const b = planTextOrder[chainStep]!;
+    for (let i = 0; i < chainBatches.length; i++) {
+        const b = chainBatches[i]!;
         const token = dagPropLogFmtToken(tokenLabelOf(b.tgtId));
         logDagPropagationPlaybackLine(
-            `${dagPropLogPad(`plan[${chainStep}]`, DAG_PROP_LOG_W.event)} | token=${dagPropLogPad(token, DAG_PROP_LOG_W.token)} | share_norm=${dagPropLogPadWeight(b.shareNorm)} | running_max=${dagPropLogPadWeight(b.runningMaxNorm)} | weight=${dagPropLogPadWeight(b.propagationWeight)}`,
+            `${dagPropLogPad(`plan[${i}]`, DAG_PROP_LOG_W.event)} | token=${dagPropLogPad(token, DAG_PROP_LOG_W.token)} | share_norm=${dagPropLogPadWeight(b.shareNorm)} | running_max=${dagPropLogPadWeight(b.runningMaxNorm)} | weight=${dagPropLogPadWeight(b.propagationWeight)}`,
         );
     }
 }
@@ -738,11 +866,14 @@ export type CreateDagRecursiveEdgeAnimationControllerOptions = {
     isRecursiveAttributionEnabled: () => boolean;
     hasNode: (id: string) => boolean;
     offsetOf: (id: string) => number;
+    /** 节点 id → 是否 prompt（`step === -1`）。 */
+    isPromptNode: (id: string) => boolean;
     /** 节点 id → 界面展示用 token 文案（如 `displayLabel`）。 */
     tokenLabelOf: (id: string) => string | null;
     direction?: DagRecursiveEdgeAnimationDirection;
     /** 开始传播播放时读取；与 DAG 生成回放共用 UI 配置。 */
     getReplayPacing?: () => DagRecursiveEdgeReplayPacing;
+    getPropagationPlaybackOptions?: () => DagPropagationPlaybackOptions;
 };
 
 export function createDagRecursiveEdgeAnimationController(
@@ -754,6 +885,9 @@ export function createDagRecursiveEdgeAnimationController(
         totalS: 7,
     });
     const getReplayPacing = options.getReplayPacing ?? defaultPacing;
+    const getPropagationPlaybackOptions =
+        options.getPropagationPlaybackOptions ??
+        ((): DagPropagationPlaybackOptions => ({ forwardSlideSharedNodes: false }));
     const notifyPhaseChange = (): void => {
         options.onPlaybackPhaseChange?.();
     };
@@ -816,6 +950,7 @@ export function createDagRecursiveEdgeAnimationController(
                 options.offsetOf,
                 focusState.nodeShareById,
                 focusId,
+                options.isPromptNode,
             ) != null
         );
     }
@@ -845,29 +980,42 @@ export function createDagRecursiveEdgeAnimationController(
             setPlaybackPhase('idle');
             return;
         }
+        const forwardSlideSharedNodes = getPropagationPlaybackOptions().forwardSlideSharedNodes;
         const plan = buildPropagationPlaybackPlan(
             focusState.incomingEdgeShareByKey,
             options.offsetOf,
             focusState.nodeShareById,
             focusId,
+            options.isPromptNode,
         );
         if (plan == null) {
             setPlaybackPhase('idle');
             return;
         }
-        const initialBatchIndex =
-            direction === 'backward' ? 0 : FORWARD_PROMPT_BATCH_INDEX;
+        const lastBatch = plan.batches.length - 1;
+        let batchIndex = direction === 'backward' ? 0 : Math.max(0, lastBatch);
+        let forwardPromptPreamblePending = false;
+        if (
+            direction === 'forward' &&
+            !forwardSlideSharedNodes &&
+            planHasFirstPromptRegionBatch(plan)
+        ) {
+            forwardPromptPreamblePending = true;
+            batchIndex = firstNonPromptRegionBatchIndexFromEnd(plan);
+        }
         userAnimationFocusId = focusId;
         animation = {
             plan,
             direction,
-            batchIndex: initialBatchIndex,
+            batchIndex,
+            forwardPromptPreamblePending,
+            weightScope: { direction, forwardSlideSharedNodes },
         };
         logPropagationPlaybackPlanOnStart({
             plan,
             focusId,
             direction,
-            initialBatchIndex,
+            initialBatchIndex: batchIndex,
             pacing: getReplayPacing(),
             nodeShareById: focusState.nodeShareById,
             tokenLabelOf: options.tokenLabelOf,
@@ -893,58 +1041,68 @@ export function createDagRecursiveEdgeAnimationController(
         scheduleAnimationStep(focusId);
     }
 
-    function delayMsForCurrentBatch(state: DagEdgeBatchAnimationState): number {
+    /** 当前帧的模拟开销（ms）；固定帧或本帧 `propagationWeight` 决定。 */
+    function appearanceCostMsForCurrentFrame(state: DagEdgeBatchAnimationState): number {
+        const lastBatch = state.plan.batches.length - 1;
+        const backwardSkippedPromptSteadyEnd =
+            state.direction === 'backward' &&
+            planHasFirstPromptRegionBatch(state.plan) &&
+            lastNonFirstPromptRegionBatchIndex(state.plan) < lastBatch &&
+            state.batchIndex === lastBatch;
         if (
-            isForwardPromptOnlyBatchIndex(state.direction, state.batchIndex) ||
+            state.forwardPromptPreamblePending ||
             (state.direction === 'backward' && state.batchIndex === 0) ||
-            (state.direction === 'forward' && state.batchIndex === 0)
+            (state.direction === 'forward' && state.batchIndex === 0) ||
+            backwardSkippedPromptSteadyEnd
         ) {
             return FORWARD_PROMPT_FRAME_DWELL_MS;
         }
         const batch = state.plan.batches[state.batchIndex];
         if (batch == null) return 0;
-        return batchPlaybackDelayMs(batch, state.plan, getReplayPacing());
+        return batchAppearanceCostMs(batch, state.plan, getReplayPacing(), state.weightScope);
     }
 
-    /** 展示当前帧后的停留（ms）；forward prompt / backward 首帧 / forward 稳态末帧均为 {@link FORWARD_PROMPT_FRAME_DWELL_MS}。 */
-    function dwellMsAfterCurrentFrame(state: DagEdgeBatchAnimationState): number {
-        return delayMsForCurrentBatch(state);
-    }
-
-    /** batchIndex 时间线：backward `0 → last`；forward `-1(prompt) → last → … → 0(稳态)`。 */
+    /** batchIndex 时间线：backward `0 → lastAnim → last(稳态，跳过 prompt 区)`；forward `preamble? → last → … → 0(稳态)`。 */
     function hasNextBatch(state: DagEdgeBatchAnimationState, lastBatch: number): boolean {
         if (state.direction === 'backward') {
             return state.batchIndex < lastBatch;
         }
-        return (
-            state.batchIndex === FORWARD_PROMPT_BATCH_INDEX ||
-            state.batchIndex > 0
-        );
+        return state.forwardPromptPreamblePending || state.batchIndex > 0;
     }
 
     function advanceBatchIndex(state: DagEdgeBatchAnimationState): void {
         if (state.direction === 'backward') {
+            const lastBatch = state.plan.batches.length - 1;
+            const lastAnim = lastNonFirstPromptRegionBatchIndex(state.plan);
+            if (state.batchIndex < lastAnim) {
+                state.batchIndex += 1;
+                return;
+            }
+            if (state.batchIndex === lastAnim && lastAnim < lastBatch) {
+                state.batchIndex = lastBatch;
+                return;
+            }
             state.batchIndex += 1;
             return;
         }
-        if (state.batchIndex === FORWARD_PROMPT_BATCH_INDEX) {
-            state.batchIndex = state.plan.batches.length - 1;
+        if (state.forwardPromptPreamblePending) {
+            state.forwardPromptPreamblePending = false;
             return;
         }
         state.batchIndex -= 1;
     }
 
     function logPropagationFrame(state: DagEdgeBatchAnimationState): void {
-        const promptFrame = isForwardPromptOnlyBatchIndex(state.direction, state.batchIndex);
-        const batch = promptFrame ? null : state.plan.batches[state.batchIndex];
+        const preamble = state.forwardPromptPreamblePending;
+        const batch = preamble ? null : state.plan.batches[state.batchIndex];
         const lastBatch = state.plan.batches.length - 1;
-        const dwellMs = dwellMsAfterCurrentFrame(state);
-        const token = promptFrame
+        const appearanceCostMs = appearanceCostMsForCurrentFrame(state);
+        const token = preamble
             ? 'prompt'
             : dagPropLogFmtToken(batch?.tgtId != null ? options.tokenLabelOf(batch.tgtId) : null);
-        const weight = promptFrame ? 'fixed' : dagPropLogFmtWeight(batch?.propagationWeight);
+        const weight = preamble ? 'fixed' : dagPropLogFmtWeight(batch?.propagationWeight);
         logDagPropagationPlaybackLine(
-            `${dagPropLogPad('frame', DAG_PROP_LOG_W.event)} ${dagPropLogPad(`${state.batchIndex}/${lastBatch}`, DAG_PROP_LOG_W.frame)} | token=${dagPropLogPad(token, DAG_PROP_LOG_W.token)} | weight=${dagPropLogPad(weight, DAG_PROP_LOG_W.weight)} | dwellMs=${dagPropLogPadInt(dwellMs, DAG_PROP_LOG_W.dwell)}`,
+            `${dagPropLogPad('frame', DAG_PROP_LOG_W.event)} ${dagPropLogPad(`${state.batchIndex}/${lastBatch}`, DAG_PROP_LOG_W.frame)} | token=${dagPropLogPad(token, DAG_PROP_LOG_W.token)} | weight=${dagPropLogPad(weight, DAG_PROP_LOG_W.weight)} | costMs=${dagPropLogPadInt(appearanceCostMs, DAG_PROP_LOG_W.dwell)}`,
         );
     }
 
@@ -971,20 +1129,20 @@ export function createDagRecursiveEdgeAnimationController(
             options.onTick();
             logPropagationFrame(liveState);
 
-            const dwellMs = dwellMsAfterCurrentFrame(liveState);
+            const appearanceCostMs = appearanceCostMsForCurrentFrame(liveState);
             timer = setTimeout(() => {
                 if (version !== capturedVersion) return;
-                const stateAfterDwell = animation;
-                if (!stateAfterDwell || stateAfterDwell.plan.focusId !== focusId) return;
+                const stateAfterCost = animation;
+                if (!stateAfterCost || stateAfterCost.plan.focusId !== focusId) return;
 
-                if (!hasNextBatch(stateAfterDwell, lastBatch)) {
+                if (!hasNextBatch(stateAfterCost, lastBatch)) {
                     timer = null;
                     setPlaybackPhase('ended');
                     return;
                 }
-                advanceBatchIndex(stateAfterDwell);
+                advanceBatchIndex(stateAfterCost);
                 showFrameAndScheduleNext();
-            }, dwellMs);
+            }, appearanceCostMs);
         };
 
         showFrameAndScheduleNext();

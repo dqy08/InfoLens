@@ -12,8 +12,11 @@
  * {@link ./genAttributeDagPreprocess excludeNodeAggregatedEntries}（prompt / 已生成区 exclude）与
  * {@link ./genAttributeDagPreprocess phase2RankAndSparsify}，在「节点/展示单元」语义上做筛选。
  *
- * 任何非 `exact` 的对齐都会打一条 warn，便于观测 tokenizer 行为与 DAG 节点粒度的偏离。
+ * 任何非 `exact` 的对齐都会打一条 warn，便于观测 tokenizer 行为与 DAG 节点粒度的偏离；
+ * 整段落入 delete 移除区导致的 `empty` 为预期，由调用方经 {@link AlignWarnContext.skipWarnIfFullyInIntervals} 抑制。
  */
+
+import { isOffsetSpanFullyExcluded } from '../core/attributionDisplayModel';
 
 /** 对齐层需要的节点最小信息（与 view 中 DagNode 的子集） */
 export type NodeInterval = {
@@ -36,7 +39,7 @@ export type NodeAssignment = {
  * - `contained`：piece 严格落入某节点内部（拆分型；1 条 piece → 1 个节点，weight=1）。
  * - `union`：piece 区间恰好等于若干相邻节点区间的并集（合并型；如「如下」）。
  * - `overlap`：既不 exact / contained / union 的重叠（非整齐边界，按重叠字符数分权）。
- * - `empty`：与任何节点均无重叠（一般不应发生）。
+ * - `empty`：与任何节点均无重叠（delete 移除的 prompt 等预期情形不打 warn）。
  */
 export type AlignmentCase = 'exact' | 'contained' | 'union' | 'overlap' | 'empty';
 
@@ -121,6 +124,11 @@ export type AlignWarnContext = {
     step?: number;
     /** target token 便于定位 */
     targetToken?: string;
+    /**
+     * piece 整段落入其中时不打 warn（如 delete 已从 DAG 移除的 prompt 区；`empty` 为预期）。
+     * 与 {@link ./genAttributeDagView} `dagDeleteIntervals` 同源。
+     */
+    skipWarnIfFullyInIntervals?: ReadonlyArray<[number, number]>;
 };
 
 /** `console.warn` 与边 tooltip 共用的前缀。 */
@@ -190,8 +198,13 @@ export function alignAndAggregateByNode(
     for (const attr of entries) {
         const [as, ae] = attr.offset;
         const { assignments, kase } = resolveAttrOffsetToNodes(sorted, as, ae);
+        const skipExpectedEmpty =
+            kase === 'empty' &&
+            warnCtx?.skipWarnIfFullyInIntervals != null &&
+            warnCtx.skipWarnIfFullyInIntervals.length > 0 &&
+            isOffsetSpanFullyExcluded(as, ae, warnCtx.skipWarnIfFullyInIntervals);
         const warnLine =
-            kase !== 'exact'
+            kase !== 'exact' && !skipExpectedEmpty
                 ? formatAlignmentWarnLine(kase, as, ae, attr, assignments, warnCtx)
                 : null;
         if (warnLine !== null) {

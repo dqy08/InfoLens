@@ -1,4 +1,4 @@
-"""Semantic analysis API：返回原文各 token 对 prompt 的平均关注度"""
+"""Semantic analysis API：返回原文各 token 对 query 的归因 score（字段名 token_attention 为历史遗留）"""
 import gc
 import json
 import queue

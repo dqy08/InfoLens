@@ -550,6 +550,8 @@ export async function showVisitStatsTimelineDialog(api: TextAnalysisAPI): Promis
                 .property('selected', (d) => d.value === metricCache)
                 .text((d) => d.label);
 
+            toolbar.append('span').text('per');
+
             const granularitySelect = toolbar
                 .append('select')
                 .attr('class', 'visit-stats-timeline-granularity')

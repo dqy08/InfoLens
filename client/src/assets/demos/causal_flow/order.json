@@ -10,6 +10,15 @@
     "featured": "bold"
   },
   {
+    "slug": "过拟合｜李白 将进酒",
+    "label": "过拟合｜李白 将进酒",
+    "featured": "bold"
+  },
+  {
+    "slug": "CN-EN翻译",
+    "label": "CN->EN | 翻译"
+  },
+  {
     "slug": "CoT｜苏州所在省的省会",
     "label": "CoT | 苏州所在省的省会",
     "featured": "bold"
@@ -20,7 +29,7 @@
   },
   {
     "slug": "CoT｜反向传播归因动画",
-    "label": "CoT | 思维链的反向传播归因动画",
+    "label": "CoT | 思维链的反向归因过程动画",
     "featured": "bold"
   },
   {
@@ -37,17 +46,13 @@
     "label": "CoT | strawberry里有几个r"
   },
   {
-    "slug": "ReAct｜Tool-call｜北京天气",
-    "label": "ReAct｜Tool-call｜北京天气",
+    "slug": "Tool-call｜北京天气",
+    "label": "Tool-call｜北京天气",
     "featured": "bold"
   },
   {
-    "slug": "过拟合｜李白 将进酒",
-    "label": "过拟合｜李白 将进酒",
+    "slug": "Tool | 马斯克",
+    "label": "CoT+Tool｜SpaceX 马斯克",
     "featured": "bold"
-  },
-  {
-    "slug": "CN-EN翻译",
-    "label": "CN->EN | 翻译"
   }
 ]

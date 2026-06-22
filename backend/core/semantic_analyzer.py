@@ -218,6 +218,7 @@ def _analyze_logits_gradient(
         # 在 GPU 上一次性计算所有 token 的 ‖∇f‖，避免循环内 .item() 导致 500 次 GPU→CPU 同步
         grad_slice = grad[0, prompt_end:text_token_end].float()
         norms = grad_slice.norm(dim=-1).cpu().tolist()
+        # 响应字段名 token_attention 为历史遗留；值为各 token 归因 score，非 attention 权重
         token_attention: List[Dict] = []
         nan_count = 0
         for i in range(prompt_end, text_token_end):
@@ -268,7 +269,7 @@ def analyze_semantic(
         debug_info: 为 True 时返回 debug_abbrev（推理原文缩写）；topk_tokens、topk_probs 始终在结果中
 
     Returns:
-        {"model", "token_attention", "full_match_degree"}；debug_info=True 时包含 debug_info 对象
+        {"model", "token_attention"（各 token 归因 score；API 历史字段名）, "full_match_degree"}；debug_info=True 时包含 debug_info 对象
     """
     tokenizer, model, device = ensure_instruct_slot_ready()
     return _analyze_logits_gradient(

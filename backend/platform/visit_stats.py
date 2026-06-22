@@ -47,7 +47,7 @@ _STATS_OS_ORDER = ("ios", "android", "windows", "macos", "linux", "unknown")
 _STATS_GEN_ATTR_OPT_ORDER = (
     "layout_linear_arc", "layout_step_down", "layout_spiral",
     "causal_flow", "causal_flow_anim_backward",
-    "downstream", "token_tooltip",
+    "downstream", "token_tooltip", "tool_use",
 )
 
 # RLock：_persist_tick 在已持锁时调用 _sample_locked_counters，同线程需可重入。

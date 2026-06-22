@@ -13,8 +13,8 @@ import { SEMANTIC_CHUNK_BYTES } from '../core/constants';
 import { getSemanticMatchThreshold } from '../cross/semanticThresholdManager';
 import { getDigitsMergeEnabled } from '../cross/digitsMergeManager';
 import {
-    getAttentionRawScore,
-    mergeAttentionTokensFullyForRendering,
+    getTokenRawScore,
+    mergeTokenSpansFullyForRendering,
     normalizeTokenScores,
     splitTextToChunks,
 } from '../cross/semanticUtils';
@@ -198,13 +198,13 @@ export class SemanticSearchController {
             const matchDegree = res.full_match_degree ?? 0;
             maxMatchDegree = Math.max(maxMatchDegree, matchDegree);
             const matched = matchDegree >= getSemanticMatchThreshold();
-            const merged = mergeAttentionTokensFullyForRendering(res.token_attention ?? [], chunk.text, {
+            const merged = mergeTokenSpansFullyForRendering(res.token_attention ?? [], chunk.text, {
                 digitMerge: getDigitsMergeEnabled(),
             });
             const normalized = normalizeTokenScores(merged);
             const tokens = matched
                 ? normalized
-                : normalized.map((t) => ({ ...t, rawScore: getAttentionRawScore(t), score: 0 }));
+                : normalized.map((t) => ({ ...t, rawScore: getTokenRawScore(t), score: 0 }));
 
             chunkInfos.push({
                 startOffset: chunk.startOffset,

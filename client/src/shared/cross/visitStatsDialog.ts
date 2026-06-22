@@ -32,7 +32,7 @@ const OS_ORDER = ['ios', 'android', 'windows', 'macos', 'linux', 'unknown'] as c
 const GEN_ATTR_OPT_ORDER = [
     'layout_linear_arc', 'layout_step_down', 'layout_spiral',
     'causal_flow', 'causal_flow_anim_backward',
-    'downstream', 'token_tooltip',
+    'downstream', 'token_tooltip', 'tool_use',
 ] as const;
 
 /**
@@ -65,6 +65,7 @@ const GEN_ATTR_OPT_LABELS: Record<(typeof GEN_ATTR_OPT_ORDER)[number], string> =
     layout_spiral: 'DAG layout/spiral',
     downstream: 'Show downstream influence',
     token_tooltip: 'Show token tooltip',
+    tool_use: 'Tool use',
 };
 
 type VisitStatsRow = NonNullable<Awaited<ReturnType<TextAnalysisAPI['getVisitStats']>>>;

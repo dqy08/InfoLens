@@ -16,7 +16,7 @@ import {
     mergeTokensForRendering,
     createRawSnapshot
 } from '../../shared/cross/tokenUtils';
-import { getAttentionRawScore, mergeAttentionTokensFullyForRendering, normalizeTokenScores } from '../../shared/cross/semanticUtils';
+import { getTokenRawScore, mergeTokenSpansFullyForRendering, normalizeTokenScores } from '../../shared/cross/semanticUtils';
 import {
     validateTokenConsistency,
     validateTokenProbabilities,
@@ -87,13 +87,17 @@ export interface VisualizationDependencies {
 export interface SemanticData {
     text: string;
     model?: string;
-    /** 整段模式：API 返回的 token_attention 副本，用于切换 digit merge 时重算（分块模式不存） */
-    semanticTokenAttentionFromApi?: Array<{
+    /** 整段模式：API `token_attention` 字段的原始 score 条目副本，用于切换 digit merge 时重算（分块模式不存） */
+    semanticTokenSpansFromApi?: Array<{
         offset: [number, number];
         raw: string;
         score: number;
         rawScore?: number;
     }>;
+    /**
+     * 经 overlap/digit 合并与归一化后的 token 归因 score 条目。
+     * 字段名 `token_attention` 为 API 历史遗留，**非** transformer attention 权重。
+     */
     token_attention: Array<{
         offset: [number, number];
         raw: string;
@@ -198,7 +202,7 @@ export class VisualizationUpdater {
      */
     private computeDisplayResult(): (FrontendAnalyzeResult & {
         rawScoresNormed?: number[];
-        attentionRawScores?: number[];
+        tokenRawScores?: number[];
         chunkInfos?: SemanticData['chunkInfos'];
     }) | null {
         const info = this.currentState.infoDensityData;
@@ -229,11 +233,11 @@ export class VisualizationUpdater {
                 }
                 }
                 // 联合模式：bpeMerged 与语义 tokens 超出部分合并为并集，使 rect/渲染范围与截断边界一致
-                const tokenAttention = sem.token_attention ?? [];
-                const { unionTokens, scoresForUnion, rawScoresForUnion } = tokenAttention.length
-                    ? this.mergeBpeWithSemanticBeyond(infoMerged, tokenAttention)
+                const semanticTokens = sem.token_attention ?? [];
+                const { unionTokens, scoresForUnion, rawScoresForUnion } = semanticTokens.length
+                    ? this.mergeBpeWithSemanticBeyond(infoMerged, semanticTokens)
                     : (() => {
-                        const m = this.mapTokenAttentionToMerged(infoMerged, []);
+                        const m = this.mapSemanticTokensToMerged(infoMerged, []);
                         return {
                             unionTokens: infoMerged,
                             scoresForUnion: m.scores,
@@ -245,7 +249,7 @@ export class VisualizationUpdater {
                     bpeBpeMergedTokens: unionTokens,
                     bpe_strings: unionTokens,
                     rawScoresNormed: scoresForUnion,
-                    attentionRawScores: rawScoresForUnion,
+                    tokenRawScores: rawScoresForUnion,
                     chunkInfos: sem.chunkInfos,
                 };
             }
@@ -652,15 +656,15 @@ export class VisualizationUpdater {
             }
         }
         const sem = this.currentState.semanticData;
-        if (sem && !sem.chunkInfos?.length && sem.semanticTokenAttentionFromApi?.length && sem.text) {
-            const mergedAttention = mergeAttentionTokensFullyForRendering(
-                sem.semanticTokenAttentionFromApi,
+        if (sem && !sem.chunkInfos?.length && sem.semanticTokenSpansFromApi?.length && sem.text) {
+            const mergedSpans = mergeTokenSpansFullyForRendering(
+                sem.semanticTokenSpansFromApi,
                 sem.text,
                 { digitMerge }
             );
-            const normalizedAttention = normalizeTokenScores(mergedAttention);
-            const computedSignalFit = findSignalThresholdWithLog(normalizedAttention);
-            sem.token_attention = normalizedAttention;
+            const normalizedSpans = normalizeTokenScores(mergedSpans);
+            const computedSignalFit = findSignalThresholdWithLog(normalizedSpans);
+            sem.token_attention = normalizedSpans;
             sem.signalFitResult = computedSignalFit ?? undefined;
         }
         const infoResult = this.currentState.infoDensityData?.result as FrontendAnalyzeResult | undefined;
@@ -895,7 +899,7 @@ export class VisualizationUpdater {
         signalFitResult?: signalFitResult | null
     ): boolean {
         const chunkInfos = res?.chunkInfos;
-        const tokenAttention = res?.token_attention;
+        const semanticTokens = res?.token_attention;
         const currentText = text ?? '';
 
         if (!hasSemanticData(res)) {
@@ -907,8 +911,8 @@ export class VisualizationUpdater {
         if (!currentText) return false;
 
         // 整段模式（无 chunkInfos）需校验 token 边界
-        if (tokenAttention?.length && !chunkInfos?.length) {
-            const err = validateTokenConsistency(tokenAttention!, currentText, { allowOverlap: true });
+        if (semanticTokens?.length && !chunkInfos?.length) {
+            const err = validateTokenConsistency(semanticTokens!, currentText, { allowOverlap: true });
             if (err) {
                 showAlertDialog(tr('Error'), err);
                 return false;
@@ -917,26 +921,26 @@ export class VisualizationUpdater {
 
         /** 分块模式：装配端已按 chunk 完成 overlap+digit+normalize，禁止全文再合并/再归一化（避免跨 chunk 合数字、跨 chunk 定标）。 */
         const isChunkedSemantic = Boolean(chunkInfos?.length);
-        const semanticTokenAttentionFromApi =
-            !isChunkedSemantic && tokenAttention && tokenAttention.length > 0
-                ? tokenAttention.map((t) => ({
+        const semanticTokenSpansFromApi =
+            !isChunkedSemantic && semanticTokens && semanticTokens.length > 0
+                ? semanticTokens.map((t) => ({
                       ...t,
                       offset: [t.offset[0], t.offset[1]] as [number, number],
                   }))
                 : undefined;
-        const mergedAttention = isChunkedSemantic
-            ? (tokenAttention ?? [])
-            : mergeAttentionTokensFullyForRendering(tokenAttention ?? [], currentText, {
+        const mergedSpans = isChunkedSemantic
+            ? (semanticTokens ?? [])
+            : mergeTokenSpansFullyForRendering(semanticTokens ?? [], currentText, {
                   digitMerge: getDigitsMergeEnabled(),
               });
-        const normalizedAttention = isChunkedSemantic ? mergedAttention : normalizeTokenScores(mergedAttention);
+        const normalizedSpans = isChunkedSemantic ? mergedSpans : normalizeTokenScores(mergedSpans);
         const computedSignalFit = isChunkedSemantic
             ? undefined
-            : findSignalThresholdWithLog(normalizedAttention);
+            : findSignalThresholdWithLog(normalizedSpans);
         const chunkInfosResolved =
             chunkInfos?.length
                 ? chunkInfos.map((info) => {
-                      const slice = normalizedAttention.filter(
+                      const slice = normalizedSpans.filter(
                           (t) => t.offset[0] < info.endOffset && t.offset[1] > info.startOffset
                       );
                       const thresholdResult =
@@ -948,8 +952,8 @@ export class VisualizationUpdater {
         this.currentState.semanticData = {
             text: currentText,
             model: res.model,
-            semanticTokenAttentionFromApi,
-            token_attention: normalizedAttention,
+            semanticTokenSpansFromApi,
+            token_attention: normalizedSpans,
             signalFitResult: signalFitResult ?? computedSignalFit ?? undefined,
             chunkInfos: chunkInfosResolved,
             full_match_degree: res.full_match_degree,
@@ -986,7 +990,7 @@ export class VisualizationUpdater {
 
     private buildSemanticOnlyResult(
         res: { model?: string },
-        tokenAttention: Array<{
+        semanticTokens: Array<{
             offset: [number, number];
             raw: string;
             score: number;
@@ -996,19 +1000,19 @@ export class VisualizationUpdater {
         chunkInfos?: SemanticData['chunkInfos']
     ): (FrontendAnalyzeResult & {
         rawScoresNormed: number[];
-        attentionRawScores: number[];
+        tokenRawScores: number[];
         chunkInfos?: SemanticData['chunkInfos'];
     }) | null {
         const safeText = text ?? '';
         if (!safeText) return null;
         /** `semanticData.token_attention` 已在 handleSemanticResponse 中完成 overlap + digit + normalize */
-        const bpeTokens: FrontendToken[] = tokenAttention.map((t) => ({
+        const bpeTokens: FrontendToken[] = semanticTokens.map((t) => ({
             offset: t.offset,
             raw: t.raw,
             pred_topk: []
         })) as FrontendToken[];
-        const rawScoresNormed = tokenAttention.map((t) => t.score);
-        const attentionRawScores = tokenAttention.map((t) => getAttentionRawScore(t));
+        const rawScoresNormed = semanticTokens.map((t) => t.score);
+        const tokenRawScores = semanticTokens.map((t) => getTokenRawScore(t));
         const cloneRow = (t: FrontendToken): FrontendToken => ({ ...t });
         return {
             model: res.model,
@@ -1017,7 +1021,7 @@ export class VisualizationUpdater {
             bpeBpeMergedTokens: bpeTokens.map(cloneRow),
             originalText: safeText,
             rawScoresNormed,
-            attentionRawScores,
+            tokenRawScores,
             chunkInfos
         };
     }
@@ -1027,7 +1031,7 @@ export class VisualizationUpdater {
      * @returns 不一致时返回错误描述（含前后文本），一致时返回 null
      */
     private checkSemanticAlignsWithInfo(
-        tokenAttention: Array<{ offset: [number, number]; raw?: string }>,
+        semanticTokens: Array<{ offset: [number, number]; raw?: string }>,
         infoMerged: Array<{ offset: [number, number] }>,
         text: string
     ): { firstBadIdx: number; aSample: string; bSample: string; aNext: string; bNext: string; textBefore: string; textAt: string; textAfter: string } | null {
@@ -1042,17 +1046,17 @@ export class VisualizationUpdater {
             const s = raw.slice(0, 20) + (raw.length > 20 ? '…' : '');
             return `第${idx}个token分词 [字符${t.offset[0]}-${t.offset[1]}] "${esc(s)}"`;
         };
-        for (let i = 0; i < tokenAttention.length; i++) {
-            const [as, ae] = tokenAttention[i].offset;
+        for (let i = 0; i < semanticTokens.length; i++) {
+            const [as, ae] = semanticTokens[i].offset;
             if (as < 0 || ae > totalChars || ae <= as) continue; // 由 validateTokenConsistency 处理
             if (ae > infoEnd) continue; // 超出双方重叠范围，不参与检查
             if (!boundaries.has(as) || !boundaries.has(ae)) {
-                const raw = (tokenAttention[i] as { raw?: string }).raw ?? '';
+                const raw = (semanticTokens[i] as { raw?: string }).raw ?? '';
                 const infoIdx = infoMerged.findIndex(t => t.offset[0] <= as && as < t.offset[1]);
                 const infoAt = infoIdx >= 0 ? infoMerged[infoIdx]! : null;
                 const rawShort = (raw || text.slice(as, ae)).slice(0, 20);
                 const infoRaw = infoAt ? (text.slice(infoAt.offset[0], infoAt.offset[1]).slice(0, 20) || '') : '';
-                const nextSem = tokenAttention[i + 1];
+                const nextSem = semanticTokens[i + 1];
                 const nextInfo = infoIdx >= 0 && infoIdx + 1 < infoMerged.length ? infoMerged[infoIdx + 1]! : null;
                 return {
                     firstBadIdx: i,
@@ -1075,7 +1079,7 @@ export class VisualizationUpdater {
      */
     private mergeBpeWithSemanticBeyond(
         bpeMerged: FrontendToken[],
-        tokenAttention: Array<{
+        semanticTokens: Array<{
             offset: [number, number];
             raw: string;
             score: number;
@@ -1087,17 +1091,17 @@ export class VisualizationUpdater {
         rawScoresForUnion: (number | undefined)[];
     } {
         const infoEnd = bpeMerged.length > 0 ? bpeMerged[bpeMerged.length - 1]!.offset[1] : 0;
-        const beyond = tokenAttention.filter((t) => t.offset[0] >= infoEnd);
+        const beyond = semanticTokens.filter((t) => t.offset[0] >= infoEnd);
         if (beyond.length === 0) {
-            const { scores, rawScores } = this.mapTokenAttentionToMerged(bpeMerged, tokenAttention);
+            const { scores, rawScores } = this.mapSemanticTokensToMerged(bpeMerged, semanticTokens);
             return {
                 unionTokens: bpeMerged,
                 scoresForUnion: scores,
                 rawScoresForUnion: rawScores,
             };
         }
-        /** beyond 已在 handleSemanticResponse 中 overlap+digit 合并；段内用原始梯度重新归一化 */
-        const beyondRenormed = normalizeTokenScores(beyond.map((t) => ({ ...t, score: getAttentionRawScore(t) })));
+        /** beyond 已在 handleSemanticResponse 中 overlap+digit 合并；段内用原始 score 重新归一化 */
+        const beyondRenormed = normalizeTokenScores(beyond.map((t) => ({ ...t, score: getTokenRawScore(t) })));
         const semanticAsFrontend: FrontendToken[] = beyondRenormed.map((t) => ({
             offset: [t.offset[0], t.offset[1]],
             raw: t.raw,
@@ -1105,15 +1109,15 @@ export class VisualizationUpdater {
             pred_topk: [],
         }));
         const unionTokens = [...bpeMerged, ...semanticAsFrontend];
-        const { scores: infoScores, rawScores: infoRawScores } = this.mapTokenAttentionToMerged(
+        const { scores: infoScores, rawScores: infoRawScores } = this.mapSemanticTokensToMerged(
             bpeMerged,
-            tokenAttention
+            semanticTokens
         );
         const beyondScores: (number | undefined)[] = beyondRenormed.map((t) =>
             Number.isFinite(t.score) ? t.score : undefined
         );
         const beyondRawScores: (number | undefined)[] = beyondRenormed.map((t) => {
-            const r = getAttentionRawScore(t);
+            const r = getTokenRawScore(t);
             return Number.isFinite(r) ? r : undefined;
         });
         const scoresForUnion = [...infoScores, ...beyondScores];
@@ -1122,15 +1126,12 @@ export class VisualizationUpdater {
     }
 
     /**
-     * 将 token_attention（offset 为原文字符偏移）映射到 merged tokens
-     */
-    /**
-     * 将 token_attention 映射到 merged tokens，双指针 O(N+M)。
+     * 将语义 API 的 token score 条目（offset 为原文字符偏移）映射到 merged tokens，双指针 O(N+M)。
      * 前提：两个数组均按 offset 升序排列。
      */
-    private mapTokenAttentionToMerged(
+    private mapSemanticTokensToMerged(
         bpeBpeMergedTokens: Array<{ offset: [number, number] }>,
-        tokenAttention: Array<{ offset: [number, number]; score: number; rawScore?: number }>
+        semanticTokens: Array<{ offset: [number, number]; score: number; rawScore?: number }>
     ): {
         scores: (number | undefined)[];
         rawScores: (number | undefined)[];
@@ -1140,16 +1141,16 @@ export class VisualizationUpdater {
         const rawScores: number[] = new Array(n).fill(0);
         const weights: number[] = new Array(n).fill(0);
 
-        let j = 0; // 跳过所有在当前 attn 之前结束的 merged token
-        for (const attn of tokenAttention) {
-            const [as, ae] = attn.offset;
-            const rawPart = getAttentionRawScore(attn);
+        let j = 0; // 跳过所有在当前 semantic token 之前结束的 merged token
+        for (const semToken of semanticTokens) {
+            const [as, ae] = semToken.offset;
+            const rawPart = getTokenRawScore(semToken);
             while (j < n && bpeBpeMergedTokens[j].offset[1] <= as) j++;
             for (let k = j; k < n && bpeBpeMergedTokens[k].offset[0] < ae; k++) {
                 const [s, e] = bpeBpeMergedTokens[k].offset;
                 // j/k 的推进条件已保证 e > as 且 s < ae，overlap 必然 > 0
                 const overlap = Math.min(e, ae) - Math.max(s, as);
-                scores[k] += attn.score * overlap;
+                scores[k] += semToken.score * overlap;
                 rawScores[k] += rawPart * overlap;
                 weights[k] += overlap;
             }

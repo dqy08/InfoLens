@@ -20,8 +20,10 @@ import type { PredictionAttributeModelVariant } from '../../shared/prediction_at
 import {
     clampDagEdgeTopPCoverage,
     DAG_EDGE_TOP_P_COVERAGE_DEFAULT,
+    dagExcludeIntervalContextForReplay,
     extractPromptTokenSpans,
     filterPromptSpansInInputRanges,
+    isDagGenStepTargetExcluded,
     type PromptTokenSpan,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagPreprocess';
 import {
@@ -47,7 +49,7 @@ import {
 import type { DagRecursiveEdgeReplayPacing } from '../../shared/prediction_attribution/causal_flow/genAttributeDagRecursiveEdgeAnimation';
 import {
     buildDagStepPlaybackEvents,
-    resolveDagStepPlaybackDelaysFromPacing,
+    resolveDagStepPlaybackClocksFromPacing,
     resolveDagStepPlaybackStart,
     runDagStepPlaybackLoop,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagStepPlayback';
@@ -117,13 +119,19 @@ import {
     GEN_ATTR_ENABLE_THINKING_STORAGE_KEY,
     GEN_ATTR_ENABLE_TOOL_CALLING_STORAGE_KEY,
     GEN_ATTR_ENABLE_MULTI_TURN_STORAGE_KEY,
+    GEN_ATTR_TOOL_CONFIG_STORAGE_KEY,
     GEN_ATTR_MAX_NEW_TOKENS_STORAGE_KEY,
     GEN_ATTR_MODEL_VARIANT_STORAGE_KEY,
     LS_SKIP_CHAT_TEMPLATE,
 } from '../../features/chat/chatPromptTemplateMode';
 import { postCompletionsPrompt, postCompletionsStop } from '../../shared/api/completionsClient';
 import { createToolCallingOptionsRow } from '../../features/chat/toolCallingOptionsRow';
-import { cloneToolConfig, toolConfigFingerprint } from '../../features/chat/toolConfig';
+import {
+    cloneToolConfig,
+    toolConfigCacheKeyFields,
+    toolConfigFingerprint,
+    toolConfigToolsSchema,
+} from '../../features/chat/toolConfig';
 import {
     attachToolCallingPendingLine,
     type ToolCallingPendingLine,
@@ -151,6 +159,10 @@ const GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_mod
 const GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_step_ms';
 const GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_replay_pacing_mode';
 const GEN_ATTR_DAG_REPLAY_AUTO_ZOOM_STORAGE_KEY = 'info_radar_gen_attr_dag_replay_auto_zoom';
+const GEN_ATTR_DAG_DISABLE_SMART_STEP_TIME_STORAGE_KEY =
+    'info_radar_gen_attr_dag_disable_smart_step_time';
+const GEN_ATTR_DAG_FORWARD_SLIDE_SHARED_NODES_STORAGE_KEY =
+    'info_radar_gen_attr_dag_forward_slide_shared_nodes';
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_total_s';
 const GEN_ATTR_DAG_NODE_CI_VISUAL_SCALE_STORAGE_KEY = 'info_radar_gen_attr_dag_node_ci_visual_scale';
 const GEN_ATTR_DAG_DECAY_ATTRIBUTION_HIGH_SURPRISAL_STORAGE_KEY =
@@ -220,9 +232,11 @@ const DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS: GenAttrDemoUiOptions = {
     showDownstreamInfluence: false,
     recursiveAttributionEnabled: false,
     recursiveEdgeBatchAnimationDirection: 'forward',
+    forwardSlideSharedNodes: false,
     showTokenInfoOnSelected: false,
     replayPacingMode: 'total',
     replayAutoZoom: false,
+    disableSmartStepTime: false,
     playbackTotalS: GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT,
     playbackStepMs: GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT,
     excludePromptPatternsEnabled: true,
@@ -343,6 +357,14 @@ function readStoredDagReplayAutoZoom(): boolean {
     );
 }
 
+function readStoredDagDisableSmartStepTime(): boolean {
+    return lsReadBool(
+        GEN_ATTR_DAG_DISABLE_SMART_STEP_TIME_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.disableSmartStepTime,
+        { encoding: '1' },
+    );
+}
+
 function readStoredDagLayoutMode(): DagLayoutMode {
     return lsReadEnum(
         GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY,
@@ -440,6 +462,18 @@ const dagReplayStepWrap = document.getElementById('gen_attr_dag_replay_step_wrap
 const dagReplayAutoZoomInput = document.getElementById(
     'gen_attr_dag_replay_auto_zoom',
 ) as HTMLInputElement | null;
+const dagDisableSmartStepTimeWrap = document.getElementById(
+    'gen_attr_dag_disable_smart_step_time_wrap',
+);
+const dagDisableSmartStepTimeInput = document.getElementById(
+    'gen_attr_dag_disable_smart_step_time',
+) as HTMLInputElement | null;
+const dagForwardSlideSharedNodesWrap = document.getElementById(
+    'gen_attr_dag_forward_slide_prompt_wrap',
+);
+const dagForwardSlideSharedNodesInput = document.getElementById(
+    'gen_attr_dag_forward_slide_shared_nodes',
+) as HTMLInputElement | null;
 
 /** 与 `#gen_attr_dag_replay_mode` 同步；非法或缺失时视为 `total`。 */
 function currentDagReplayPacingMode(): DagReplayPacingMode {
@@ -460,7 +494,12 @@ function readDagReplayPacingFromControls(options?: { writeBack?: boolean }): Dag
         if (dagPlaybackStepMsInput) dagPlaybackStepMsInput.value = String(stepMs);
         if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = formatDagPlaybackTotalS(totalS);
     }
-    return { mode: currentDagReplayPacingMode(), stepMs, totalS };
+    return {
+        mode: currentDagReplayPacingMode(),
+        stepMs,
+        totalS,
+        disableSmartStepTime: dagDisableSmartStepTimeInput?.checked ?? false,
+    };
 }
 
 /** 切换下拉时更新 `hidden`；样式见 `.gen-attr-dag-replay-value-wrap:not([hidden])`。 */
@@ -560,10 +599,11 @@ const genAttrResetUiOptionsBtn = document.getElementById(
 ) as HTMLButtonElement | null;
 const completeReasonEl = d3.select('#gen_attr_complete_reason');
 
-function onExcludePatternsEffectiveChange(): void {
+/** exclude / delete 正则生效变更：须 reset 全步重放；动态过程（DAG 忙）中不生效。exclude 不改节点几何，保留视口。 */
+function onDagPatternsEffectiveChange(opts?: { refit?: boolean }): void {
     const h = runnerHandle;
     if (!h || h.tokenCount === 0) return;
-    tryResetAndReplayDag();
+    tryResetAndReplayDag(opts);
 }
 
 bindExcludePatternsUi({
@@ -573,7 +613,7 @@ bindExcludePatternsUi({
     },
     textInput: genAttrDeletePromptPatternsTa,
     enableCheckbox: genAttrDeletePromptPatternsEnable,
-    onEffectiveChange: onExcludePatternsEffectiveChange,
+    onEffectiveChange: () => onDagPatternsEffectiveChange(),
     defaultTextWhenKeyAbsent: '',
     defaultEnabledWhenKeyAbsent: false,
     skipLocalStoragePersist: true,
@@ -585,7 +625,7 @@ bindExcludePatternsUi({
     },
     textInput: genAttrExcludePromptPatternsTa,
     enableCheckbox: genAttrExcludePromptPatternsEnable,
-    onEffectiveChange: onExcludePatternsEffectiveChange,
+    onEffectiveChange: () => onDagPatternsEffectiveChange({ refit: false }),
     defaultTextWhenKeyAbsent: DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT,
     skipLocalStoragePersist: true,
 });
@@ -596,7 +636,7 @@ bindExcludePatternsUi({
     },
     textInput: genAttrExcludeGeneratedPatternsTa,
     enableCheckbox: genAttrExcludeGeneratedPatternsEnable,
-    onEffectiveChange: onExcludePatternsEffectiveChange,
+    onEffectiveChange: () => onDagPatternsEffectiveChange({ refit: false }),
     defaultTextWhenKeyAbsent: DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT,
     skipLocalStoragePersist: true,
 });
@@ -638,6 +678,10 @@ const initialDagPlaybackTotalS = readStoredDagPlaybackTotalS();
 if (dagPlaybackTotalSInput) dagPlaybackTotalSInput.value = formatDagPlaybackTotalS(initialDagPlaybackTotalS);
 const initialDagReplayAutoZoom = readStoredDagReplayAutoZoom();
 if (dagReplayAutoZoomInput) dagReplayAutoZoomInput.checked = initialDagReplayAutoZoom;
+const initialDagDisableSmartStepTime = readStoredDagDisableSmartStepTime();
+if (dagDisableSmartStepTimeInput) {
+    dagDisableSmartStepTimeInput.checked = initialDagDisableSmartStepTime;
+}
 applyDagReplaySpeedUi();
 
 const genAttrResultsNode = genAttrResultsEl.node() as HTMLElement | null;
@@ -747,9 +791,20 @@ function applyDagDimInactiveTokensFromControls(): void {
     );
 }
 
+/** DAG 用户传播焦点；`initGenAttributeDagView` 之前恒为 `null`。 */
+let getDagUserFocusId: () => string | null = () => null;
+
+/** 与右上角 ↯ 出现条件一致：因果流模式 + 已确立传播焦点。 */
+function syncDisableSmartStepTimeVisibility(): void {
+    if (!dagDisableSmartStepTimeWrap) return;
+    const recursive = dagRecursiveAttributionInput?.checked ?? false;
+    dagDisableSmartStepTimeWrap.hidden = !(recursive && getDagUserFocusId() != null);
+}
+
 /** 传播归因相关控件可见性：仅在适用时显示。 */
 function applyDagRecursiveAttributionSubmodeUi(): void {
     const recursive = dagRecursiveAttributionInput?.checked ?? false;
+    const forward = recursive && currentDagRecursiveEdgeAnimationDirection() === 'forward';
     if (dagShowDownstreamInfluenceGroup) {
         dagShowDownstreamInfluenceGroup.hidden = recursive;
     }
@@ -759,6 +814,10 @@ function applyDagRecursiveAttributionSubmodeUi(): void {
     if (dagDimInactiveTokensGroup) {
         dagDimInactiveTokensGroup.hidden = !recursive;
     }
+    if (dagForwardSlideSharedNodesWrap) {
+        dagForwardSlideSharedNodesWrap.hidden = !forward;
+    }
+    syncDisableSmartStepTimeVisibility();
     syncDimInactiveTokensThresholdInputUi();
 }
 
@@ -804,6 +863,25 @@ function readStoredDagRecursiveEdgeAnimationDirection(): DagRecursiveEdgeAnimati
     );
 }
 
+function readStoredDagForwardSlideSharedNodes(): boolean {
+    return lsReadBool(
+        GEN_ATTR_DAG_FORWARD_SLIDE_SHARED_NODES_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.forwardSlideSharedNodes,
+        { encoding: '1' },
+    );
+}
+
+const initialDagForwardSlideSharedNodes = readStoredDagForwardSlideSharedNodes();
+if (dagForwardSlideSharedNodesInput) {
+    dagForwardSlideSharedNodesInput.checked = initialDagForwardSlideSharedNodes;
+}
+
+function readDagPropagationPlaybackOptionsFromControls(): { forwardSlideSharedNodes: boolean } {
+    return {
+        forwardSlideSharedNodes: dagForwardSlideSharedNodesInput?.checked ?? false,
+    };
+}
+
 const initialDagRecursiveEdgeAnimationDirection = readStoredDagRecursiveEdgeAnimationDirection();
 if (dagRecursiveEdgeAnimationDirectionSelect) {
     dagRecursiveEdgeAnimationDirectionSelect.value = initialDagRecursiveEdgeAnimationDirection;
@@ -827,6 +905,7 @@ dagRecursiveAttributionInput?.addEventListener('change', () => {
 dagRecursiveEdgeAnimationDirectionSelect?.addEventListener('change', () => {
     const direction = currentDagRecursiveEdgeAnimationDirection();
     dagRecursiveEdgeAnimationDirectionSelect.value = direction;
+    applyDagRecursiveAttributionSubmodeUi();
     dagHandle.setRecursiveEdgeBatchAnimationDirection(direction);
 });
 
@@ -872,19 +951,6 @@ dagHideExcludedTokensInput?.addEventListener('change', () => {
 
 dagShowTopkOnSelectedInput?.addEventListener('change', () => {
     dagHandle.setShowTokenInfoOnSelected(dagShowTopkOnSelectedInput.checked);
-});
-
-setPageOptsGetter(() => {
-    const mode = currentDagLayoutMode();
-    return {
-        layout_linear_arc: mode === 'linear-arc',
-        layout_step_down: mode === 'linear-arc-step-down',
-        layout_spiral: mode === 'spiral',
-        causal_flow: dagRecursiveAttributionInput?.checked ?? false,
-        causal_flow_anim_backward: currentDagRecursiveEdgeAnimationDirection() === 'backward',
-        downstream: dagShowDownstreamInfluenceInput?.checked ?? false,
-        token_tooltip: dagShowTopkOnSelectedInput?.checked ?? false,
-    };
 });
 
 // DAG 回放节奏（与上节「DAG 测量宽度」无关；宽度 listener 在后文）
@@ -947,6 +1013,7 @@ const {
 const toolCallingOptions = createToolCallingOptionsRow({
     enableToolCallingStorageKey: GEN_ATTR_ENABLE_TOOL_CALLING_STORAGE_KEY,
     multiTurnStorageKey: GEN_ATTR_ENABLE_MULTI_TURN_STORAGE_KEY,
+    toolConfigStorageKey: GEN_ATTR_TOOL_CONFIG_STORAGE_KEY,
     onStateChange: () => syncSubmitButtonState(),
 });
 
@@ -954,8 +1021,23 @@ const {
     isToolCallingEnabled,
     isMultiTurnEnabled,
     getCurrentToolConfig,
+    isToolCallingConfigReady,
     restoreFromDraft: restoreToolCallingFromDraft,
 } = toolCallingOptions;
+
+setPageOptsGetter(() => {
+    const mode = currentDagLayoutMode();
+    return {
+        layout_linear_arc: mode === 'linear-arc',
+        layout_step_down: mode === 'linear-arc-step-down',
+        layout_spiral: mode === 'spiral',
+        causal_flow: dagRecursiveAttributionInput?.checked ?? false,
+        causal_flow_anim_backward: currentDagRecursiveEdgeAnimationDirection() === 'backward',
+        downstream: dagShowDownstreamInfluenceInput?.checked ?? false,
+        token_tooltip: dagShowTopkOnSelectedInput?.checked ?? false,
+        tool_use: isToolCallingEnabled(),
+    };
+});
 
 function isGenAttrUseSystemPrompt(): boolean {
     return genAttrUseSystemPromptInput?.checked ?? true;
@@ -1153,8 +1235,7 @@ function replayRunnerStepsIntoDag(h: TokenGenAttributionHandle, catalogSpans?: P
     }
     const steps = h.getAllSteps();
     const catalog = catalogSpans ?? extractPromptTokenSpans(steps[0]!);
-    const lastStep = steps[steps.length - 1]!;
-    const excludeCtx = lastStep.context + lastStep.token;
+    const excludeCtx = dagExcludeIntervalContextForReplay(steps);
     // 整段回放期间中间帧不可见：批处理内只维护图数据，结束时统一刷一次 svg。
     dagHandle.beginBatch();
     try {
@@ -1180,8 +1261,8 @@ function replayRunnerStepsIntoDag(h: TokenGenAttributionHandle, catalogSpans?: P
     dagPlaybackNextIndex = h.tokenCount;
 }
 
-/** 末 output gen 后的收尾停留（ms）；不参与「等到下一段内容」的 1× 时钟，纯 UI 特例。 */
-const DAG_LAST_TOKEN_DWELL_MS = 500;
+/** 末 output gen 展示后的收尾模拟开销（ms）；步进队列已结束，纯 UI 特例。 */
+const DAG_LAST_TOKEN_APPEARANCE_COST_MS = 500;
 
 let dagPlaybackTimer: ReturnType<typeof setTimeout> | null = null;
 let dagLastTokenDwellTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1197,12 +1278,12 @@ function cancelDagLastTokenDwell(): void {
  * 末 token 已展示后的统一延时调度（生成 onComplete、回放最后一步）。
  * 新调度会取消上一次 pending，避免与步进 `dagPlaybackTimer` 叠用同一字段。
  */
-function scheduleDagLastTokenDwell(action: () => void, dwellMs: number = DAG_LAST_TOKEN_DWELL_MS): void {
+function scheduleDagLastTokenDwell(action: () => void, costMs: number = DAG_LAST_TOKEN_APPEARANCE_COST_MS): void {
     cancelDagLastTokenDwell();
     dagLastTokenDwellTimer = setTimeout(() => {
         dagLastTokenDwellTimer = null;
         action();
-    }, dwellMs);
+    }, costMs);
 }
 
 function stopDagPlayback(): void {
@@ -1236,8 +1317,21 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
         dagHandle.reset(true);
         dagPlaybackNextIndex = 0;
     }
+    const excludeCtx = dagExcludeIntervalContextForReplay(steps);
+    const excludePromptPatternsText = genAttrEffectiveExcludePromptPatternsText();
+    const excludeGeneratedPatternsText = genAttrEffectiveExcludeGeneratedPatternsText();
+    const skipAppearanceCostForOutputGen = (stepIndex: number): boolean => {
+        const step = steps[stepIndex];
+        if (!step) return false;
+        return isDagGenStepTargetExcluded(
+            step,
+            excludeCtx,
+            excludePromptPatternsText,
+            excludeGeneratedPatternsText,
+        );
+    };
     const pacing = readDagReplayPacingFromControls({ writeBack: true });
-    const delays = resolveDagStepPlaybackDelaysFromPacing(steps, pacing);
+    const clocks = resolveDagStepPlaybackClocksFromPacing(steps, pacing);
     const includePrompt = dagPlaybackNextIndex === 0 && currentRunPromptSpans.length > 0;
     const events = buildDagStepPlaybackEvents(steps, includePrompt);
     const start = resolveDagStepPlaybackStart(
@@ -1271,7 +1365,7 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
     runDagStepPlaybackLoop({
         events,
         start,
-        delays,
+        clocks,
         isStale: isStalePlaybackHandle,
         setTimer: (cb, delayMs) => {
             dagPlaybackTimer = setTimeout(() => {
@@ -1306,7 +1400,6 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
         },
         showOutputGen: (stepIndex) => {
             const playbackStep = steps[stepIndex]!;
-            const excludeCtx = playbackStep.context + playbackStep.token;
             syncDagInputLayerAtStep({
                 catalogSpans: currentRunPromptSpans,
                 layoutWire: playbackStep.context,
@@ -1328,6 +1421,7 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
                 dagHandle.setDagPlaybackPlaying(false);
             });
         },
+        skipAppearanceCostForOutputGen,
     });
 }
 
@@ -1356,16 +1450,25 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
     recursiveAttributionEnabled: initialDagRecursiveAttribution,
     recursiveEdgeBatchAnimationDirection: initialDagRecursiveEdgeAnimationDirection,
     getReplayPacing: () => readDagReplayPacingFromControls({ writeBack: true }),
+    getPropagationPlaybackOptions: () => readDagPropagationPlaybackOptionsFromControls(),
     edgeTopPCoverage: initialDagEdgeTopPCoverage,
     onFullscreenError: (message) => showToast(message, 'error'),
     getEffectiveExcludePromptPatternsText: genAttrEffectiveExcludePromptPatternsText,
     getEffectiveExcludeGeneratedPatternsText: genAttrEffectiveExcludeGeneratedPatternsText,
     getEffectiveDeletePromptPatternsText: genAttrEffectiveDeletePromptPatternsText,
+    onUserFocusChange: () => syncDisableSmartStepTimeVisibility(),
 });
+
+getDagUserFocusId = () => dagHandle.getUserFocusId();
+syncDisableSmartStepTimeVisibility();
 
 toolCallingPendingLine = attachToolCallingPendingLine(
     document.querySelector('#results .gen-attr-dag-stack') as HTMLElement,
 );
+
+dagForwardSlideSharedNodesInput?.addEventListener('change', () => {
+    dagHandle.refreshNodeLinkHighlight();
+});
 
 dagLayoutModeSelect?.addEventListener('change', () => {
     applyDagLayoutModeUi();
@@ -1388,6 +1491,8 @@ function isDagBusy(): boolean {
 
 /**
  * 非忙状态下 reset + replay，按需 fit，供各设置项切换后复用。忙时为 no-op。
+ * exclude / Top-P 等影响建边的选项变更后须走此路径（DAG exclude 在建边时定稿，见 genAttributeDagView）。
+ * 生成或 ▶ 回放进行中（{@link isDagBusy}）时改 exclude 正则为 no-op，动态过程内对已建边不生效。
  * 默认保留 DAG 选中节点；整页重置 UI 等场景传 `preserveNodeSelection: false`。
  * `refit: false` 时 `reset(true)` 保留 pan/zoom（仅边集/样式类变更）。
  */
@@ -1474,6 +1579,7 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
         mode: replayPacingMode,
         stepMs: playbackStepMs,
         totalS: playbackTotalS,
+        disableSmartStepTime,
     } = readDagReplayPacingFromControls();
     return {
         layoutMode: currentDagLayoutMode(),
@@ -1494,9 +1600,11 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
         showDownstreamInfluence: dagShowDownstreamInfluenceInput?.checked ?? false,
         recursiveAttributionEnabled: dagRecursiveAttributionInput?.checked ?? false,
         recursiveEdgeBatchAnimationDirection: currentDagRecursiveEdgeAnimationDirection(),
+        forwardSlideSharedNodes: dagForwardSlideSharedNodesInput?.checked ?? false,
         showTokenInfoOnSelected: dagShowTopkOnSelectedInput?.checked ?? false,
         replayPacingMode,
         replayAutoZoom: dagReplayAutoZoomInput?.checked ?? false,
+        disableSmartStepTime,
         playbackTotalS,
         playbackStepMs,
         excludePromptPatternsEnabled: genAttrExcludePromptPatternsEnable?.checked ?? true,
@@ -1573,8 +1681,16 @@ const GEN_ATTR_DEMO_UI_PERSIST_SPECS: ReadonlyArray<{
     { controlId: 'gen_attr_dag_show_topk_on_selected', storageKey: GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY },
     { controlId: 'gen_attr_dag_replay_mode', storageKey: GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY },
     { controlId: 'gen_attr_dag_replay_auto_zoom', storageKey: GEN_ATTR_DAG_REPLAY_AUTO_ZOOM_STORAGE_KEY },
+    {
+        controlId: 'gen_attr_dag_disable_smart_step_time',
+        storageKey: GEN_ATTR_DAG_DISABLE_SMART_STEP_TIME_STORAGE_KEY,
+    },
     { controlId: 'gen_attr_dag_playback_total_s', storageKey: GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY },
     { controlId: 'gen_attr_dag_playback_step_ms', storageKey: GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY },
+    {
+        controlId: 'gen_attr_dag_forward_slide_shared_nodes',
+        storageKey: GEN_ATTR_DAG_FORWARD_SLIDE_SHARED_NODES_STORAGE_KEY,
+    },
     {
         controlId: 'gen_attr_delete_prompt_patterns_enable',
         storageKey: GEN_ATTR_DELETE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY,
@@ -1638,6 +1754,12 @@ function persistGenAttrDemoUiOptionsToLocalStorage(snap: GenAttrDemoUiOptions): 
     lsWriteBool(GEN_ATTR_DAG_SHOW_TOPK_ON_SELECTED_STORAGE_KEY, snap.showTokenInfoOnSelected, '1');
     lsWriteString(GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY, snap.replayPacingMode);
     lsWriteBool(GEN_ATTR_DAG_REPLAY_AUTO_ZOOM_STORAGE_KEY, snap.replayAutoZoom, '1');
+    lsWriteBool(GEN_ATTR_DAG_DISABLE_SMART_STEP_TIME_STORAGE_KEY, snap.disableSmartStepTime, '1');
+    lsWriteBool(
+        GEN_ATTR_DAG_FORWARD_SLIDE_SHARED_NODES_STORAGE_KEY,
+        snap.forwardSlideSharedNodes,
+        '1',
+    );
     lsSet(GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY, String(snap.playbackTotalS));
     lsSet(GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY, String(snap.playbackStepMs));
     lsSet(GEN_ATTR_DELETE_PROMPT_PATTERNS_STORAGE_KEY, snap.deletePromptPatternsText);
@@ -1801,6 +1923,13 @@ function applyGenAttrDemoUiOptionsSnap(snap: Partial<GenAttrDemoUiOptions>): voi
         }
         dagHandle.setRecursiveEdgeBatchAnimationDirection(direction);
     }
+    if (snap.forwardSlideSharedNodes !== undefined) {
+        if (dagForwardSlideSharedNodesInput) {
+            dagForwardSlideSharedNodesInput.checked = snap.forwardSlideSharedNodes;
+        }
+        applyDagRecursiveAttributionSubmodeUi();
+        dagHandle.refreshNodeLinkHighlight();
+    }
     if (snap.showTokenInfoOnSelected !== undefined) {
         if (dagShowTopkOnSelectedInput) dagShowTopkOnSelectedInput.checked = snap.showTokenInfoOnSelected;
         dagHandle.setShowTokenInfoOnSelected(snap.showTokenInfoOnSelected);
@@ -1811,6 +1940,11 @@ function applyGenAttrDemoUiOptionsSnap(snap: Partial<GenAttrDemoUiOptions>): voi
     }
     if (snap.replayAutoZoom !== undefined) {
         if (dagReplayAutoZoomInput) dagReplayAutoZoomInput.checked = snap.replayAutoZoom;
+    }
+    if (snap.disableSmartStepTime !== undefined) {
+        if (dagDisableSmartStepTimeInput) {
+            dagDisableSmartStepTimeInput.checked = snap.disableSmartStepTime;
+        }
     }
     if (snap.playbackTotalS !== undefined) {
         const s = clampDagPlaybackTotalS(snap.playbackTotalS);
@@ -2424,7 +2558,9 @@ async function resolveInitialContext(signal: AbortSignal): Promise<string> {
         {
             model: currentModelVariant(),
             messages,
-            tools: isToolCallingEnabled() ? getCurrentToolConfig().tools_schema : undefined,
+            tools: isToolCallingEnabled()
+                ? toolConfigToolsSchema(getCurrentToolConfig())
+                : undefined,
             enable_thinking: isEnableThinking() ? true : undefined,
         },
         { signal }
@@ -2476,9 +2612,7 @@ function buildGenAttrCacheKeyForRun(params: {
                   stopAfterTeacherForcing: params.stopAfterTF,
               }
             : {}),
-        ...(params.multiTurn
-            ? { toolConfigFingerprint: toolConfigFingerprint(getCurrentToolConfig()) }
-            : {}),
+        ...toolConfigCacheKeyFields(params.multiTurn, getCurrentToolConfig()),
     };
 }
 
@@ -2520,6 +2654,13 @@ function finishAttributionRun(
 
 async function runGeneration(): Promise<void> {
     if (inFlight || !isInputReadyForRun()) return;
+    if (!isSkipChatTemplate() && isToolCallingEnabled() && !isToolCallingConfigReady()) {
+        showAlertDialog(
+            tr('LLM Causal Flow'),
+            tr('When Tool use is on, configure at least one tool in Config tools.'),
+        );
+        return;
+    }
 
     genAbort?.abort();
     multiTurnAttributionHandle?.abort();
@@ -2673,7 +2814,6 @@ async function runGeneration(): Promise<void> {
             stopAfterTeacherForcing: stopAfterTF,
             onStep(step, stepIndex) {
                 allSteps.push(step);
-                runnerHandle = createHydratedTokenGenHandle(allSteps);
                 onAttributionStep(step, stepIndex);
             },
             onComplete(reason) {

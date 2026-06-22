@@ -14,7 +14,7 @@ function valueInBinRange(value: number, x0: number, x1: number, binIndex: number
 export type HistogramType = 'token' | 'byte' | 'raw_score_normed';
 export type HighlightData = FrontendAnalyzeResult & {
     rawScoresNormed?: number[];
-    attentionRawScores?: number[];
+    tokenRawScores?: number[];
     signalProbs?: number[];
     pPwValues?: number[];
     pwScores?: number[];

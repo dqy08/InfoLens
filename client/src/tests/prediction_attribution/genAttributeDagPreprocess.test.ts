@@ -2,7 +2,12 @@
  * DAG 预处理：delete prompt 区间收集
  * 运行: cd client/src && npx tsx tests/prediction_attribution/genAttributeDagPreprocess.test.ts
  */
-import { collectDeletePromptIntervals } from '../../shared/prediction_attribution/causal_flow/genAttributeDagPreprocess';
+import {
+    collectDeletePromptIntervals,
+    dagExcludeIntervalContextForReplay,
+    isDagGenStepTargetExcluded,
+} from '../../shared/prediction_attribution/causal_flow/genAttributeDagPreprocess';
+import type { TokenGenStep } from '../../shared/prediction_attribution/causal_flow/tokenGenAttributionRunner';
 
 let passed = 0;
 let failed = 0;
@@ -44,6 +49,39 @@ assertEq(
 );
 
 assertEq('empty pattern → []', collectDeletePromptIntervals(wire, inputRanges, ''), []);
+
+console.log('dagExcludeIntervalContextForReplay');
+
+assertEq('empty steps → empty string', dagExcludeIntervalContextForReplay([]), '');
+
+const stepStub = (context: string, token: string): TokenGenStep =>
+    ({ context, token }) as TokenGenStep;
+
+assertEq(
+    'uses last step context + token',
+    dagExcludeIntervalContextForReplay([
+        stepStub('ab', 'c'),
+        stepStub('abc', 'd'),
+    ]),
+    'abcd',
+);
+
+console.log('isDagGenStepTargetExcluded');
+
+const genStep = (context: string, token: string): Pick<TokenGenStep, 'context' | 'token' | 'inputRanges'> => ({
+    context,
+    token,
+    inputRanges: [[0, context.length]],
+});
+
+assert(
+    'generated exclude on target token',
+    isDagGenStepTargetExcluded(genStep('Hi ', 'there'), 'Hi there', '', 'there'),
+);
+assert(
+    'not excluded when pattern misses',
+    !isDagGenStepTargetExcluded(genStep('Hi ', 'there'), 'Hi there', '', 'zzz'),
+);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

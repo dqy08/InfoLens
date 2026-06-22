@@ -10,7 +10,7 @@ import { fetchTokenize } from '../core/predictionAttributeClient';
 import { postCompletionsPromptIncremental } from '../../api/completionsClient';
 import type { CompletionFinishReason } from '../../cross/generationEndReasonLabel';
 import type { ToolConfig } from '../../../features/chat/toolConfig';
-import { executeMockTool, hasMockTool } from '../../../features/chat/mockExecutor';
+import { resolveMockTool } from '../../../features/chat/mockExecutor';
 import { parseToolCallFromCompletion } from '../../../features/chat/toolCallParser';
 import { MAX_TOOL_ROUNDS } from '../../../features/chat/multiTurnToolCalling';
 import {
@@ -135,6 +135,8 @@ export function runMultiTurnAttribution(opts: RunMultiTurnAttributionOptions): M
 
             const lastStep = steps[steps.length - 1]!;
             wire = lastStep.context + lastStep.token;
+            // currentText = 当轮 generatedText（含首轮 teacher forcing 逐步消费的 token + 其后模型续写）。
+            // 与 chat multiTurnToolCalling 不同：那边 TF 预先拼在 wire 上、completion 只返回增量，故需 parseToolCallFromWireRound。
             const turnGenerated = lastStep.currentText;
 
             const parsed = parseToolCallFromCompletion(turnGenerated);
@@ -143,14 +145,22 @@ export function runMultiTurnAttribution(opts: RunMultiTurnAttributionOptions): M
                 opts.onAllComplete('error');
                 return;
             }
-            if (parsed.status === 'absent' || !hasMockTool(opts.toolConfig, parsed.call.name)) {
+            if (parsed.status === 'absent') {
+                opts.onAllComplete(reason);
+                return;
+            }
+
+            const mockContent = resolveMockTool(
+                opts.toolConfig,
+                parsed.call.name,
+                parsed.call.arguments,
+            );
+            if (mockContent === null) {
                 opts.onAllComplete(reason);
                 return;
             }
 
             await runMockToolPendingGap(opts.signal, opts.mockToolGapUi);
-
-            const mockContent = executeMockTool(opts.toolConfig, parsed.call.name);
             const incrementalSuffix = await fetchIncrementalSuffix(
                 opts.model,
                 opts.enableThinking,

@@ -1,0 +1,69 @@
+[
+    {
+        "function": {
+            "name": "get_current_temperature",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "mock_results": [
+            {
+                "response": {
+                    "temperature": "25°C"
+                }
+            }
+        ]
+    },
+    {
+        "function": {
+            "name": "get_current_weather",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "mock_results": [
+            {
+                "response": {
+                    "weather": "晴，气温25°C"
+                }
+            }
+        ]
+    },
+    {
+        "function": {
+            "name": "web_search",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "mock_results": [
+            {
+                "trigger_keyword": "IPO",
+                "response": {
+                    "content": "史上最大IPO，就在今晚！当地时间6月11日，美国太空探索技术公司（SpaceX）向美国证券交易委员会提交最新文件，正式完成IPO定价工作，此次IPO募资总额达750亿美元，创下全球资本市场有史以来最大IPO募资纪录。"
+                }
+            },
+            {
+                "trigger_keyword": "老板",
+                "response": {
+                    "content": "SpaceX是美国一家民营航空航天及人工智能公司，总部位于美国得克萨斯州卡梅伦县的星础市。其由企业家埃隆·马斯克于2002年创办。"
+                }
+            }
+        ]
+    }
+]

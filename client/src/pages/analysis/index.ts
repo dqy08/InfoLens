@@ -863,7 +863,7 @@ window.onload = () => {
         await openLoadUrlDialog();
     });
 
-    // Semantic analysis Search 按钮：将 query 和原文发送给 analyze-attention API
+    // Semantic analysis Search 按钮：将 query 和原文发送给 analyze_semantic API
     const semanticSearchInput = document.getElementById('semantic_search_input') as HTMLInputElement | null;
     const getSubmode = () =>
         (document.getElementById('semantic_submode_select') as HTMLSelectElement | null)?.value || undefined;

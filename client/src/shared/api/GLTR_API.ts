@@ -49,6 +49,10 @@ export interface AnalyzeSemanticOptions {
 export type SemanticResult = {
     success: boolean;
     model?: string;
+    /**
+     * 各 token 的归因 score（offset / raw / score）。
+     * API 历史字段名 `token_attention`；**非** transformer attention 权重。
+     */
     token_attention?: Array<{ offset: [number, number]; raw: string; score: number }>;
     debug_info?: { abbrev?: string; topk_tokens?: string[]; topk_probs?: number[] };
     full_match_degree?: number;

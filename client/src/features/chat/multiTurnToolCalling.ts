@@ -7,11 +7,14 @@ import {
 } from '../../shared/api/completionsClient';
 import type { ChatMessage } from './chatMessages';
 import type { ChatDisplaySegment, ChatMultiTurnRun } from './chatSegments';
-import { executeMockTool, hasMockTool } from './mockExecutor';
-import { parseToolCallFromCompletion } from './toolCallParser';
+import { resolveMockTool } from './mockExecutor';
+import {
+    assistantOutputOffsetForRound,
+    parseToolCallFromWireRound,
+} from './toolCallParser';
 import { tr } from '../../shared/lang/i18n-lite';
 import { assertStreamMatchesFinal } from './completionStreamAssert';
-import type { ToolConfig } from './toolConfig';
+import { toolConfigToolsSchema, type ToolConfig } from './toolConfig';
 import {
     runMockToolPendingGap,
     TOOL_CALLING_PENDING_LABEL,
@@ -81,7 +84,7 @@ async function assembleFullPrompt(
         {
             model,
             messages,
-            tools: toolConfig.tools_schema,
+            tools: toolConfigToolsSchema(toolConfig),
             enable_thinking: enableThinking,
         },
         { signal }
@@ -156,6 +159,11 @@ export async function runMultiTurnToolCalling(
         while (round < MAX_TOOL_ROUNDS) {
             currentRoundStreamed = '';
             const promptForRound = wire;
+            const assistantOutputOffset = assistantOutputOffsetForRound(
+                round,
+                firstPrompt.length,
+                wire.length
+            );
 
             const res = await runCompletion(
                 opts.model,
@@ -186,11 +194,20 @@ export async function runMultiTurnToolCalling(
             });
             opts.onSegmentsUpdate?.(segments);
 
-            const parsed = parseToolCallFromCompletion(text);
+            const parsed = parseToolCallFromWireRound(wire, assistantOutputOffset);
             if (parsed.status === 'malformed') {
                 throw new Error(tr('Invalid tool_call JSON in model output'));
             }
-            if (parsed.status === 'absent' || !hasMockTool(opts.toolConfig, parsed.call.name)) {
+            if (parsed.status === 'absent') {
+                return { segments };
+            }
+
+            const mockContent = resolveMockTool(
+                opts.toolConfig,
+                parsed.call.name,
+                parsed.call.arguments,
+            );
+            if (mockContent === null) {
                 return { segments };
             }
 
@@ -198,8 +215,6 @@ export async function runMultiTurnToolCalling(
             opts.onSegmentsUpdate?.(segments);
 
             await runMockToolPendingGap(opts.signal);
-
-            const mockContent = executeMockTool(opts.toolConfig, parsed.call.name);
 
             // 向后端请求本条 tool response 的 incremental_suffix
             const incremental_suffix = await fetchIncrementalSuffix(

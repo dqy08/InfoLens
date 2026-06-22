@@ -275,6 +275,14 @@
                                 <option value="backward">backward</option>
                             </select>
                         </span>
+                        <span class="semantic-submode-group" id="gen_attr_dag_forward_slide_prompt_wrap" hidden>
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_forward_slide_shared_nodes"
+                                    title="When checked, forward propagation play (↯) visits prompt and other tokens that have attribution share, with dwell time scaled by weight. When unchecked, a fixed 500ms prompt preamble runs before batch playback. Saved locally; applied when you press play."
+                                    data-i18n="title">
+                                <span data-i18n>Slide prompt in animation</span>
+                            </label>
+                        </span>
                         <span class="semantic-submode-group" id="gen_attr_dag_dim_inactive_tokens_group" hidden>
                             <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_dim_inactive_tokens"
@@ -412,7 +420,7 @@
                             <label class="semantic-submode-label" for="gen_attr_dag_replay_mode" data-i18n>Play speed</label>
                             <select id="gen_attr_dag_replay_mode"
                                 class="semantic-submode-select gen-attr-dag-replay-mode-select"
-                                title="Total duration or per-step delay. DAG step replay (▶) uses equal steps or a fixed step interval; propagation chain animation (↯) scales each step by attribution weight."
+                                title="Total duration or per-step simulated cost. DAG step replay (▶) divides evenly or uses a fixed per-token cost; propagation chain animation (↯) scales each frame by attribution weight."
                                 data-i18n="title">
                                 <option value="total" data-i18n>total time</option>
                                 <option value="step" data-i18n>step time</option>
@@ -427,10 +435,16 @@
                             <span id="gen_attr_dag_replay_step_wrap" class="gen-attr-dag-replay-value-wrap" hidden>
                                 <input type="number" id="gen_attr_dag_playback_step_ms" class="gen-attr-dag-measure-width-input"
                                     value="200" min="0" max="10000" step="10"
-                                    title="Milliseconds per step. DAG step replay (▶) uses this fixed interval; with a focused token in Causal Flow Mode, propagation play (↯) scales each batch by layer weight. Saved locally; applied when you press play."
+                                    title="Milliseconds per step. DAG step replay (▶) uses this as the 1× output-gen clock; with a focused token in Causal Flow Mode, propagation play (↯) scales each batch by layer weight. Saved locally; applied when you press play."
                                     data-i18n="title">
                                 <span class="semantic-submode-label">ms</span>
                             </span>
+                            <label class="semantic-submode-label" id="gen_attr_dag_disable_smart_step_time_wrap" hidden>
+                                <input type="checkbox" id="gen_attr_dag_disable_smart_step_time"
+                                    title="When checked, propagation chain animation (↯) uses a uniform interval per frame instead of scaling by attribution weight. DAG step replay (▶) is unchanged. Saved locally; applied when you press play."
+                                    data-i18n="title">
+                                <span data-i18n>Disable smart step time</span>
+                            </label>
                         </span>
                     </div>
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row gen-attr-dag-replay-auto-zoom-row">

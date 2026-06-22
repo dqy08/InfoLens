@@ -1,5 +1,5 @@
 /**
- * BPE 与 token_attention 共用的 offset 几何：overlap 顺序扫描与 digit 下标分组。
+ * BPE 与语义/归因 token score 条目共用的 offset 几何：overlap 顺序扫描与 digit 下标分组。
  * 概率相乘 / score 求和等聚合语义由各自调用方在合并回调中实现。
  *
  * offset 语义：与 dataValidation.validateTokenConsistency 一致，均为 `Array.from(text)` 下标（Unicode 码点），非 UTF-16 码元。
@@ -154,7 +154,7 @@ export type SequentialOverlapOptions<T> = {
 };
 
 /**
- * 顺序扫描 overlap：与既有 mergeBpeOverlapTokens / mergeAttentionTokensForRendering 行为一致。
+ * 顺序扫描 overlap：与既有 mergeBpeOverlapTokens / mergeTokenSpansForRendering 行为一致。
  *
  * 合并条件（满足其一即与下一 token 合并，合并步骤相同）：
  * - **区间重叠**：`next` 起点 &lt; `current` 右端（`curStart &lt; prevEnd`）。

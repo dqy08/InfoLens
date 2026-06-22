@@ -80,12 +80,15 @@ def _log_500_handler(request, exc):
         raise exc
     print("=" * 60)
     print("❌ 500 Internal Server Error")
-    traceback.print_exc()
+    if exc is not None:
+        traceback.print_exception(type(exc), exc, exc.__traceback__)
+    else:
+        print("(no exception object passed to error handler)")
     print("=" * 60)
     return problem(
         status=500,
         title="Internal Server Error",
-        detail=str(exc),
+        detail=str(exc) if exc is not None else "Internal Server Error",
     )
 
 

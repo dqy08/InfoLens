@@ -27,7 +27,10 @@ MODEL_PATHS = {
 INSTRUCT_MODEL_PATHS = {
     "qwen3-0.6b-instruct": "Qwen/Qwen3-0.6B",
     "qwen3-1.7b-instruct": "Qwen/Qwen3-1.7B",
+    # Qwen3-2507 将 thinking / non-thinking 拆成独立权重，不支持 enable_thinking 切换；
+    # 需 non-thinking 用 instruct，需 thinking 用 thinking（qwen3.5-4b 除外，为 hybrid 可开关）。
     "qwen3-4b-instruct": "Qwen/Qwen3-4B-Instruct-2507",
+    "qwen3-4b-thinking": "Qwen/Qwen3-4B-Thinking-2507",
     "qwen3-8b-instruct": "Qwen/Qwen3-8B",
     # qwen3.5，目前只支持CPU。MPS上有反向传播不支持fp16问题，CUDA上有transformers 5.x版本报错问题。
     "qwen3.5-0.8b-instruct": "Qwen/Qwen3.5-0.8B",

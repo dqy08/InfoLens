@@ -36,7 +36,7 @@ import { aggregateUsageFromSegments } from '../../features/chat/chatCompletionUs
 import { assertStreamMatchesFinal } from '../../features/chat/completionStreamAssert';
 import { ChatTurnsView } from '../../features/chat/chatTurnsView';
 import { createToolCallingOptionsRow } from '../../features/chat/toolCallingOptionsRow';
-import { cloneToolConfig, toolConfigFingerprint } from '../../features/chat/toolConfig';
+import { cloneToolConfig, toolConfigFingerprint, toolConfigToolsSchema } from '../../features/chat/toolConfig';
 import type { PredictionAttributeModelVariant } from '../../shared/prediction_attribution/core/attributionResultCache';
 import { createCompletionOptionsRow } from '../../shared/cross/completionOptionsRow';
 import { completionFinishReasonLabel } from '../../shared/cross/generationEndReasonLabel';
@@ -77,6 +77,7 @@ import {
     CHAT_MAX_NEW_TOKENS_STORAGE_KEY,
     CHAT_MODEL_VARIANT_STORAGE_KEY,
     CHAT_MULTI_TURN_MOCK_STORAGE_KEY,
+    CHAT_TOOL_CONFIG_STORAGE_KEY,
     LS_SKIP_CHAT_TEMPLATE,
 } from '../../features/chat/chatPromptTemplateMode';
 import { createToast } from '../../shared/ui/toast';
@@ -346,6 +347,7 @@ const {
 const toolCallingOptions = createToolCallingOptionsRow({
     enableToolCallingStorageKey: CHAT_ENABLE_TOOL_CALLING_STORAGE_KEY,
     multiTurnStorageKey: CHAT_MULTI_TURN_MOCK_STORAGE_KEY,
+    toolConfigStorageKey: CHAT_TOOL_CONFIG_STORAGE_KEY,
     onStateChange: () => syncAskButtonState(),
 });
 
@@ -353,6 +355,7 @@ const {
     isToolCallingEnabled,
     isMultiTurnEnabled: isMultiTurnMockEnabled,
     getCurrentToolConfig,
+    isToolCallingConfigReady,
     restoreFromDraft: restoreToolCallingFromDraft,
 } = toolCallingOptions;
 
@@ -745,7 +748,7 @@ async function executeMultiTurnAsk(options: {
         teacherForcing: teacherForcingText,
         signal,
     });
-    const cacheKey = buildCompletionCacheKey(modelPrompt, model, true);
+    const cacheKey = buildCompletionCacheKey(modelPrompt, model, true, toolConfig);
     const cacheDraft = buildChatRunDraftForCache();
 
     if (forceRefresh) {
@@ -863,6 +866,14 @@ async function executeMultiTurnAsk(options: {
 const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
     const prompt = getActivePromptValue();
     if (askInFlight || !isAskInputsReady()) return;
+    const skipTemplate = skipChatTemplateInput?.checked ?? false;
+    if (!skipTemplate && isToolCallingEnabled() && !isToolCallingConfigReady()) {
+        showAlertDialog(
+            tr('LLM Raw Chat'),
+            tr('When Tool use is on, configure at least one tool in Config tools.'),
+        );
+        return;
+    }
     const forceRefresh = options?.forceRefresh === true;
     const teacherForcingText = teacherForcingContinuationForRun();
 
@@ -881,7 +892,6 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
 
     try {
         let streamedText = '';
-        const skipTemplate = skipChatTemplateInput?.checked ?? false;
         const model = currentModelVariant();
 
         const useMultiTurn =
@@ -911,7 +921,9 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
                 system: systemRaw,
                 useSystem,
             });
-            const tools = isToolCallingEnabled() ? getCurrentToolConfig().tools_schema : undefined;
+            const tools = isToolCallingEnabled()
+                ? toolConfigToolsSchema(getCurrentToolConfig())
+                : undefined;
             const assembled = await postCompletionsPrompt(
                 {
                     model,

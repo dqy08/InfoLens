@@ -8,6 +8,23 @@ export type ToolCallParseResult =
     | { status: 'parsed'; call: ParsedToolCall }
     | { status: 'malformed' };
 
+/** 多轮 wire：本轮开始前 assistant 产出区在 wire 中的起始偏移。 */
+export function assistantOutputOffsetForRound(
+    round: number,
+    firstPromptLength: number,
+    wireLengthAtRoundStart: number,
+): number {
+    return round === 0 ? firstPromptLength : wireLengthAtRoundStart;
+}
+
+/** 从 wire 中解析本轮 assistant 产出里的首个 tool call（含首轮 teacher forcing）。 */
+export function parseToolCallFromWireRound(
+    wire: string,
+    assistantOutputOffset: number,
+): ToolCallParseResult {
+    return parseToolCallFromCompletion(wire.slice(assistantOutputOffset));
+}
+
 /** 从续写文本中解析首个 Qwen 风格 `<tool_call>` 块。 */
 export function parseToolCallFromCompletion(text: string): ToolCallParseResult {
     const match = text.match(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/);

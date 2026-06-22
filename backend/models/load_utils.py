@@ -61,7 +61,15 @@ def ensure_model_local(model_path: str, *, force_download: bool = False) -> str:
                 return snapshot_download(model_path, **dl_kw)
             return path
         except Exception:
-            return snapshot_download(model_path, **dl_kw)
+            try:
+                return snapshot_download(model_path, **dl_kw)
+            except Exception as download_err:
+                cache_dir = f"models--{model_path.replace('/', '--')}"
+                raise RuntimeError(
+                    f"无法从 Hugging Face 下载模型 {model_path!r}: {download_err}。"
+                    f"可设置 HF_ENDPOINT_MIRROR=https://hf-mirror.com 后重试；"
+                    f"若此前下载中断，可删除缓存目录 ~/.cache/huggingface/hub/{cache_dir} 后重试。"
+                ) from download_err
     return model_path
 
 

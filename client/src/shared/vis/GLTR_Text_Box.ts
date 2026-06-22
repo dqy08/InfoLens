@@ -53,7 +53,7 @@ export type SemanticRenderFields = {
     /** 信号概率 P_pw：x<=threshold 为 0，x>threshold 为 1 */
     signalProb?: number;
     rawScoreNormed?: number;
-    /** Attention 分析时的原始 score（未归一化） */
+    /** 语义 / 归因着色时的原始 score（未归一化） */
     rawScore?: number;
     chunkIndex?: number;
     chunkMatchDegree?: number;
@@ -940,7 +940,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
             const latestRd = this.currentRenderData ?? rd;
             const latestExt = latestRd as FrontendAnalyzeResult & {
                 rawScoresNormed?: number[];
-                attentionRawScores?: number[];
+                tokenRawScores?: number[];
                 pPwValues?: number[];
                 pwScores?: number[];
             };
@@ -952,7 +952,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
             if (hasRawScoresNormedNow && rawScoresNormed) {
                 // rawScoreNormed 始终用 rawScoresNormed，与 color source 无关
                 const attnScore = rawScoresNormed[tokenIndex];
-                const rawScore = latestExt.attentionRawScores?.[tokenIndex];
+                const rawScore = latestExt.tokenRawScores?.[tokenIndex];
                 const signalProb = latestExt.pPwValues?.[tokenIndex];  // P_pw：x<=threshold 为 0，x>threshold 为 1
                 const pwScore = latestExt.pwScores?.[tokenIndex];
 

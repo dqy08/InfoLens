@@ -1,9 +1,11 @@
 import { tr } from '../../shared/lang/i18n-lite';
 import { lsReadBool, lsWriteBool } from '../../shared/storage/localStorageHelpers';
-import { showDialog } from '../../shared/ui/dialog';
+import { showEditableToolConfigDialog } from './toolConfigDialog';
 import {
-    DEFAULT_TOOL_CONFIG,
     cloneToolConfig,
+    EMPTY_TOOL_CONFIG,
+    readToolConfigFromLs,
+    writeToolConfigToLs,
     type ToolConfig,
 } from './toolConfig';
 
@@ -12,6 +14,7 @@ const MOUNT_ID = 'tool_calling_options_mount';
 export type ToolCallingOptionsRowOptions = {
     enableToolCallingStorageKey: string;
     multiTurnStorageKey: string;
+    toolConfigStorageKey: string;
     onStateChange: () => void;
 };
 
@@ -27,6 +30,7 @@ export type ToolCallingOptionsRowApi = {
     isToolCallingEnabled: () => boolean;
     isMultiTurnEnabled: () => boolean;
     getCurrentToolConfig: () => ToolConfig;
+    isToolCallingConfigReady: () => boolean;
     restoreFromDraft: (draft: ToolCallingDraftRestore) => void;
     syncSubUi: () => void;
 };
@@ -37,25 +41,6 @@ type ToolCallingRowElements = {
     multiTurnRow: HTMLLabelElement;
     configBtn: HTMLButtonElement;
 };
-
-function showToolConfigDialog(config: ToolConfig): void {
-    showDialog({
-        title: tr('Config tools'),
-        content: (dialog) => {
-            dialog
-                .append('pre')
-                .attr('class', 'chat-tool-config-readonly')
-                .style('white-space', 'pre-wrap')
-                .style('font-size', '12px')
-                .style('margin', '0')
-                .text(JSON.stringify(config, null, 2));
-            return {};
-        },
-        confirmText: null,
-        cancelText: tr('Close'),
-        width: 'clamp(320px, 92vw, 640px)',
-    });
-}
 
 function mountToolCallingOptionsRow(mount: HTMLElement): ToolCallingRowElements {
     const row = document.createElement('div');
@@ -118,11 +103,19 @@ export function createToolCallingOptionsRow(
     const { enableInput, multiTurnInput, multiTurnRow, configBtn } =
         mountToolCallingOptionsRow(mount);
 
-    let currentToolConfig: ToolConfig = cloneToolConfig(DEFAULT_TOOL_CONFIG);
+    let currentToolConfig: ToolConfig = readToolConfigFromLs(options.toolConfigStorageKey);
 
     const isToolCallingEnabled = (): boolean => enableInput.checked;
     const isMultiTurnEnabled = (): boolean => multiTurnInput.checked;
     const getCurrentToolConfig = (): ToolConfig => currentToolConfig;
+    const isToolCallingConfigReady = (): boolean =>
+        !isToolCallingEnabled() || currentToolConfig.entries.length > 0;
+
+    const persistToolConfig = (config: ToolConfig): void => {
+        currentToolConfig = cloneToolConfig(config);
+        writeToolConfigToLs(options.toolConfigStorageKey, currentToolConfig);
+        options.onStateChange();
+    };
 
     const syncSubUi = (): void => {
         const on = isToolCallingEnabled();
@@ -136,10 +129,13 @@ export function createToolCallingOptionsRow(
         const multiTurn = draft.multiTurnEnabled ?? draft.multiTurnMockEnabled ?? true;
         multiTurnInput.checked = multiTurn;
         lsWriteBool(options.multiTurnStorageKey, multiTurnInput.checked);
-        currentToolConfig = draft.toolConfig
+        const next = draft.toolConfig
             ? cloneToolConfig(draft.toolConfig)
-            : cloneToolConfig(DEFAULT_TOOL_CONFIG);
+            : cloneToolConfig(EMPTY_TOOL_CONFIG);
+        currentToolConfig = next;
+        writeToolConfigToLs(options.toolConfigStorageKey, next);
         syncSubUi();
+        options.onStateChange();
     };
 
     enableInput.checked = lsReadBool(options.enableToolCallingStorageKey, false);
@@ -156,7 +152,7 @@ export function createToolCallingOptionsRow(
     });
 
     configBtn.addEventListener('click', () => {
-        showToolConfigDialog(getCurrentToolConfig());
+        showEditableToolConfigDialog(getCurrentToolConfig(), persistToolConfig);
     });
     syncSubUi();
 
@@ -164,6 +160,7 @@ export function createToolCallingOptionsRow(
         isToolCallingEnabled,
         isMultiTurnEnabled,
         getCurrentToolConfig,
+        isToolCallingConfigReady,
         restoreFromDraft,
         syncSubUi,
     };

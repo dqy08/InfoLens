@@ -76,7 +76,7 @@ export const getTokenProbability = (token: FrontendToken): number => {
 /**
  * BPE Overlap 合并：将 offset 重叠的 token 合并。
  * 重叠多来自 tokenizer 与字边界不对齐（如 CJK）：表层 raw/offset 可能看起来交叉或「重复」，底层仍是各不相同的分词位置。
- * 合并后 `raw` 取原文切片；`real_topk` 概率按独立近似 **相乘**（语义 token_attention 则对原始梯度 **求和** 后 **再** 全局归一化，见 semanticUtils）。
+ * 合并后 `raw` 取原文切片；`real_topk` 概率按独立近似 **相乘**（语义/归因 token score 则对原始 score **求和** 后 **再** 全局归一化，见 semanticUtils）。
  *
  * 先去掉零宽且 raw 为空的 token；其余零宽由 {@link mergeSequentialOverlap} 按 offset 与下一 token 是否覆盖该点统一合并。
  */

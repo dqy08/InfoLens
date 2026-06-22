@@ -1,12 +1,14 @@
 /**
  * DAG **步进回放**（▶）事件队列：与传播链动画（↯，`genAttributeDagRecursiveEdgeAnimation`）无关。
  *
- * 每段内容在**出现前**自行计算 `delayBeforeMs`（等到下一段内容），再 delay → show → 调度下一事件。
+ * 每段内容在**出现前**等待其自身模拟开销（`appearanceCostMs`），再 show → 下一事件。
+ * 开销为 0 的段（prompt、exclude 命中的 gen 等）在同一次调用栈内连续 show，不用 `setTimer`，避免中间帧闪烁。
  */
 import type { TokenGenStep } from './tokenGenAttributionRunner';
 import {
-    resolveDagStepPlaybackDelays,
+    resolveDagStepPlaybackClocks,
     type DagRecursiveEdgeReplayPacing,
+    type DagStepPlaybackClocks,
 } from './genAttributeDagPropagationPlaybackPacing';
 
 export type DagStepPlaybackEvent =
@@ -14,11 +16,7 @@ export type DagStepPlaybackEvent =
     | { kind: 'toolResponse'; stepIndex: number }
     | { kind: 'outputGen'; stepIndex: number };
 
-export type DagStepPlaybackDelays = {
-    stepDelayMs: number;
-    waitUntilResponseMs: number;
-    waitAfterInputMs: number;
-};
+export type { DagStepPlaybackClocks };
 
 /** 相邻 output gen 之间是否夹 tool（下一步 `inputRanges` 变长）。 */
 export function isToolCallingBoundaryBetweenSteps(
@@ -39,11 +37,11 @@ export function countToolCallingBoundaries(steps: readonly TokenGenStep[]): numb
     return n;
 }
 
-export function resolveDagStepPlaybackDelaysFromPacing(
+export function resolveDagStepPlaybackClocksFromPacing(
     steps: readonly TokenGenStep[],
     pacing: DagRecursiveEdgeReplayPacing,
-): DagStepPlaybackDelays {
-    return resolveDagStepPlaybackDelays(steps.length, countToolCallingBoundaries(steps), pacing);
+): DagStepPlaybackClocks {
+    return resolveDagStepPlaybackClocks(steps.length, countToolCallingBoundaries(steps), pacing);
 }
 
 /** 按回放顺序展开：prompt（可选）→ 每步 output gen；轮间边界前插入 tool response。 */
@@ -63,38 +61,58 @@ export function buildDagStepPlaybackEvents(
 }
 
 /**
- * 本段内容出现前要等的时长（ms）。语义见 `genAttributeDagPropagationPlaybackPacing` 模块注释表。
+ * 正向扫描事件队列，预计算每段出现前的模拟开销（ms）。
+ *
+ * `inputPauseDue`：prompt / tool response 已展示，但「input 后首拍」尚未消费。
+ * exclude 命中的 gen 仍 `showOutputGen`，开销为 0，且**不**消费首拍；首拍落在第一个非 exclude 的 gen。
  */
-export function dagStepPlaybackDelayBeforeMs(
+export function buildDagStepPlaybackAppearanceCosts(
+    events: readonly DagStepPlaybackEvent[],
+    clocks: DagStepPlaybackClocks,
+    skipOutputGen?: (stepIndex: number) => boolean,
+): number[] {
+    let inputPauseDue = false;
+    return events.map((event) => {
+        switch (event.kind) {
+            case 'prompt':
+                inputPauseDue = true;
+                return 0;
+            case 'toolResponse':
+                inputPauseDue = true;
+                return clocks.toolResponseClockMs;
+            case 'outputGen': {
+                if (skipOutputGen?.(event.stepIndex)) return 0;
+                if (inputPauseDue) {
+                    inputPauseDue = false;
+                    return clocks.genAfterInputClockMs;
+                }
+                return event.stepIndex === 0 ? 0 : clocks.outputGenClockMs;
+            }
+            default: {
+                const _exhaustive: never = event;
+                return _exhaustive;
+            }
+        }
+    });
+}
+
+/** {@link buildDagStepPlaybackAppearanceCosts} 的单事件便捷访问（测试用）。 */
+export function dagStepPlaybackAppearanceCostMs(
     event: DagStepPlaybackEvent,
     eventIndex: number,
     events: readonly DagStepPlaybackEvent[],
-    delays: DagStepPlaybackDelays,
+    clocks: DagStepPlaybackClocks,
+    skipAppearanceCostForOutputGen?: (stepIndex: number) => boolean,
 ): number {
-    switch (event.kind) {
-        case 'prompt':
-            return 0;
-        case 'toolResponse':
-            return delays.waitUntilResponseMs;
-        case 'outputGen': {
-            const prev = eventIndex > 0 ? events[eventIndex - 1] : undefined;
-            if (prev?.kind === 'prompt' || prev?.kind === 'toolResponse') {
-                return delays.waitAfterInputMs;
-            }
-            if (event.stepIndex === 0) return 0;
-            return delays.stepDelayMs;
-        }
-        default: {
-            const _exhaustive: never = event;
-            return _exhaustive;
-        }
-    }
+    return buildDagStepPlaybackAppearanceCosts(events, clocks, skipAppearanceCostForOutputGen)[
+        eventIndex
+    ]!;
 }
 
 export type DagStepPlaybackStart = {
     eventIndex: number;
-    /** 中途恢复时首段内容立即出现，不再等 delayBefore。 */
-    skipDelayForFirstEvent: boolean;
+    /** 中途恢复时首段内容立即出现，不再计模拟开销。 */
+    skipAppearanceCostForFirstEvent: boolean;
 };
 
 /** 从 `nextOutputGenStepIndex`（= `dagPlaybackNextIndex`）映射到事件队列起点。 */
@@ -105,19 +123,19 @@ export function resolveDagStepPlaybackStart(
     includePrompt: boolean,
 ): DagStepPlaybackStart {
     if (nextOutputGenStepIndex === 0 && includePrompt) {
-        return { eventIndex: 0, skipDelayForFirstEvent: false };
+        return { eventIndex: 0, skipAppearanceCostForFirstEvent: false };
     }
     if (nextOutputGenStepIndex === 0) {
         const eventIndex = events.findIndex((e) => e.kind === 'outputGen' && e.stepIndex === 0);
-        return { eventIndex: eventIndex < 0 ? 0 : eventIndex, skipDelayForFirstEvent: true };
+        return { eventIndex: eventIndex < 0 ? 0 : eventIndex, skipAppearanceCostForFirstEvent: true };
     }
     const i = nextOutputGenStepIndex;
     if (i > 0 && isToolCallingBoundaryBetweenSteps(steps, i - 1)) {
         const eventIndex = events.findIndex((e) => e.kind === 'toolResponse' && e.stepIndex === i);
-        return { eventIndex: eventIndex < 0 ? events.length : eventIndex, skipDelayForFirstEvent: true };
+        return { eventIndex: eventIndex < 0 ? events.length : eventIndex, skipAppearanceCostForFirstEvent: true };
     }
     const eventIndex = events.findIndex((e) => e.kind === 'outputGen' && e.stepIndex === i);
-    return { eventIndex: eventIndex < 0 ? events.length : eventIndex, skipDelayForFirstEvent: true };
+    return { eventIndex: eventIndex < 0 ? events.length : eventIndex, skipAppearanceCostForFirstEvent: true };
 }
 
 function createPlaybackDueClock(): { delayMs(intendedMs: number): number } {
@@ -136,7 +154,7 @@ function createPlaybackDueClock(): { delayMs(intendedMs: number): number } {
 export type RunDagStepPlaybackLoopOptions = {
     events: readonly DagStepPlaybackEvent[];
     start: DagStepPlaybackStart;
-    delays: DagStepPlaybackDelays;
+    clocks: DagStepPlaybackClocks;
     isStale: () => boolean;
     setTimer: (cb: () => void, delayMs: number) => void;
     setToolPendingVisible: (visible: boolean) => void;
@@ -147,53 +165,67 @@ export type RunDagStepPlaybackLoopOptions = {
     afterStepShown?: () => void;
     onOutputGenShown: (stepIndex: number) => void;
     onAllOutputGensShown: () => void;
+    /** exclude 命中的 output gen：仍 `showOutputGen`，但 appearance 开销为 0。 */
+    skipAppearanceCostForOutputGen?: (stepIndex: number) => boolean;
 };
 
-/** 从 `start.eventIndex` 起逐事件：delayBefore → show → 下一事件。 */
+/** 从 `start.eventIndex` 起逐事件：0 开销段同步连播，有开销段才 `setTimer`。 */
 export function runDagStepPlaybackLoop(opts: RunDagStepPlaybackLoopOptions): void {
     const clock = createPlaybackDueClock();
+    const appearanceCosts = buildDagStepPlaybackAppearanceCosts(
+        opts.events,
+        opts.clocks,
+        opts.skipAppearanceCostForOutputGen,
+    );
 
-    const playFrom = (eventIndex: number, skipDelay: boolean): void => {
-        if (opts.isStale()) return;
-        if (eventIndex >= opts.events.length) return;
-
-        const event = opts.events[eventIndex]!;
-        const intendedDelay = skipDelay
-            ? 0
-            : dagStepPlaybackDelayBeforeMs(event, eventIndex, opts.events, opts.delays);
-        const showPendingDuringDelay = event.kind === 'toolResponse' && intendedDelay > 0;
-        if (showPendingDuringDelay) opts.setToolPendingVisible(true);
-
-        opts.setTimer(() => {
-            if (opts.isStale()) return;
-            if (showPendingDuringDelay) opts.setToolPendingVisible(false);
-
-            switch (event.kind) {
-                case 'prompt':
-                    opts.showPrompt();
-                    break;
-                case 'toolResponse':
-                    opts.showToolResponse(event.stepIndex);
-                    break;
-                case 'outputGen':
-                    opts.showOutputGen(event.stepIndex);
-                    opts.onOutputGenShown(event.stepIndex);
-                    break;
-                default: {
-                    const _exhaustive: never = event;
-                    void _exhaustive;
-                }
+    const showEvent = (event: DagStepPlaybackEvent): void => {
+        switch (event.kind) {
+            case 'prompt':
+                opts.showPrompt();
+                break;
+            case 'toolResponse':
+                opts.showToolResponse(event.stepIndex);
+                break;
+            case 'outputGen':
+                opts.showOutputGen(event.stepIndex);
+                opts.onOutputGenShown(event.stepIndex);
+                break;
+            default: {
+                const _exhaustive: never = event;
+                void _exhaustive;
             }
-            opts.afterStepShown?.();
-
-            const nextIndex = eventIndex + 1;
-            if (nextIndex >= opts.events.length) {
-                opts.onAllOutputGensShown();
-                return;
-            }
-            playFrom(nextIndex, false);
-        }, clock.delayMs(intendedDelay));
+        }
     };
 
-    playFrom(opts.start.eventIndex, opts.start.skipDelayForFirstEvent);
+    const playFrom = (eventIndex: number, skipAppearanceCost: boolean): void => {
+        if (opts.isStale()) return;
+
+        while (eventIndex < opts.events.length) {
+            const event = opts.events[eventIndex]!;
+            const appearanceCostMs = skipAppearanceCost ? 0 : appearanceCosts[eventIndex]!;
+            skipAppearanceCost = false;
+
+            if (appearanceCostMs > 0) {
+                const showPendingDuringCost = event.kind === 'toolResponse';
+                if (showPendingDuringCost) opts.setToolPendingVisible(true);
+                const idx = eventIndex;
+                opts.setTimer(() => {
+                    if (opts.isStale()) return;
+                    if (showPendingDuringCost) opts.setToolPendingVisible(false);
+                    showEvent(event);
+                    opts.afterStepShown?.();
+                    playFrom(idx + 1, false);
+                }, clock.delayMs(appearanceCostMs));
+                return;
+            }
+
+            showEvent(event);
+            opts.afterStepShown?.();
+            eventIndex++;
+        }
+
+        opts.onAllOutputGensShown();
+    };
+
+    playFrom(opts.start.eventIndex, opts.start.skipAppearanceCostForFirstEvent);
 }

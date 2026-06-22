@@ -11,6 +11,7 @@ const STORAGE_KEY = 'info_radar_semantic_result_cache';
 export type SemanticCacheResult = {
     success: boolean;
     model?: string;
+    /** 归因 score 条目；API 字段名 `token_attention` 为历史遗留，非 attention 权重。 */
     token_attention?: Array<{ offset: [number, number]; raw: string; score: number }>;
     debug_info?: { abbrev?: string; topk_tokens?: string[]; topk_probs?: number[] };
     full_match_degree?: number;

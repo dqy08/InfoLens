@@ -88,11 +88,15 @@ export type GenAttrDemoUiOptions = {
     recursiveAttributionEnabled: boolean;
     /** 传播链播放方向（▶ 在传播模式下、有用户焦点时）。 */
     recursiveEdgeBatchAnimationDirection: 'backward' | 'forward';
+    /** forward ↯：slide 有 Total share 的 prompt 等节点；false 时用 500ms prompt 首开帧。 */
+    forwardSlideSharedNodes: boolean;
     /** 是否显示 token tooltip（UI: Show token tooltip；`showTokenInfoOnSelected`）。 */
     showTokenInfoOnSelected: boolean;
     replayPacingMode: 'total' | 'step';
     /** 步进重放（▶）每步是否自动 fit 视口。 */
     replayAutoZoom: boolean;
+    /** 传播链（↯）禁用按归因权重缩放帧间隔，改为均匀间隔。 */
+    disableSmartStepTime: boolean;
     playbackTotalS: number;
     playbackStepMs: number;
     /** 删除 prompt token（物理移除，不占布局）：使能与正则文本（`info_radar_gen_attr_delete_prompt_*`）。 */
@@ -326,6 +330,12 @@ function isValidDemoUiOptionsPayload(v: unknown): v is Partial<GenAttrDemoUiOpti
         return false;
     }
     if (
+        d.forwardSlideSharedNodes !== undefined &&
+        typeof d.forwardSlideSharedNodes !== 'boolean'
+    ) {
+        return false;
+    }
+    if (
         d.showTokenInfoOnSelected !== undefined &&
         typeof d.showTokenInfoOnSelected !== 'boolean'
     ) {
@@ -335,6 +345,9 @@ function isValidDemoUiOptionsPayload(v: unknown): v is Partial<GenAttrDemoUiOpti
         return false;
     }
     if (d.replayAutoZoom !== undefined && typeof d.replayAutoZoom !== 'boolean') {
+        return false;
+    }
+    if (d.disableSmartStepTime !== undefined && typeof d.disableSmartStepTime !== 'boolean') {
         return false;
     }
     if (d.playbackTotalS !== undefined && (typeof d.playbackTotalS !== 'number' || !Number.isFinite(d.playbackTotalS))) {

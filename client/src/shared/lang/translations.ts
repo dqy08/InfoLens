@@ -131,7 +131,11 @@ export const translations: Translations = {
         'Restore DAG options, play speed, exclusions, etc. to defaults and clear saved preferences for those controls.':
             '将 DAG 参数、播放速度、排除正则等恢复为默认值，并清除这些控件的本地保存项。',
         'Play speed': '播放速度',
+        'Disable smart step time': '禁用智能步长时间',
+        'When checked, propagation chain animation (↯) uses a uniform interval per frame instead of scaling by attribution weight. DAG step replay (▶) is unchanged. Saved locally; applied when you press play.':
+            '勾选后，传播链动画（↯）各帧使用均匀间隔，不再按归因权重缩放；步进重放（▶）不受影响。本地保存；点击播放时生效。',
         'Auto zoom': '自动缩放',
+        'Slide prompt in animation': '动画中 slide 扫过 prompt',
         'When checked, step replay (▶) fits the viewport after each step (stops if you pan or zoom). Saved locally.':
             '勾选后，步进重放（▶）每步自动适配视口（手动平移/缩放后停止）。本地保存。',
         'Causal Flow Mode': '因果流模式',
@@ -141,31 +145,35 @@ export const translations: Translations = {
             '因果流模式下，对已聚焦 token 在 DAG 上按传播播放（↯）时，焦点传播链分批动画的方向。',
         'When checked, direct attribution focus also shows outgoing edges from the selected or hovered token as downstream influence. Causal Flow Mode keeps showing upstream attribution chains only.':
             '勾选后，直接归因焦点下还会显示从选中/悬浮 token 出发的下游影响出边。因果流模式仍只显示向上游的归因链。',
-        'Total duration or per-step delay. DAG step replay (▶) uses equal steps or a fixed step interval; propagation chain animation (↯) scales each step by attribution weight.':
-            '总时长或单步延时。DAG 步进重放（▶）按步均分或固定单步间隔；传播链动画（↯）按各层归因权重缩放每步停留时间。',
+        'Total duration or per-step simulated cost. DAG step replay (▶) divides evenly or uses a fixed per-token cost; propagation chain animation (↯) scales each frame by attribution weight.':
+            '总时长或单步模拟开销。DAG 步进重放（▶）按步均分或固定单步开销；传播链动画（↯）按各层归因权重缩放每帧模拟开销。',
         'Total seconds. DAG step replay (▶) divides evenly across steps; propagation chain (↯) splits by layer weight. Saved locally; applied when you press play or select a focus node.':
             '总秒数。步进重放（▶）在步间均分；传播链（↯）按层权重分配。本地保存；点击对应播放钮或选中焦点节点时生效。',
         'Total seconds. With no focused token, DAG step replay (▶) divides evenly; in Causal Flow Mode with a focused token, propagation play (↯) runs focus-chain animation split by layer weight. Saved locally; applied when you press play.':
             '总秒数。无焦点时步进重放（▶）在步间均分；因果流模式下对已聚焦 token 按传播播放（↯）时，按层权重运行焦点传播链动画。本地保存；点击播放时生效。',
         'Milliseconds per step. DAG step replay (▶) uses this fixed interval; propagation chain (↯) multiplies by layer weight. Saved locally; applied when you press play or select a focus node.':
             '每步毫秒数。步进重放（▶）使用固定间隔；传播链（↯）乘以层权重。本地保存；点击对应播放钮或选中焦点节点时生效。',
-        'Milliseconds per step. DAG step replay (▶) uses this fixed interval; with a focused token in Causal Flow Mode, propagation play (↯) scales each batch by layer weight. Saved locally; applied when you press play.':
-            '每步毫秒数。步进重放（▶）使用固定间隔；因果流模式下对已聚焦 token 按传播播放（↯）时，各批按层权重缩放停留。本地保存；点击播放时生效。',
+        'Milliseconds per step. DAG step replay (▶) uses this as the 1× output-gen clock; with a focused token in Causal Flow Mode, propagation play (↯) scales each batch by layer weight. Saved locally; applied when you press play.':
+            '每步毫秒数。步进重放（▶）作为 output gen 的 1× 时钟；因果流模式下对已聚焦 token 按传播播放（↯）时，各批按层权重缩放模拟开销。本地保存；点击播放时生效。',
         'Cached history': '历史缓存',
         'Cached demo': '示例缓存',
         'Demo not found': '未找到该示例缓存',
         'No run to export': '当前无可导出的运行结果',
         'History': '输入历史',
-        'Raw prompt': 'Raw prompt 原始提示词',
-        'Raw prompt mode': 'Raw prompt mode 原始提示词模式',
-        'Enable thinking': 'Enable thinking 启用思考模式',
-        'Tool use': 'Tool use 工具使用',
-        'Multi-turn': 'Multi-turn 多轮',
-        'Config tools': 'Config tools 配置工具',
+        'Raw prompt': '原始提示词',
+        'Raw prompt mode': '原始提示词模式',
+        'Enable thinking': '启用思考模式',
+        'Tool use': '工具使用',
+        'Multi-turn': '多轮',
+        'Config tools': '配置工具',
+        'Add tool': '新增工具',
+        'custom': '自定义',
+        'custom, will not save': '自定义，未勾选不会保存',
+        'When Tool use is on, configure at least one tool in Config tools.':
+            '已开启 Tool use，请先在 Config tools 中至少勾选一个工具。',
         'Invalid tool_call JSON in model output': '模型输出中 tool_call JSON 无效。',
         'Tool calling reached max rounds ({max})': 'Tool calling 已达最大轮数（{max}），已停止。',
-        'Teacher forcing': 'Teacher forcing 强制续写归因',
-        'Forced continuation': 'Forced continuation 期望续写',
+        'Teacher forcing': 'Teacher forcing 强制续写',
         'Stop after teacher forcing': '续写结束后停止（不继续 top-1 生成）',
         'When enabled, type the exact continuation after the assembled prompt. Each step attributes the next token toward that text (same tokenizer as Model), then stops when the continuation is consumed or EOS.':
             '启用后，在下方填写接在「完整 prompt」之后的期望续写文本。每一步用该串剩余部分的第一个 token 作为归因目标（与所选 Model 槽位分词器一致）；续写消费完或遇到 EOS 时结束。',

@@ -18,3 +18,5 @@ export const CHAT_ENABLE_TOOL_CALLING_STORAGE_KEY = 'info_radar_chat_enable_tool
 export const CHAT_MULTI_TURN_MOCK_STORAGE_KEY = 'info_radar_chat_multi_turn_mock';
 export const GEN_ATTR_ENABLE_TOOL_CALLING_STORAGE_KEY = 'info_radar_gen_attr_enable_tool_calling';
 export const GEN_ATTR_ENABLE_MULTI_TURN_STORAGE_KEY = 'info_radar_gen_attr_enable_multi_turn';
+export const CHAT_TOOL_CONFIG_STORAGE_KEY = 'info_radar_chat_tool_config';
+export const GEN_ATTR_TOOL_CONFIG_STORAGE_KEY = 'info_radar_gen_attr_tool_config';

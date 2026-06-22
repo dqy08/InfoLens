@@ -292,6 +292,51 @@
   }
 }
 
+// Config tools：列表在弹窗内滚动；Add 与 Cancel/Confirm 共用底栏
+.chat-tool-config-form {
+  min-height: 120px;
+}
+
+.chat-tool-config-error {
+  flex-shrink: 0;
+  color: var(--error-color, #c62828);
+  font-size: 13px;
+  margin: 0 0 8px 0;
+}
+
+.chat-tool-config-add-btn {
+  margin-right: auto;
+}
+
+.chat-tool-config-item {
+  margin-bottom: 4px;
+
+  &--expanded {
+    margin-bottom: 12px;
+  }
+}
+
+.chat-tool-config-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-tool-config-item-label {
+  font-size: 13px;
+}
+
+// Config tools：JSON 编辑区（比通用 .dialog-textarea 更高）
+.chat-tool-config-entry-json {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 6px;
+  height: 400px;
+  min-height: 60px;
+  max-height: 80vh;
+}
+
 // 对话框文本区域字数显示（参照原有文本输入框的字数显示样式）
 .dialog-textarea-counter {
   font-size: 8pt;

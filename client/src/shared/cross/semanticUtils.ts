@@ -1,5 +1,5 @@
 /**
- * 语义分析相关工具函数
+ * 语义分析与预测归因共用的 token score 管线工具（合并、归一化；不绑定具体后端算法）。
  */
 
 import type { BpeMergeReason } from '../../shared/api/GLTR_API';
@@ -16,20 +16,20 @@ import {
 /**
  * 合并/归一化管线中的原始强度：已写入 rawScore 时用其值，否则用 score。
  */
-export function getAttentionRawScore<T extends { score: number }>(t: T): number {
+export function getTokenRawScore<T extends { score: number }>(t: T): number {
     const ext = t as { rawScore?: number };
     return ext.rawScore !== undefined ? ext.rawScore : t.score;
 }
 
 /**
- * 将 score 归一化到 [0,1]；写入 rawScore（归一化前的强度，供 tooltip attentionRawScores）。
+ * 将 score 归一化到 [0,1]；写入 rawScore（归一化前的强度，供 tooltip tokenRawScores）。
  * 语义 / 归因路径应在 **overlap 与 digit 合并并对原始 score 求和之后** 再调用，使 max 与合并后强度一致。
- * 若调用方已将「原始梯度」放在 rawScore、且 score 置 0（如未匹配块），则以 rawScore 作为 tooltip 保留值，仅用 score 参与 max 归一。
+ * 若调用方已将原始 score 放在 rawScore、且 score 置 0（如未匹配块），则以 rawScore 作为 tooltip 保留值，仅用 score 参与 max 归一。
  */
 export function normalizeTokenScores<T extends { score: number }>(tokens: T[]): Array<T & { rawScore: number }> {
     const max = Math.max(0, ...tokens.map((t) => t.score).filter(Number.isFinite));
     return tokens.map((t) => {
-        const rawScore = getAttentionRawScore(t);
+        const rawScore = getTokenRawScore(t);
         if (max <= 0) {
             return { ...t, rawScore };
         }
@@ -122,16 +122,16 @@ export function findSplitPoint(text: string, start: number, maxEnd: number): num
 }
 
 /**
- * 合并 token_attention 中因 BPE overlap 产生的重叠 token（offset 几何合并与 mergeTokensForRendering 一致）。
+ * 合并 API 返回的 token score 条目中因 BPE overlap 产生的重叠 span（offset 几何合并与 mergeTokensForRendering 一致）。
  *
  * BPE overlap 多为 tokenizer 的 offset 与字边界不对齐所致：相邻条目的 raw / offset 在表层可能看起来「重叠」，
- * 但底层仍是按 tokenizer 位置各不相同的嵌入与梯度；并非同一条底层数据被算了两次。
+ * 但底层仍是按 tokenizer 位置各不相同的条目；并非同一条底层数据被算了两次。
  *
- * 输入须为 API 的原始 `score`（梯度范数）；重叠时 **相加**。归一化到 [0,1] 须在合并之后由 normalizeTokenScores 统一做。
+ * 输入须为 API 的原始 `score`；重叠时 **相加**。归一化到 [0,1] 须在合并之后由 normalizeTokenScores 统一做。
  *
  * 与 BPE 一致：先 {@link dropEmptyZeroWidthTokens}，再 {@link mergeSequentialOverlap}（含零宽落在下一区间内之合并）。
  */
-export function mergeAttentionTokensForRendering<T extends { offset: [number, number]; raw: string; score: number }>(
+export function mergeTokenSpansForRendering<T extends { offset: [number, number]; raw: string; score: number }>(
     tokens: T[],
     text: string
 ): T[] {
@@ -155,9 +155,9 @@ export function mergeAttentionTokensForRendering<T extends { offset: [number, nu
 }
 
 /**
- * Digit 合并：与 {@link mergeBpeDigitTokens} 相同分组规则（{@link digitMergeIndexGroupsByText}），对 attention 的 `score` **求和**（BPE 侧为概率相乘）。
+ * Digit 合并：与 {@link mergeBpeDigitTokens} 相同分组规则（{@link digitMergeIndexGroupsByText}），对 token `score` **求和**（BPE 侧为概率相乘）。
  */
-export function mergeAttentionDigitTokens<T extends { offset: [number, number]; raw: string; score: number }>(
+export function mergeTokenDigitSpans<T extends { offset: [number, number]; raw: string; score: number }>(
     tokens: T[],
     text: string
 ): T[] {
@@ -182,18 +182,18 @@ export function mergeAttentionDigitTokens<T extends { offset: [number, number]; 
 }
 
 /**
- * 语义 / 归因 attention 的统一合并：先 overlap（与 BPE 几何一致），可选再 digit；归一化由调用方 {@link normalizeTokenScores} 完成。
+ * 语义 / 归因 token score 的统一合并：先 overlap（与 BPE 几何一致），可选再 digit；归一化由调用方 {@link normalizeTokenScores} 完成。
  */
-export function mergeAttentionTokensFullyForRendering<T extends { offset: [number, number]; raw: string; score: number }>(
+export function mergeTokenSpansFullyForRendering<T extends { offset: [number, number]; raw: string; score: number }>(
     tokens: T[],
     text: string,
     options: DigitMergePipelineOptions = {}
 ): T[] {
-    const overlapped = mergeAttentionTokensForRendering(tokens, text);
+    const overlapped = mergeTokenSpansForRendering(tokens, text);
     if (options.digitMerge === false) {
         return overlapped;
     }
-    return mergeAttentionDigitTokens(overlapped, text);
+    return mergeTokenDigitSpans(overlapped, text);
 }
 
 /** bytesPerChunk：UTF-8 字节数；startOffset：字符索引。 */

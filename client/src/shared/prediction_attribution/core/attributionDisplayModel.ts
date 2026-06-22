@@ -2,8 +2,8 @@ import type { BpeMergeReason, FrontendAnalyzeResult, FrontendToken } from '../..
 import type { AttributionApiResponse } from './attributionResultCache';
 import { getDigitsMergeEnabled } from '../../cross/digitsMergeManager';
 import {
-    getAttentionRawScore,
-    mergeAttentionTokensFullyForRendering,
+    getTokenRawScore,
+    mergeTokenSpansFullyForRendering,
     normalizeTokenScores,
 } from '../../cross/semanticUtils';
 
@@ -69,7 +69,11 @@ export function collectExcludeRegexMatchIntervals(
 }
 
 /** 当且仅当 `[ts, te)` 完全落在某一匹配区间内时返回 true（区间列表不合并，逐段判断）。 */
-export function isOffsetSpanFullyExcluded(ts: number, te: number, intervals: [number, number][]): boolean {
+export function isOffsetSpanFullyExcluded(
+    ts: number,
+    te: number,
+    intervals: ReadonlyArray<[number, number]>,
+): boolean {
     for (const [a, b] of intervals) {
         if (a <= ts && te <= b) return true;
     }
@@ -77,8 +81,8 @@ export function isOffsetSpanFullyExcluded(ts: number, te: number, intervals: [nu
 }
 
 /**
- * 将归因 API 响应转为 {@link GLTR_Text_Box} 可用的 {@link FrontendAnalyzeResult}（含 rawScoresNormed / attentionRawScores / 可选 colorScores）。
- * 管线：overlap + digit 合并 → {@link normalizeTokenScores}，与语义 attention 一致。
+ * 将归因 API 响应转为 {@link GLTR_Text_Box} 可用的 {@link FrontendAnalyzeResult}（含 rawScoresNormed / tokenRawScores / 可选 colorScores）。
+ * 管线：overlap + digit 合并 → {@link normalizeTokenScores}，与语义分析 token score 管线一致。
  */
 export function buildAttributionDisplayResult(
     context: string,
@@ -109,7 +113,7 @@ export function buildAttributionDisplayResult(
         };
     });
 
-    const merged = mergeAttentionTokensFullyForRendering(effective, context, {
+    const merged = mergeTokenSpansFullyForRendering(effective, context, {
         digitMerge: getDigitsMergeEnabled(),
     });
     const normalized = normalizeTokenScores(merged);
@@ -131,7 +135,7 @@ export function buildAttributionDisplayResult(
         return row;
     });
 
-    const attentionRawScores = normalized.map((t) => getAttentionRawScore(t));
+    const tokenRawScores = normalized.map((t) => getTokenRawScore(t));
     const rawScoresNormed = normalized.map((t) => t.score);
 
     const result = {
@@ -146,10 +150,10 @@ export function buildAttributionDisplayResult(
     const ext = result as FrontendAnalyzeResult & {
         rawScoresNormed: number[];
         colorScores?: number[];
-        attentionRawScores: number[];
+        tokenRawScores: number[];
     };
     ext.rawScoresNormed = rawScoresNormed;
-    ext.attentionRawScores = attentionRawScores;
+    ext.tokenRawScores = tokenRawScores;
     if (options.colorRangeMax != null) {
         ext.colorScores = mapNormedScoresToColorRange(rawScoresNormed, options.colorRangeMax);
     }

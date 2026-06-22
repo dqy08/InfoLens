@@ -4,7 +4,7 @@ import {
 } from '../core/attributionDisplayModel';
 import type { NodeAggregatedEntry } from './genAttributeDagIntervalResolve';
 import type { TokenGenStep } from './tokenGenAttributionRunner';
-import { getAttentionRawScore } from '../../cross/semanticUtils';
+import { getTokenRawScore } from '../../cross/semanticUtils';
 import { DAG_EDGE_MIN_NORMALIZED_SCORE } from './genAttributeDagEdgeDisplay';
 
 /** 与 DAG 节点 id 一致：来自 API `token_attribution` 几何（按 offset 去重，独立于 exclude/归一化）。 */
@@ -50,7 +50,7 @@ function normalizeTopNPoolForDagSparse<T extends { score: number }>(tokens: T[])
     });
     const massSum = positiveMass.reduce((a, v) => a + v, 0);
     return tokens.map((t, i) => {
-        const rawScore = getAttentionRawScore(t);
+        const rawScore = getTokenRawScore(t);
         const poolMassFrac = massSum > 0 ? positiveMass[i]! / massSum : 0;
         const scoreNorm = max <= 0 ? t.score : t.score / max;
         return { ...t, score: scoreNorm, rawScore, poolMassFrac };
@@ -178,12 +178,42 @@ export function collectGenAttrDagExcludeIntervals(
 }
 
 /**
+ * 非实时 DAG 建边（↻ 刷新、批内 replay、▶ 步进回放）共用的 exclude 匹配全文。
+ * 在完整最终串上判定 generated exclude，使播完与刷新边集一致；实时生成仍用每步 `step.context + step.token`。
+ */
+export function dagExcludeIntervalContextForReplay(steps: readonly TokenGenStep[]): string {
+    if (steps.length === 0) return '';
+    const last = steps[steps.length - 1]!;
+    return last.context + last.token;
+}
+
+/** 本步新生成 token（target 节点）是否整段落入 exclude 区间（与 {@link genAttributeDagView.update} 建边判定同源）。 */
+export function isDagGenStepTargetExcluded(
+    step: Pick<TokenGenStep, 'context' | 'token' | 'inputRanges'>,
+    excludeIntervalContext: string,
+    excludePromptPatternsText: string,
+    excludeGeneratedPatternsText: string,
+): boolean {
+    const targetStart = step.context.length;
+    const targetEnd = targetStart + step.token.length;
+    const intervals = collectGenAttrDagExcludeIntervals(
+        excludeIntervalContext,
+        step.inputRanges,
+        excludePromptPatternsText,
+        excludeGeneratedPatternsText,
+    );
+    return isOffsetSpanFullyExcluded(targetStart, targetEnd, intervals);
+}
+
+/**
  * 对齐聚合之后、Top-N 之前：在 **prompt 区** / **已生成后缀区** 分别匹配两套 exclude 模式，按**节点区间** `[ts, te)` 判定是否整段落入排除区间，
  * 命中则该条 `score` 置 0。与 piece 级 exclude 相比，合并型 piece 拆到多节点后可分别命中/不命中。
  *
- * @param excludeIntervalContext 取匹配区间所用的全文（与 DAG 节点 offset 同源）。流式场景传**当前已写出的累积串**
- *（如 `steps[last].context + steps[last].token`），使跨多 token 才闭合的正则与下标一致；缺省为 `step.context`。
- * @param excludePromptPatternsText prompt 区 `[0, promptRegionEnd)` 上使用的排除正则全文（勾选关时传 `''`）。
+ * DAG 建边时一次定稿：置零后由 {@link phase2RankAndSparsify} 在可见池内重归一；已建边不随后续播放或 exclude 正则变更而修正
+ *（动态过程中改 exclude 对已建边不生效，见 {@link ./genAttributeDagView} 模块注释「Exclude 原则」）。
+ *
+ * @param excludeIntervalContext 本步建边时用于 exclude 匹配的全文（与 DAG 节点 offset 同源）；缺省为 `step.context`。
+ * @param excludePromptPatternsText prompt 区上使用的排除正则全文（勾选关时传 `''`）。
  * @param excludeGeneratedPatternsText 已生成后缀区上使用的排除正则全文（勾选关时传 `''`）。
  */
 export function excludeNodeAggregatedEntries(

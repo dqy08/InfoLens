@@ -3,20 +3,25 @@
  * 运行: cd client/src && npm run test:dagPropagationPlayback
  */
 import {
-    batchPlaybackDelayMs,
+    batchAppearanceCostMs,
     computePropagationGroupPacings,
-    DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS,
-    DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS,
+    DAG_PLAYBACK_GEN_AFTER_INPUT_CLOCKS,
+    DAG_PLAYBACK_TOOL_RESPONSE_CLOCKS,
+    effectivePropagationWeightTotal,
     FORWARD_PROMPT_FRAME_DWELL_MS,
     propagationRunningMaxLookaheadForGroupCount,
-    resolveDagStepPlaybackDelays,
+    propagationUniformWeightedFrameCount,
+    resolveDagStepPlaybackClocks,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagPropagationPlaybackPacing';
 import { buildMaxNormalizedRenderStrengthByKey } from '../../shared/prediction_attribution/causal_flow/genAttributeDagEdgeRenderStrength';
 import {
     backwardSlideIncomingEdgeKeysForBatch,
     buildPropagationPlaybackPlan,
     createDagRecursiveEdgeAnimationController,
+    lastNonFirstPromptRegionBatchIndex,
+    markFirstPromptRegionGroupsInTextOrder,
     maxShareInEdgeKeySet,
+    resolveRecursiveEdgeAnimationRenderOverlay,
     tgtIdFromEdgeKey,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagRecursiveEdgeAnimation';
 
@@ -122,19 +127,80 @@ console.log('2. computePropagationGroupPacings');
     assert('weightTotal 可累加', weightTotal >= 0);
 }
 
-// ── batchPlaybackDelayMs ────────────────────────────────────────────────────
-console.log('3. batchPlaybackDelayMs');
+{
+    const focusId = 'f';
+    const nodeShare = new Map([
+        ['f', 1],
+        ['p', 0.9],
+        ['a', 0.3],
+        ['b', 0.4],
+    ]);
+    const { groupPreps, weightMax } = computePropagationGroupPacings(
+        [
+            { tgtIds: ['p'], isFirstPromptRegion: true },
+            { tgtIds: ['a'] },
+            { tgtIds: ['b'] },
+        ],
+        nodeShare,
+        focusId,
+    );
+    assertClose('weightMax 不含首个 prompt', weightMax, 0.4);
+    assertClose('单个 prompt 区内归一 weight=1', groupPreps[0]!.propagationWeight, 1);
+    assertEq('prompt 无 runningMaxNorm', groupPreps[0]!.runningMaxNorm, undefined);
+    assertClose('gen 组 shareNorm 不受 prompt 稀释', groupPreps[1]!.shareNorm ?? -1, 0.75);
+}
+
+{
+    const focusId = 'f';
+    const nodeShare = new Map([
+        ['f', 1],
+        ['p0', 0.5],
+        ['p1', 0.6],
+        ['a', 0.3],
+    ]);
+    const { groupPreps, weightMax, promptRegionMax } = computePropagationGroupPacings(
+        [
+            { tgtIds: ['p0'], isFirstPromptRegion: true },
+            { tgtIds: ['p1'], isFirstPromptRegion: true },
+            { tgtIds: ['a'] },
+        ],
+        nodeShare,
+        focusId,
+    );
+    assertClose('weightMax 不含 prompt 区', weightMax, 0.3);
+    assertClose('promptRegionMax', promptRegionMax, 0.6);
+    assertClose('prompt 区内归一 p0', groupPreps[0]!.propagationWeight, 0.5 / 0.6);
+    assertClose('prompt 区内归一 p1', groupPreps[1]!.propagationWeight, 1);
+    assertEq('prompt 批无 runningMaxNorm', groupPreps[0]!.runningMaxNorm, undefined);
+    assertEq('prompt 批无 runningMaxNorm (2)', groupPreps[1]!.runningMaxNorm, undefined);
+}
+
+// ── markFirstPromptRegionGroupsInTextOrder ───────────────────────────────────
+console.log('2b. markFirstPromptRegionGroupsInTextOrder');
+{
+    const isPrompt = (id: string) => id.startsWith('p');
+    const groups = new Map([
+        [0, { edgeKeys: [] as string[], nodeIds: new Set(['p0']) }],
+        [1, { edgeKeys: [] as string[], nodeIds: new Set(['p1']) }],
+        [2, { edgeKeys: ['p1->a'], nodeIds: new Set(['a']) }],
+    ]);
+    const flags = markFirstPromptRegionGroupsInTextOrder([0, 1, 2], (o) => groups.get(o)!, isPrompt);
+    assertEq('首部连续 prompt 均标记', flags.join(','), 'true,true,false');
+}
+
+// ── batchAppearanceCostMs ────────────────────────────────────────────────────
+console.log('3. batchAppearanceCostMs');
 const batch = { propagationWeight: 0.25 };
-const plan = { weightTotal: 1 };
+const plan = { weightTotal: 1, chainWeightTotal: 1, batches: [{}, {}, {}] };
 
 assertEq(
     'step：0 权重 → 0ms',
-    batchPlaybackDelayMs({ propagationWeight: 0 }, plan, { mode: 'step', stepMs: 500, totalS: 7 }),
+    batchAppearanceCostMs({ propagationWeight: 0 }, plan, { mode: 'step', stepMs: 500, totalS: 7 }),
     0,
 );
 assertEq(
     'step：权重连续',
-    batchPlaybackDelayMs(batch, plan, { mode: 'step', stepMs: 400, totalS: 7 }),
+    batchAppearanceCostMs(batch, plan, { mode: 'step', stepMs: 400, totalS: 7 }),
     100,
 );
 
@@ -142,39 +208,144 @@ const totalPacing = { mode: 'total' as const, stepMs: 500, totalS: 7 };
 const weightedBudgetMs = 7 * 1000 - FORWARD_PROMPT_FRAME_DWELL_MS;
 assertEq(
     'total：按权重占比，预算已扣固定帧',
-    batchPlaybackDelayMs(batch, plan, totalPacing),
+    batchAppearanceCostMs(batch, plan, totalPacing),
     Math.round(0.25 * weightedBudgetMs),
 );
 
 assertEq(
     'total：权重 0 → 0ms',
-    batchPlaybackDelayMs({ propagationWeight: 0 }, plan, totalPacing),
+    batchAppearanceCostMs({ propagationWeight: 0 }, plan, totalPacing),
     0,
 );
 
-// ── resolveDagStepPlaybackDelays ────────────────────────────────────────────
-console.log('3b. resolveDagStepPlaybackDelays');
 {
-    const step = resolveDagStepPlaybackDelays(10, 1, { mode: 'step', stepMs: 200, totalS: 7 });
-    assertEq('step：gen 间隔', step.stepDelayMs, 200);
+    const mixedPlan = { weightTotal: 1.5, chainWeightTotal: 1, batches: [{}, {}, {}] };
+    const chainBatch = { propagationWeight: 0.5 };
     assertEq(
-        'step：等 response = 3× step',
-        step.waitUntilResponseMs,
-        200 * DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS,
+        'effective：forward 未 slide → chain',
+        effectivePropagationWeightTotal(mixedPlan, {
+            direction: 'forward',
+            forwardSlideSharedNodes: false,
+        }),
+        1,
     );
     assertEq(
-        'step：input 后首 gen = 2× step',
-        step.waitAfterInputMs,
-        200 * DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS,
+        'effective：forward slide → 全量',
+        effectivePropagationWeightTotal(mixedPlan, {
+            direction: 'forward',
+            forwardSlideSharedNodes: true,
+        }),
+        1.5,
     );
-    const total = resolveDagStepPlaybackDelays(10, 1, { mode: 'total', stepMs: 200, totalS: 7 });
+    assertEq(
+        'effective：backward → chain（不含 prompt 区）',
+        effectivePropagationWeightTotal(mixedPlan, {
+            direction: 'backward',
+            forwardSlideSharedNodes: false,
+        }),
+        1,
+    );
+    assertEq(
+        'effective：backward 忽略 slide prompt 选项',
+        effectivePropagationWeightTotal(mixedPlan, {
+            direction: 'backward',
+            forwardSlideSharedNodes: true,
+        }),
+        1,
+    );
+    assertEq(
+        'total：forward 未 slide 用 chain 分母',
+        batchAppearanceCostMs(chainBatch, mixedPlan, totalPacing, {
+            direction: 'forward',
+            forwardSlideSharedNodes: false,
+        }),
+        Math.round(0.5 * weightedBudgetMs),
+    );
+    assertEq(
+        'total：forward slide 用全量分母',
+        batchAppearanceCostMs(chainBatch, mixedPlan, totalPacing, {
+            direction: 'forward',
+            forwardSlideSharedNodes: true,
+        }),
+        Math.round((0.5 / 1.5) * weightedBudgetMs),
+    );
+}
+
+// ── uniform propagation intervals ─────────────────────────────────────────────
+console.log('3c. disableSmartStepTime');
+{
+    const uniformPlan = {
+        weightTotal: 1,
+        chainWeightTotal: 1,
+        batches: [{ isFirstPromptRegion: true }, {}, {}],
+    };
+    const stepUniform = {
+        mode: 'step' as const,
+        stepMs: 400,
+        totalS: 7,
+        disableSmartStepTime: true,
+    };
+    assertEq(
+        'uniform step：忽略权重',
+        batchAppearanceCostMs({ propagationWeight: 0.25 }, uniformPlan, stepUniform),
+        400,
+    );
+    assertEq(
+        'uniform step：权重 0 仍为 stepMs',
+        batchAppearanceCostMs({ propagationWeight: 0 }, uniformPlan, stepUniform),
+        400,
+    );
+    const totalUniform = {
+        mode: 'total' as const,
+        stepMs: 400,
+        totalS: 7,
+        disableSmartStepTime: true,
+    };
+    const backwardScope = { direction: 'backward' as const, forwardSlideSharedNodes: false };
+    const frameCount = propagationUniformWeightedFrameCount(uniformPlan, backwardScope);
+    assertEq('uniform total：backward 计时节拍', frameCount, 2);
+    const weightedBudgetMs = 7 * 1000 - FORWARD_PROMPT_FRAME_DWELL_MS;
+    assertEq(
+        'uniform total：均分预算',
+        batchAppearanceCostMs(batch, uniformPlan, totalUniform, backwardScope),
+        Math.round(weightedBudgetMs / frameCount),
+    );
+    const forwardNoSlideScope = { direction: 'forward' as const, forwardSlideSharedNodes: false };
+    const promptThenGenPlan = {
+        weightTotal: 1,
+        chainWeightTotal: 1,
+        batches: [{ isFirstPromptRegion: true }, {}],
+    };
+    assertEq(
+        'uniform total：forward 未 slide 跳过 prompt 区',
+        propagationUniformWeightedFrameCount(promptThenGenPlan, forwardNoSlideScope),
+        1,
+    );
+}
+
+// ── resolveDagStepPlaybackClocks ────────────────────────────────────────────
+console.log('3b. resolveDagStepPlaybackClocks');
+{
+    const step = resolveDagStepPlaybackClocks(10, 1, { mode: 'step', stepMs: 200, totalS: 7 });
+    assertEq('step：output gen 1× 时钟', step.outputGenClockMs, 200);
+    assertEq(
+        'step：tool response = 3×',
+        step.toolResponseClockMs,
+        200 * DAG_PLAYBACK_TOOL_RESPONSE_CLOCKS,
+    );
+    assertEq(
+        'step：input 后首 gen = 3×',
+        step.genAfterInputClockMs,
+        200 * DAG_PLAYBACK_GEN_AFTER_INPUT_CLOCKS,
+    );
+    const total = resolveDagStepPlaybackClocks(10, 1, { mode: 'total', stepMs: 200, totalS: 7 });
     const weightTotal =
-        10 + DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS + DAG_PLAYBACK_WAIT_AFTER_INPUT_CLOCKS;
-    assertEq('total：stepDelay 按权重分母', total.stepDelayMs, Math.round(7000 / weightTotal));
+        10 + DAG_PLAYBACK_TOOL_RESPONSE_CLOCKS + DAG_PLAYBACK_GEN_AFTER_INPUT_CLOCKS;
+    assertEq('total：outputGenClock 按权重分母', total.outputGenClockMs, Math.round(7000 / weightTotal));
     assertEq(
-        'total：等 response = 3× step',
-        total.waitUntilResponseMs,
-        total.stepDelayMs * DAG_PLAYBACK_WAIT_UNTIL_RESPONSE_CLOCKS,
+        'total：tool response = 3×',
+        total.toolResponseClockMs,
+        total.outputGenClockMs * DAG_PLAYBACK_TOOL_RESPONSE_CLOCKS,
     );
 }
 
@@ -193,10 +364,10 @@ console.log('4. buildPropagationPlaybackPlan');
         ['a', 0.3],
         ['p', 0.2],
     ]);
-    const plan = buildPropagationPlaybackPlan(incoming, offsetOf, nodeShare, 'f');
+    const plan = buildPropagationPlaybackPlan(incoming, offsetOf, nodeShare, 'f', (id) => id === 'p');
     assert('非空计划', plan != null);
     if (plan != null) {
-        assertEq('批次数 = offset 组数', plan.batches.length, 3);
+        assertEq('批次数 = offset 组数（含仅 src 的 prompt）', plan.batches.length, 4);
         assert('播放序 offset 降序', plan.batches[0]!.groupOffset > plan.batches[1]!.groupOffset);
         assertEq(
             'backward batch0 = 焦点侧单组（b->f）',
@@ -208,6 +379,8 @@ console.log('4. buildPropagationPlaybackPlan');
             plan.forwardFrontierByBatchIndex[0]?.size === 3,
         );
         const last = plan.batches.length - 1;
+        assertEq('forward 首帧 = 文序最远组（prompt）', plan.batches[last]!.tgtId, 'p');
+        assertEq('prompt 批无入边', plan.batches[last]!.edgeKeys.length, 0);
         assertEq(
             'backward 末批前沿 = 全链',
             plan.backwardFrontierByBatchIndex[last]?.size ?? 0,
@@ -219,11 +392,45 @@ console.log('4. buildPropagationPlaybackPlan');
             }
         }
         const textOrder = [...plan.batches].sort((a, b) => a.groupOffset - b.groupOffset);
-        assertClose('文序首组 offset 最小', textOrder[0]!.groupOffset, 1);
+        assertClose('文序首组 offset 最小（prompt）', textOrder[0]!.groupOffset, 0);
+        assertClose('prompt 区内归一 weight', textOrder[0]!.propagationWeight, 1);
+        assertEq('prompt 批 runningMaxNorm 为 undefined', textOrder[0]!.runningMaxNorm, undefined);
+        assertClose('weightMax 不含 prompt', plan.weightMax, 0.4);
+        assertClose('promptRegionMax', plan.promptRegionMax, 0.2);
     }
 }
 
-assertEq('空入边 → null', buildPropagationPlaybackPlan(new Map(), () => 0, new Map(), 'f'), null);
+console.log('4b. buildPropagationPlaybackPlan 多 prompt token');
+{
+    const incoming = new Map<string, number>([
+        ['p0->a', 0.1],
+        ['p1->a', 0.05],
+        ['a->b', 0.2],
+        ['b->f', 0.5],
+    ]);
+    const offsetOf = (id: string) => ({ p0: 0, p1: 1, a: 2, b: 3, f: 4 })[id] ?? 0;
+    const nodeShare = new Map([
+        ['f', 1],
+        ['b', 0.4],
+        ['a', 0.3],
+        ['p0', 0.25],
+        ['p1', 0.15],
+    ]);
+    const isPrompt = (id: string) => id === 'p0' || id === 'p1';
+    const plan = buildPropagationPlaybackPlan(incoming, offsetOf, nodeShare, 'f', isPrompt);
+    assert('计划非空', plan != null);
+    if (plan != null) {
+        const textOrder = [...plan.batches].sort((a, b) => a.groupOffset - b.groupOffset);
+        assertEq('两个 prompt 批均属 prompt 区', textOrder[0]!.isFirstPromptRegion, true);
+        assertEq('两个 prompt 批均属 prompt 区 (2)', textOrder[1]!.isFirstPromptRegion, true);
+        assertEq('gen 批不在 prompt 区', textOrder[2]!.isFirstPromptRegion ?? false, false);
+        assertClose('p0 区内归一 weight', textOrder[0]!.propagationWeight, 1);
+        assertClose('p1 区内归一 weight', textOrder[1]!.propagationWeight, 0.15 / 0.25);
+        assertClose('promptRegionMax', plan.promptRegionMax, 0.25);
+    }
+}
+
+assertEq('空入边 → null', buildPropagationPlaybackPlan(new Map(), () => 0, new Map(), 'f', () => false), null);
 
 // ── buildMaxNormalizedRenderStrengthByKey（重构前后等价 + 蓝/红分母）────────
 console.log('5. buildMaxNormalizedRenderStrengthByKey');
@@ -266,7 +473,7 @@ console.log('6. backwardSlideIncomingEdgeKeysForBatch');
         ['a', 0.3],
         ['p', 0.2],
     ]);
-    const plan = buildPropagationPlaybackPlan(incoming, offsetOf, nodeShare, 'f');
+    const plan = buildPropagationPlaybackPlan(incoming, offsetOf, nodeShare, 'f', (id) => id === 'p');
     assert('计划非空', plan != null);
     if (plan != null) {
         const batch0Keys = backwardSlideIncomingEdgeKeysForBatch(plan, 0, 'f');
@@ -337,6 +544,7 @@ console.log('6. createDagRecursiveEdgeAnimationController pause/resume');
         isRecursiveAttributionEnabled: () => true,
         hasNode: () => true,
         offsetOf,
+        isPromptNode: (id) => id === 'p',
         tokenLabelOf: (id) => id,
         direction: 'backward',
         getReplayPacing: () => ({ mode: 'step', stepMs: 60_000, totalS: 7 }),
@@ -355,6 +563,109 @@ console.log('6. createDagRecursiveEdgeAnimationController pause/resume');
     ctrl.stopPlayback();
     assertEq('stop → idle', ctrl.getPlaybackPhase(), 'idle');
     assertEq('stop clears animation focus', ctrl.getUserAnimationFocusId(), null);
+}
+
+// ── backward 跳过首个 prompt 区 slide ───────────────────────────────────────
+console.log('7. backward skips first prompt region slide');
+{
+    const incoming = new Map<string, number>([
+        ['p->a', 0.3],
+        ['a->b', 0.2],
+        ['b->f', 0.5],
+    ]);
+    const offsetOf = (id: string) => ({ p: 0, a: 1, b: 2, f: 3 })[id] ?? 0;
+    const nodeShare = new Map([
+        ['f', 1],
+        ['b', 0.4],
+        ['a', 0.3],
+        ['p', 0.2],
+    ]);
+    const focusId = 'f';
+    const plan = buildPropagationPlaybackPlan(incoming, offsetOf, nodeShare, focusId, (id) => id === 'p');
+    assert('计划非空', plan != null);
+    if (plan != null) {
+        const lastBatch = plan.batches.length - 1;
+        const lastAnim = lastNonFirstPromptRegionBatchIndex(plan);
+        assertEq('末批为 prompt', plan.batches[lastBatch]!.isFirstPromptRegion, true);
+        assertEq('lastAnim 在 prompt 之前', lastAnim, lastBatch - 1);
+
+        const focusState = {
+            activeNodeIds: new Set(['p', 'a', 'b', focusId]),
+            incomingEdgeShareByKey: incoming,
+            downstreamEdgeStrengthByKey: new Map<string, number>(),
+            nodeShareById: nodeShare,
+        };
+        const ctx = {
+            nodesSortedByStepDesc: [
+                { id: 'f', step: 3 },
+                { id: 'b', step: 2 },
+                { id: 'a', step: 1 },
+                { id: 'p', step: -1 },
+            ],
+            incomingLinksByTarget: new Map<string, readonly unknown[]>(),
+        };
+        const overlayArgs = {
+            effectiveFocusId: focusId,
+            focusState,
+            userAnimationFocusId: focusId,
+            recursiveAttributionEnabled: true,
+            computeFocusState: () => focusState,
+            computeSteadyStateStayShareById: (m: Map<string, number>) => new Map(m),
+            ctx,
+        };
+
+        const promptBatchAnim = {
+            plan,
+            direction: 'backward' as const,
+            batchIndex: lastBatch,
+            forwardPromptPreamblePending: false,
+            weightScope: { direction: 'backward' as const, forwardSlideSharedNodes: true },
+        };
+        const promptOverlay = resolveRecursiveEdgeAnimationRenderOverlay({
+            ...overlayArgs,
+            animation: promptBatchAnim,
+        });
+        assertEq(
+            'prompt 批（若落到）无 slide',
+            promptOverlay.propagationSlideTgtId,
+            null,
+        );
+
+        const genBatchAnim = {
+            ...promptBatchAnim,
+            batchIndex: lastAnim,
+        };
+        const genOverlay = resolveRecursiveEdgeAnimationRenderOverlay({
+            ...overlayArgs,
+            animation: genBatchAnim,
+        });
+        assertEq(
+            '末个 gen 批 slide 为代表 token',
+            genOverlay.propagationSlideTgtId,
+            plan.batches[lastAnim]!.tgtId,
+        );
+        assert(
+            'slide 不是 prompt',
+            genOverlay.propagationSlideTgtId !== 'p',
+        );
+
+        const forwardPromptSlideAnim = {
+            plan,
+            direction: 'forward' as const,
+            batchIndex: lastBatch,
+            forwardPromptPreamblePending: false,
+            weightScope: { direction: 'forward' as const, forwardSlideSharedNodes: true },
+        };
+        const forwardPromptOverlay = resolveRecursiveEdgeAnimationRenderOverlay({
+            ...overlayArgs,
+            animation: forwardPromptSlideAnim,
+        });
+        assertEq(
+            'forward slide prompt：prompt 批有 slide',
+            forwardPromptOverlay.propagationSlideTgtId,
+            'p',
+        );
+    }
 }
 
 // ── summary ─────────────────────────────────────────────────────────────────
