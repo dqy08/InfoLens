@@ -9,7 +9,6 @@ from backend.models.model_manager import ModelSlot
 _configured_slots: tuple[ModelSlot, ...] = (ModelSlot.BASE, ModelSlot.INSTRUCT)
 _remote_origins: dict[ModelSlot, str] = {}
 _worker_mode: bool = False
-_initialized: bool = False
 
 _REMOTE_TOKEN_ENV = "INFORADAR_REMOTE_HF_TOKEN"
 
@@ -33,14 +32,19 @@ def _parse_slots(raw: str | None) -> tuple[ModelSlot, ...]:
     return tuple(out)
 
 
+def _normalize_origin(origin: str) -> str:
+    origin = origin.strip().rstrip("/")
+    if not origin.startswith(("http://", "https://")):
+        origin = f"https://{origin}"
+    return origin
+
+
 def _parse_remote_spec(spec: str) -> tuple[ModelSlot, str]:
     if "=" not in spec:
         raise ValueError(f"--remote must be slot=origin, got {spec!r}")
     key, origin = spec.split("=", 1)
     key = key.strip().lower()
-    origin = origin.strip().rstrip("/")
-    if not origin.startswith(("http://", "https://")):
-        raise ValueError(f"remote origin must be http(s) URL, got {origin!r}")
+    origin = _normalize_origin(origin)
     try:
         slot = ModelSlot(key)
     except ValueError as exc:
@@ -50,7 +54,7 @@ def _parse_remote_spec(spec: str) -> tuple[ModelSlot, str]:
 
 def configure_from_args(args: Namespace) -> None:
     """解析 CLI 并同步 model_manager.CONFIGURED_SLOTS / LOCAL_SLOTS。"""
-    global _configured_slots, _remote_origins, _worker_mode, _initialized
+    global _configured_slots, _remote_origins, _worker_mode
 
     worker = bool(getattr(args, "worker", False))
     remote_specs: list[str] = list(getattr(args, "remote", None) or [])
@@ -79,7 +83,6 @@ def configure_from_args(args: Namespace) -> None:
     _configured_slots = slots
     _remote_origins = remote_map
     _worker_mode = worker
-    _initialized = True
 
     from backend.models import model_manager
 

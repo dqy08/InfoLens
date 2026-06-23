@@ -12,7 +12,6 @@ def _reset_routing():
     model_routing._configured_slots = (ModelSlot.BASE, ModelSlot.INSTRUCT)
     model_routing._remote_origins = {}
     model_routing._worker_mode = False
-    model_routing._initialized = False
     yield
 
 

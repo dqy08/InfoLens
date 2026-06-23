@@ -13,6 +13,14 @@ diagnose_and_fix_thread_env_vars()
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"Using `httpx` with `starlette\.testclient`",
+    category=UserWarning,
+)
+
 import connexion
 from backend.platform.logging_config import configure_logging
 from backend.api.static import register_static_routes

@@ -13,7 +13,6 @@ def _reset_routing_state():
     model_routing._configured_slots = (ModelSlot.BASE, ModelSlot.INSTRUCT)
     model_routing._remote_origins = {}
     model_routing._worker_mode = False
-    model_routing._initialized = False
     yield
 
 
@@ -47,6 +46,17 @@ def test_remote_base_with_token(monkeypatch):
     assert model_routing.is_local(ModelSlot.INSTRUCT)
     assert not model_routing.is_local(ModelSlot.BASE)
     assert model_routing.remote_origin(ModelSlot.BASE) == "https://example.hf.space"
+
+
+def test_remote_origin_without_scheme(monkeypatch):
+    monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "test-token")
+    args = Namespace(
+        slots="base,instruct",
+        remote=["base=dqy08-infolens-worker1.hf.space"],
+        worker=False,
+    )
+    model_routing.configure_from_args(args)
+    assert model_routing.remote_origin(ModelSlot.BASE) == "https://dqy08-infolens-worker1.hf.space"
 
 
 def test_worker_and_remote_mutually_exclusive(monkeypatch):

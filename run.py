@@ -35,8 +35,6 @@ ENV_HELP = """
   INFORADAR_PORT            Docker 监听端口（默认 7860）
   INFORADAR_BASE_MODEL      Docker 覆盖 base 模型 id（可选）
   INFORADAR_INSTRUCT_MODEL  Docker 覆盖 instruct 模型 id（可选，master/default）
-
-产品主路径：Causal Flow + instruct 槽位（见 CONTEXT.md Product focus）。
 """
 
 

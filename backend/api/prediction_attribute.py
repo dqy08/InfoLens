@@ -1,8 +1,4 @@
-"""预测归因 API
-
-核心产品 LLM Causal Flow 的主 API：逐 token 调用本端点做生成与归因（见 CONTEXT.md Product focus）。
-默认使用 instruct 槽位（``model: "instruct"``）。
-"""
+"""预测归因 API"""
 import gc
 import time
 

@@ -103,6 +103,12 @@ def _auth_headers() -> dict[str, str]:
     }
 
 
+def _upstream_error(exc: requests.RequestException) -> tuple[dict, int]:
+    if isinstance(exc, requests.Timeout):
+        return {"success": False, "message": f"upstream timeout: {exc}"}, 504
+    return {"success": False, "message": f"upstream unreachable: {exc}"}, 502
+
+
 def _response_from_requests(resp: requests.Response):
     content_type = resp.headers.get("Content-Type", "")
     if "application/json" in content_type:
@@ -129,20 +135,29 @@ def proxy_request(
     on_response: Callable[[Any, float, int], None] | None = None,
 ):
     url = f"{origin.rstrip('/')}{path}"
-    headers = _auth_headers()
+    try:
+        headers = _auth_headers()
+    except RuntimeError as exc:
+        if on_stream_close is not None:
+            on_stream_close()
+        return {"success": False, "message": str(exc)}, 500
+
     started = time.perf_counter()
 
     if stream:
         return _proxy_streaming(
             url, method, headers, json_body, timeout, on_stream_close, on_response, started
         )
-    resp = requests.request(
-        method,
-        url,
-        headers=headers,
-        json=json_body,
-        timeout=timeout,
-    )
+    try:
+        resp = requests.request(
+            method,
+            url,
+            headers=headers,
+            json=json_body,
+            timeout=timeout,
+        )
+    except requests.RequestException as exc:
+        return _upstream_error(exc)
     elapsed = time.perf_counter() - started
     if on_response is not None:
         body = None
@@ -165,14 +180,19 @@ def _proxy_streaming(
     on_response: Callable[[Any, float, int], None] | None,
     started: float,
 ):
-    upstream = requests.request(
-        method,
-        url,
-        headers=headers,
-        json=json_body,
-        timeout=timeout,
-        stream=True,
-    )
+    try:
+        upstream = requests.request(
+            method,
+            url,
+            headers=headers,
+            json=json_body,
+            timeout=timeout,
+            stream=True,
+        )
+    except requests.RequestException as exc:
+        if on_stream_close is not None:
+            on_stream_close()
+        return _upstream_error(exc)
 
     def _handle_sse_block(block: bytes) -> None:
         if on_response is None:

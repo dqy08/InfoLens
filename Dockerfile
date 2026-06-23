@@ -64,6 +64,5 @@ EXPOSE 7860
 # 在CPU basic 上使用0.6b模型能达到及格的速度
 # 在CPU upgrade 上使用1.7b模型能达到及格的速度
 # 在本地M5 16G芯片上使用4b模型能达到及格的速度（瓶颈是内存大小）；M5 16G内存仅能同时支持一种分析模型（信息密度分析或语义分析）
-# 核心产品 Causal Flow 走 instruct 槽位；多 Space 分流时优先保障 instruct 低延迟（见 CONTEXT.md Product focus）
 # INFORADAR_ROLE: 不设或 default=现网双模型；master=门户；worker=base Worker（见 docker_entrypoint.sh）
 CMD ["./docker_entrypoint.sh"]

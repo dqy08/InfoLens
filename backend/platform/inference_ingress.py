@@ -93,21 +93,25 @@ def ingress_inference(
             "message": f"slot {slot.value!r} has no remote origin configured",
         }, 500
 
-    on_close = None
+    on_close = clear_active_remote_completion_slot if track_remote_completion else None
     if track_remote_completion:
         set_active_remote_completion_slot(slot)
-        on_close = clear_active_remote_completion_slot
 
     def _on_response(data: Any, elapsed: float, status_code: int) -> None:
         _emit_response_log(response_log_fn, data, elapsed, status_code)
 
-    return proxy_request(
-        origin,
-        method,
-        api_path,
-        json_body=json_body,
-        stream=stream,
-        timeout=timeout,
-        on_stream_close=on_close,
-        on_response=_on_response,
-    )
+    try:
+        return proxy_request(
+            origin,
+            method,
+            api_path,
+            json_body=json_body,
+            stream=stream,
+            timeout=timeout,
+            on_stream_close=on_close,
+            on_response=_on_response,
+        )
+    except Exception:
+        if track_remote_completion:
+            clear_active_remote_completion_slot()
+        raise

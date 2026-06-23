@@ -6,11 +6,10 @@ colorTo: red
 sdk: docker
 short_description: Explore the informational nature of LLMs and language.
 tags:
-  - nlp
+  - llm-interpretability
   - text-analysis
   - information
   - visualization
-  - reading-tools
 app_port: 7860
 pinned: false
 license: apache-2.0
@@ -19,6 +18,12 @@ license: apache-2.0
 # Info Lens
 
 **Info Lens** is a small toolbox for exploring the informational nature of LLMs and language.
+- Source: [github.com/dqy08/InfoLens](https://github.com/dqy08/InfoLens)
+- Live demo: [huggingface.co/spaces/dqy08/InfoLens](https://huggingface.co/spaces/dqy08/InfoLens)
+
+<img src="client/src/assets/images/dag-dark.gif" width="460" alt="LLM Causal Flow" />
+
+<img src="client/src/assets/images/dag-cot.gif" width="460" alt="Chain-of-thought" />
 
 ## Legacy name: InfoRadar
 
@@ -41,16 +46,20 @@ Once running, visit `http://localhost:7860` in your browser.
 
 ### Local Development
 
-**Backend Environment**:
+**Frontend Build** 
+
 ```bash
-pip install -r requirements.txt
-python server.py
+cd client/src && npm ci && npm run build
 ```
 
-**Frontend Build**:
+**Backend Environment**:
+
 ```bash
-cd client/src && npm install && npm run build
+pip install -r requirements.txt
+python run.py
 ```
+
+Visit `http://localhost:5001` in your browser.
 
 ## 📜 License
 
