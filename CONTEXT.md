@@ -2,6 +2,16 @@
 
 探索 LLM 与语言的信息结构；可视化预测、归因与生成过程。
 
+## Product focus
+
+**Core product（核心产品）**:
+LLM **Causal Flow**（`causal_flow.html`）— 逐 token 生成并构建 context–attribution DAG，支持多轮 tool calling。首页导航首位产品；性能、部署与分流决策优先保障此页体验。
+_Avoid_: 把 Info Highlight（信息密度 / `analysis.html`）或 Raw Chat 当作默认核心产品表述
+
+**Core inference path（核心推理路径）**:
+**instruct 槽位**（`--instruct_model` / API `model: "instruct"`）— Causal Flow 的逐 token 归因（`POST /api/prediction-attribute`）、tokenize、多轮 wire 编排均走 instruct；续写类能力（`/v1/completions`）默认亦在此槽位。多 Space 部署时，instruct 宜低延迟、高可用（宜本地推理或专用 Worker，不宜作为次要 offload 对象）。
+_Avoid_: 把 base 槽位（信息密度 `/api/analyze`）描述为产品主路径
+
 ## Language
 
 **Tool call**:

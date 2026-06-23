@@ -65,6 +65,7 @@ _process_start_at: str | None = None
 _reset_base: dict = {}
 _reset_at: str | None = None
 
+_stats_disabled = False
 _cached_server_platform: str | None = None
 
 _HF_REPO = "dqy08/info-lens-stats"
@@ -421,6 +422,8 @@ def _persist_tick():
 
 
 def record_page_load():
+    if _stats_disabled:
+        return
     with _LOCK:
         _WIN["page_loads"] += 1
 
@@ -430,6 +433,8 @@ def record_activity_report(
     client_os: str | None = None,
 ) -> None:
     """累计秒与增量秒相等 ⇔ 本轮第一次有效心跳；活跃访问与 client_os 均仅在此包上计一次。"""
+    if _stats_disabled:
+        return
     if total_active_sec < 1 or delta_active_sec < 0:
         return
     if not page_key:
@@ -448,12 +453,16 @@ def record_activity_report(
 
 
 def bump_api(kind: str):
+    if _stats_disabled:
+        return
     with _LOCK:
         _API[kind] += 1
 
 
 def record_gen_attr_opt_sec(delta_sec: int, opts: dict[str, bool]) -> None:
     """累计 causal_flow.html 各非默认选项处于激活状态的活跃秒。"""
+    if _stats_disabled:
+        return
     if delta_sec <= 0:
         return
     with _LOCK:
@@ -959,5 +968,11 @@ def _register_shutdown_persist():
 
 def register_visit_stats(_app):
     """_app 与 server 注册约定一致；统计线程不依赖应用对象。"""
+    from backend.platform.model_routing import is_worker
+
+    global _stats_disabled
+    if is_worker():
+        _stats_disabled = True
+        return
     _register_shutdown_persist()
     threading.Thread(target=_daemon_persist_hourly, daemon=True).start()

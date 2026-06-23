@@ -1,6 +1,7 @@
 """文本 tokenize API：不做模型推理，仅返回各 token 的字符 offset 与原文。"""
 from backend.core.prediction_attributor import slot_for_prediction_attr_model
 from backend.models.model_manager import ensure_slot_weights_loaded
+from backend.platform.inference_ingress import ingress_inference
 
 
 def tokenize(tokenize_request):
@@ -21,16 +22,24 @@ def tokenize(tokenize_request):
     except ValueError as e:
         return {"success": False, "message": str(e)}, 400
 
-    tokenizer, _, _ = ensure_slot_weights_loaded(slot)
+    def local_fn():
+        tokenizer, _, _ = ensure_slot_weights_loaded(slot)
+        enc = tokenizer(context, return_offsets_mapping=True)
+        token_ids = enc["input_ids"]
+        if token_ids and isinstance(token_ids[0], list):
+            token_ids = token_ids[0]
+        spans = [
+            {"offset": [s, e], "raw": context[s:e], "token_id": int(tid)}
+            for (s, e), tid in zip(enc["offset_mapping"], token_ids)
+            if s < e
+        ]
+        return {"success": True, "spans": spans}, 200
 
-    enc = tokenizer(context, return_offsets_mapping=True)
-    token_ids = enc["input_ids"]
-    if token_ids and isinstance(token_ids[0], list):
-        token_ids = token_ids[0]
-    spans = [
-        {"offset": [s, e], "raw": context[s:e], "token_id": int(tid)}
-        for (s, e), tid in zip(enc["offset_mapping"], token_ids)
-        if s < e  # 过滤 BOS/EOS 等长度为 0 的特殊 token
-    ]
-
-    return {"success": True, "spans": spans}, 200
+    return ingress_inference(
+        slot=slot,
+        api_path="/api/tokenize",
+        json_body=tokenize_request,
+        stream=False,
+        timeout=30.0,
+        local_fn=local_fn,
+    )

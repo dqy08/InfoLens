@@ -1,5 +1,5 @@
 /**
- * 逐 token 生成归因：基于 /api/prediction-attribute。
+ * Causal Flow 核心编排：逐 token 生成归因（/api/prediction-attribute，instruct 槽位）。
  * 默认 `target_prediction` 为空 → 服务端 top-1 贪心；传入 {@link TokenGenAttributionOptions.teacherForcingContinuation} 时按用户续写逐步强制首 token 再归因。
  */
 import type { AttributionApiResponse, PredictionAttributeModelVariant } from '../core/attributionResultCache';

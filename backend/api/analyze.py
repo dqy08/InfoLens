@@ -155,19 +155,17 @@ def _log_request(text, stream_mode=False, client_ip=None):
 
 
 def _log_response(res, char_count, elapsed_time, stream_mode=False, request_id=None, wait_time=None):
-    """打印响应日志"""
-    tokens = len(res.get('bpe_strings', []))
-    text_length = char_count
-    mode_str = "(stream)" if stream_mode else ""
-    
-    # 构建日志消息
-    msg = f"\t📤 API analyze {mode_str} response:"
-    if request_id is not None:
-        msg += f" req_id={request_id},"
-    msg += f" tokens={tokens}, text_length={text_length}"
-    msg += f", response_time={elapsed_time:.4f}s"
-    
-    print(msg)
+    """Worker 本地推理结束时打印响应日志。"""
+    from backend.platform.inference_response_log import log_analyze_response
+
+    log_analyze_response(
+        request_id=request_id,
+        char_count=char_count,
+        result=res,
+        elapsed=elapsed_time,
+        stream=stream_mode,
+        for_worker=True,
+    )
 
 
 def _validate_and_fix_result(res):
@@ -193,39 +191,67 @@ def analyze(analyze_request):
         如果 stream=True: SSE 响应对象
         否则: (响应字典, 状态码) 元组
     """
-    # 检查模型是否正在加载中（使用模块级上下文）
-    from backend.platform.app_context import get_app_context
-    context = get_app_context(prefer_module_context=True)
-    if context.model_loading:
-        return _error_response('', '', '模型正在加载中，请稍后重试', 503)
-
-    # 在请求上下文中获取 client_ip，流式响应时生成器内可能已失效
     from backend.platform.access_log import get_client_ip
+    from backend.platform.inference_ingress import ingress_inference
+    from backend.platform.inference_response_log import make_analyze_response_logger
+    from backend.models.model_manager import ModelSlot
+
+    stream = analyze_request.get("stream", False)
+    text = analyze_request.get("text")
+    if not text:
+        return _error_response("", "", "缺少分析文本，请提供 text 字段", 400)
+
     client_ip = get_client_ip()
+    logged: dict = {"request_id": None}
 
-    # 检查是否启用流式响应
-    stream = analyze_request.get('stream', False)
-    if stream:
-        return _analyze_with_stream(analyze_request, client_ip)
-    return _analyze_plain(analyze_request, client_ip)
+    def log_fn():
+        logged["request_id"] = _log_request(text, stream_mode=bool(stream), client_ip=client_ip)
+
+    def local_fn():
+        from backend.platform.app_context import get_app_context
+
+        context = get_app_context(prefer_module_context=True)
+        if context.model_loading:
+            return _error_response("", "", "模型正在加载中，请稍后重试", 503)
+        if stream:
+            return _analyze_with_stream(
+                analyze_request, client_ip, request_id=logged["request_id"]
+            )
+        return _analyze_plain(analyze_request, client_ip, request_id=logged["request_id"])
+
+    return ingress_inference(
+        slot=ModelSlot.BASE,
+        api_path="/api/analyze",
+        json_body=analyze_request,
+        stream=bool(stream),
+        timeout=60.0,
+        log_fn=log_fn,
+        local_fn=local_fn,
+        response_log_fn=make_analyze_response_logger(
+            logged, text_len=len(text), stream=bool(stream)
+        ),
+    )
 
 
-def _analyze_with_stream(analyze_request, client_ip):
+def _analyze_with_stream(analyze_request, client_ip, request_id=None):
     """
     流式分析文本，通过SSE返回进度和结果（内部函数）
 
     Args:
         analyze_request: 分析请求字典，包含 model 和 text
         client_ip: 客户端 IP，在入口处获取后传入
+        request_id: ingress 已记账时传入，避免重复 bump / 日志
 
     Returns:
         SSE响应对象
     """
-    reporter = SSEProgressReporter(lambda: _generate_analyze_events(analyze_request, client_ip))
+    reporter = SSEProgressReporter(
+        lambda: _generate_analyze_events(analyze_request, client_ip, request_id=request_id)
+    )
     return reporter.create_response()
 
 
-def _analyze_plain(analyze_request, client_ip):
+def _analyze_plain(analyze_request, client_ip, request_id=None):
     """
     非流式分析：封装流式实现，消费事件流后返回 JSON。
     供脚本等简单客户端使用。
@@ -234,7 +260,9 @@ def _analyze_plain(analyze_request, client_ip):
     error_msg = None
     status_code = 500
     try:
-        for event_str in _generate_analyze_events(analyze_request, client_ip):
+        for event_str in _generate_analyze_events(
+            analyze_request, client_ip, request_id=request_id
+        ):
             if not event_str.startswith('data: '):
                 continue
             data = json.loads(event_str[6:].strip())
@@ -262,7 +290,7 @@ def _analyze_plain(analyze_request, client_ip):
     return result, 200
 
 
-def _generate_analyze_events(analyze_request, client_ip):
+def _generate_analyze_events(analyze_request, client_ip, request_id=None):
     """
     流式分析核心：生成 SSE 事件流（progress + result/error）。
     供 _analyze_with_stream 和 _analyze_plain 复用。
@@ -291,7 +319,8 @@ def _generate_analyze_events(analyze_request, client_ip):
 
     try:
         char_count = len(text) if text else 0
-        request_id = _log_request(text, stream_mode=True, client_ip=client_ip)
+        if request_id is None:
+            request_id = _log_request(text, stream_mode=True, client_ip=client_ip)
 
         # 创建线程安全的进度队列
         progress_queue = queue.Queue()
@@ -386,8 +415,12 @@ def _generate_analyze_events(analyze_request, client_ip):
         res = analysis_result
 
         elapsed_time = time.perf_counter() - start_time
-        _log_response(res, char_count, elapsed_time, stream_mode=True,
-                     request_id=request_id, wait_time=lock_wait_time)
+        from backend.platform.model_routing import is_worker
+
+        if is_worker():
+            _log_response(
+                res, char_count, elapsed_time, stream_mode=True, request_id=request_id
+            )
 
         # 验证和修复结果
         res = _validate_and_fix_result(res)

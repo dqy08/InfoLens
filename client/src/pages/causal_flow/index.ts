@@ -1,3 +1,7 @@
+/**
+ * LLM Causal Flow — Info Lens 核心产品页（见 CONTEXT.md Product focus）。
+ * 逐 token 归因 DAG；推理走 instruct 槽位（/api/prediction-attribute、/api/tokenize）。
+ */
 import * as d3 from 'd3';
 import '../../shared/core/d3-polyfill';
 import '../../css/pages/causal_flow.scss';

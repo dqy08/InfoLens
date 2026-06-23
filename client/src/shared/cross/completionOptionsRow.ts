@@ -54,6 +54,7 @@ export function createCompletionOptionsRow(
         MAX_NEW_TOKENS_INPUT_ID
     ) as HTMLInputElement | null;
 
+    // Causal Flow / Chat 默认 instruct（核心推理路径，见 CONTEXT.md Product focus）
     const readStoredModelVariant = (): PredictionAttributeModelVariant =>
         lsReadEnum(options.modelVariantStorageKey, ['base', 'instruct'] as const, 'instruct');
 

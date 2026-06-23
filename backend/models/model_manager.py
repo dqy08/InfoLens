@@ -1,5 +1,7 @@
 """模型管理：base / instruct 双槽位，HF 权重缓存共用。
 
+产品主路径见 CONTEXT.md「Product focus」：核心产品 Causal Flow，核心推理为 instruct 槽位。
+
 加载约定（由简到繁）：
 - ``ensure_slot_weights_loaded(slot)``：仅保证该槽位 HF 权重在 ``_hf_loaded`` 中（归因、tokenize）。
 - ``ensure_slot_ready(slot)``：槽位可推理；base 另挂 ``project_registry`` / QwenLM（信息密度）。
@@ -30,10 +32,12 @@ class ModelSlot(str, Enum):
     """与 CLI --base_model / --instruct_model 对应的两个对等槽位。"""
 
     BASE = "base"
+    # 核心产品 Causal Flow 主路径（prediction-attribute、tokenize、completions 默认）
     INSTRUCT = "instruct"
 
 
 CONFIGURED_SLOTS: tuple[ModelSlot, ...] = (ModelSlot.BASE, ModelSlot.INSTRUCT)
+LOCAL_SLOTS: tuple[ModelSlot, ...] = CONFIGURED_SLOTS
 
 
 def _resolved_hf_path_for_slot(slot: ModelSlot) -> str:
@@ -143,12 +147,13 @@ def preload_all_slots():
 
     get_app_context(prefer_module_context=True)
 
-    paths = {_resolved_hf_path_for_slot(s) for s in CONFIGURED_SLOTS}
+    paths = {_resolved_hf_path_for_slot(s) for s in LOCAL_SLOTS}
 
     with _init_lock:
         for path in paths:
             ensure_model_loaded(path)
-        _register_base_qwenlm_if_needed()
+        if ModelSlot.BASE in LOCAL_SLOTS:
+            _register_base_qwenlm_if_needed()
 
 
 def ensure_slot_ready(slot: ModelSlot):
@@ -178,7 +183,7 @@ def ensure_base_slot_ready():
 
 
 def ensure_instruct_slot_ready():
-    """语义分析 / 续写：``ensure_slot_ready(ModelSlot.INSTRUCT)``。"""
+    """Causal Flow 核心路径 / 语义分析 / 续写：``ensure_slot_ready(ModelSlot.INSTRUCT)``。"""
     return ensure_slot_ready(ModelSlot.INSTRUCT)
 
 

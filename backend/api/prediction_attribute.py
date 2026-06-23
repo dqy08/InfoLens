@@ -1,4 +1,8 @@
-"""预测归因 API"""
+"""预测归因 API
+
+核心产品 LLM Causal Flow 的主 API：逐 token 调用本端点做生成与归因（见 CONTEXT.md Product focus）。
+默认使用 instruct 槽位（``model: "instruct"``）。
+"""
 import gc
 import time
 
@@ -94,58 +98,80 @@ def prediction_attribute(attribution_request):
 
     client_ip = get_client_ip()
     start_time = time.perf_counter()
-    request_id = log_prediction_attribute_request(
-        context=context,
-        target_prediction=target_prediction,
-        target_token_id=target_token_id,
-        model=model,
-        source_page=source_page,
-        flow_id=flow_id,
-        flow_step=flow_step,
-        client_ip=client_ip,
-    )
+    logged: dict = {"request_id": None}
 
-    lock_acquired = inference_lock.acquire(timeout=LOCK_WAIT_TIMEOUT)
-    if not lock_acquired:
-        return {
-            "success": False,
-            "message": (
-                f"Queue wait exceeded {LOCK_WAIT_TIMEOUT} seconds; "
-                "server is busy, please try again later."
-            ),
-        }, 503
-
-    try:
-        result = analyze_prediction_attribution(
-            context,
-            target_prediction,
-            model=model,
+    def log_fn():
+        logged["request_id"] = log_prediction_attribute_request(
+            context=context,
+            target_prediction=target_prediction,
             target_token_id=target_token_id,
-        )
-    except ValueError as e:
-        return {"success": False, "message": str(e)}, 400
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        exit_if_oom(e, defer_seconds=1)
-        return {"success": False, "message": str(e)}, 500
-    finally:
-        inference_lock.release()
-        gc.collect()
-
-    elapsed = time.perf_counter() - start_time
-    tokens = len(result.get("token_attribution", []))
-    target_token = result.get("target_token")
-    if flow_id is None:
-        print(
-            f"\t📤 API prediction_attribute response: req_id={request_id}, "
-            f"target={target_token!r}, tokens={tokens}, response_time={elapsed:.4f}s"
-        )
-    else:
-        print(
-            f"\t📤 API prediction_attribute response: req_id={request_id}, "
-            f"flow_id={flow_id!r}, flow_step={flow_step}, "
-            f"target={target_token!r}, tokens={tokens}, response_time={elapsed:.4f}s"
+            model=model,
+            source_page=source_page,
+            flow_id=flow_id,
+            flow_step=flow_step,
+            client_ip=client_ip,
         )
 
-    return {"success": True, **result}, 200
+    def local_fn():
+        request_id = logged["request_id"]
+        lock_acquired = inference_lock.acquire(timeout=LOCK_WAIT_TIMEOUT)
+        if not lock_acquired:
+            return {
+                "success": False,
+                "message": (
+                    f"Queue wait exceeded {LOCK_WAIT_TIMEOUT} seconds; "
+                    "server is busy, please try again later."
+                ),
+            }, 503
+
+        try:
+            result = analyze_prediction_attribution(
+                context,
+                target_prediction,
+                model=model,
+                target_token_id=target_token_id,
+            )
+        except ValueError as e:
+            return {"success": False, "message": str(e)}, 400
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            exit_if_oom(e, defer_seconds=1)
+            return {"success": False, "message": str(e)}, 500
+        finally:
+            inference_lock.release()
+            gc.collect()
+
+        elapsed = time.perf_counter() - start_time
+        from backend.platform.inference_response_log import log_prediction_attribute_response
+        from backend.platform.model_routing import is_worker
+
+        if is_worker():
+            log_prediction_attribute_response(
+                request_id=request_id,
+                result=result,
+                elapsed=elapsed,
+                flow_id=flow_id,
+                flow_step=flow_step,
+                for_worker=True,
+            )
+
+        return {"success": True, **result}, 200
+
+    from backend.core.prediction_attributor import slot_for_prediction_attr_model
+    from backend.platform.inference_ingress import ingress_inference
+    from backend.platform.inference_response_log import make_prediction_attribute_response_logger
+
+    slot = slot_for_prediction_attr_model(model)
+    return ingress_inference(
+        slot=slot,
+        api_path="/api/prediction-attribute",
+        json_body=attribution_request,
+        stream=False,
+        timeout=60.0,
+        log_fn=log_fn,
+        local_fn=local_fn,
+        response_log_fn=make_prediction_attribute_response_logger(
+            logged, flow_id=flow_id, flow_step=flow_step
+        ),
+    )

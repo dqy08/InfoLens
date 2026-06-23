@@ -2,6 +2,7 @@
 预测归因：对任意上下文的下一个 token 预测，计算指定候选 token 的 logit
 对输入各 token embedding 的梯度，以梯度 L2 范数作为归因分。
 
+Causal Flow（核心产品）每步生成都经此模块；生产环境以 instruct 槽位为主（``model: "instruct"``）。
 由请求参数 `model` 选择权重槽位：base 为主槽位（--base_model），instruct 为 instruct 槽位（--instruct_model）。
 """
 

@@ -39,7 +39,8 @@ def _build_success_response(result, debug_info: bool = False):
 
 def _generate_semantic_events(
     query: str, text: str, submode: Optional[str] = None, debug_info: bool = False,
-    full_match_degree_only: bool = False, client_ip: Optional[str] = None
+    full_match_degree_only: bool = False, client_ip: Optional[str] = None,
+    request_id: Optional[int] = None,
 ):
     """
     流式语义分析核心：生成 SSE 事件流（progress + result/error）。
@@ -49,7 +50,8 @@ def _generate_semantic_events(
     if client_ip is None:
         client_ip = get_client_ip()
     start_time = time.perf_counter()
-    request_id = _log_request(query, text, client_ip)
+    if request_id is None:
+        request_id = _log_request(query, text, client_ip)
 
     progress_queue = queue.Queue()
     analysis_done = threading.Event()
@@ -121,11 +123,16 @@ def _generate_semantic_events(
             return
 
         elapsed = time.perf_counter() - start_time
-        tokens = len(analysis_result.get("token_attention", []))
-        print(
-            f"\t📤 API analyze_semantic (stream) response: req_id={request_id}, "
-            f"tokens={tokens}, response_time={elapsed:.4f}s"
-        )
+        from backend.platform.inference_response_log import log_analyze_semantic_response
+        from backend.platform.model_routing import is_worker
+
+        if is_worker():
+            log_analyze_semantic_response(
+                request_id=request_id,
+                result=analysis_result,
+                elapsed=elapsed,
+                for_worker=True,
+            )
         yield send_result_event(_build_success_response(analysis_result, debug_info))
     except Exception as e:
         import traceback
@@ -138,17 +145,21 @@ def _generate_semantic_events(
 
 def _analyze_semantic_with_stream(
     query: str, text: str, submode: Optional[str] = None, debug_info: bool = False,
-    full_match_degree_only: bool = False, client_ip: Optional[str] = None
+    full_match_degree_only: bool = False, client_ip: Optional[str] = None,
+    request_id: Optional[int] = None,
 ):
     """流式语义分析，通过 SSE 返回阶段级进度"""
     return SSEProgressReporter(
-        lambda: _generate_semantic_events(query, text, submode, debug_info, full_match_degree_only, client_ip)
+        lambda: _generate_semantic_events(
+            query, text, submode, debug_info, full_match_degree_only, client_ip, request_id
+        )
     ).create_response()
 
 
 def _analyze_semantic_plain(
     query: str, text: str, submode: Optional[str] = None, debug_info: bool = False,
-    full_match_degree_only: bool = False, client_ip: Optional[str] = None
+    full_match_degree_only: bool = False, client_ip: Optional[str] = None,
+    request_id: Optional[int] = None,
 ):
     """
     非流式语义分析：封装流式实现，消费事件流后返回 JSON。
@@ -158,7 +169,9 @@ def _analyze_semantic_plain(
     error_msg = None
     status_code = 500
     try:
-        for event_str in _generate_semantic_events(query, text, submode, debug_info, full_match_degree_only, client_ip):
+        for event_str in _generate_semantic_events(
+            query, text, submode, debug_info, full_match_degree_only, client_ip, request_id
+        ):
             if not event_str.startswith('data: '):
                 continue
             data = json.loads(event_str[6:].strip())
@@ -207,6 +220,32 @@ def analyze_semantic(semantic_request):
         return {"success": False, "message": "缺少 text 字段"}, 400
 
     client_ip = get_client_ip()
-    if stream:
-        return _analyze_semantic_with_stream(query, text, submode, debug_info, full_match_degree_only, client_ip)
-    return _analyze_semantic_plain(query, text, submode, debug_info, full_match_degree_only, client_ip)
+    logged: dict = {"request_id": None}
+
+    def log_fn():
+        logged["request_id"] = _log_request(query, text, client_ip)
+
+    def local_fn():
+        rid = logged["request_id"]
+        if stream:
+            return _analyze_semantic_with_stream(
+                query, text, submode, debug_info, full_match_degree_only, client_ip, rid
+            )
+        return _analyze_semantic_plain(
+            query, text, submode, debug_info, full_match_degree_only, client_ip, rid
+        )
+
+    from backend.models.model_manager import ModelSlot
+    from backend.platform.inference_ingress import ingress_inference
+    from backend.platform.inference_response_log import make_analyze_semantic_response_logger
+
+    return ingress_inference(
+        slot=ModelSlot.INSTRUCT,
+        api_path="/api/analyze-semantic",
+        json_body=semantic_request,
+        stream=bool(stream),
+        timeout=60.0,
+        log_fn=log_fn,
+        local_fn=local_fn,
+        response_log_fn=make_analyze_semantic_response_logger(logged),
+    )

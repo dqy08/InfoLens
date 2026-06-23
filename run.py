@@ -29,6 +29,14 @@ ENV_HELP = """
   FORCE_CPU=1           强制使用 CPU，忽略 CUDA/MPS
   FORCE_INT8=1          启用 INT8 量化（CPU/CUDA 支持，MPS 不支持）
   CPU_FORCE_BFLOAT16=1  CPU 使用 bfloat16
+  INFORADAR_REMOTE_HF_TOKEN  master 代理 Private Worker 时必填（无 fallback）
+  INFORADAR_ROLE            Docker 部署：default（或不设）、master、worker（见 docker_entrypoint.sh）
+  INFORADAR_REMOTE_BASE     master 时 base Worker 根 URL（无尾斜杠）
+  INFORADAR_PORT            Docker 监听端口（默认 7860）
+  INFORADAR_BASE_MODEL      Docker 覆盖 base 模型 id（可选）
+  INFORADAR_INSTRUCT_MODEL  Docker 覆盖 instruct 模型 id（可选，master/default）
+
+产品主路径：Causal Flow + instruct 槽位（见 CONTEXT.md Product focus）。
 """
 
 
@@ -81,16 +89,44 @@ def _parse_args():
         action="store_true",
         help="输出详细调试信息（如 semantic 分析的推理原文与 top-k）",
     )
+    parser.add_argument(
+        "--slots",
+        default=None,
+        help="本进程参与的槽位，逗号分隔（默认 base,instruct）",
+    )
+    parser.add_argument(
+        "--remote",
+        action="append",
+        default=None,
+        metavar="SLOT=ORIGIN",
+        help="槽位不本地加载，请求转发到 Space 根 URL（可重复）",
+    )
+    parser.add_argument(
+        "--worker",
+        action="store_true",
+        help="Worker 形态：关 stats/demo 写/admin；保留静态页",
+    )
     return parser.parse_args()
 
 
 def _load_and_run(args):
     """加载 server、backend 等依赖并启动服务（parse_args 遇 -h 已退出，不会执行到此）"""
+    from backend.platform.model_routing import configure_from_args, is_worker
+
+    try:
+        configure_from_args(args)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
+
     from flask_compress import Compress
     from flask_cors import CORS
 
     import server
     from server import app
+    from backend.platform.worker_guards import register_worker_guards
+
+    register_worker_guards(app)
     from backend.platform.app_context import AppContext
     from backend.demo.data_utils import resolve_data_dir
     from backend.models.model_manager import preload_all_slots
@@ -102,6 +138,9 @@ def _load_and_run(args):
         CORS(app.app, headers="Content-Type")
 
     Compress(app.app)
+
+    if is_worker():
+        print("[inforadar] worker mode: visit_stats persist and demo writes disabled", flush=True)
 
     if not getattr(ctx.args, "no_auto_load", False):
         def load_model_in_background():

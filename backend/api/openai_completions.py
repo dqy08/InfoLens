@@ -42,7 +42,9 @@ COMPLETION_WALL_CLOCK_TIMEOUT_SEC = 300.0
 
 def _log_cmpl_issue(request_id: int, msg: str) -> None:
     """续写非正常结束时一行说明（与成功时的 ``_log_completion_finished`` 二选一）。"""
-    print(f"\t⚠️ openai_completions req_id={request_id}: {msg}")
+    from backend.platform.inference_response_log import log_openai_completions_issue
+
+    log_openai_completions_issue(msg, request_id=request_id)
 
 
 def _log_request(model: str, prompt: str, client_ip=None):
@@ -64,9 +66,13 @@ def _build_response(
     bpe_strings: List[Dict[str, Any]],
     *,
     model_display: str,
+    ttft_s: Optional[float] = None,
 ):
     """OpenAICompletionsResponse：choices + usage；info_radar 为续写 token 级数据。"""
     total = prompt_tokens + completion_tokens
+    info_radar: Dict[str, Any] = {"bpe_strings": bpe_strings}
+    if ttft_s is not None:
+        info_radar["ttft_s"] = ttft_s
     return {
         "id": "cmpl-stub-info-radar",
         "object": "text_completion",
@@ -84,9 +90,7 @@ def _build_response(
             "completion_tokens": completion_tokens,
             "total_tokens": total,
         },
-        "info_radar": {
-            "bpe_strings": bpe_strings,
-        },
+        "info_radar": info_radar,
     }
 
 
@@ -127,32 +131,15 @@ def _log_completion_finished(
     elapsed: float,
     ttft_s: Optional[float],
 ) -> None:
-    """旧非流式分支在返回 JSON 前、流式在发出末条 result 前的同一行日志。
+    from backend.platform.inference_response_log import log_openai_completions_response
 
-    prompt tokens/s = prompt_tokens / TTFT；generate tokens/s = completion_tokens / (elapsed − TTFT)。
-    ``elapsed`` 为 SSE 起点至结束；与 TTFT 计时原点不完全一致时，吞吐率为近似值。
-    无 TTFT（``ttft_s`` 为 ``None``）时不输出时间与吞吐字段。
-    """
-    if ttft_s is None:
-        tps_part = ""
-    else:
-        decode_s = elapsed - ttft_s
-        prompt_time_s = f"{ttft_s:.4f}" if ttft_s > 0 else "n/a"
-        gen_time_s = f"{decode_s:.4f}" if decode_s > 0 else "n/a"
-        prompt_part = f"{prompt_tokens / ttft_s:.2f}" if ttft_s > 0 else "n/a"
-        gen_part = (
-            f"{completion_tokens / decode_s:.2f}"
-            if completion_tokens and decode_s > 0
-            else "n/a"
-        )
-        tps_part = (
-            f", time= {prompt_time_s} / {gen_time_s}s, "
-            f"tokens/s= {prompt_part} / {gen_part}"
-        )
-    print(
-        f"\t📤 API openai_completions response: req_id={request_id}, "
-        f"prompt/generate tokens= {prompt_tokens} / {completion_tokens}, "
-        f"{tps_part}"
+    log_openai_completions_response(
+        request_id=request_id,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        elapsed=elapsed,
+        ttft_s=ttft_s,
+        for_worker=True,
     )
 
 
@@ -257,13 +244,16 @@ def _generate_completion_events(
                         f"tokens={prompt_tokens}/{completion_tokens}",
                     )
                 else:
-                    _log_completion_finished(
-                        request_id,
-                        prompt_tokens,
-                        completion_tokens,
-                        elapsed,
-                        ttft_s,
-                    )
+                    from backend.platform.model_routing import is_worker
+
+                    if is_worker():
+                        _log_completion_finished(
+                            request_id,
+                            prompt_tokens,
+                            completion_tokens,
+                            elapsed,
+                            ttft_s,
+                        )
                 yield send_result_event(
                     _build_response(
                         _completion_text,
@@ -272,6 +262,7 @@ def _generate_completion_events(
                         completion_tokens,
                         bpe_strings,
                         model_display=model_display,
+                        ttft_s=ttft_s,
                     )
                 )
                 return
@@ -326,9 +317,26 @@ def _completions_sse_response(
 def completions_stop():
     """
     单用户串行：置位全局停止标志，使当前续写在 generate 与 SSE 回调中尽快结束。
-    无需 body；新一次 POST /v1/completions 时会在流式生成器入口清除该标志。
+    若当前续写槽位为 remote，同步转发 Worker。
     """
+    from backend.platform.inference_proxy import (
+        get_active_remote_completion_slot,
+        proxy_request,
+    )
+    from backend.platform.model_routing import remote_origin
+
     global_completion_stop_event.set()
+
+    slot = get_active_remote_completion_slot()
+    if slot is not None:
+        origin = remote_origin(slot)
+        if origin:
+            return proxy_request(
+                origin,
+                "POST",
+                "/api/v1/completions/stop",
+                timeout=10.0,
+            )
     return {"ok": True}, 200
 
 
@@ -422,33 +430,46 @@ def completions_prompt(completions_prompt_request):
     else:
         enable_thinking = enable_thinking_raw
 
-    client_ip = get_client_ip()
-    from backend.platform.access_log import log_openai_completions_prompt_request
-
-    log_openai_completions_prompt_request(
-        model,
-        messages=messages,
-        enable_thinking=enable_thinking,
-        tools_count=len(tools) if tools else 0,
-        client_ip=client_ip,
-    )
-
     try:
         slot = slot_for_prediction_attr_model(model)
     except ValueError as e:
         return {"success": False, "message": str(e)}, 400
 
-    try:
-        prompt_used = apply_chat_template_for_completion(
-            messages,
-            slot=slot,
-            enable_thinking=enable_thinking,
-            tools=tools,
-        )
-    except PromptTooLongError as e:
-        return {"success": False, "message": str(e)}, 400
+    client_ip = get_client_ip()
+    from backend.platform.access_log import log_openai_completions_prompt_request
 
-    return {"prompt_used": prompt_used}, 200
+    def log_fn():
+        log_openai_completions_prompt_request(
+            model,
+            messages=messages,
+            enable_thinking=enable_thinking,
+            tools_count=len(tools) if tools else 0,
+            client_ip=client_ip,
+        )
+
+    def local_fn():
+        try:
+            prompt_used = apply_chat_template_for_completion(
+                messages,
+                slot=slot,
+                enable_thinking=enable_thinking,
+                tools=tools,
+            )
+        except PromptTooLongError as e:
+            return {"success": False, "message": str(e)}, 400
+        return {"prompt_used": prompt_used}, 200
+
+    from backend.platform.inference_ingress import ingress_inference
+
+    return ingress_inference(
+        slot=slot,
+        api_path="/api/v1/completions/prompt",
+        json_body=completions_prompt_request,
+        stream=False,
+        timeout=30.0,
+        log_fn=log_fn,
+        local_fn=local_fn,
+    )
 
 
 def completions_prompt_incremental(completions_prompt_incremental_request):
@@ -493,17 +514,28 @@ def completions_prompt_incremental(completions_prompt_incremental_request):
     except ValueError as e:
         return {"success": False, "message": str(e)}, 400
 
-    try:
-        suffix = compute_tool_append_suffix(
-            tool_content,
-            enable_thinking=enable_thinking,
-            tool_name=tool_name or None,
-            slot=slot,
-        )
-    except RuntimeError as e:
-        return {"success": False, "message": str(e)}, 500
+    def local_fn():
+        try:
+            suffix = compute_tool_append_suffix(
+                tool_content,
+                enable_thinking=enable_thinking,
+                tool_name=tool_name or None,
+                slot=slot,
+            )
+        except RuntimeError as e:
+            return {"success": False, "message": str(e)}, 500
+        return {"incremental_suffix": suffix}, 200
 
-    return {"incremental_suffix": suffix}, 200
+    from backend.platform.inference_ingress import ingress_inference
+
+    return ingress_inference(
+        slot=slot,
+        api_path="/api/v1/completions/prompt-incremental",
+        json_body=completions_prompt_incremental_request,
+        stream=False,
+        timeout=30.0,
+        local_fn=local_fn,
+    )
 
 
 def completions(completions_request):
@@ -559,13 +591,32 @@ def completions(completions_request):
         return {"success": False, "message": str(e)}, 400
 
     client_ip = get_client_ip()
-    request_id = _log_request(model, prompt, client_ip)
+    logged: dict = {"request_id": None}
 
-    return _completions_sse_response(
-        prompt,
-        request_id,
+    def log_fn():
+        logged["request_id"] = _log_request(model, prompt, client_ip)
+
+    def local_fn():
+        return _completions_sse_response(
+            prompt,
+            logged["request_id"],
+            slot=slot,
+            model_display=_model_display_name_for_slot(slot),
+            max_tokens=max_tokens,
+            bypass_site_context_limit=bypass_site,
+        )
+
+    from backend.platform.inference_ingress import ingress_inference
+    from backend.platform.inference_response_log import make_completions_response_logger
+
+    return ingress_inference(
         slot=slot,
-        model_display=_model_display_name_for_slot(slot),
-        max_tokens=max_tokens,
-        bypass_site_context_limit=bypass_site,
+        api_path="/api/v1/completions",
+        json_body=completions_request,
+        stream=True,
+        timeout=COMPLETION_WALL_CLOCK_TIMEOUT_SEC,
+        log_fn=log_fn,
+        local_fn=local_fn,
+        response_log_fn=make_completions_response_logger(logged),
+        track_remote_completion=True,
     )
