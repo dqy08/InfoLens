@@ -7,7 +7,7 @@ import * as d3 from 'd3';
 import type { TextAnalysisAPI, AnalysisData } from '../../shared/api/GLTR_API';
 import { createRawSnapshot } from '../cross/tokenUtils';
 import { extractErrorMessage } from '../core/errorUtils';
-import { DEMO_FILE_ENDPOINT } from '../api/apiConfig';
+import { resolveDemoFileUrl } from '../api/apiConfig';
 
 // ============ 接口定义 ============
 
@@ -84,7 +84,7 @@ export class ServerStorage implements IDemoStorage {
         
         try {
             // 使用配置的端点前缀，前端只需关心demo的逻辑路径
-            const data = await d3.json(`${DEMO_FILE_ENDPOINT}${path}`);
+            const data = await d3.json(resolveDemoFileUrl(path));
             
             // 直接返回数据，验证由上层（DemoResourceLoader）统一处理
             return { success: true, data: data as AnalysisData };

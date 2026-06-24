@@ -1,0 +1,45 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: client/src/package-lock.json
+
+      - name: Build static site
+        run: cd client/src && npm ci && npm run build:github-pages
+
+      - name: Disable Jekyll
+        run: touch client/dist-github_pages/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: client/dist-github_pages
+
+      - uses: actions/deploy-pages@v4
+        id: deployment

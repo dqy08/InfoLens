@@ -25,10 +25,6 @@ license: apache-2.0
 
 <img src="client/src/assets/images/dag-cot.gif" width="460" alt="Chain-of-thought" />
 
-## Legacy name: InfoRadar
-
-InfoRadar is the former project and repo name. It still appears in parts of the codebase. 
-
 ## 📦 Quick Start
 
 ### Using Docker (Recommended)
@@ -60,6 +56,10 @@ python run.py
 ```
 
 Visit `http://localhost:5001` in your browser.
+
+## Legacy name: InfoRadar
+
+InfoRadar is the former project and repo name. It still appears in parts of the codebase. 
 
 ## 📜 License
 

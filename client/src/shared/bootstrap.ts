@@ -6,6 +6,7 @@
 import * as d3 from 'd3';
 import { SimpleEventHandler } from './core/SimpleEventHandler';
 import { TextAnalysisAPI } from './api/GLTR_API';
+import { resolveApiBase } from './api/resolveApiBase';
 import { initForceNarrowFromStorage } from './core/responsive';
 import { getTokenSurprisalColor, getByteSurprisalColor, HISTOGRAM_MIN_ALPHA } from './cross/SurprisalColorConfig';
 import { initClientActivityPing } from './core/clientActivityPing';
@@ -28,12 +29,13 @@ export interface CommonAppContext {
  * @param element 事件处理器绑定的元素（默认为 document.body）
  * @returns 初始化后的公共对象
  */
-export function initializeCommonApp(apiPrefix: string = '', element?: Element): CommonAppContext {
+export function initializeCommonApp(apiPrefix?: string, element?: Element): CommonAppContext {
+    const base = apiPrefix ?? resolveApiBase();
     initForceNarrowFromStorage();
     initOnlineCountDisplay();
-    initClientActivityPing(apiPrefix);
+    initClientActivityPing(base);
 
-    const api = new TextAnalysisAPI(apiPrefix);
+    const api = new TextAnalysisAPI(base);
 
     // 使用传入的元素或默认 body 元素
     const targetElement = element || document.body;

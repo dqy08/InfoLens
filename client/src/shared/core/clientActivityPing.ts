@@ -1,4 +1,4 @@
-import URLHandler from './URLHandler';
+import { apiUrl } from '../api/resolveApiBase';
 import { AdminManager } from '../cross/adminManager';
 import { applyOnlineCount } from '../cross/onlineCountDisplay';
 import { isSessionActive } from './activitySession';
@@ -53,7 +53,7 @@ function shouldReportAtSec(totalActiveSec: number): boolean {
 export function initClientActivityPing(apiPrefix: string | null | undefined): void {
     if (typeof window === 'undefined') return;
     const admin = AdminManager.getInstance();
-    const endpoint = `${apiPrefix || URLHandler.basicURL()}/api/client-activity`;
+    const endpoint = apiUrl('/api/client-activity', apiPrefix ?? undefined);
     let totalActiveSec = 0;
     let lastReportedSec = 0;
 

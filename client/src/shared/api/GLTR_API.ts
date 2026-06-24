@@ -3,7 +3,7 @@ Attn API and Types
  */
 
 import * as d3 from "d3";
-import URLHandler from "../core/URLHandler";
+import { resolveApiBase, apiUrl } from "./resolveApiBase";
 import {cleanSpecials} from "../core/Util";
 import * as semanticResultCache from "../cross/semanticResultCache";
 import { getSemanticMatchThreshold } from "../cross/semanticThresholdManager";
@@ -62,10 +62,15 @@ export type SemanticResult = {
 export class TextAnalysisAPI {
     private adminToken: string | null = null;
 
-    constructor(private baseURL: string = null) {
+    constructor(private baseURL: string | null = null) {
         if (this.baseURL == null) {
-            this.baseURL = URLHandler.basicURL();
+            this.baseURL = resolveApiBase();
         }
+    }
+
+    /** 本实例 API 根（构造时或 resolveApiBase）；路径以 `/api/...` 传入 */
+    private url(path: string): string {
+        return apiUrl(path, this.baseURL ?? '');
     }
 
     /**
@@ -94,12 +99,12 @@ export class TextAnalysisAPI {
 
 
     public list_demos(path?: string): Promise<{ path: string, items: Array<{type: 'folder'|'file', name: string, path: string}> }> {
-        const url = this.baseURL + '/api/list_demos' + (path ? `?path=${encodeURIComponent(path)}` : '');
+        const url = this.url('/api/list_demos') + (path ? `?path=${encodeURIComponent(path)}` : '');
         return d3.json(url);
     }
 
     public save_demo(name: string, data: AnalyzeResponse, path: string = '/', overwrite: boolean = false): Promise<{ success: boolean, exists?: boolean, message?: string, file?: string }> {
-        return d3.json(this.baseURL + '/api/save_demo', {
+        return d3.json(this.url('/api/save_demo'), {
             method: "POST",
             body: JSON.stringify({ name, data, path, overwrite }),
             headers: this.getHeaders()
@@ -107,7 +112,7 @@ export class TextAnalysisAPI {
     }
 
     public delete_demo(file: string): Promise<{ success: boolean, message?: string }> {
-        return d3.json(this.baseURL + '/api/delete_demo', {
+        return d3.json(this.url('/api/delete_demo'), {
             method: "POST",
             body: JSON.stringify({ file }),
             headers: this.getHeaders()
@@ -115,7 +120,7 @@ export class TextAnalysisAPI {
     }
 
     public move_demo(file: string, targetPath: string): Promise<{ success: boolean, message?: string }> {
-        return d3.json(this.baseURL + '/api/move_demo', {
+        return d3.json(this.url('/api/move_demo'), {
             method: "POST",
             body: JSON.stringify({ file, target_path: targetPath }),
             headers: this.getHeaders()
@@ -123,7 +128,7 @@ export class TextAnalysisAPI {
     }
 
     public move_folder(path: string, targetPath: string): Promise<{ success: boolean, message?: string }> {
-        return d3.json(this.baseURL + '/api/move_demo', {
+        return d3.json(this.url('/api/move_demo'), {
             method: "POST",
             body: JSON.stringify({ path, target_path: targetPath }),
             headers: this.getHeaders()
@@ -131,7 +136,7 @@ export class TextAnalysisAPI {
     }
 
     public rename_demo(file: string, newName: string): Promise<{ success: boolean, message?: string }> {
-        return d3.json(this.baseURL + '/api/rename_demo', {
+        return d3.json(this.url('/api/rename_demo'), {
             method: "POST",
             body: JSON.stringify({ file, new_name: newName }),
             headers: this.getHeaders()
@@ -139,7 +144,7 @@ export class TextAnalysisAPI {
     }
 
     public rename_folder(path: string, newName: string): Promise<{ success: boolean, message?: string }> {
-        return d3.json(this.baseURL + '/api/rename_folder', {
+        return d3.json(this.url('/api/rename_folder'), {
             method: "POST",
             body: JSON.stringify({ path, new_name: newName }),
             headers: this.getHeaders()
@@ -147,7 +152,7 @@ export class TextAnalysisAPI {
     }
 
     public delete_folder(path: string): Promise<{ success: boolean, message?: string }> {
-        return d3.json(this.baseURL + '/api/delete_folder', {
+        return d3.json(this.url('/api/delete_folder'), {
             method: "POST",
             body: JSON.stringify({ path }),
             headers: this.getHeaders()
@@ -155,11 +160,11 @@ export class TextAnalysisAPI {
     }
 
     public list_all_folders(): Promise<{ folders: string[] }> {
-        return d3.json(this.baseURL + '/api/list_all_folders');
+        return d3.json(this.url('/api/list_all_folders'));
     }
 
     public create_folder(parentPath: string, folderName: string): Promise<{ success: boolean, message?: string }> {
-        return d3.json(this.baseURL + '/api/create_folder', {
+        return d3.json(this.url('/api/create_folder'), {
             method: "POST",
             body: JSON.stringify({ parent_path: parentPath, folder_name: folderName }),
             headers: this.getHeaders()
@@ -202,7 +207,7 @@ export class TextAnalysisAPI {
 
         // 否则使用传统的JSON响应
         const payload = this.buildAnalyzePayload(model, text, bitmask, stream);
-        return d3.json(this.baseURL + '/api/analyze', {
+        return d3.json(this.url('/api/analyze'), {
             method: "POST",
             body: JSON.stringify(payload),
             headers: {
@@ -224,7 +229,7 @@ export class TextAnalysisAPI {
      * @returns Promise<{success: boolean, text?: string, url?: string, char_count?: number, message?: string}>
      */
     public fetchUrlText(url: string): Promise<{success: boolean, text?: string, url?: string, char_count?: number, message?: string}> {
-        return d3.json(this.baseURL + '/api/fetch_url', {
+        return d3.json(this.url('/api/fetch_url'), {
             method: "POST",
             body: JSON.stringify({ url }),
             headers: {
@@ -268,13 +273,13 @@ export class TextAnalysisAPI {
         online_now?: number,
         online_window_sec?: number,
     }> {
-        return d3.json(this.baseURL + '/api/visit_stats', {
+        return d3.json(this.url('/api/visit_stats'), {
             headers: this.getHeaders()
         });
     }
 
     public resetVisitStats(): Promise<{ success: boolean, error?: string }> {
-        return d3.json(this.baseURL + '/api/visit_stats/reset', {
+        return d3.json(this.url('/api/visit_stats/reset'), {
             method: 'POST',
             headers: this.getHeaders(),
         });
@@ -286,7 +291,7 @@ export class TextAnalysisAPI {
         bins?: { hour: string, active_visits: number, active_sec: number }[],
         error?: string,
     }> {
-        return d3.json(this.baseURL + '/api/visit_stats/active_visits_timeline', {
+        return d3.json(this.url('/api/visit_stats/active_visits_timeline'), {
             headers: this.getHeaders(),
         });
     }
@@ -295,7 +300,7 @@ export class TextAnalysisAPI {
      * 获取可用模型列表
      */
     public getAvailableModels(): Promise<{ success: boolean, models: string[] }> {
-        return d3.json(this.baseURL + '/api/available_models');
+        return d3.json(this.url('/api/available_models'));
     }
 
     /**
@@ -309,7 +314,7 @@ export class TextAnalysisAPI {
         use_int8: boolean,
         use_bfloat16: boolean
     }> {
-        return d3.json(this.baseURL + '/api/current_model');
+        return d3.json(this.url('/api/current_model'));
     }
 
     /**
@@ -320,7 +325,7 @@ export class TextAnalysisAPI {
         use_int8?: boolean, 
         use_bfloat16?: boolean
     ): Promise<{ success: boolean, message?: string, model?: string }> {
-        return d3.json(this.baseURL + '/api/switch_model', {
+        return d3.json(this.url('/api/switch_model'), {
             method: "POST",
             body: JSON.stringify({ 
                 model,
@@ -367,7 +372,7 @@ export class TextAnalysisAPI {
     }
 
     private async fetchSemanticJson(path: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<SemanticResult> {
-        const res = await fetch(this.baseURL + path, {
+        const res = await fetch(this.url(path), {
             method: 'POST',
             headers: this.getHeaders(),
             body: JSON.stringify(payload),
@@ -412,7 +417,7 @@ export class TextAnalysisAPI {
             const safeResolve = (v: T) => { if (!settled && !signal?.aborted) { settled = true; resolve(v); } };
             const safeReject = (e: unknown) => { if (!settled) { settled = true; reject(e); } };
 
-            fetch(this.baseURL + path, {
+            fetch(this.url(path), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=UTF-8' },
                 body: JSON.stringify(payload),

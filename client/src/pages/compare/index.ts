@@ -6,6 +6,7 @@ import {SimpleEventHandler} from "../../shared/core/SimpleEventHandler";
 import type {AnalysisData, AnalyzeResponse, FrontendAnalyzeResult, FrontendToken} from "../../shared/api/GLTR_API";
 import {TextAnalysisAPI} from "../../shared/api/GLTR_API";
 import URLHandler from "../../shared/core/URLHandler";
+import {resolveApiBase} from "../../shared/api/resolveApiBase";
 import {Histogram, type HistogramBinClickEvent} from '../../shared/vis/Histogram';
 import {ScatterPlot} from '../../shared/vis/ScatterPlot';
 import {getDiffColor} from '../../shared/cross/SurprisalColorConfig';
@@ -132,7 +133,7 @@ type DemoColumnData = {
 
 window.onload = () => {
     // 初始化公共应用组件
-    const api_prefix = URLHandler.parameters['api'] || '';
+    const api_prefix = resolveApiBase();
     const bodyElement = <Element>d3.select('body').node();
     const { eventHandler, api, tokenSurprisalColorScale, byteSurprisalColorScale, totalSurprisalFormat } = initializeCommonApp(api_prefix, bodyElement);
 

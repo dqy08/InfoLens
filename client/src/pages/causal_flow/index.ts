@@ -11,10 +11,10 @@ import { initChatPanelLayout } from '../../shared/ui/chat_panel_layout';
 import { PANEL_SPLIT_STORAGE_KEY_GEN_ATTRIBUTE } from '../../shared/cross/panelSplitStorage';
 import { TextInputController } from '../../shared/controllers/textInputController';
 import { initializeCommonApp } from '../../shared/bootstrap';
+import { resolveApiBase } from '../../shared/api/resolveApiBase';
 import { registerPageBusy } from '../../shared/core/activitySession';
 import { setPageOptsGetter } from '../../shared/core/clientActivityPing';
 import { showAlertDialog } from '../../shared/ui/dialog';
-import URLHandler from '../../shared/core/URLHandler';
 import { createToast } from '../../shared/ui/toast';
 import type { PredictionAttributeModelVariant } from '../../shared/prediction_attribution/core/attributionResultCache';
 import {
@@ -373,7 +373,7 @@ function readStoredDagLayoutMode(): DagLayoutMode {
     );
 }
 
-const apiPrefix = URLHandler.parameters['api'] || '';
+const apiPrefix = resolveApiBase();
 const bodyElement = d3.select('body').node() as Element;
 const { totalSurprisalFormat, api } = initializeCommonApp(apiPrefix, bodyElement);
 const apiBaseForRequests = apiPrefix === '' ? '' : String(apiPrefix);

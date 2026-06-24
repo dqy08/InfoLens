@@ -14,7 +14,7 @@ import { getCurrentLanguage, initI18n, tr } from '../../shared/lang/i18n-lite';
 import { AdminManager } from '../../shared/cross/adminManager';
 import { SettingsMenuManager } from '../../shared/cross/settingsMenuManager';
 import { initializeCommonApp } from '../../shared/bootstrap';
-import URLHandler from '../../shared/core/URLHandler';
+import { resolveApiBase } from '../../shared/api/resolveApiBase';
 import { DEFAULT_DEMO_URL_PARAM } from '../../shared/cross/contentUrl';
 
 /** 首页轮播三帧 → 打包 demo slug（与 demos/causal_flow/*.json 文件名一致） */
@@ -212,7 +212,7 @@ bindGenAttributeBadgeLink();
 
 const syncGenAttributeCardPreview = initGenAttributeCardCarousel();
 
-const apiPrefix = URLHandler.parameters['api'] || '';
+const apiPrefix = resolveApiBase();
 const { api } = initializeCommonApp(apiPrefix);
 const adminManager = AdminManager.getInstance();
 api.setAdminToken(adminManager.isInAdminMode() ? adminManager.getAdminToken() : null);

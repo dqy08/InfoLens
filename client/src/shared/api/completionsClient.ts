@@ -1,7 +1,7 @@
-import URLHandler from '../core/URLHandler';
+import { AdminManager } from '../cross/adminManager';
+import { apiUrl } from './resolveApiBase';
 import * as completionResultCache from '../../features/chat/completionResultCache';
 import type { ChatDisplaySegment } from '../../features/chat/chatSegments';
-import { AdminManager } from '../cross/adminManager';
 import type { TokenWithOffset } from './generatedSchemas';
 
 function completionsRequestHeaders(): Record<string, string> {
@@ -65,7 +65,7 @@ export type OpenAICompletionsResponse = {
  * Chat 页 Stop 仅调用此函数而不断开 fetch，以便仍收到末条 SSE result（含 info_radar）。
  */
 export function postCompletionsStop(): void {
-    const url = URLHandler.basicURL() + COMPLETIONS_STOP_PATH;
+    const url = apiUrl(COMPLETIONS_STOP_PATH);
     void fetch(url, {
         method: 'POST',
         headers: completionsRequestHeaders(),
@@ -98,7 +98,7 @@ export async function postCompletionsPrompt(
     options: PostCompletionsPromptOptions = {}
 ): Promise<{ prompt_used: string }> {
     const { signal } = options;
-    const url = URLHandler.basicURL() + COMPLETIONS_PROMPT_PATH;
+    const url = apiUrl(COMPLETIONS_PROMPT_PATH);
     const payload: Record<string, unknown> = {
         model: body.model,
         messages: body.messages,
@@ -146,7 +146,7 @@ export async function postCompletionsPromptIncremental(
     options: PostCompletionsPromptOptions = {}
 ): Promise<{ incremental_suffix: string }> {
     const { signal } = options;
-    const url = URLHandler.basicURL() + COMPLETIONS_PROMPT_INCREMENTAL_PATH;
+    const url = apiUrl(COMPLETIONS_PROMPT_INCREMENTAL_PATH);
     const payload: Record<string, unknown> = {
         model: body.model,
         tool_content: body.tool_content,
@@ -321,7 +321,7 @@ export async function postCompletions(
         fetchRemote();
 
         function fetchRemote(): void {
-        fetch(URLHandler.basicURL() + COMPLETIONS_PATH, {
+        fetch(apiUrl(COMPLETIONS_PATH), {
             method: 'POST',
             headers: completionsRequestHeaders(),
             body: JSON.stringify(body),

@@ -1,7 +1,4 @@
-/**
- * /api/prediction-attribute 与 /api/tokenize：统一请求与 JSON 解析。
- * 归因缓存规则见 {@link ./attributionResultCache}。
- */
+import { apiUrl } from '../../api/resolveApiBase';
 import type { AttributionApiResponse, PredictionAttributeModelVariant } from './attributionResultCache';
 import type { PromptTokenSpan } from '../causal_flow/genAttributeDagPreprocess';
 import {
@@ -41,7 +38,7 @@ export async function fetchPredictionAttribute(
     if (typeof flowStep === 'number' && Number.isInteger(flowStep) && flowStep >= 0) {
         bodyObj.flow_step = flowStep;
     }
-    const res = await fetch(`${apiBaseForRequests}/api/prediction-attribute`, {
+    const res = await fetch(apiUrl('/api/prediction-attribute', apiBaseForRequests), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bodyObj),
@@ -112,7 +109,7 @@ export async function fetchTokenize(
     context: string,
     model: PredictionAttributeModelVariant,
 ): Promise<PromptTokenSpan[]> {
-    const res = await fetch(`${apiBase}/api/tokenize`, {
+    const res = await fetch(apiUrl('/api/tokenize', apiBase), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ context, model }),

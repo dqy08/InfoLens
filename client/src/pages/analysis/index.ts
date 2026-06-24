@@ -8,6 +8,7 @@ import type {AnalyzeResponse, FrontendAnalyzeResult, FrontendToken} from "../../
 import {GLTR_HoverEvent, GLTR_Mode, GLTR_Text_Box} from "../../shared/vis/GLTR_Text_Box";
 import {ToolTip} from "../../shared/vis/ToolTip";
 import URLHandler from "../../shared/core/URLHandler";
+import {resolveApiBase} from "../../shared/api/resolveApiBase";
 import {Histogram, HistogramBinClickEvent} from '../../shared/vis/Histogram';
 import {ScatterPlot, type ScatterChunkClickEvent} from '../../shared/vis/ScatterPlot';
 import {initThemeManager} from '../../shared/ui/theme';
@@ -78,7 +79,7 @@ const mapIDtoEnum = {
 
 window.onload = () => {
     // 初始化公共应用组件
-    const api_prefix = URLHandler.parameters['api'] || '';
+    const api_prefix = resolveApiBase();
     const bodyElement = <Element>d3.select('body').node();
     const { eventHandler, api, tokenSurprisalColorScale, byteSurprisalColorScale, totalSurprisalFormat } = initializeCommonApp(api_prefix, bodyElement);
 

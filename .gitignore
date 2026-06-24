@@ -15,6 +15,7 @@ client/src/.cache-loader/
 
 # --- 构建产物 ---
 client/dist/
+client/dist-github_pages/
 build/
 dist/
 *.egg-info/

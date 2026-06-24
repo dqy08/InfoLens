@@ -5,9 +5,12 @@ const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 const { expandHtmlIncludes } = require('./scripts/includeHtmlPartials.js');
 const { injectPageMeta } = require('./scripts/injectPageMetaIntoHtml.js');
+const { injectApiBaseMeta } = require('./scripts/injectApiBaseMeta.js');
 const { GenAttributeDemoManifestPlugin } = require('./scripts/genAttributeDemoManifestPlugin.js');
 
 const SRC_ROOT = __dirname;
+const WEB_DIST = process.env.INFORADAR_WEB_DIST || 'dist';
+const WEB_DIST_ABS = path.resolve(__dirname, '..', WEB_DIST);
 
 const PAGE_META_DOC = JSON.parse(
     fs.readFileSync(path.join(SRC_ROOT, 'assets', 'content', 'page-meta.json'), 'utf8')
@@ -19,7 +22,9 @@ function copyHtmlWithIncludesAndPageMeta(from, to, pageKey) {
         to,
         transform(content) {
             const expanded = expandHtmlIncludes(content.toString('utf8'), SRC_ROOT);
-            return injectPageMeta(expanded, pageKey, PAGE_META_DOC);
+            let html = injectPageMeta(expanded, pageKey, PAGE_META_DOC);
+            html = injectApiBaseMeta(html);
+            return html;
         },
     };
 }
@@ -178,7 +183,7 @@ module.exports = {
     },
     output: {
         filename: '[name].js',
-        path: path.resolve(__dirname, '../dist/'),
+        path: WEB_DIST_ABS,
         clean: true // Clean output directory before emit
     },
     performance: {

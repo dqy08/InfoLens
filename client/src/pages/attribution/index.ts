@@ -11,9 +11,9 @@ import { initChatPanelLayout } from '../../shared/ui/chat_panel_layout';
 import { PANEL_SPLIT_STORAGE_KEY_ATTRIBUTION } from '../../shared/cross/panelSplitStorage';
 import { TextInputController } from '../../shared/controllers/textInputController';
 import { initializeCommonApp } from '../../shared/bootstrap';
+import { resolveApiBase } from '../../shared/api/resolveApiBase';
 import { registerPageBusy } from '../../shared/core/activitySession';
 import { showAlertDialog } from '../../shared/ui/dialog';
-import URLHandler from '../../shared/core/URLHandler';
 import { initCachedHistoryQueryDropdown, type CachedHistorySelectContext } from '../../shared/cross/cachedHistoryUi';
 import {
     DEFAULT_CONTENT_URL_PARAM,
@@ -56,7 +56,7 @@ function readStoredAttributionPageModelVariant(): PredictionAttributeModelVarian
     return lsReadEnum(ATTRIBUTION_MODEL_VARIANT_STORAGE_KEY, ['base', 'instruct'] as const, 'instruct');
 }
 
-const apiPrefix = URLHandler.parameters['api'] || '';
+const apiPrefix = resolveApiBase();
 const bodyElement = d3.select('body').node() as Element;
 const { eventHandler, totalSurprisalFormat, api } = initializeCommonApp(apiPrefix, bodyElement);
 /** 与 {@link TextAnalysisAPI} 一致：`?api=` 非空时用其作为基址，否则 `''`，URL 为 `/api/...`（相对当前站点根路径） */

@@ -3,6 +3,7 @@
  */
 
 import { lsGet, lsRemove, lsSet } from '../storage/localStorageHelpers';
+import { apiUrl } from '../api/resolveApiBase';
 
 const INFORADAR_ADMIN_TOKEN_KEY = 'admin_token';
 const ADMIN_MODE_KEY = 'is_admin_mode';
@@ -54,7 +55,7 @@ export class AdminManager {
     public async setAdminToken(token: string): Promise<{ success: boolean; message?: string }> {
         try {
             // 验证token（调用后端API）
-            const response = await fetch('/api/check_admin', {
+            const response = await fetch(apiUrl('/api/check_admin'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
