@@ -123,7 +123,9 @@ function initGenAttributeCardCarousel(): (theme: Theme) => void {
         index = i;
         syncDots();
         syncSlideVideos();
-        slides[i].scrollIntoView({ behavior, block: 'nearest', inline: 'start' });
+        const slideWidth = viewport.clientWidth;
+        if (slideWidth <= 0) return;
+        viewport.scrollTo({ left: i * slideWidth, behavior });
     };
 
     const restartTimer = (): void => {

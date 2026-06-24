@@ -19,7 +19,7 @@ export const translations: Translations = {
         // - client/src/content/home.en.html
         // - client/src/content/home.zh.html
         // 由 contentLoader.ts 动态加载
-        'Info Lens': 'Info Lens 信息透镜',
+        'Back to Info Lens': '返回 Info Lens 信息透镜',
         'A toolbox for exploring the informational nature of LLMs and language': '用于探索 LLM 与语言的信息本质的工具箱',
         'Info Highlight': 'Info Highlight 信息高亮',
         "- highlight the 'informative' parts": '- 高亮“信息量大”的地方',

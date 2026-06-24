@@ -92,7 +92,12 @@ html[data-theme='dark'] body.nav-landing-page {
 }
 
 .nav-landing-heartline {
-  margin: 2rem 0 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0;
   text-align: center;
   font-size: 0.875rem;
   line-height: 1.45;
@@ -101,8 +106,47 @@ html[data-theme='dark'] body.nav-landing-page {
   letter-spacing: 0.02em;
 }
 
+.nav-landing-social {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.nav-landing-social-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  opacity: 0.72;
+  text-decoration: none;
+  background: center / contain no-repeat;
+  transition: opacity 0.15s ease;
+
+  &:hover {
+    opacity: 1;
+  }
+
+  &--github {
+    background-image: url('../../assets/images/social/github.svg');
+  }
+
+  &--huggingface {
+    background-image: url('../../assets/images/social/huggingface.svg');
+  }
+
+  &--xiaohongshu {
+    width: 1.5rem;
+    background-image: url('../../assets/images/social/xiaohongshu.svg');
+  }
+}
+
+html[data-theme='dark'] .nav-landing-social-link--github {
+  background-image: url('../../assets/images/social/github-dark.svg');
+}
+
 .nav-landing-hint {
-  margin: 0;
+  margin: 2rem 0 0.35rem;
   text-align: center;
   font-size: 0.8125rem;
   font-style: italic;

@@ -1,0 +1,39 @@
+name: Sync to Hugging Face Spaces
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Force push to HF Spaces (overwrite remote history)
+        type: boolean
+        default: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        space: [dqy08/InfoLens, dqy08/infolens-worker1]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push to ${{ matrix.space }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::error::HF_TOKEN secret is empty — check repo Settings → Secrets → Actions"
+            exit 1
+          fi
+          PUSH_ARGS=()
+          if [ "${{ github.event.forced }}" = "true" ] || [ "${{ inputs.force }}" = "true" ]; then
+            echo "Force push enabled (github.event.forced=${{ github.event.forced }}, inputs.force=${{ inputs.force }})"
+            PUSH_ARGS+=(--force)
+          fi
+          git -c credential.helper='!f() { echo "username=dqy08"; echo "password=$HF_TOKEN"; }; f' \
+            push "${PUSH_ARGS[@]}" https://huggingface.co/spaces/${{ matrix.space }} HEAD:main
