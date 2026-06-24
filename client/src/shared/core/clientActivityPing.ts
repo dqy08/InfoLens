@@ -64,7 +64,10 @@ export function initClientActivityPing(apiPrefix: string | null | undefined): vo
             total_active_sec: totalActiveSec,
             delta_active_sec: deltaActiveSec,
         };
-        if (includeClientOs) payload.client_os = detectInitialClientOs();
+        if (includeClientOs) {
+            payload.client_os = detectInitialClientOs();
+            payload.client_origin = location.hostname;
+        }
         if (_pageOptsGetter) {
             const active = Object.fromEntries(Object.entries(_pageOptsGetter()).filter(([, v]) => v));
             if (Object.keys(active).length > 0) payload.page_opts = active;

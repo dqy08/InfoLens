@@ -11,6 +11,7 @@ import { initForceNarrowFromStorage } from './core/responsive';
 import { getTokenSurprisalColor, getByteSurprisalColor, HISTOGRAM_MIN_ALPHA } from './cross/SurprisalColorConfig';
 import { initClientActivityPing } from './core/clientActivityPing';
 import { initOnlineCountDisplay } from './cross/onlineCountDisplay';
+import { initFrontendBuildTimeDisplay } from './cross/buildTimeDisplay';
 
 /**
  * 公共初始化返回对象
@@ -33,6 +34,7 @@ export function initializeCommonApp(apiPrefix?: string, element?: Element): Comm
     const base = apiPrefix ?? resolveApiBase();
     initForceNarrowFromStorage();
     initOnlineCountDisplay();
+    initFrontendBuildTimeDisplay();
     initClientActivityPing(base);
 
     const api = new TextAnalysisAPI(base);

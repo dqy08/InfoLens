@@ -66,6 +66,18 @@
   }
 }
 
+.settings-menu-build-info {
+  padding: 8px 12px;
+  color: var(--text-muted, var(--text-color));
+  opacity: 0.75;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  text-align: center;
+}
+
 .settings-menu {
   position: absolute;
   top: 100%;

@@ -17,10 +17,12 @@ _WIN = {"page_loads": 0, "active_visits": 0}
 _PAGE_SEC = defaultdict(int)
 _API = defaultdict(int)
 _OS_REPORTS = defaultdict(int)  # 与同页「首轮心跳」(delta_active_sec == total_active_sec) 对齐，仅凭该包附带 client_os 计一次
+_ORIGIN_REPORTS = defaultdict(int)  # 首轮心跳且 client_origin 非 HF 默认域时计一次 active visit
 _GEN_ATTR_OPT_SEC = defaultdict(int)  # causal_flow.html 各非默认选项处于激活状态的活跃秒
 _VALID_CLIENT_OS = frozenset({"ios", "android", "windows", "macos", "linux", "unknown"})
+_DEFAULT_ORIGIN_HOSTS = frozenset({"localhost", "127.0.0.1", "[::1]"})
 
-_STATS_SCHEMA_VERSION = 3
+_STATS_SCHEMA_VERSION = 4
 
 # client/src/shared/cross/visitStatsContract.ts：STATS_PERIOD_* / STATS_UTC_HOUR_FMT
 # client/src/shared/cross/settingsMenuManager.ts handleVisitStatsClick：PAGE_ORDER / API_ORDER / OS_ORDER
@@ -151,6 +153,18 @@ def _migrate_dict_keys(d: Mapping[str, object], migrations: dict[str, str]) -> t
 
 _PAGE_SEC_KEY_MIGRATIONS = {
     "gen_attribute.html": "causal_flow.html",
+    "/": "index.html",
+    "InfoLens": "index.html",
+    "info_radar": "index.html",
+    "InfoRadar": "index.html",
+    "home": "index.html",
+    "index": "index.html",
+    "analysis": "analysis.html",
+    "compare": "compare.html",
+    "chat": "chat.html",
+    "attribution": "attribution.html",
+    "causal_flow": "causal_flow.html",
+    "gen_attribute": "causal_flow.html",
 }
 
 _API_KEY_MIGRATIONS = {
@@ -162,15 +176,18 @@ _API_KEY_MIGRATIONS = {
 
 
 def _migrate_stats_record(rec: dict) -> tuple[dict, bool]:
-    """Hub 上 v1/v2 等旧 stats 记录在内存中升到 v3；下次 persist 写回。"""
-    if int(rec.get("stats_schema_version", 1)) >= _STATS_SCHEMA_VERSION:
-        return rec, False
+    """Hub 上旧 stats 记录在内存中升级；page_sec key 每次读入都归一化合并。"""
     out = copy.deepcopy(rec)
-    changed = False
-    for field, mig in (("page_sec", _PAGE_SEC_KEY_MIGRATIONS), ("api", _API_KEY_MIGRATIONS)):
+    changed = _apply_page_sec_normalization(out)
+    if int(rec.get("stats_schema_version", 1)) >= _STATS_SCHEMA_VERSION:
+        return out, changed
+    for field, mig in (("api", _API_KEY_MIGRATIONS),):
         if field in out:
             out[field], c = _migrate_dict_keys(out[field], mig)
             changed |= c
+    if "origin_visits" not in out:
+        out["origin_visits"] = {}
+        changed = True
     if int(out.get("stats_schema_version", 1)) < _STATS_SCHEMA_VERSION:
         out["stats_schema_version"] = _STATS_SCHEMA_VERSION
         changed = True
@@ -188,9 +205,66 @@ def _ingest_remote_base(remote: dict) -> dict:
 
 
 def normalize_page_key(page_key: str) -> str:
-    if page_key == "gen_attribute.html":
-        return "causal_flow.html"
-    return page_key
+    k = (page_key or "").strip()
+    if not k or k == "/":
+        return "index.html"
+    mapped = _PAGE_SEC_KEY_MIGRATIONS.get(k)
+    if mapped:
+        return mapped
+    if k in _STATS_PAGE_ORDER:
+        return k
+    if not k.endswith(".html"):
+        with_html = f"{k}.html"
+        if with_html in _STATS_PAGE_ORDER:
+            return with_html
+    # GitHub Pages 项目站根路径段（如 /InfoLens/ → InfoLens）
+    if "." not in k and "/" not in k:
+        return "index.html"
+    return k
+
+
+def _coalesce_page_sec_keys(page_sec: Mapping[str, object]) -> tuple[dict[str, int], bool]:
+    out: dict[str, int] = defaultdict(int)
+    changed = False
+    for k, v in page_sec.items():
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        nk = normalize_page_key(str(k))
+        if nk != k:
+            changed = True
+        out[nk] += n
+    return dict(out), changed
+
+
+def _apply_page_sec_normalization(rec: dict) -> bool:
+    if "page_sec" not in rec:
+        return False
+    normalized, changed = _coalesce_page_sec_keys(rec["page_sec"])
+    if changed:
+        rec["page_sec"] = normalized
+    return changed
+
+
+def is_default_origin(hostname: str) -> bool:
+    """HF Space / 本地开发视为默认来源，不计入 origin_visits。"""
+    h = hostname.strip().lower()
+    if not h:
+        return True
+    if h in _DEFAULT_ORIGIN_HOSTS:
+        return True
+    return h == "hf.space" or h.endswith(".hf.space")
+
+
+def normalize_client_origin(hostname: str | None) -> str | None:
+    """非默认来源返回小写 hostname，否则 None。"""
+    if hostname is None:
+        return None
+    h = hostname.strip().lower()
+    if not h or is_default_origin(h):
+        return None
+    return h
 
 
 def _download_stats_total() -> dict | None:
@@ -279,7 +353,7 @@ def _increment_nonempty(h: dict) -> bool:
     """是否有尚未写入远端的任意增量。"""
     if h.get("page_loads") or h.get("active_visits"):
         return True
-    if h.get("page_sec") or h.get("api") or h.get("os") or h.get("gen_attr_opt_sec"):
+    if h.get("page_sec") or h.get("api") or h.get("os") or h.get("gen_attr_opt_sec") or h.get("origin_visits"):
         return True
     return False
 
@@ -303,6 +377,7 @@ def _apply_persist_success(total_rec: dict, committed_sample: dict) -> None:
         _subtract_defaultdict_int(_PAGE_SEC, committed_sample["session_page_sec"])
         _subtract_defaultdict_int(_API, committed_sample["session_api"])
         _subtract_defaultdict_int(_OS_REPORTS, committed_sample["session_os_reports"])
+        _subtract_defaultdict_int(_ORIGIN_REPORTS, committed_sample["session_origin_reports"])
         _subtract_defaultdict_int(_GEN_ATTR_OPT_SEC, committed_sample["session_gen_attr_opt_sec"])
 
 
@@ -431,8 +506,9 @@ def record_page_load():
 def record_activity_report(
     page_key: str, delta_active_sec: int, total_active_sec: int,
     client_os: str | None = None,
+    client_origin: str | None = None,
 ) -> None:
-    """累计秒与增量秒相等 ⇔ 本轮第一次有效心跳；活跃访问与 client_os 均仅在此包上计一次。"""
+    """累计秒与增量秒相等 ⇔ 本轮第一次有效心跳；活跃访问、client_os、非 HF origin 均仅在此包上计一次。"""
     if _stats_disabled:
         return
     if total_active_sec < 1 or delta_active_sec < 0:
@@ -441,6 +517,7 @@ def record_activity_report(
         return
     page_key = normalize_page_key(page_key)
     first_in_nav = delta_active_sec == total_active_sec
+    origin_key = normalize_client_origin(client_origin) if first_in_nav else None
     with _LOCK:
         if first_in_nav:
             _WIN["active_visits"] += 1
@@ -448,6 +525,8 @@ def record_activity_report(
                 key = client_os.strip().lower()
                 nk = key if key in _VALID_CLIENT_OS else "unknown"
                 _OS_REPORTS[nk] += 1
+            if origin_key:
+                _ORIGIN_REPORTS[origin_key] += 1
         if delta_active_sec > 0:
             _PAGE_SEC[page_key] += delta_active_sec
 
@@ -475,6 +554,8 @@ def _sample_locked_counters() -> dict:
     with _LOCK:
         bo = _base.get("os")
         base_os = dict(bo) if isinstance(bo, dict) else {}
+        bov = _base.get("origin_visits")
+        base_origin_visits = dict(bov) if isinstance(bov, dict) else {}
         bgo = _base.get("gen_attr_opt_sec")
         base_gen_attr_opt_sec = dict(bgo) if isinstance(bgo, dict) else {}
         return {
@@ -483,12 +564,14 @@ def _sample_locked_counters() -> dict:
             "session_page_sec": dict(_PAGE_SEC),
             "session_api": dict(_API),
             "session_os_reports": dict(_OS_REPORTS),
+            "session_origin_reports": dict(_ORIGIN_REPORTS),
             "session_gen_attr_opt_sec": dict(_GEN_ATTR_OPT_SEC),
             "bp": int(_base_int(_base, "page_loads")),
             "bav": _base_int(_base, "active_visits"),
             "base_page_sec": dict(_base.get("page_sec") or {}),
             "base_api": dict(_base.get("api") or {}),
             "base_os": base_os,
+            "base_origin_visits": base_origin_visits,
             "base_gen_attr_opt_sec": base_gen_attr_opt_sec,
             "saved_at": _base.get("saved_at"),
         }
@@ -497,14 +580,21 @@ def _sample_locked_counters() -> dict:
 def _merge_from_sample(s: dict) -> tuple[dict, dict, dict]:
     """(管理员 API 快照, stats_total 的 body 不含 saved_at, stats_delta 的 body)。"""
     sp, sa, so = s["session_page_sec"], s["session_api"], s["session_os_reports"]
+    sor = s["session_origin_reports"]
     bpp, bpa, bpo = s["base_page_sec"], s["base_api"], s["base_os"]
+    bpo_origin = s["base_origin_visits"]
     sg, bgo = s["session_gen_attr_opt_sec"], s["base_gen_attr_opt_sec"]
 
-    total_page_sec = {k: bpp.get(k, 0) + sp.get(k, 0) for k in set(bpp) | set(sp)}
+    total_page_sec_raw = {k: bpp.get(k, 0) + sp.get(k, 0) for k in set(bpp) | set(sp)}
+    total_page_sec, _ = _coalesce_page_sec_keys(total_page_sec_raw)
     total_api = {k: bpa.get(k, 0) + sa.get(k, 0) for k in set(bpa) | set(sa)}
     total_os = {
         k: int(bpo.get(k, 0)) + int(so.get(k, 0))
         for k in set(bpo) | set(so)
+    }
+    total_origin_visits = {
+        k: int(bpo_origin.get(k, 0)) + int(sor.get(k, 0))
+        for k in set(bpo_origin) | set(sor)
     }
     total_gen_attr_opt_sec = {k: bgo.get(k, 0) + sg.get(k, 0) for k in set(bgo) | set(sg)}
 
@@ -512,10 +602,13 @@ def _merge_from_sample(s: dict) -> tuple[dict, dict, dict]:
     total_api = _ordered_str_int_map(_STATS_API_ORDER, total_api)
     total_os = _ordered_str_int_map(_STATS_OS_ORDER, total_os)
     total_gen_attr_opt_sec = _ordered_str_int_map(_STATS_GEN_ATTR_OPT_ORDER, total_gen_attr_opt_sec)
-    ord_pg = _ordered_str_int_map(_STATS_PAGE_ORDER, sp)
+    ord_pg, _ = _coalesce_page_sec_keys(sp)
+    ord_pg = _ordered_str_int_map(_STATS_PAGE_ORDER, ord_pg)
     ord_api = _ordered_str_int_map(_STATS_API_ORDER, sa)
     ord_os = _ordered_str_int_map(_STATS_OS_ORDER, so)
+    ord_origin = dict(sorted(sor.items()))
     ord_gen_attr_opt_sec = _ordered_str_int_map(_STATS_GEN_ATTR_OPT_ORDER, sg)
+    sorted_origin_visits = dict(sorted(total_origin_visits.items()))
 
     tpl, tav = s["bp"] + s["sw_pl"], s["bav"] + s["sw_av"]
 
@@ -523,6 +616,7 @@ def _merge_from_sample(s: dict) -> tuple[dict, dict, dict]:
         "success": True,
         "totals": {"page_loads": tpl, "active_visits": tav},
         "os": total_os,
+        "origin_visits": sorted_origin_visits,
         "page_sec": total_page_sec,
         "api": total_api,
         "gen_attr_opt_sec": total_gen_attr_opt_sec,
@@ -532,6 +626,7 @@ def _merge_from_sample(s: dict) -> tuple[dict, dict, dict]:
         "page_loads": tpl,
         "active_visits": tav,
         "os": total_os,
+        "origin_visits": sorted_origin_visits,
         "page_sec": total_page_sec,
         "api": total_api,
         "gen_attr_opt_sec": total_gen_attr_opt_sec,
@@ -540,6 +635,7 @@ def _merge_from_sample(s: dict) -> tuple[dict, dict, dict]:
         "page_loads": s["sw_pl"],
         "active_visits": s["sw_av"],
         "os": ord_os,
+        "origin_visits": ord_origin,
         "page_sec": ord_pg,
         "api": ord_api,
         "gen_attr_opt_sec": ord_gen_attr_opt_sec,

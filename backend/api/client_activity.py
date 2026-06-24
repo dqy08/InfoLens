@@ -31,7 +31,8 @@ def client_activity_report(activity_body=None):
     except (TypeError, ValueError):
         return _activity_response()
     path_only = p.split("?", 1)[0].split("#", 1)[0].strip()
-    page_key = path_only.rstrip("/").split("/")[-1] or path_only
+    segments = [s for s in path_only.rstrip("/").split("/") if s]
+    page_key = segments[-1] if segments else "index.html"
     if not page_key:
         return _activity_response()
     if "?" in p:
@@ -45,9 +46,11 @@ def client_activity_report(activity_body=None):
     if not request_has_valid_admin():
         raw_os = d.get("client_os")
         client_os = str(raw_os).strip() if raw_os is not None else None
+        raw_origin = d.get("client_origin")
+        client_origin = str(raw_origin).strip() if raw_origin is not None else None
 
         record_heartbeat()
-        record_activity_report(page_key, dlt, cum, client_os)
+        record_activity_report(page_key, dlt, cum, client_os, client_origin)
         if page_key == "causal_flow.html":
             raw_opts = d.get("page_opts")
             if isinstance(raw_opts, dict):

@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const webpack = require('webpack');
 const ForkTsCheckerWebpackPlugin = require('fork-ts-checker-webpack-plugin');
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const CopyWebpackPlugin = require('copy-webpack-plugin');
@@ -15,6 +16,7 @@ const WEB_DIST_ABS = path.resolve(__dirname, '..', WEB_DIST);
 const PAGE_META_DOC = JSON.parse(
     fs.readFileSync(path.join(SRC_ROOT, 'assets', 'content', 'page-meta.json'), 'utf8')
 );
+const BUILD_TIME = new Date().toISOString();
 
 function copyHtmlWithIncludesAndPageMeta(from, to, pageKey) {
     return {
@@ -132,6 +134,9 @@ module.exports = {
         extensions: ['.ts', '.js']
     },
     plugins: [
+        new webpack.DefinePlugin({
+            __BUILD_TIME__: JSON.stringify(BUILD_TIME),
+        }),
         new MiniCssExtractPlugin({
             // Options similar to the same options in webpackOptions.output
             // both options are optional

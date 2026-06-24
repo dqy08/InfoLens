@@ -111,6 +111,8 @@ function visitStatsHtml(data: VisitStatsRow): string {
     const pg = data.page_sec ?? {};
     const ap = data.api ?? {};
     const os = data.os ?? {};
+    const originVisits = data.origin_visits ?? {};
+    const originVisitsBase = sb.origin_visits ?? {};
     const hasBase = Object.keys(sb).length > 0;
     const fmtTotal = (v: number) => (hasBase ? String(v) : 'unknown');
     const linesJoined = (keys: string[], cur: Record<string, number>, base: Record<string, number>): string[] => {
@@ -145,6 +147,12 @@ function visitStatsHtml(data: VisitStatsRow): string {
         })
         : ['(none)'];
 
+    const originVisitKeys = Object.keys(originVisits).filter((k) => (originVisits[k] ?? 0) > 0).sort();
+    const originVisitLines = originVisitKeys.map((k) => {
+        const v = originVisits[k] ?? 0;
+        return `\t${esc(k)}: ${fmtTotal(v)}${deltaSuffix(v - (originVisitsBase[k] ?? 0))}`;
+    });
+
     return [
         `Last delta reset: ${esc(data.reset_at ? new Date(data.reset_at).toLocaleString() : 'unknown')}`,
         `Last persisted: ${esc(data.saved_at ? new Date(data.saved_at).toLocaleString() : 'unknown')}`,
@@ -152,6 +160,7 @@ function visitStatsHtml(data: VisitStatsRow): string {
         `[All-time (${g('+ delta since reset')})]`,
         `Page loads: ${fmtTotal(t.page_loads)}${deltaSuffix(t.page_loads - (sb.page_loads ?? 0))}`,
         `Active visits: ${fmtTotal(t.active_visits)}${deltaSuffix(t.active_visits - (sb.active_visits ?? 0))}`,
+        ...originVisitLines,
         `Online: ${data.online_now ?? 'unknown'}`,
         '',
         '[OS]',

@@ -248,6 +248,7 @@ export class TextAnalysisAPI {
         success: boolean,
         totals: { page_loads: number, active_visits: number },
         os: Record<string, number>,
+        origin_visits?: Record<string, number>,
         page_sec: Record<string, number>,
         api: Record<string, number>,
         gen_attr_opt_sec?: Record<string, number>,
@@ -259,6 +260,7 @@ export class TextAnalysisAPI {
             page_sec?: Record<string, number>,
             api?: Record<string, number>,
             os?: Record<string, number>,
+            origin_visits?: Record<string, number>,
             gen_attr_opt_sec?: Record<string, number>,
         },
         reset_base?: {
@@ -267,6 +269,7 @@ export class TextAnalysisAPI {
             page_sec?: Record<string, number>,
             api?: Record<string, number>,
             os?: Record<string, number>,
+            origin_visits?: Record<string, number>,
             gen_attr_opt_sec?: Record<string, number>,
         },
         reset_at?: string | null,
