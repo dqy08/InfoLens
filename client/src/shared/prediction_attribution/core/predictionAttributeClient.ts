@@ -1,3 +1,7 @@
+/**
+ * /api/prediction-attribute 与 /api/tokenize：统一请求与 JSON 解析。
+ * 归因缓存规则见 {@link ./attributionResultCache}。
+ */
 import { apiUrl } from '../../api/resolveApiBase';
 import type { AttributionApiResponse, PredictionAttributeModelVariant } from './attributionResultCache';
 import type { PromptTokenSpan } from '../causal_flow/genAttributeDagPreprocess';

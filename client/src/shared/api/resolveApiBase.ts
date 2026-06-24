@@ -6,9 +6,6 @@ import URLHandler from '../core/URLHandler';
 
 export const INFORADAR_API_BASE_META_NAME = 'inforadar-api-base';
 
-/** 门户 Space 根 URL（GitHub Pages 构建注入 meta 用）。 */
-export const PORTAL_API_BASE = 'https://dqy08-infolens.hf.space';
-
 export function normalizeApiBase(url: string): string {
     const s = url.trim();
     if (!s) return '';

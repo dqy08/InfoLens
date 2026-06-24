@@ -13,7 +13,6 @@ import { initChatPanelLayout } from '../../shared/ui/chat_panel_layout';
 import { PANEL_SPLIT_STORAGE_KEY_CHAT } from '../../shared/cross/panelSplitStorage';
 import { TextInputController } from '../../shared/controllers/textInputController';
 import { initializeCommonApp } from '../../shared/bootstrap';
-import { resolveApiBase } from '../../shared/api/resolveApiBase';
 import { registerPageBusy } from '../../shared/core/activitySession';
 import { showAlertDialog } from '../../shared/ui/dialog';
 import URLHandler from '../../shared/core/URLHandler';
@@ -94,9 +93,8 @@ void migrateLegacyChatCacheIfNeeded();
 
 const showToast = createToast('#toast').show;
 
-const apiPrefix = resolveApiBase();
 const bodyElement = d3.select('body').node() as Element;
-const { eventHandler, totalSurprisalFormat, api } = initializeCommonApp(apiPrefix, bodyElement);
+const { eventHandler, totalSurprisalFormat, api, apiBase } = initializeCommonApp(undefined, bodyElement);
 
 const adminManager = AdminManager.getInstance();
 api.setAdminToken(adminManager.isInAdminMode() ? adminManager.getAdminToken() : null);
@@ -1207,7 +1205,7 @@ if (chatCopyFulltextBtn) {
 initDensityAttributionSidebar({
     eventHandler,
     getCurrentAnalyzeResult: () => chatTurnsView.getActiveAnalyzeResult(),
-    apiPrefix,
+    apiPrefix: apiBase,
     showToast,
     getContextPrefix: () => chatTurnsView.getPromptPrefixForSidebar() || currentPromptUsed,
     predictionModelVariant: 'instruct',

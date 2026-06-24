@@ -11,7 +11,6 @@ import { initChatPanelLayout } from '../../shared/ui/chat_panel_layout';
 import { PANEL_SPLIT_STORAGE_KEY_GEN_ATTRIBUTE } from '../../shared/cross/panelSplitStorage';
 import { TextInputController } from '../../shared/controllers/textInputController';
 import { initializeCommonApp } from '../../shared/bootstrap';
-import { resolveApiBase } from '../../shared/api/resolveApiBase';
 import { registerPageBusy } from '../../shared/core/activitySession';
 import { setPageOptsGetter } from '../../shared/core/clientActivityPing';
 import { showAlertDialog } from '../../shared/ui/dialog';
@@ -373,10 +372,9 @@ function readStoredDagLayoutMode(): DagLayoutMode {
     );
 }
 
-const apiPrefix = resolveApiBase();
 const bodyElement = d3.select('body').node() as Element;
-const { totalSurprisalFormat, api } = initializeCommonApp(apiPrefix, bodyElement);
-const apiBaseForRequests = apiPrefix === '' ? '' : String(apiPrefix);
+const { totalSurprisalFormat, api, apiBase } = initializeCommonApp(undefined, bodyElement);
+const apiBaseForRequests = apiBase;
 
 const adminManager = AdminManager.getInstance();
 api.setAdminToken(adminManager.isInAdminMode() ? adminManager.getAdminToken() : null);

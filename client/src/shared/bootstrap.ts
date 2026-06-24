@@ -19,6 +19,8 @@ import { initFrontendBuildTimeDisplay } from './cross/buildTimeDisplay';
 export interface CommonAppContext {
     eventHandler: SimpleEventHandler;
     api: TextAnalysisAPI;
+    /** 本页 API 根（meta / ?api= / 同源 ''）；与 TextAnalysisAPI 实例一致 */
+    apiBase: string;
     tokenSurprisalColorScale: (value: number) => string;
     byteSurprisalColorScale: (value: number) => string;
     totalSurprisalFormat: (n: number | null) => string;
@@ -46,6 +48,7 @@ export function initializeCommonApp(apiPrefix?: string, element?: Element): Comm
     return {
         eventHandler: new SimpleEventHandler(targetElement),
         api,
+        apiBase: base,
         tokenSurprisalColorScale: (v) => getTokenSurprisalColor(v, HISTOGRAM_MIN_ALPHA),
         byteSurprisalColorScale: (v) => getByteSurprisalColor(v, 1, HISTOGRAM_MIN_ALPHA),
         totalSurprisalFormat: (n: number | null) => n !== null && Number.isFinite(n) ? format(n) : String(n)

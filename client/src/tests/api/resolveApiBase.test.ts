@@ -5,9 +5,10 @@ import {
     normalizeApiBase,
     resolveApiBaseFromSources,
     apiUrl,
-    PORTAL_API_BASE,
 } from '../../shared/api/resolveApiBase';
 import { resolveDemoFileUrlFromBase } from '../../shared/api/apiConfig';
+
+const PORTAL = 'https://portal.example.test';
 
 let passed = 0;
 let failed = 0;
@@ -28,7 +29,7 @@ assert('empty', normalizeApiBase('  '), '');
 
 console.log('resolveApiBaseFromSources');
 assert('meta wins', resolveApiBaseFromSources('http://other', 'https://portal.hf.space'), 'https://portal.hf.space');
-assert('meta wins over empty param', resolveApiBaseFromSources('', PORTAL_API_BASE), PORTAL_API_BASE);
+assert('meta wins over empty param', resolveApiBaseFromSources('', PORTAL), PORTAL);
 assert('?api= when no meta', resolveApiBaseFromSources('http://localhost:5001', null), 'http://localhost:5001');
 assert('same-origin default', resolveApiBaseFromSources(undefined, null), '');
 assert('same-origin when meta empty', resolveApiBaseFromSources(undefined, '  '), '');
@@ -36,8 +37,8 @@ assert('same-origin when meta empty', resolveApiBaseFromSources(undefined, '  ')
 console.log('resolveDemoFileUrlFromBase');
 assert(
     'portal + demo path',
-    resolveDemoFileUrlFromBase(PORTAL_API_BASE, '/quick-start-1.json'),
-    'https://dqy08-infolens.hf.space/demo/quick-start-1.json',
+    resolveDemoFileUrlFromBase(PORTAL, '/quick-start-1.json'),
+    `${PORTAL}/demo/quick-start-1.json`,
 );
 assert(
     'same-origin demo',
@@ -46,7 +47,7 @@ assert(
 );
 
 console.log('apiUrl');
-assert('portal api path', apiUrl('/api/analyze', PORTAL_API_BASE), `${PORTAL_API_BASE}/api/analyze`);
+assert('portal api path', apiUrl('/api/analyze', PORTAL), `${PORTAL}/api/analyze`);
 assert('same-origin api', apiUrl('/api/tokenize', ''), '/api/tokenize');
 assert('empty base explicit', apiUrl('/api/check_admin', ''), '/api/check_admin');
 
