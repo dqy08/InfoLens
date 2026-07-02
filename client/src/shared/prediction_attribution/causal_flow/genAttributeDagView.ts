@@ -19,16 +19,28 @@ import {
 } from './genAttributeDagEdgeDisplay';
 import {
     buildMaxNormalizedRenderStrengthByKey,
+    DAG_LIGHTNING_SLOW_MO_DEFAULT,
+    DAG_LIGHTNING_THRESHOLD_TAU_DEFAULT,
+    lightningBoundaryAnimationDwellMs,
+    lightningBoundaryFadeProgress,
+    lightningContentRevealProgress,
+    lightningDagFlashOverlayOpacity,
+    lightningDecayOpacity,
+    lightningDecayStrokeCss,
+    lightningEdgeRenderOpacity,
     normalizeEdgeRenderOpacity,
 } from './genAttributeDagEdgeRenderStrength';
+import { createDagLightningSoundController } from './genAttributeDagLightningSound';
 import { DAG_CAUSAL_FLOW_ICON } from './genAttributeDagIcons';
 import {
     backwardSlideIncomingEdgeKeysForBatch,
     createDagRecursiveEdgeAnimationController,
+    DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS,
     type DagRecursiveEdgeReplayPacing,
     maxHighlightEdgeShare,
     type DagFocusAttributionState,
     type DagPropagationPlaybackOptions,
+    type DagPropagationPlaybackPhase,
     type DagRecursiveEdgeAnimationDirection,
 } from './genAttributeDagRecursiveEdgeAnimation';
 import {
@@ -432,6 +444,8 @@ const CSS_VAR_DAG_NORMAL_LINE_COLOR = '--dag-normal-line-color';
 const CSS_VAR_DAG_HIGHLIGHT_LINE_IN = '--dag-highlight-line-color-in';
 /** 与 {@link start.scss} `--dag-highlight-line-color-out` 一致（出边：从焦点出发） */
 const CSS_VAR_DAG_HIGHLIGHT_LINE_OUT = '--dag-highlight-line-color-out';
+/** 与 {@link _theme-vars.scss} `--dag-lightning-line-color` 一致（传播末帧闪电：accent 混白，亮到发白） */
+const CSS_VAR_DAG_LIGHTNING_LINE_COLOR = '--dag-lightning-line-color';
 /** 与 causal_flow.scss 中 `--recursive-chain` 的 `stroke-opacity` 一致（由 JS 写入 g 元素） */
 const CSS_VAR_DAG_NODE_RECURSIVE_SHARE = '--gen-attr-dag-node-recursive-share';
 
@@ -613,6 +627,14 @@ export type GenAttributeDagHandle = {
     setRecursiveEdgeBatchAnimationDirection(direction: DagRecursiveEdgeAnimationDirection): void;
     /** 重算节点/边高亮（如 slide prompt 等仅影响渲染、不改图数据的选项切换后）。 */
     refreshNodeLinkHighlight(): void;
+    /** 在 DAG 上播放一次闪电动画预览（需因果流模式、传播焦点、已勾选闪电）。 */
+    playLightningEffectPreview(): void;
+    /** 中止闪电动画预览并恢复稳态渲染。 */
+    cancelLightningEffectPreview(): void;
+    /** 调节 τ 时：固定在第一回击峰值帧预览传播蓝边亮度（不播雷声、不跑时间轴）。 */
+    enterLightningTauPreview(): void;
+    /** 结束 {@link enterLightningTauPreview}。 */
+    exitLightningTauPreview(): void;
     /** 是否在直接归因焦点上额外展示从焦点出发的下游影响出边。 */
     setShowDownstreamInfluence(show: boolean): void;
     /** prompt 层节点是否已注入（即 {@link setPromptTokenSpans} 至少成功添加过一个节点） */
@@ -956,6 +978,10 @@ export function initGenAttributeDagView(
             setRecursiveAttributionEnabled: noop,
             setRecursiveEdgeBatchAnimationDirection: noop,
             refreshNodeLinkHighlight: noop,
+            playLightningEffectPreview: noop,
+            cancelLightningEffectPreview: noop,
+            enterLightningTauPreview: noop,
+            exitLightningTauPreview: noop,
             isPropagationPlaybackEngaged: () => false,
             stopPropagationPlayback: noop,
             setShowDownstreamInfluence: noop,
@@ -1063,6 +1089,12 @@ export function initGenAttributeDagView(
 
     const svg = stack.append('svg').attr('class', 'gen-attr-dag-svg');
 
+    const lightningFlashOverlay = stack
+        .append('div')
+        .attr('class', 'gen-attr-dag-lightning-flash')
+        .style('display', 'none')
+        .style('opacity', '0');
+
     /** 边箭头 marker 放在 svg 根 defs，与 {@link rootG} 平级、不受 zoom 变换，与原先单例 marker 一致，避免嵌套在 zoom 内时箭头相对线段偏细 */
     const linkMarkersDefs = svg.append('defs').attr('class', 'gen-attr-dag-link-markers-defs');
 
@@ -1141,11 +1173,82 @@ export function initGenAttributeDagView(
     }
 
     const getPropagationPlaybackOptions =
-        options?.getPropagationPlaybackOptions ?? ((): DagPropagationPlaybackOptions => ({ forwardSlideSharedNodes: false }));
+        options?.getPropagationPlaybackOptions ??
+        ((): DagPropagationPlaybackOptions => ({
+            forwardSlideSharedNodes: false,
+            lightningEffect: false,
+            lightningThresholdTau: DAG_LIGHTNING_THRESHOLD_TAU_DEFAULT,
+            lightningSlowMo: DAG_LIGHTNING_SLOW_MO_DEFAULT,
+            lightningSound: false,
+        }));
+
+    let lightningPreviewStartedAt: number | null = null;
+    let lightningTauAdjustPreview = false;
+    const lightningSound = createDagLightningSoundController();
+    let lightningSoundOnBoundaryFrame = false;
+
+    function syncLightningSound(args: {
+        propagationPlaybackPhase: DagPropagationPlaybackPhase;
+        lightningEffectEnabled: boolean;
+        lightningSoundEnabled: boolean;
+        lightningPreviewActive: boolean;
+        boundaryFrameElapsedMs: number;
+        anim: { direction: DagRecursiveEdgeAnimationDirection; batchIndex: number; forwardPromptPreamblePending: boolean } | null;
+        forwardPromptPreambleFrame: boolean;
+    }): void {
+        if (!args.lightningEffectEnabled || !args.lightningSoundEnabled) {
+            lightningSound.cancelPendingStrike();
+            lightningSound.stopRumble();
+            lightningSoundOnBoundaryFrame = false;
+            return;
+        }
+        const { propagationPlaybackPhase, anim, lightningPreviewActive } = args;
+        if (propagationPlaybackPhase !== 'playing' && propagationPlaybackPhase !== 'paused') {
+            if (lightningPreviewActive) {
+                lightningSoundOnBoundaryFrame = false;
+                return;
+            }
+            lightningSound.stopRumble();
+            lightningSoundOnBoundaryFrame = false;
+            return;
+        }
+        if (anim?.direction !== 'forward') {
+            lightningSound.stopRumble();
+            lightningSoundOnBoundaryFrame = false;
+            return;
+        }
+        const onLightningFrame =
+            anim.batchIndex === 0 && !anim.forwardPromptPreamblePending && !args.forwardPromptPreambleFrame;
+        if (onLightningFrame) {
+            if (args.boundaryFrameElapsedMs < DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS) {
+                lightningSoundOnBoundaryFrame = false;
+                if (propagationPlaybackPhase === 'playing') {
+                    lightningSound.startRumbleLoop();
+                } else {
+                    lightningSound.pauseRumble();
+                }
+                return;
+            }
+            if (!lightningSoundOnBoundaryFrame) {
+                lightningSound.scheduleStrikeAfterRumbleDelay();
+            }
+            lightningSoundOnBoundaryFrame = true;
+            return;
+        }
+        lightningSoundOnBoundaryFrame = false;
+        if (propagationPlaybackPhase === 'playing') {
+            lightningSound.startRumbleLoop();
+        } else {
+            lightningSound.pauseRumble();
+        }
+    }
 
     const recursiveEdgeAnimation = createDagRecursiveEdgeAnimationController({
         onTick: () => refreshNodeLinkHighlight(),
         onPlaybackPhaseChange: () => {
+            if (recursiveEdgeAnimation.getPlaybackPhase() === 'playing') {
+                lightningPreviewStartedAt = null;
+            }
             syncDagPlayButtonImpl();
             refreshNodeLinkHighlight();
         },
@@ -1476,6 +1579,58 @@ export function initGenAttributeDagView(
         });
 
     /** 焦点高亮：递归强调来源链，直接强调一跳关系。 */
+    let lightningFadeRaf: number | null = null;
+
+    function cancelLightningEffectPreview(): void {
+        if (lightningPreviewStartedAt == null && !lightningTauAdjustPreview) return;
+        lightningSound.cancelPendingStrike();
+        lightningPreviewStartedAt = null;
+        lightningTauAdjustPreview = false;
+        cancelLightningFadeRaf();
+    }
+
+    function canPreviewLightningEffect(): boolean {
+        return (
+            getPropagationPlaybackOptions().lightningEffect &&
+            recursiveAttributionEnabled &&
+            effectiveFocusId() != null &&
+            recursiveEdgeAnimation.getPlaybackPhase() !== 'playing'
+        );
+    }
+
+    function enterLightningTauPreview(): void {
+        if (!canPreviewLightningEffect()) return;
+        lightningPreviewStartedAt = null;
+        lightningTauAdjustPreview = true;
+        cancelLightningFadeRaf();
+        refreshNodeLinkHighlight();
+    }
+
+    function exitLightningTauPreview(): void {
+        if (!lightningTauAdjustPreview) return;
+        lightningTauAdjustPreview = false;
+        cancelLightningFadeRaf();
+        refreshNodeLinkHighlight();
+    }
+
+    function playLightningEffectPreview(): void {
+        if (!canPreviewLightningEffect()) return;
+        lightningTauAdjustPreview = false;
+        lightningPreviewStartedAt = performance.now();
+        if (getPropagationPlaybackOptions().lightningSound) {
+            lightningSound.scheduleStrikeDelay();
+        }
+        cancelLightningFadeRaf();
+        refreshNodeLinkHighlight();
+    }
+
+    function cancelLightningFadeRaf(): void {
+        if (lightningFadeRaf != null) {
+            cancelAnimationFrame(lightningFadeRaf);
+            lightningFadeRaf = null;
+        }
+    }
+
     function refreshNodeLinkHighlight(): void {
         const focusId = effectiveFocusId();
         const focusState = focusId
@@ -1591,6 +1746,50 @@ export function initGenAttributeDagView(
         const nodeDisplay = (d: DagNode): string | null =>
             hideExcludedTokens && nodeLowVisReasonById.get(d.id) != null ? 'none' : null;
         const propagationPlaybackPhase = recursiveEdgeAnimation.getPlaybackPhase();
+        const lightningEffectEnabled = getPropagationPlaybackOptions().lightningEffect;
+        const lightningPreviewActive =
+            lightningEffectEnabled &&
+            recursiveAttributionEnabled &&
+            (lightningPreviewStartedAt != null || lightningTauAdjustPreview) &&
+            propagationPlaybackPhase !== 'playing';
+        const lightningBoundaryFrame =
+            lightningEffectEnabled &&
+            recursiveAttributionEnabled &&
+            anim != null &&
+            anim.direction === 'forward' &&
+            anim.batchIndex === 0 &&
+            !forwardPromptPreambleFrame &&
+            propagationPlaybackPhase === 'playing';
+        const boundaryFrameElapsedMs = lightningBoundaryFrame
+            ? recursiveEdgeAnimation.getCurrentFrameElapsedMs()
+            : 0;
+        const lightningVisualActive =
+            lightningPreviewActive ||
+            (lightningBoundaryFrame &&
+                boundaryFrameElapsedMs >= DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS);
+        const lightningAnimationDwellMs = lightningBoundaryAnimationDwellMs(
+            DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS,
+            lightningEffectEnabled,
+            getPropagationPlaybackOptions().lightningSlowMo,
+        );
+        const lightningSlowMoUi = getPropagationPlaybackOptions().lightningSlowMo;
+        const lightningElapsedMs = lightningVisualActive
+            ? lightningTauAdjustPreview
+                ? 0
+                : lightningBoundaryFrame
+                ? boundaryFrameElapsedMs - DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS
+                : Math.max(0, performance.now() - (lightningPreviewStartedAt ?? performance.now()))
+            : 0;
+        const lightningFadeProgress = lightningVisualActive
+            ? lightningBoundaryFadeProgress(lightningElapsedMs, lightningSlowMoUi)
+            : 0;
+        const dagFlashOverlayOpacity =
+            lightningVisualActive && !lightningTauAdjustPreview
+                ? lightningDagFlashOverlayOpacity(lightningElapsedMs, lightningSlowMoUi)
+                : 0;
+        const lightningContentReveal = lightningVisualActive
+            ? lightningContentRevealProgress(lightningElapsedMs, lightningSlowMoUi)
+            : 1;
         /** 传播动画视觉态（含暂停 / 部分前沿帧）；与静态有焦点区分 fill 全亮规则（动画时另允 slide）。 */
         const propagationAnimVisualActive =
             anim != null &&
@@ -1661,6 +1860,14 @@ export function initGenAttributeDagView(
             .classed('gen-attr-dag-node--hover', (d) => hoveredId === d.id)
             .classed('gen-attr-dag-node--selected', showFocusSelectedStroke)
             .style('display', nodeDisplay);
+        nodeG.style(
+            'opacity',
+            lightningVisualActive && lightningContentReveal < 1 ? String(lightningContentReveal) : null,
+        );
+        nodeGHit.style(
+            'opacity',
+            lightningVisualActive && lightningContentReveal < 1 ? String(lightningContentReveal) : null,
+        );
         // 每条边：颜色/强度（见 resolveDagLinkHighlightDisplay）、`<title>` 一并刷新（含 linkGFront 高亮边）。
         rootG.selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link').each(function(d) {
             const srcId = endpointNode(d.source, graph).id;
@@ -1683,6 +1890,30 @@ export function initGenAttributeDagView(
                     edgeKey,
                     focusState?.incomingEdgeShareByKey.has(edgeKey) ?? false,
                 );
+            const isBluePropagationIncoming =
+                linkFocusState != null &&
+                linkFocusState.incomingEdgeShareByKey.has(edgeKey) &&
+                backwardSlideIncomingRenderByKey?.get(edgeKey) == null;
+            const isLightningArrow =
+                lightningVisualActive && isBluePropagationIncoming && finalRenderStrength > 0;
+            const strokeForRender =
+                isLightningArrow
+                    ? lightningDecayStrokeCss(
+                          lightningFadeProgress,
+                          CSS_VAR_DAG_LIGHTNING_LINE_COLOR,
+                          CSS_VAR_DAG_HIGHLIGHT_LINE_IN,
+                      )
+                    : stroke;
+            const opacityForRender = isLightningArrow
+                ? lightningDecayOpacity(
+                      lightningEdgeRenderOpacity(
+                          finalRenderStrength,
+                          getPropagationPlaybackOptions().lightningThresholdTau,
+                      ),
+                      finalRenderStrength,
+                      lightningFadeProgress,
+                  )
+                : finalRenderStrength * lightningContentReveal;
             const g = d3.select(this);
             const srcAttrs = graph.getNodeAttributes(srcId) as DagNode;
             const tgtAttrs = graph.getNodeAttributes(tgtId) as DagNode;
@@ -1698,11 +1929,11 @@ export function initGenAttributeDagView(
                     linkStrength,
                 }),
             );
-            g.select('path.gen-attr-dag-link-visible').attr('stroke', stroke).attr('stroke-opacity', finalRenderStrength);
+            g.select('path.gen-attr-dag-link-visible').attr('stroke', strokeForRender).attr('stroke-opacity', opacityForRender);
             linkMarkersDefs
                 .select<SVGPathElement>(`#${dagLinkMarkerElementId(d.source, d.target)} path`)
-                .attr('stroke', stroke)
-                .attr('stroke-opacity', finalRenderStrength);
+                .attr('stroke', strokeForRender)
+                .attr('stroke-opacity', opacityForRender);
 
             const incident =
                 linkFocusState != null &&
@@ -1717,6 +1948,47 @@ export function initGenAttributeDagView(
 
         syncLayoutForLowVisibilityMembership(focusId, focusState);
         syncGenAttrDagTopkTooltipImpl();
+
+        if (dagFlashOverlayOpacity > 0) {
+            lightningFlashOverlay.style('display', null).style('opacity', String(dagFlashOverlayOpacity));
+        } else {
+            lightningFlashOverlay.style('display', 'none').style('opacity', '0');
+        }
+
+        const boundaryFrameLightningPending =
+            lightningBoundaryFrame &&
+            boundaryFrameElapsedMs < DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS;
+        if (
+            boundaryFrameLightningPending ||
+            (lightningVisualActive &&
+                !lightningTauAdjustPreview &&
+                (lightningFadeProgress < 1 ||
+                    dagFlashOverlayOpacity > 0 ||
+                    lightningContentReveal < 1) &&
+                lightningElapsedMs < lightningAnimationDwellMs)
+        ) {
+            if (lightningFadeRaf == null) {
+                lightningFadeRaf = requestAnimationFrame(() => {
+                    lightningFadeRaf = null;
+                    refreshNodeLinkHighlight();
+                });
+            }
+        } else {
+            cancelLightningFadeRaf();
+            if (lightningPreviewActive && lightningElapsedMs >= lightningAnimationDwellMs) {
+                lightningPreviewStartedAt = null;
+            }
+        }
+
+        syncLightningSound({
+            propagationPlaybackPhase,
+            lightningEffectEnabled,
+            lightningSoundEnabled: getPropagationPlaybackOptions().lightningSound,
+            lightningPreviewActive,
+            boundaryFrameElapsedMs,
+            anim: animOverlay.anim,
+            forwardPromptPreambleFrame: animOverlay.forwardPromptPreambleFrame,
+        });
     }
 
     syncGenAttrDagTopkTooltipImpl = (): void => {
@@ -2570,6 +2842,9 @@ export function initGenAttributeDagView(
     syncSvgSize();
 
     function detach(): void {
+        cancelLightningEffectPreview();
+        cancelLightningFadeRaf();
+        lightningSound.dispose();
         recursiveEdgeAnimation.dispose();
         detachDagPseudoFullscreenIfPresent(rootEl);
         ro.disconnect();
@@ -2613,6 +2888,10 @@ export function initGenAttributeDagView(
         setRecursiveAttributionEnabled,
         setRecursiveEdgeBatchAnimationDirection,
         refreshNodeLinkHighlight,
+        playLightningEffectPreview,
+        cancelLightningEffectPreview,
+        enterLightningTauPreview,
+        exitLightningTauPreview,
         isPropagationPlaybackEngaged,
         stopPropagationPlayback,
         setShowDownstreamInfluence,

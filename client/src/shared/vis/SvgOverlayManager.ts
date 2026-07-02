@@ -6,6 +6,7 @@
 import {FrontendAnalyzeResult} from "../../shared/api/GLTR_API";
 import {calculateSurprisal, calculateSurprisalDensity} from "../core/Util";
 import {getByteSurprisalColor, getTokenSurprisalColor, getDiffColor, getSemanticSimilarityColor} from "../cross/SurprisalColorConfig";
+import { getSurprisalRenderMaxAlpha } from "../../features/analysis/surprisalColorWeakenManager";
 import {TokenFragmentRect, RectCacheEntry, ZERO_WIDTH_FRAGMENT_PLACEHOLDER_PX} from "./types";
 
 /** 差分模式配置 */
@@ -329,12 +330,13 @@ export class SvgOverlayManager {
         if (disableInfoDensityRender) return 'transparent';
         const tokenData = rd.bpe_strings[tokenIndex];
         const cap = this.options.surprisalColorMax;
+        const maxAlpha = getSurprisalRenderMaxAlpha();
         if (tokenRenderStyle === 'classic') {
             const topk = this.options.getTokenRealTopk(rd, tokenIndex);
             const surprisal = topk != null ? calculateSurprisal(topk[1]) : 0;
-            return getTokenSurprisalColor(surprisal, undefined, cap);
+            return getTokenSurprisalColor(surprisal, undefined, cap, maxAlpha);
         }
-        return getByteSurprisalColor(calculateSurprisalDensity(tokenData), 1, undefined, cap);
+        return getByteSurprisalColor(calculateSurprisalDensity(tokenData), 1, undefined, cap, maxAlpha);
     }
 
     /**

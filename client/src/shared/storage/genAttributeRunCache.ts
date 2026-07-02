@@ -97,6 +97,14 @@ export type GenAttrDemoUiOptions = {
     replayAutoZoom: boolean;
     /** 传播链（↯）禁用按归因权重缩放帧间隔，改为均匀间隔。 */
     disableSmartStepTime: boolean;
+    /** forward 末帧 dwell：传播蓝边闪电高亮（accent 混白 × linear opacity）。 */
+    lightningEffect: boolean;
+    /** 闪电 `min(1, renderStrength/τ)` 分母；见 {@link clampLightningThresholdTau}。 */
+    lightningThresholdTau: number;
+    /** 闪电慢放倍数 [1,10]；见 {@link clampLightningSlowMo}。 */
+    lightningSlowMo: number;
+    /** 闪电效果伴随雷声。 */
+    lightningSound: boolean;
     playbackTotalS: number;
     playbackStepMs: number;
     /** 删除 prompt token（物理移除，不占布局）：使能与正则文本（`info_radar_gen_attr_delete_prompt_*`）。 */
@@ -348,6 +356,24 @@ function isValidDemoUiOptionsPayload(v: unknown): v is Partial<GenAttrDemoUiOpti
         return false;
     }
     if (d.disableSmartStepTime !== undefined && typeof d.disableSmartStepTime !== 'boolean') {
+        return false;
+    }
+    if (d.lightningEffect !== undefined && typeof d.lightningEffect !== 'boolean') {
+        return false;
+    }
+    if (
+        d.lightningThresholdTau !== undefined &&
+        (typeof d.lightningThresholdTau !== 'number' || !Number.isFinite(d.lightningThresholdTau))
+    ) {
+        return false;
+    }
+    if (
+        d.lightningSlowMo !== undefined &&
+        (typeof d.lightningSlowMo !== 'number' || !Number.isFinite(d.lightningSlowMo))
+    ) {
+        return false;
+    }
+    if (d.lightningSound !== undefined && typeof d.lightningSound !== 'boolean') {
         return false;
     }
     if (d.playbackTotalS !== undefined && (typeof d.playbackTotalS !== 'number' || !Number.isFinite(d.playbackTotalS))) {

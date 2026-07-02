@@ -35,6 +35,12 @@ import {
     formatDimInactiveThresholdPercentForInput,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagNodeDim';
 import {
+    clampLightningSlowMo,
+    clampLightningThresholdTau,
+    DAG_LIGHTNING_SLOW_MO_DEFAULT,
+    DAG_LIGHTNING_THRESHOLD_TAU_DEFAULT,
+} from '../../shared/prediction_attribution/causal_flow/genAttributeDagEdgeRenderStrength';
+import {
     initGenAttributeDagView,
     setDagNodeCiVisualScaleEnabled,
     setDagDecayAttributionToHighSurprisalTargetEnabled,
@@ -45,7 +51,10 @@ import {
     DAG_COMPACTNESS_DEFAULT,
     LINEAR_ARC_ADJACENT_GAP_DEFAULT,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagView';
-import type { DagRecursiveEdgeReplayPacing } from '../../shared/prediction_attribution/causal_flow/genAttributeDagRecursiveEdgeAnimation';
+import type {
+    DagPropagationPlaybackOptions,
+    DagRecursiveEdgeReplayPacing,
+} from '../../shared/prediction_attribution/causal_flow/genAttributeDagRecursiveEdgeAnimation';
 import {
     buildDagStepPlaybackEvents,
     resolveDagStepPlaybackClocksFromPacing,
@@ -160,6 +169,10 @@ const GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_rep
 const GEN_ATTR_DAG_REPLAY_AUTO_ZOOM_STORAGE_KEY = 'info_radar_gen_attr_dag_replay_auto_zoom';
 const GEN_ATTR_DAG_DISABLE_SMART_STEP_TIME_STORAGE_KEY =
     'info_radar_gen_attr_dag_disable_smart_step_time';
+const GEN_ATTR_DAG_LIGHTNING_EFFECT_STORAGE_KEY = 'info_radar_gen_attr_dag_lightning_effect';
+const GEN_ATTR_DAG_LIGHTNING_THRESHOLD_STORAGE_KEY = 'info_radar_gen_attr_dag_lightning_threshold';
+const GEN_ATTR_DAG_LIGHTNING_SLOW_MO_STORAGE_KEY = 'info_radar_gen_attr_dag_lightning_slow_mo';
+const GEN_ATTR_DAG_LIGHTNING_SOUND_STORAGE_KEY = 'info_radar_gen_attr_dag_lightning_sound';
 const GEN_ATTR_DAG_FORWARD_SLIDE_SHARED_NODES_STORAGE_KEY =
     'info_radar_gen_attr_dag_forward_slide_shared_nodes';
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_total_s';
@@ -236,6 +249,10 @@ const DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS: GenAttrDemoUiOptions = {
     replayPacingMode: 'total',
     replayAutoZoom: false,
     disableSmartStepTime: false,
+    lightningEffect: false,
+    lightningThresholdTau: DAG_LIGHTNING_THRESHOLD_TAU_DEFAULT,
+    lightningSlowMo: DAG_LIGHTNING_SLOW_MO_DEFAULT,
+    lightningSound: false,
     playbackTotalS: GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT,
     playbackStepMs: GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT,
     excludePromptPatternsEnabled: true,
@@ -364,6 +381,38 @@ function readStoredDagDisableSmartStepTime(): boolean {
     );
 }
 
+function readStoredDagLightningEffect(): boolean {
+    return lsReadBool(
+        GEN_ATTR_DAG_LIGHTNING_EFFECT_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.lightningEffect,
+        { encoding: '1' },
+    );
+}
+
+function readStoredDagLightningThresholdTau(): number {
+    return lsReadNumber(
+        GEN_ATTR_DAG_LIGHTNING_THRESHOLD_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.lightningThresholdTau,
+        { parse: 'float', clamp: clampLightningThresholdTau },
+    );
+}
+
+function readStoredDagLightningSlowMo(): number {
+    return lsReadNumber(
+        GEN_ATTR_DAG_LIGHTNING_SLOW_MO_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.lightningSlowMo,
+        { clamp: clampLightningSlowMo },
+    );
+}
+
+function readStoredDagLightningSound(): boolean {
+    return lsReadBool(
+        GEN_ATTR_DAG_LIGHTNING_SOUND_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.lightningSound,
+        { encoding: '1' },
+    );
+}
+
 function readStoredDagLayoutMode(): DagLayoutMode {
     return lsReadEnum(
         GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY,
@@ -465,6 +514,22 @@ const dagDisableSmartStepTimeWrap = document.getElementById(
 );
 const dagDisableSmartStepTimeInput = document.getElementById(
     'gen_attr_dag_disable_smart_step_time',
+) as HTMLInputElement | null;
+const dagLightningEffectInput = document.getElementById(
+    'gen_attr_dag_lightning_effect',
+) as HTMLInputElement | null;
+const dagLightningThresholdInput = document.getElementById(
+    'gen_attr_dag_lightning_threshold',
+) as HTMLInputElement | null;
+const dagLightningThresholdWrap = document.getElementById('gen_attr_dag_lightning_threshold_wrap');
+const dagLightningSlowMoInput = document.getElementById(
+    'gen_attr_dag_lightning_slow_mo',
+) as HTMLInputElement | null;
+const dagLightningSlowMoWrap = document.getElementById('gen_attr_dag_lightning_slow_mo_wrap');
+const dagLightningOptionsRow = document.getElementById('gen_attr_dag_lightning_options_row');
+const dagLightningSoundWrap = document.getElementById('gen_attr_dag_lightning_sound_wrap');
+const dagLightningSoundInput = document.getElementById(
+    'gen_attr_dag_lightning_sound',
 ) as HTMLInputElement | null;
 const dagForwardSlideSharedNodesWrap = document.getElementById(
     'gen_attr_dag_forward_slide_prompt_wrap',
@@ -680,6 +745,23 @@ const initialDagDisableSmartStepTime = readStoredDagDisableSmartStepTime();
 if (dagDisableSmartStepTimeInput) {
     dagDisableSmartStepTimeInput.checked = initialDagDisableSmartStepTime;
 }
+const initialDagLightningEffect = readStoredDagLightningEffect();
+if (dagLightningEffectInput) {
+    dagLightningEffectInput.checked = initialDagLightningEffect;
+}
+syncLightningSuboptionsVisibility();
+const initialDagLightningThresholdTau = readStoredDagLightningThresholdTau();
+if (dagLightningThresholdInput) {
+    dagLightningThresholdInput.value = String(initialDagLightningThresholdTau);
+}
+const initialDagLightningSlowMo = readStoredDagLightningSlowMo();
+if (dagLightningSlowMoInput) {
+    dagLightningSlowMoInput.value = String(initialDagLightningSlowMo);
+}
+const initialDagLightningSound = readStoredDagLightningSound();
+if (dagLightningSoundInput) {
+    dagLightningSoundInput.checked = initialDagLightningSound;
+}
 applyDagReplaySpeedUi();
 
 const genAttrResultsNode = genAttrResultsEl.node() as HTMLElement | null;
@@ -793,10 +875,22 @@ function applyDagDimInactiveTokensFromControls(): void {
 let getDagUserFocusId: () => string | null = () => null;
 
 /** 与右上角 ↯ 出现条件一致：因果流模式 + 已确立传播焦点。 */
-function syncDisableSmartStepTimeVisibility(): void {
-    if (!dagDisableSmartStepTimeWrap) return;
-    const recursive = dagRecursiveAttributionInput?.checked ?? false;
-    dagDisableSmartStepTimeWrap.hidden = !(recursive && getDagUserFocusId() != null);
+function syncPropagationPlaybackControlsVisibility(): void {
+    if (!dagDisableSmartStepTimeWrap && !dagLightningOptionsRow) {
+        return;
+    }
+    const show = (dagRecursiveAttributionInput?.checked ?? false) && getDagUserFocusId() != null;
+    if (dagDisableSmartStepTimeWrap) dagDisableSmartStepTimeWrap.hidden = !show;
+    if (dagLightningOptionsRow) dagLightningOptionsRow.hidden = !show;
+    syncLightningSuboptionsVisibility();
+}
+
+/** 闪电效果关闭时隐藏 τ / 慢放 / 雷声子选项。 */
+function syncLightningSuboptionsVisibility(): void {
+    const show = dagLightningEffectInput?.checked ?? false;
+    if (dagLightningThresholdWrap) dagLightningThresholdWrap.hidden = !show;
+    if (dagLightningSlowMoWrap) dagLightningSlowMoWrap.hidden = !show;
+    if (dagLightningSoundWrap) dagLightningSoundWrap.hidden = !show;
 }
 
 /** 传播归因相关控件可见性：仅在适用时显示。 */
@@ -815,7 +909,7 @@ function applyDagRecursiveAttributionSubmodeUi(): void {
     if (dagForwardSlideSharedNodesWrap) {
         dagForwardSlideSharedNodesWrap.hidden = !forward;
     }
-    syncDisableSmartStepTimeVisibility();
+    syncPropagationPlaybackControlsVisibility();
     syncDimInactiveTokensThresholdInputUi();
 }
 
@@ -874,9 +968,23 @@ if (dagForwardSlideSharedNodesInput) {
     dagForwardSlideSharedNodesInput.checked = initialDagForwardSlideSharedNodes;
 }
 
-function readDagPropagationPlaybackOptionsFromControls(): { forwardSlideSharedNodes: boolean } {
+function readDagLightningThresholdTauFromControl(): number {
+    const raw = parseFloat(dagLightningThresholdInput?.value ?? '');
+    return Number.isFinite(raw) ? clampLightningThresholdTau(raw) : readStoredDagLightningThresholdTau();
+}
+
+function readDagLightningSlowMoFromControl(): number {
+    const raw = parseFloat(dagLightningSlowMoInput?.value ?? '');
+    return Number.isFinite(raw) ? clampLightningSlowMo(raw) : readStoredDagLightningSlowMo();
+}
+
+function readDagPropagationPlaybackOptionsFromControls(): DagPropagationPlaybackOptions {
     return {
         forwardSlideSharedNodes: dagForwardSlideSharedNodesInput?.checked ?? false,
+        lightningEffect: dagLightningEffectInput?.checked ?? false,
+        lightningThresholdTau: readDagLightningThresholdTauFromControl(),
+        lightningSlowMo: readDagLightningSlowMoFromControl(),
+        lightningSound: dagLightningSoundInput?.checked ?? false,
     };
 }
 
@@ -1454,11 +1562,25 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
     getEffectiveExcludePromptPatternsText: genAttrEffectiveExcludePromptPatternsText,
     getEffectiveExcludeGeneratedPatternsText: genAttrEffectiveExcludeGeneratedPatternsText,
     getEffectiveDeletePromptPatternsText: genAttrEffectiveDeletePromptPatternsText,
-    onUserFocusChange: () => syncDisableSmartStepTimeVisibility(),
+    onUserFocusChange: () => syncPropagationPlaybackControlsVisibility(),
 });
 
 getDagUserFocusId = () => dagHandle.getUserFocusId();
-syncDisableSmartStepTimeVisibility();
+syncPropagationPlaybackControlsVisibility();
+dagLightningEffectInput?.addEventListener('change', () => {
+    syncLightningSuboptionsVisibility();
+    if (dagLightningEffectInput?.checked) {
+        dagHandle.playLightningEffectPreview();
+    } else {
+        dagHandle.cancelLightningEffectPreview();
+        dagHandle.refreshNodeLinkHighlight();
+    }
+});
+dagLightningThresholdInput?.addEventListener('focus', () => dagHandle.enterLightningTauPreview());
+dagLightningThresholdInput?.addEventListener('blur', () => dagHandle.exitLightningTauPreview());
+dagLightningThresholdInput?.addEventListener('input', () => dagHandle.refreshNodeLinkHighlight());
+dagLightningSlowMoInput?.addEventListener('input', () => dagHandle.refreshNodeLinkHighlight());
+dagLightningSoundInput?.addEventListener('change', () => dagHandle.refreshNodeLinkHighlight());
 
 toolCallingPendingLine = attachToolCallingPendingLine(
     document.querySelector('#results .gen-attr-dag-stack') as HTMLElement,
@@ -1603,6 +1725,10 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
         replayPacingMode,
         replayAutoZoom: dagReplayAutoZoomInput?.checked ?? false,
         disableSmartStepTime,
+        lightningEffect: dagLightningEffectInput?.checked ?? false,
+        lightningThresholdTau: readDagLightningThresholdTauFromControl(),
+        lightningSlowMo: readDagLightningSlowMoFromControl(),
+        lightningSound: dagLightningSoundInput?.checked ?? false,
         playbackTotalS,
         playbackStepMs,
         excludePromptPatternsEnabled: genAttrExcludePromptPatternsEnable?.checked ?? true,
@@ -1683,6 +1809,22 @@ const GEN_ATTR_DEMO_UI_PERSIST_SPECS: ReadonlyArray<{
         controlId: 'gen_attr_dag_disable_smart_step_time',
         storageKey: GEN_ATTR_DAG_DISABLE_SMART_STEP_TIME_STORAGE_KEY,
     },
+    {
+        controlId: 'gen_attr_dag_lightning_effect',
+        storageKey: GEN_ATTR_DAG_LIGHTNING_EFFECT_STORAGE_KEY,
+    },
+    {
+        controlId: 'gen_attr_dag_lightning_threshold',
+        storageKey: GEN_ATTR_DAG_LIGHTNING_THRESHOLD_STORAGE_KEY,
+    },
+    {
+        controlId: 'gen_attr_dag_lightning_slow_mo',
+        storageKey: GEN_ATTR_DAG_LIGHTNING_SLOW_MO_STORAGE_KEY,
+    },
+    {
+        controlId: 'gen_attr_dag_lightning_sound',
+        storageKey: GEN_ATTR_DAG_LIGHTNING_SOUND_STORAGE_KEY,
+    },
     { controlId: 'gen_attr_dag_playback_total_s', storageKey: GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY },
     { controlId: 'gen_attr_dag_playback_step_ms', storageKey: GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY },
     {
@@ -1753,6 +1895,10 @@ function persistGenAttrDemoUiOptionsToLocalStorage(snap: GenAttrDemoUiOptions): 
     lsWriteString(GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY, snap.replayPacingMode);
     lsWriteBool(GEN_ATTR_DAG_REPLAY_AUTO_ZOOM_STORAGE_KEY, snap.replayAutoZoom, '1');
     lsWriteBool(GEN_ATTR_DAG_DISABLE_SMART_STEP_TIME_STORAGE_KEY, snap.disableSmartStepTime, '1');
+    lsWriteBool(GEN_ATTR_DAG_LIGHTNING_EFFECT_STORAGE_KEY, snap.lightningEffect, '1');
+    lsSet(GEN_ATTR_DAG_LIGHTNING_THRESHOLD_STORAGE_KEY, String(snap.lightningThresholdTau));
+    lsSet(GEN_ATTR_DAG_LIGHTNING_SLOW_MO_STORAGE_KEY, String(snap.lightningSlowMo));
+    lsWriteBool(GEN_ATTR_DAG_LIGHTNING_SOUND_STORAGE_KEY, snap.lightningSound, '1');
     lsWriteBool(
         GEN_ATTR_DAG_FORWARD_SLIDE_SHARED_NODES_STORAGE_KEY,
         snap.forwardSlideSharedNodes,
@@ -1943,6 +2089,23 @@ function applyGenAttrDemoUiOptionsSnap(snap: Partial<GenAttrDemoUiOptions>): voi
         if (dagDisableSmartStepTimeInput) {
             dagDisableSmartStepTimeInput.checked = snap.disableSmartStepTime;
         }
+    }
+    if (snap.lightningEffect !== undefined) {
+        if (dagLightningEffectInput) {
+            dagLightningEffectInput.checked = snap.lightningEffect;
+        }
+        syncLightningSuboptionsVisibility();
+    }
+    if (snap.lightningThresholdTau !== undefined) {
+        const tau = clampLightningThresholdTau(snap.lightningThresholdTau);
+        if (dagLightningThresholdInput) dagLightningThresholdInput.value = String(tau);
+    }
+    if (snap.lightningSlowMo !== undefined) {
+        const slowMo = clampLightningSlowMo(snap.lightningSlowMo);
+        if (dagLightningSlowMoInput) dagLightningSlowMoInput.value = String(slowMo);
+    }
+    if (snap.lightningSound !== undefined) {
+        if (dagLightningSoundInput) dagLightningSoundInput.checked = snap.lightningSound;
     }
     if (snap.playbackTotalS !== undefined) {
         const s = clampDagPlaybackTotalS(snap.playbackTotalS);

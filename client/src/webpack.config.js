@@ -92,6 +92,10 @@ module.exports = {
                 type: 'asset/resource'
             },
             {
+                test: /\.mp3$/,
+                type: 'asset/resource'
+            },
+            {
                 test: /\.woff(2)?(\?v=[0-9]\.[0-9]\.[0-9])?$/,
                 type: 'asset',
                 parser: {

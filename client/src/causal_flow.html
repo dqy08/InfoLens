@@ -429,7 +429,7 @@
                             <span id="gen_attr_dag_replay_total_wrap" class="gen-attr-dag-replay-value-wrap">
                                 <input type="number" id="gen_attr_dag_playback_total_s" class="gen-attr-dag-measure-width-input"
                                     value="7" min="1" max="3600" step="1"
-                                    title="Total seconds. With no focused token, DAG step replay (▶) divides evenly; in Causal Flow Mode with a focused token, propagation play (↯) runs focus-chain animation split by layer weight. Saved locally; applied when you press play."
+                                    title="Total seconds for weighted propagation frames. Lightning effect dwell at the end is extra wall time and not included. With no focused token, DAG step replay (▶) divides evenly; in Causal Flow Mode with a focused token, propagation play (↯) runs focus-chain animation split by layer weight. Saved locally; applied when you press play."
                                     data-i18n="title">
                                 <span class="semantic-submode-label">s</span>
                             </span>
@@ -446,15 +446,41 @@
                                     data-i18n="title">
                                 <span data-i18n>Disable smart step time</span>
                             </label>
-                        </span>
-                    </div>
-                    <div class="gen-attr-dag-measure-width-row semantic-submode-row gen-attr-dag-replay-auto-zoom-row">
-                        <span class="semantic-submode-group">
-                            <label class="semantic-submode-label">
+                            <label class="semantic-submode-label gen-attr-dag-replay-auto-zoom-label">
                                 <input type="checkbox" id="gen_attr_dag_replay_auto_zoom"
                                     title="When checked, step replay (▶) fits the viewport after each step (stops if you pan or zoom). Saved locally."
                                     data-i18n="title">
                                 <span data-i18n>Auto zoom</span>
+                            </label>
+                        </span>
+                    </div>
+                    <div id="gen_attr_dag_lightning_options_row" class="gen-attr-dag-measure-width-row semantic-submode-row gen-attr-dag-lightning-options-row" hidden>
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_lightning_effect"
+                                    title="When checked, forward propagation play (↯) highlights propagation edges in peak contrast during the last-frame dwell (boundary frame × slow-mo). Extra wall time; not counted in Play speed total time. Saved locally; applied when you press play."
+                                    data-i18n="title">
+                                <span data-i18n>Lightning effect</span>
+                            </label>
+                            <span id="gen_attr_dag_lightning_threshold_wrap" class="gen-attr-dag-replay-value-wrap" hidden>
+                                <span class="semantic-submode-label" data-i18n>τ</span>
+                                <input type="number" id="gen_attr_dag_lightning_threshold" class="gen-attr-dag-measure-width-input"
+                                    value="0.35" min="0.05" max="1" step="0.05"
+                                    title="Lightning linear boost denominator τ on render strength: opacity = min(1, strength / τ). Lower τ brightens more edges. Saved locally."
+                                    data-i18n="title">
+                            </span>
+                            <span id="gen_attr_dag_lightning_slow_mo_wrap" class="gen-attr-dag-replay-value-wrap" hidden>
+                                <span class="semantic-submode-label" data-i18n>Lightning slow-mo x</span>
+                                <input type="number" id="gen_attr_dag_lightning_slow_mo" class="gen-attr-dag-measure-width-input"
+                                    value="1" min="1" max="10" step="1"
+                                    title="Slows lightning dwell and animation rhythm by this factor (1–10). Saved locally; applied when you press play."
+                                    data-i18n="title">
+                            </span>
+                            <label class="semantic-submode-label" id="gen_attr_dag_lightning_sound_wrap" hidden>
+                                <input type="checkbox" id="gen_attr_dag_lightning_sound"
+                                    title="When checked, forward propagation play (↯) plays thunder strike and rumble with the lightning effect. Saved locally."
+                                    data-i18n="title">
+                                <span data-i18n>Thunder sound</span>
                             </label>
                         </span>
                     </div>

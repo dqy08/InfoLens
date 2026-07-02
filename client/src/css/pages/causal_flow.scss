@@ -300,6 +300,14 @@ $gen-attr-cached-demos-panel-width: 21em;
     -webkit-user-select: none;
   }
 
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-lightning-flash {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    background: color-mix(in srgb, var(--dag-lightning-line-color) 50%, transparent);
+    pointer-events: none;
+  }
+
   // 窄屏 / 强制窄屏：右栏常为 height:auto，DAG 易「很宽、很矮」；min-height 兜底；若非全屏再对 stack 设 max-height(≈80dvh)+flex-shrink:0。（全屏时 #results 带 :fullscreen 或 .css-pseudo-fullscreen-target，用 :not 排除后不施加封顶。）
   $_dag-narrow-stack-min: max(300px, min(60dvh, 680px));
   $_dag-narrow-stack-max-h: 80dvh;
@@ -554,7 +562,8 @@ body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row
   align-items: center;
   gap: 6px 10px;
 
-  > #gen_attr_dag_disable_smart_step_time_wrap {
+  > #gen_attr_dag_disable_smart_step_time_wrap,
+  > .gen-attr-dag-replay-auto-zoom-label {
     font-weight: normal;
     margin-inline-start: 12px;
   }

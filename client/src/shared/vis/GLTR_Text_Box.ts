@@ -203,6 +203,14 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
     };
     private _onTokenRenderStyleChange = (): void => this._refreshBaseRectColorsOrFullRender();
     private _onInfoDensityRenderChange = (): void => this._refreshBaseRectColorsOrFullRender();
+    private _onSurprisalColorWeakenChange = (): void => {
+        this._refreshBaseRectColorsOrFullRender();
+        if (this.options.enableMinimap && this.cachedPositions && this.currentRenderData) {
+            this.renderMinimap(this.cachedPositions, this.currentRenderData).catch(err => {
+                console.error('Minimap渲染出错:', err);
+            });
+        }
+    };
 
     static events = {
         tokenHovered: 'lmf-view-token-hovered',
@@ -244,6 +252,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
         this.setupThemeListener();
         window.addEventListener('token-render-style-change', this._onTokenRenderStyleChange);
         window.addEventListener('info-density-render-change', this._onInfoDensityRenderChange);
+        window.addEventListener('surprisal-color-weaken-change', this._onSurprisalColorWeakenChange);
 
         // 初始化颜色scale
         this.updateColorScales();
@@ -1165,6 +1174,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
         this.currentSvgOverlay = undefined;
         window.removeEventListener('token-render-style-change', this._onTokenRenderStyleChange);
         window.removeEventListener('info-density-render-change', this._onInfoDensityRenderChange);
+        window.removeEventListener('surprisal-color-weaken-change', this._onSurprisalColorWeakenChange);
 
         // 调用父类的destroy方法
         super.destroy();

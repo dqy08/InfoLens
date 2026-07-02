@@ -18,6 +18,10 @@ import {
     getInfoDensityRenderDisabled,
     setInfoDensityRenderDisabled,
 } from '../../features/analysis/infoDensityRenderManager';
+import {
+    getSurprisalColorWeakened,
+    setSurprisalColorWeakened,
+} from '../../features/analysis/surprisalColorWeakenManager';
 import { showVisitStatsDialog } from './visitStatsDialog';
 import { showModelManageDialog } from './modelManageDialog';
 
@@ -45,6 +49,7 @@ export class SettingsMenuManager {
     private semanticThresholdItem: d3.Selection<HTMLElement, unknown, HTMLElement, any>;
     private semanticSubmodeRow: d3.Selection<HTMLElement, unknown, HTMLElement, any>;
     private disableInfoDensityToggle: d3.Selection<HTMLInputElement, unknown, HTMLElement, any>;
+    private weakenSurprisalColorToggle: d3.Selection<HTMLInputElement, unknown, HTMLElement, any>;
     private themeDropdownContainer: d3.Selection<Element, unknown, HTMLElement, any>;
     private adminManager: AdminManager;
     private api: TextAnalysisAPI;
@@ -82,6 +87,7 @@ export class SettingsMenuManager {
         this.semanticThresholdItem = d3.select<HTMLElement, any>('#semantic_threshold_item');
         this.semanticSubmodeRow = d3.select<HTMLElement, any>('#semantic_submode_row');
         this.disableInfoDensityToggle = d3.select<HTMLInputElement, any>('#disable_info_density_toggle');
+        this.weakenSurprisalColorToggle = d3.select<HTMLInputElement, any>('#weaken_surprisal_color_toggle');
         this.themeDropdownContainer = d3.select('#theme_dropdown');
         this.adminManager = adminManager;
         this.api = api;
@@ -160,6 +166,14 @@ export class SettingsMenuManager {
             });
         }
 
+        if (this.menuContext === 'analysis' && this.weakenSurprisalColorToggle.node()) {
+            this.weakenSurprisalColorToggle.on('change', () => {
+                const weakened = (this.weakenSurprisalColorToggle.node() as HTMLInputElement)?.checked || false;
+                setSurprisalColorWeakened(weakened);
+                window.dispatchEvent(new CustomEvent('surprisal-color-weaken-change'));
+            });
+        }
+
         // Language dropdown - 由 languageManager 初始化，这里只需要确保容器存在
         // 语言切换逻辑在 language.ts 中处理
 
@@ -198,6 +212,9 @@ export class SettingsMenuManager {
         }
         if (this.menuContext === 'analysis' && this.disableInfoDensityToggle.node()) {
             this.setDisableInfoDensity(getInfoDensityRenderDisabled());
+        }
+        if (this.menuContext === 'analysis' && this.weakenSurprisalColorToggle.node()) {
+            this.setWeakenSurprisalColor(getSurprisalColorWeakened());
         }
         this.applyAdminUiState();
     }
@@ -260,6 +277,9 @@ export class SettingsMenuManager {
         }
         if (this.menuContext === 'analysis' && this.disableInfoDensityToggle.node()) {
             this.setDisableInfoDensity(getInfoDensityRenderDisabled());
+        }
+        if (this.menuContext === 'analysis' && this.weakenSurprisalColorToggle.node()) {
+            this.setWeakenSurprisalColor(getSurprisalColorWeakened());
         }
 
         // 通知外部更新 UI
@@ -327,6 +347,13 @@ export class SettingsMenuManager {
         const checkbox = this.disableInfoDensityToggle.node() as HTMLInputElement | null;
         if (checkbox) {
             checkbox.checked = disabled;
+        }
+    }
+
+    public setWeakenSurprisalColor(weakened: boolean): void {
+        const checkbox = this.weakenSurprisalColorToggle.node() as HTMLInputElement | null;
+        if (checkbox) {
+            checkbox.checked = weakened;
         }
     }
 

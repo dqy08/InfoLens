@@ -188,17 +188,15 @@ export async function showVisitStatsDialog(api: TextAnalysisAPI): Promise<void> 
                 .style('white-space', 'pre-wrap')
                 .style('font', 'inherit')
                 .style('font-size', '13px');
-        } else {
-            block.style('opacity', '0');
         }
+        block.style('opacity', '0.75').text('Loading…');
         try {
             const data = await api.getVisitStats();
             if (!data?.success) throw new Error('bad');
-            block.html(visitStatsHtml(data));
+            block.style('opacity', null).html(visitStatsHtml(data));
         } catch {
-            block.text('Failed to load stats.');
+            block.style('opacity', null).text('Failed to load stats.');
         }
-        block.style('opacity', '1');
     };
 
     showDialog({

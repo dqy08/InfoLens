@@ -12,7 +12,7 @@ const paths = {
         html: path.resolve(__dirname, '../assets/content/home.en.html')
     },
     zh: {
-        json: path.resolve(__dirname, '../../../data/demo/public/CN/InfoHighlight-介绍.json'),
+        json: path.resolve(__dirname, '../../../data/demo/public/CN/InfoHighlight- 介绍.json'),
         html: path.resolve(__dirname, '../assets/content/home.zh.html')
     }
 };

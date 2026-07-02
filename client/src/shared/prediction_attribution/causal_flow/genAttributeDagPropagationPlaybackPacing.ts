@@ -1,5 +1,5 @@
-/** backward 首帧 / forward 末帧稳态固定模拟开销（ms），不参与 Play speed 权重分配。 */
-export const FORWARD_PROMPT_FRAME_DWELL_MS = 500;
+/** 传播链边界帧固定停留（ms）：正向 prompt 首开 / 末帧稳态、反向首帧焦点 slide 等；不参与 Play speed 权重分配。 */
+export const DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS = 500;
 
 /** 链序 running max 前瞻：lookahead = max(MIN, round(RATIO × 传播组数))。 */
 export const DAG_PROPAGATION_WEIGHT_RUNNING_MAX_LOOKAHEAD_RATIO = 0.1;
@@ -32,7 +32,7 @@ export type DagReplayPacingMode = 'total' | 'step';
  * | output gen（续写） | 1× |
  * | tool response | {@link DAG_PLAYBACK_TOOL_RESPONSE_CLOCKS}×（pending 期间展示） |
  * | input 后首 output gen | {@link DAG_PLAYBACK_GEN_AFTER_INPUT_CLOCKS}× |
- * | 末 output gen（结束） | {@link FORWARD_PROMPT_FRAME_DWELL_MS} 固定收尾 |
+ * | 末 output gen（结束） | {@link DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS} 固定收尾 |
  *
  * 仅影响 ▶ 与 ↯ 的时钟倍数；live mock tool 仍用固定 1s（`toolCallingPendingUi`）。
  */
@@ -50,7 +50,7 @@ export type DagRecursiveEdgeReplayPacing = {
     stepMs: number;
     /**
      * `total`：整段动画名义总时长（s）。
-     * 权重步从 `totalS×1000 − {@link FORWARD_PROMPT_FRAME_DWELL_MS}` 按占比分配（backward 首帧预留）；forward 末帧固定收尾另计。
+     * 权重步从 `totalS×1000 − {@link DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS}` 按占比分配（backward 首帧预留）；forward 末帧固定收尾另计。
      */
     totalS: number;
     /**
@@ -155,7 +155,7 @@ export function propagationUniformWeightedFrameCount(
  * 传播链（↯）当前帧的模拟开销（ms），由本帧 `propagationWeight` 或固定帧类型决定。
  *
  * - `step`：`propagationWeight × stepMs`（`disableSmartStepTime` 时每帧 `stepMs`）
- * - `total`：`(propagationWeight / effectiveWeightTotal) × (totalS×1000 − FORWARD_PROMPT_FRAME_DWELL_MS)`
+ * - `total`：`(propagationWeight / effectiveWeightTotal) × (totalS×1000 − DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS)`
  *   （`disableSmartStepTime` 时权重预算均分至 {@link propagationUniformWeightedFrameCount}）
  */
 export function batchAppearanceCostMs(
@@ -175,7 +175,7 @@ export function batchAppearanceCostMs(
         if (scope == null) return 0;
         const frameCount = propagationUniformWeightedFrameCount(plan, scope);
         if (frameCount <= 0) return 0;
-        const weightedBudgetMs = Math.max(0, pacing.totalS * 1000 - FORWARD_PROMPT_FRAME_DWELL_MS);
+        const weightedBudgetMs = Math.max(0, pacing.totalS * 1000 - DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS);
         return Math.round(weightedBudgetMs / frameCount);
     }
     const w = batch.propagationWeight;
@@ -185,7 +185,7 @@ export function batchAppearanceCostMs(
     const totalWeight =
         scope != null ? effectivePropagationWeightTotal(plan, scope) : plan.weightTotal;
     if (totalWeight <= 0) return 0;
-    const weightedBudgetMs = Math.max(0, pacing.totalS * 1000 - FORWARD_PROMPT_FRAME_DWELL_MS);
+    const weightedBudgetMs = Math.max(0, pacing.totalS * 1000 - DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS);
     return Math.round((w / totalWeight) * weightedBudgetMs);
 }
 

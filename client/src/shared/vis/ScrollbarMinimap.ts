@@ -1,4 +1,5 @@
 import { getByteSurprisalColor, getSemanticSimilarityColor, MINIMAP_COLOR_FACTOR, SEMANTIC_MINIMAP_COLOR_FACTOR } from '../cross/SurprisalColorConfig';
+import { getSurprisalRenderMaxAlpha } from '../../features/analysis/surprisalColorWeakenManager';
 import { isNarrowScreen } from '../core/responsive';
 import { calculateSurprisalDensity, isFiniteNumber } from '../core/Util';
 import type { TokenFragmentRect } from './types';
@@ -247,7 +248,13 @@ export class ScrollbarMinimap {
             const averageSurprisalDensity = bucket.TokenFragmentCount > 0
                 ? bucket.surprisalDensitySum / bucket.TokenFragmentCount
                 : 0;
-            const color = getByteSurprisalColor(averageSurprisalDensity, MINIMAP_COLOR_FACTOR);
+            const color = getByteSurprisalColor(
+                averageSurprisalDensity,
+                MINIMAP_COLOR_FACTOR,
+                undefined,
+                undefined,
+                getSurprisalRenderMaxAlpha()
+            );
             ctx.fillStyle = color;
 
             const y = (textAreaTop + bucket.y) / worldUnitsPerMinimapPixel; // 映射到minimap的y坐标

@@ -19,6 +19,7 @@ export const DAG_PROPAGATION_PLAYBACK_LOG_LS_KEY = 'info_radar.dag_propagation_p
 export function isDagPropagationPlaybackLogEnabled(): boolean {
     if (typeof globalThis === 'undefined') return false;
     const g = globalThis as typeof globalThis & { __DAG_PROPAGATION_PLAYBACK_LOG__?: boolean };
+    if (g.__DAG_PROPAGATION_PLAYBACK_LOG__ === false) return false;
     if (g.__DAG_PROPAGATION_PLAYBACK_LOG__ === true) return true;
     try {
         return localStorage.getItem(DAG_PROPAGATION_PLAYBACK_LOG_LS_KEY) === '1';

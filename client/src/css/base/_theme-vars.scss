@@ -69,6 +69,7 @@
   --dag-normal-line-color: #ddd;
   --dag-highlight-line-color-in: color-mix(in srgb, var(--accent-color) 80%, transparent);
   --dag-highlight-line-color-out: rgba(255, 71, 64, 0.5);
+  --dag-lightning-line-color: color-mix(in srgb, var(--accent-color) 38%, white);
   --bin-highlight-outline: var(--accent-color);
   --bin-highlight-shadow: var(--accent-shadow);
   --avg-line-color: #8c8c8c;

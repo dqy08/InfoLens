@@ -134,6 +134,17 @@ export const translations: Translations = {
         'Disable smart step time': '禁用智能步长时间',
         'When checked, propagation chain animation (↯) uses a uniform interval per frame instead of scaling by attribution weight. DAG step replay (▶) is unchanged. Saved locally; applied when you press play.':
             '勾选后，传播链动画（↯）各帧使用均匀间隔，不再按归因权重缩放；步进重放（▶）不受影响。本地保存；点击播放时生效。',
+        'Lightning effect': '闪电效果',
+        'When checked, forward propagation play (↯) highlights propagation edges in peak contrast during the last-frame dwell (boundary frame × slow-mo). Extra wall time; not counted in Play speed total time. Saved locally; applied when you press play.':
+            '勾选后，正向传播播放（↯）在末帧 dwell（边界帧 × 慢放倍数）内以峰值对比度高亮传播蓝边。额外墙钟时间，不计入播放速度的总时长。本地保存；点击播放时生效。',
+        'Lightning linear boost denominator τ on render strength: opacity = min(1, strength / τ). Lower τ brightens more edges. Saved locally.':
+            '闪电线性增强分母 τ（基于当前 render strength）：opacity = min(1, strength / τ)。τ 越小越多边顶满。本地保存。',
+        'Lightning slow-mo x': '闪电慢放 x',
+        'Slows lightning dwell and animation rhythm by this factor (1–10). Saved locally; applied when you press play.':
+            '按此倍数放慢闪电 dwell 与动画节奏（1–10）。本地保存；点击播放时生效。',
+        'Thunder sound': '雷声',
+        'When checked, forward propagation play (↯) plays thunder strike and rumble with the lightning effect. Saved locally.':
+            '勾选后，正向传播播放（↯）在闪电效果时播放雷击与背景闷雷。本地保存。',
         'Auto zoom': '自动缩放',
         'Slide prompt in animation': '动画中 slide 扫过 prompt',
         'When checked, step replay (▶) fits the viewport after each step (stops if you pan or zoom). Saved locally.':
@@ -151,6 +162,8 @@ export const translations: Translations = {
             '总秒数。步进重放（▶）在步间均分；传播链（↯）按层权重分配。本地保存；点击对应播放钮或选中焦点节点时生效。',
         'Total seconds. With no focused token, DAG step replay (▶) divides evenly; in Causal Flow Mode with a focused token, propagation play (↯) runs focus-chain animation split by layer weight. Saved locally; applied when you press play.':
             '总秒数。无焦点时步进重放（▶）在步间均分；因果流模式下对已聚焦 token 按传播播放（↯）时，按层权重运行焦点传播链动画。本地保存；点击播放时生效。',
+        'Total seconds for weighted propagation frames. Lightning effect dwell at the end is extra wall time and not included. With no focused token, DAG step replay (▶) divides evenly; in Causal Flow Mode with a focused token, propagation play (↯) runs focus-chain animation split by layer weight. Saved locally; applied when you press play.':
+            '加权传播帧的总秒数。末帧闪电效果 dwell 为额外墙钟时间，不计入此项。无焦点时步进重放（▶）在步间均分；因果流模式下对已聚焦 token 按传播播放（↯）时，按层权重运行焦点传播链动画。本地保存；点击播放时生效。',
         'Milliseconds per step. DAG step replay (▶) uses this fixed interval; propagation chain (↯) multiplies by layer weight. Saved locally; applied when you press play or select a focus node.':
             '每步毫秒数。步进重放（▶）使用固定间隔；传播链（↯）乘以层权重。本地保存；点击对应播放钮或选中焦点节点时生效。',
         'Milliseconds per step. DAG step replay (▶) uses this as the 1× output-gen clock; with a focused token in Causal Flow Mode, propagation play (↯) scales each batch by layer weight. Saved locally; applied when you press play.':

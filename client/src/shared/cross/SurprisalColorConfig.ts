@@ -37,7 +37,7 @@ export const SEMANTIC_MINIMAP_COLOR_FACTOR = 0.4;
 
 /** 红色 #ff4740，用于 surprisal 与语义匹配度 */
 const SURPRISAL_RED_RGB = "255, 71, 64";
-const SURPRISAL_MAX_ALPHA = 0.7;
+export const SURPRISAL_MAX_ALPHA = 0.7;
 
 /** 直方图渐变最浅色 alpha 下限（10% 区间），供直方图使用方配置 */
 export const HISTOGRAM_MIN_ALPHA = 0.1 * SURPRISAL_MAX_ALPHA;
@@ -46,10 +46,15 @@ export const HISTOGRAM_MIN_ALPHA = 0.1 * SURPRISAL_MAX_ALPHA;
  * 根据归一化值获取对应的颜色（输入值应在[0,1]区间）
  * @param normalizedValue 归一化后的值，范围[0,1]
  * @param minAlpha alpha 下限，默认不限制
+ * @param maxAlpha 归一化值为 1 时的 alpha 上限，默认 {@link SURPRISAL_MAX_ALPHA}
  */
-export function getSurprisalColorNormalized(normalizedValue: number, minAlpha?: number): string {
+export function getSurprisalColorNormalized(
+    normalizedValue: number,
+    minAlpha?: number,
+    maxAlpha: number = SURPRISAL_MAX_ALPHA
+): string {
     const clampedValue = Math.max(0, Math.min(1, normalizedValue));
-    let alpha = clampedValue * SURPRISAL_MAX_ALPHA;
+    let alpha = clampedValue * maxAlpha;
     if (minAlpha != null) alpha = Math.max(minAlpha, alpha);
     return `rgba(${SURPRISAL_RED_RGB}, ${alpha})`;
 }
@@ -75,15 +80,17 @@ function normalizeTo_01(value: number, maxValue: number): number {
  * @param surprisal token惊讶度值，默认按 [0, TOKEN_SURPRISAL_MAX] 映射到 [0, 1]
  * @param minAlpha alpha 下限，默认不限制
  * @param maxSurprisalForMap 可选：映射上限（bits），用于 Chat 等场景收窄动态范围
+ * @param maxAlpha 归一化值为 1 时的 alpha 上限，默认 {@link SURPRISAL_MAX_ALPHA}
  */
 export function getTokenSurprisalColor(
     surprisal: number,
     minAlpha?: number,
-    maxSurprisalForMap?: number
+    maxSurprisalForMap?: number,
+    maxAlpha?: number
 ): string {
     const max = maxSurprisalForMap ?? TOKEN_SURPRISAL_MAX;
     const normalizedValue = normalizeTo_01(surprisal, max);
-    return getSurprisalColorNormalized(normalizedValue, minAlpha);
+    return getSurprisalColorNormalized(normalizedValue, minAlpha, maxAlpha);
 }
 
 /**
@@ -92,16 +99,18 @@ export function getTokenSurprisalColor(
  * @param colorFactor 颜色因子，用于调整颜色强度（如 minimap）。默认为1
  * @param minAlpha alpha 下限，默认不限制
  * @param maxByteSurprisalForMap 可选：映射上限（bits/Byte），与 {@link getTokenSurprisalColor} 的第三参同理
+ * @param maxAlpha 归一化值为 1 时的 alpha 上限，默认 {@link SURPRISAL_MAX_ALPHA}
  */
 export function getByteSurprisalColor(
     byteSurprisal: number,
     colorFactor: number = 1,
     minAlpha?: number,
-    maxByteSurprisalForMap?: number
+    maxByteSurprisalForMap?: number,
+    maxAlpha?: number
 ): string {
     const max = maxByteSurprisalForMap ?? BYTE_SURPRISAL_MAX;
     const normalizedValue = normalizeTo_01(byteSurprisal * colorFactor, max);
-    return getSurprisalColorNormalized(normalizedValue, minAlpha);
+    return getSurprisalColorNormalized(normalizedValue, minAlpha, maxAlpha);
 }
 
 /**

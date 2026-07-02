@@ -1,4 +1,5 @@
 import { DAG_MIN_ATTRIBUTION_SHARE } from './genAttributeDagEdgeDisplay';
+import { DAG_LIGHTNING_SLOW_MO_DEFAULT, DAG_LIGHTNING_THRESHOLD_TAU_DEFAULT, lightningBoundaryFrameDwellMs } from './genAttributeDagEdgeRenderStrength';
 import { parseDagLinkEndpointKey } from './genAttributeDagNodeDim';
 import {
     DAG_PROP_LOG_W,
@@ -15,7 +16,7 @@ import {
     batchAppearanceCostMs,
     computePropagationGroupPacings,
     effectivePropagationWeightTotal,
-    FORWARD_PROMPT_FRAME_DWELL_MS,
+    DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS,
     type DagRecursiveEdgeReplayPacing,
     type DagReplayPacingMode,
     type PropagationGroupPrep,
@@ -29,7 +30,7 @@ export {
     effectivePropagationWeightTotal,
     DAG_PROPAGATION_WEIGHT_RUNNING_MAX_LOOKAHEAD_MIN,
     DAG_PROPAGATION_WEIGHT_RUNNING_MAX_LOOKAHEAD_RATIO,
-    FORWARD_PROMPT_FRAME_DWELL_MS,
+    DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS,
     propagationRunningMaxLookaheadForGroupCount,
 } from './genAttributeDagPropagationPlaybackPacing';
 export {
@@ -43,6 +44,17 @@ export type DagRecursiveEdgeAnimationDirection = 'backward' | 'forward';
 export type DagPropagationPlaybackOptions = {
     /** forward：prompt 等有 share 节点纳入 batch slide；默认 false → 500ms prompt 首帧后跳过 prompt 批。 */
     forwardSlideSharedNodes: boolean;
+    /** forward 边界帧 dwell：传播蓝边峰值闪后线性衰减至稳态蓝边（accent 混白 × τ → 常色 × renderStrength）。 */
+    lightningEffect: boolean;
+    /**
+     * 闪电线性增强分母 τ（0,1]：`opacity = min(1, renderStrength / τ)`。
+     * τ 越小越多边顶满；τ=1 等价于仅最强边可达 1（在 renderStrength 已归一前提下）。
+     */
+    lightningThresholdTau: number;
+    /** 闪电效果慢放倍数 [1,10]：dwell 与节奏按此比例拉长。 */
+    lightningSlowMo: number;
+    /** 闪电效果伴随雷声（雷击 + 背景闷雷）。 */
+    lightningSound: boolean;
 };
 
 /** 与 {@link genAttributeDagView} 内焦点归因快照同形；供动画 overlay 消费。 */
@@ -88,14 +100,14 @@ const DAG_RECURSIVE_EDGE_BATCH_STEP_MS_FALLBACK = 500;
  *
  * **forward**
  * - 计划始终含全部有 share 的 token（含 prompt）；勾选 slide prompt 时从 `batches[末]` 递减，各批按 {@link batchAppearanceCostMs}。
- * - 未勾选时：先 {@link FORWARD_PROMPT_FRAME_DWELL_MS}ms prompt 稳态首帧（跳过 prompt-only 批），再从首个 gen 批递减至 `batchIndex === 0`。
+ * - 未勾选时：先 {@link DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS}ms prompt 稳态首帧（跳过 prompt-only 批），再从首个 gen 批递减至 `batchIndex === 0`。
  * - share 始终用全量焦点快照，动画只改「可见边集合」与归一分母（前沿内 max share）。
  * - 部分帧内焦点不提前高亮/描边（render 延后至末帧 `batchIndex === 0` 稳态），与反向首帧才亮焦点对称。
  * - 同一帧内，已可见边的相对强弱 = share 相对强弱；绝对 opacity 可因分母随新批次变大而变暗。
  * - 末帧 `batchIndex === 0` 时前沿 = 全链、分母 = 全链 max、可见性全开，与无动画稳定态数值一致（收敛）。
  *
  * **backward**
- * - 首帧 `batchIndex === 0`（焦点侧）：固定模拟开销 {@link FORWARD_PROMPT_FRAME_DWELL_MS}ms，焦点红色 slide；与 forward prompt 首帧对称，不参与权重分配。
+ * - 首帧 `batchIndex === 0`（焦点侧）：固定模拟开销 {@link DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS}ms，焦点红色 slide；与 forward prompt 首帧对称，不参与权重分配。
  * - 蓝线从焦点侧逐批显现：稳态 share + {@link backwardFrontierByBatchIndex} 门控（`batches[0..i]` 递增）。
  * - 未滑过：live stay；已滑过 batch：稳态 stay；非播放链生成 token 不描边；prompt（`step === -1`）若在候选集中则用 live stay（可不在传播链上）。
  * - 首个 prompt 区不参与 slide（无红框）；滑完 gen 链后一跳至末批稳态（全链蓝边），与 forward 跳过 prompt 批对称。
@@ -114,7 +126,7 @@ const DAG_RECURSIVE_EDGE_BATCH_STEP_MS_FALLBACK = 500;
  * - 间隔 = 当前帧的模拟开销；由本帧 `propagationWeight` 或固定帧类型决定。
  * - 调度：展示本帧 → 等待其开销 → 下一帧（与步进回放「展示前等待」在相邻帧时刻上等价）。
  * - 权重为 0 时开销恰为 0（`step` 下 0ms，不设最小间隔）。
- * - `total` 模式：UI `totalS` 中预留 {@link FORWARD_PROMPT_FRAME_DWELL_MS} 给 backward 首帧；forward 末帧另计同长度固定收尾，其余按权重分配。
+ * - `total` 模式：UI `totalS` 中预留 {@link DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS} 给 backward 首帧；forward 末帧另计同长度固定收尾，其余按权重分配。
  */
 /** 传播链动画的一批：同一 offset 上有份额的节点 + 该组传播入边 + 播放元数据。 */
 export type DagRecursiveIncomingEdgeBatch = {
@@ -842,6 +854,8 @@ export type DagRecursiveEdgeAnimationController = {
     getDirection(): DagRecursiveEdgeAnimationDirection;
     getUserAnimationFocusId(): string | null;
     getPlaybackPhase(): DagPropagationPlaybackPhase;
+    /** 当前帧自展示以来的时长（ms）；无活跃帧时为 0。 */
+    getCurrentFrameElapsedMs(): number;
     canStartPlayback(focusId: string, ctx: DagFocusAttributionGraphContext): boolean;
     startPlayback(focusId: string, ctx: DagFocusAttributionGraphContext): void;
     pausePlayback(): void;
@@ -887,7 +901,13 @@ export function createDagRecursiveEdgeAnimationController(
     const getReplayPacing = options.getReplayPacing ?? defaultPacing;
     const getPropagationPlaybackOptions =
         options.getPropagationPlaybackOptions ??
-        ((): DagPropagationPlaybackOptions => ({ forwardSlideSharedNodes: false }));
+        ((): DagPropagationPlaybackOptions => ({
+            forwardSlideSharedNodes: false,
+            lightningEffect: false,
+            lightningThresholdTau: DAG_LIGHTNING_THRESHOLD_TAU_DEFAULT,
+            lightningSlowMo: DAG_LIGHTNING_SLOW_MO_DEFAULT,
+            lightningSound: false,
+        }));
     const notifyPhaseChange = (): void => {
         options.onPlaybackPhaseChange?.();
     };
@@ -898,6 +918,7 @@ export function createDagRecursiveEdgeAnimationController(
     let version = 0;
     let graphCtx: DagFocusAttributionGraphContext | null = null;
     let playbackPhase: DagPropagationPlaybackPhase = 'idle';
+    let currentFrameShownAt: number | null = null;
 
     function setPlaybackPhase(next: DagPropagationPlaybackPhase): void {
         if (playbackPhase === next) return;
@@ -921,6 +942,7 @@ export function createDagRecursiveEdgeAnimationController(
         }
         animation = null;
         userAnimationFocusId = null;
+        currentFrameShownAt = null;
         setPlaybackPhase('idle');
     }
 
@@ -1055,7 +1077,14 @@ export function createDagRecursiveEdgeAnimationController(
             (state.direction === 'forward' && state.batchIndex === 0) ||
             backwardSkippedPromptSteadyEnd
         ) {
-            return FORWARD_PROMPT_FRAME_DWELL_MS;
+            if (state.direction === 'forward' && state.batchIndex === 0) {
+                return lightningBoundaryFrameDwellMs(
+                    DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS,
+                    getPropagationPlaybackOptions().lightningEffect,
+                    getPropagationPlaybackOptions().lightningSlowMo,
+                );
+            }
+            return DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS;
         }
         const batch = state.plan.batches[state.batchIndex];
         if (batch == null) return 0;
@@ -1126,6 +1155,7 @@ export function createDagRecursiveEdgeAnimationController(
             const liveState = animation;
             if (!liveState || liveState.plan.focusId !== focusId) return;
 
+            currentFrameShownAt = performance.now();
             options.onTick();
             logPropagationFrame(liveState);
 
@@ -1163,6 +1193,10 @@ export function createDagRecursiveEdgeAnimationController(
         },
         getPlaybackPhase(): DagPropagationPlaybackPhase {
             return playbackPhase;
+        },
+        getCurrentFrameElapsedMs(): number {
+            if (currentFrameShownAt == null) return 0;
+            return Math.max(0, performance.now() - currentFrameShownAt);
         },
         canStartPlayback,
         startPlayback,

@@ -9,9 +9,12 @@
   // 1lh（控件 line-height）+ 上下 padding(3px×2) + 边框(1px×2)
   --semantic-submode-control-block-size: calc(1lh + 6px + 2px);
 
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  // 仅非 hidden 时设 flex，否则会覆盖浏览器对 [hidden] 的 display:none（同 .semantic-submode-group）
+  &:not([hidden]) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
 
   .semantic-submode-group {
     // 仅非 hidden 时设 flex，否则会覆盖浏览器对 [hidden] 的 display:none（同 gen-attr-dag-replay-value-wrap）

@@ -8,7 +8,7 @@ import {
     DAG_PLAYBACK_GEN_AFTER_INPUT_CLOCKS,
     DAG_PLAYBACK_TOOL_RESPONSE_CLOCKS,
     effectivePropagationWeightTotal,
-    FORWARD_PROMPT_FRAME_DWELL_MS,
+    DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS,
     propagationRunningMaxLookaheadForGroupCount,
     propagationUniformWeightedFrameCount,
     resolveDagStepPlaybackClocks,
@@ -205,7 +205,7 @@ assertEq(
 );
 
 const totalPacing = { mode: 'total' as const, stepMs: 500, totalS: 7 };
-const weightedBudgetMs = 7 * 1000 - FORWARD_PROMPT_FRAME_DWELL_MS;
+const weightedBudgetMs = 7 * 1000 - DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS;
 assertEq(
     'total：按权重占比，预算已扣固定帧',
     batchAppearanceCostMs(batch, plan, totalPacing),
@@ -304,7 +304,7 @@ console.log('3c. disableSmartStepTime');
     const backwardScope = { direction: 'backward' as const, forwardSlideSharedNodes: false };
     const frameCount = propagationUniformWeightedFrameCount(uniformPlan, backwardScope);
     assertEq('uniform total：backward 计时节拍', frameCount, 2);
-    const weightedBudgetMs = 7 * 1000 - FORWARD_PROMPT_FRAME_DWELL_MS;
+    const weightedBudgetMs = 7 * 1000 - DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS;
     assertEq(
         'uniform total：均分预算',
         batchAppearanceCostMs(batch, uniformPlan, totalUniform, backwardScope),
