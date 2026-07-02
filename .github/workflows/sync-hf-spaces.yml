@@ -26,6 +26,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
+          git lfs install
           if [ -z "$HF_TOKEN" ]; then
             echo "::error::HF_TOKEN secret is empty — check repo Settings → Secrets → Actions"
             exit 1

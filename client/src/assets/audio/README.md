@@ -8,4 +8,5 @@
 |------|------|------|------|
 | `lightning-strike-crack.mp3` | 0:00–0:05 | 闪电回击 | 高通 40 Hz + 低通 1.1 kHz + FFT 降噪 + 3s 起 2s 淡出 |
 | `thunder-rumble-bg.mp3` | 0:05–0:12 | 背景雷声（无缝循环 ~5.5s） | 高通 28 Hz + 低通 340 Hz + 首尾 1.5s 交叉淡入 |
-| `thunder-strikes-lightning-storm-rumble.mp3` | 完整原声 | 源文件 | — |
+
+完整原声未入库（HF 禁止未走 LFS 的二进制）；需重制时从上方 Freesound 链接下载。

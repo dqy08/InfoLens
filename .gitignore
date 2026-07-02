@@ -35,6 +35,9 @@ user_dialog_history/*
 .cache_huggingface/
 .env
 
+# 音效源文件（仅本地保留，不入库）
+client/src/assets/audio/thunder-strikes-lightning-storm-rumble.mp3
+
 # --- 系统与 IDE ---
 .DS_Store
 .idea/
