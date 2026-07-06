@@ -1618,21 +1618,27 @@ function syncDagToPlaybackPrefix(
 ): void {
     dagHandle.reset(true);
     if (steps.length === 0) return;
-    syncDagInputLayerAtStep({
-        catalogSpans,
-        layoutWire: steps[0]!.context,
-        inputRanges: steps[0]!.inputRanges,
-    });
-    for (let i = 0; i < genStepCount; i++) {
-        if (i > 0 && isToolCallingBoundaryBetweenSteps(steps, i - 1)) {
-            const step = steps[i]!;
-            syncDagInputLayerAtStep({
-                catalogSpans,
-                layoutWire: step.context,
-                inputRanges: step.inputRanges,
-            });
+    // 与 replayRunnerStepsIntoDag 一致：批处理内只维护图数据，避免逐步 syncGraphToSvg 造成的卡顿。
+    dagHandle.beginBatch();
+    try {
+        syncDagInputLayerAtStep({
+            catalogSpans,
+            layoutWire: steps[0]!.context,
+            inputRanges: steps[0]!.inputRanges,
+        });
+        for (let i = 0; i < genStepCount; i++) {
+            if (i > 0 && isToolCallingBoundaryBetweenSteps(steps, i - 1)) {
+                const step = steps[i]!;
+                syncDagInputLayerAtStep({
+                    catalogSpans,
+                    layoutWire: step.context,
+                    inputRanges: step.inputRanges,
+                });
+            }
+            pushDagFromPreprocess(steps[i]!, i, false, excludeIntervalContext);
         }
-        pushDagFromPreprocess(steps[i]!, i, false, excludeIntervalContext);
+    } finally {
+        dagHandle.endBatch();
     }
 }
 
@@ -2006,13 +2012,15 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
             dagPlaybackNextIndex = stepIndex + 1;
         },
         onAllOutputGensShown: () => {
-            if (runnerHandle !== h) {
+            scheduleDagLastTokenDwell(() => {
+                if (runnerHandle !== h) {
+                    dagHandle.setDagPlaybackPlaying(false);
+                    return;
+                }
+                toolCallingPendingLine?.hide();
+                dagHandle.clearNodeSelection();
                 dagHandle.setDagPlaybackPlaying(false);
-                return;
-            }
-            toolCallingPendingLine?.hide();
-            dagHandle.setDagPlaybackPlaying(false);
-            dagHandle.clearNodeSelection();
+            });
         },
         skipAppearanceCostForOutputGen,
         ...(simulateAttention
