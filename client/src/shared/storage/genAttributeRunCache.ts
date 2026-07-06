@@ -107,6 +107,21 @@ export type GenAttrDemoUiOptions = {
     lightningSound: boolean;
     playbackTotalS: number;
     playbackStepMs: number;
+    /** ▶ 展开 attention 扫描 + FFN 动画（非 Causal Flow Mode）。 */
+    simulateAttentionCost: boolean;
+    /** ▶ 跳过 prefill：uncached 多 token 时不逐 token query；scan 仍随 query 在 context 中取前缀。 */
+    skipPrefillAttention: boolean;
+    /** prefill 中间轮动画：`plain` 逐轮扫描；`random` 每 query 一帧并行摘要。 */
+    prefillStyle: 'plain' | 'random';
+    attendMs: number;
+    /** dwell ratio（存储键仍为 ffnRatioAttend）；新 gen 前后 FFN 停留倍数。 */
+    ffnRatioAttend: number;
+    accumulativeHighlight: boolean;
+    /** random prefill：每帧并行建立的 query 数。 */
+    queryBurst: number;
+    attendBurst: number;
+    /** Simulate attention 播放中高亮 token 时隐藏 DAG 边（箭头）。 */
+    hideArrowsDuringAttention: boolean;
     /** 删除 prompt token（物理移除，不占布局）：使能与正则文本（`info_radar_gen_attr_delete_prompt_*`）。 */
     deletePromptPatternsEnabled: boolean;
     deletePromptPatternsText: string;

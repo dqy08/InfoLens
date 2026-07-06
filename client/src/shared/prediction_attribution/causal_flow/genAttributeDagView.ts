@@ -7,11 +7,13 @@ import {
     collectDeletePromptIntervals,
     collectGenAttrDagExcludeIntervals,
     DAG_EDGE_TOP_P_COVERAGE_DEFAULT,
+    normalizePromptTokenSpans,
     excludeNodeAggregatedEntries,
     phase2RankAndSparsify,
     type PromptTokenSpan,
 } from './genAttributeDagPreprocess';
 import type { CharRange } from './tokenGenAttributionRunner';
+import type { AttentionPlaybackHighlight } from './runAttentionPlayback';
 import {
     DAG_EDGE_MIN_NORMALIZED_SCORE,
     DAG_MIN_ATTRIBUTION_SHARE,
@@ -627,6 +629,10 @@ export type GenAttributeDagHandle = {
     setRecursiveEdgeBatchAnimationDirection(direction: DagRecursiveEdgeAnimationDirection): void;
     /** 重算节点/边高亮（如 slide prompt 等仅影响渲染、不改图数据的选项切换后）。 */
     refreshNodeLinkHighlight(): void;
+    /** ▶ attention 模拟播放中的 token 高亮；`null` 清除。 */
+    setAttentionPlaybackHighlight(state: AttentionPlaybackHighlight): void;
+    /** Simulate attention ∧ Hide arrows 时，仅在 {@link setAttentionPlaybackHighlight} 非 null 期间隐藏边。 */
+    setHideArrowsDuringAttention(hide: boolean): void;
     /** 在 DAG 上播放一次闪电动画预览（需因果流模式、传播焦点、已勾选闪电）。 */
     playLightningEffectPreview(): void;
     /** 中止闪电动画预览并恢复稳态渲染。 */
@@ -870,6 +876,8 @@ export type InitGenAttributeDagViewOptions = {
     linearArcAdjacentGapPx?: number;
     /** exclude / inactive（0.1）是否完全隐藏（true）还是 0.1 占位（false，默认）。 */
     hideExcludedTokens?: boolean;
+    /** Simulate attention ∧ Hide arrows 时，仅在注意力高亮进行中隐藏 DAG 边；默认 `false`。 */
+    hideArrowsDuringAttention?: boolean;
     dimInactiveTokens?: boolean;
     dimInactiveTokensThreshold?: number;
     dimInactiveNotDuringAnimation?: boolean;
@@ -924,6 +932,7 @@ export function initGenAttributeDagView(
         linearArcAdjacentGapPx = clampLinearArcAdjacentGap(iv);
     }
     let hideExcludedTokens: boolean = options?.hideExcludedTokens ?? false;
+    let hideArrowsDuringAttention: boolean = options?.hideArrowsDuringAttention ?? false;
     let dimInactiveTokens: boolean = options?.dimInactiveTokens ?? false;
     let dimInactiveTokensThreshold = clampDimInactiveTokensThreshold(
         options?.dimInactiveTokensThreshold ?? DIM_INACTIVE_TOKENS_THRESHOLD_DEFAULT,
@@ -971,6 +980,7 @@ export function initGenAttributeDagView(
             setDagCompactness: noop,
             setEdgeTopPCoverage: noop,
             setHideExcludedTokens: noop,
+            setHideArrowsDuringAttention: noop,
             setDimInactiveTokens: noop,
             setDimInactiveTokensThreshold: noop,
             setDimInactiveNotDuringAnimation: noop,
@@ -978,6 +988,7 @@ export function initGenAttributeDagView(
             setRecursiveAttributionEnabled: noop,
             setRecursiveEdgeBatchAnimationDirection: noop,
             refreshNodeLinkHighlight: noop,
+            setAttentionPlaybackHighlight: noop,
             playLightningEffectPreview: noop,
             cancelLightningEffectPreview: noop,
             enterLightningTauPreview: noop,
@@ -1153,6 +1164,8 @@ export function initGenAttributeDagView(
     let userFocusId: string | null = null;
     /** 悬浮节点 id；无选中时参与归因预览焦点，有选中时仅驱动 `--hover` 等样式，不改归因焦点 */
     let hoveredId: string | null = null;
+    /** ▶ Simulate attention：attend / FFN 阶段 token 高亮 */
+    let attentionHighlight: AttentionPlaybackHighlight = null;
     /** 最近一次 {@link refreshNodeLinkHighlight} 计算出的归因状态（基于 {@link effectiveFocusId}）；tooltip 用于展示归因份额 */
     let currentFocusState: FocusAttributionState | null = null;
     /** 传播链动画进行中 tooltip 锚点；播放结束后为 null，恢复 target / hover。 */
@@ -1806,46 +1819,87 @@ export function initGenAttributeDagView(
                      getPropagationPlaybackOptions().forwardSlideSharedNodes)
                   : getPropagationPlaybackOptions().forwardSlideSharedNodes;
         const highlightStayNodesFill = recursiveAttributionEnabled && !forwardSlideSharedNodes;
+        const attentionLit =
+            attentionHighlight != null ? new Set(attentionHighlight.litIds) : null;
+        const activeQueryIds =
+            attentionHighlight != null
+                ? new Set(
+                      attentionHighlight.queryTokenIds ??
+                          (attentionHighlight.queryTokenId != null
+                              ? [attentionHighlight.queryTokenId]
+                              : []),
+                  )
+                : null;
+        const kvEstablishedQueries =
+            attentionHighlight?.kvEstablishedQueryIds != null
+                ? new Set(attentionHighlight.kvEstablishedQueryIds)
+                : null;
         const resolveNodeFillOpacity = (d: DagNode): number => {
             const lowVis = nodeLowVisReasonById.get(d.id) ?? null;
-            if (hideExcludedTokens && lowVis != null) return DagNodeOpacityLevel.hidden;
-            if (isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)) {
-                return DagNodeOpacityLevel.almostHidden;
+            let base: number;
+            if (hideExcludedTokens && lowVis != null) {
+                base = DagNodeOpacityLevel.hidden;
+            } else if (isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)) {
+                base = DagNodeOpacityLevel.almostHidden;
+            } else {
+                const nodeFullyHighlighted = recursiveAttributionEnabled
+                    ? forwardPromptPreambleFrame
+                        ? nodeOnChainForRender(d)
+                        : highlightStayNodesFill
+                          ? (d.id === focusId && !deferFocusHighlightDuringAnim) ||
+                            (nodeStrokeShareById?.has(d.id) ?? false) ||
+                            isPropagationSlide(d)
+                          : propagationAnimVisualActive
+                            ? (d.id === focusId && !deferFocusHighlightDuringAnim) ||
+                              isPropagationSlide(d)
+                            : d.id === focusId
+                    : (focusNodeIds?.has(d.id) ?? false);
+                base = DagNodeOpacityLevel.full;
+                if (!nodeFullyHighlighted) {
+                    const hasGenTokens = nodes.some((n) => n.step >= 0);
+                    const isPromptLeaf =
+                        hasGenTokens && d.step === -1 && graph.outDegree(d.id) === 0;
+                    if (focusId || isPromptLeaf) base = DagNodeOpacityLevel.weakened;
+                }
+                if (lowVis === 'inactive') {
+                    base = DagNodeOpacityLevel.almostHidden;
+                }
             }
-            const nodeFullyHighlighted = recursiveAttributionEnabled
-                ? forwardPromptPreambleFrame
-                    ? nodeOnChainForRender(d)
-                    : highlightStayNodesFill
-                      ? (d.id === focusId && !deferFocusHighlightDuringAnim) ||
-                        (nodeStrokeShareById?.has(d.id) ?? false) ||
-                        isPropagationSlide(d)
-                      : propagationAnimVisualActive
-                        ? (d.id === focusId && !deferFocusHighlightDuringAnim) || isPropagationSlide(d)
-                        : d.id === focusId
-                : (focusNodeIds?.has(d.id) ?? false);
-            let opacity: number = DagNodeOpacityLevel.full;
-            if (!nodeFullyHighlighted) {
-                const hasGenTokens = nodes.some((n) => n.step >= 0);
-                const isPromptLeaf =
-                    hasGenTokens && d.step === -1 && graph.outDegree(d.id) === 0;
-                if (focusId || isPromptLeaf) opacity = DagNodeOpacityLevel.weakened;
+            if (attentionHighlight == null) return base;
+            if (activeQueryIds?.has(d.id) || attentionLit!.has(d.id)) {
+                return DagNodeOpacityLevel.full;
             }
-            if (lowVis === 'inactive') {
-                return DagNodeOpacityLevel.almostHidden;
-            }
-            return opacity;
+            return Math.min(base, DagNodeOpacityLevel.weakened);
         };
+        const showNodeSelectedStroke = (d: DagNode): boolean => {
+            if (attentionHighlight != null) {
+                if (kvEstablishedQueries?.has(d.id)) return true;
+                return activeQueryIds?.has(d.id) ?? false;
+            }
+            return showFocusSelectedStroke(d);
+        };
+        const suppressAttributionChainNodeStyle = attentionHighlight != null;
         nodeSel
-            .classed('gen-attr-dag-node--hover', (d) => hoveredId === d.id)
-            .classed('gen-attr-dag-node--selected', showFocusSelectedStroke)
+            .classed('gen-attr-dag-node--hover', (d) => {
+                // attend 阶段仅 fill 提亮，不加 hover 描边
+                if (attentionHighlight != null) return false;
+                return hoveredId === d.id;
+            })
+            .classed('gen-attr-dag-node--selected', showNodeSelectedStroke)
             .style('display', nodeDisplay)
             .style('opacity', null)
             .classed(
                 'gen-attr-dag-node--recursive-chain',
-                (d) => nodeOnChainForRender(d) || isBackwardSlide(d),
+                (d) =>
+                    !suppressAttributionChainNodeStyle &&
+                    (nodeOnChainForRender(d) || isBackwardSlide(d)),
             )
-            .classed('gen-attr-dag-node--backward-slide', isBackwardSlide)
+            .classed(
+                'gen-attr-dag-node--backward-slide',
+                (d) => !suppressAttributionChainNodeStyle && isBackwardSlide(d),
+            )
             .style(CSS_VAR_DAG_NODE_RECURSIVE_SHARE, (d) => {
+                if (suppressAttributionChainNodeStyle) return null;
                 if (!nodeOnChainForRender(d) && !isBackwardSlide(d)) return null;
                 const renderStrength = nodeStrokeRenderById?.get(d.id);
                 return renderStrength != null ? String(renderStrength) : null;
@@ -1857,8 +1911,11 @@ export function initGenAttributeDagView(
             .select('text.gen-attr-dag-node-text')
             .attr('opacity', resolveNodeFillOpacity);
         nodeHitSel
-            .classed('gen-attr-dag-node--hover', (d) => hoveredId === d.id)
-            .classed('gen-attr-dag-node--selected', showFocusSelectedStroke)
+            .classed('gen-attr-dag-node--hover', (d) => {
+                if (attentionHighlight != null) return false;
+                return hoveredId === d.id;
+            })
+            .classed('gen-attr-dag-node--selected', showNodeSelectedStroke)
             .style('display', nodeDisplay);
         nodeG.style(
             'opacity',
@@ -1914,6 +1971,8 @@ export function initGenAttributeDagView(
                       lightningFadeProgress,
                   )
                 : finalRenderStrength * lightningContentReveal;
+            const edgeOpacityForRender =
+                hideArrowsDuringAttention && attentionHighlight != null ? 0 : opacityForRender;
             const g = d3.select(this);
             const srcAttrs = graph.getNodeAttributes(srcId) as DagNode;
             const tgtAttrs = graph.getNodeAttributes(tgtId) as DagNode;
@@ -1929,11 +1988,11 @@ export function initGenAttributeDagView(
                     linkStrength,
                 }),
             );
-            g.select('path.gen-attr-dag-link-visible').attr('stroke', strokeForRender).attr('stroke-opacity', opacityForRender);
+            g.select('path.gen-attr-dag-link-visible').attr('stroke', strokeForRender).attr('stroke-opacity', edgeOpacityForRender);
             linkMarkersDefs
                 .select<SVGPathElement>(`#${dagLinkMarkerElementId(d.source, d.target)} path`)
                 .attr('stroke', strokeForRender)
-                .attr('stroke-opacity', opacityForRender);
+                .attr('stroke-opacity', edgeOpacityForRender);
 
             const incident =
                 linkFocusState != null &&
@@ -2223,6 +2282,7 @@ export function initGenAttributeDagView(
         layoutWire: string,
         opts?: SetPromptTokenSpansOpts,
     ): void {
+        allInputSpans = normalizePromptTokenSpans(allInputSpans);
         const inputRanges = opts?.inputRanges ?? [[0, layoutWire.length] as [number, number]];
         dagDeleteIntervals = collectDeletePromptIntervals(
             layoutWire,
@@ -2499,6 +2559,7 @@ export function initGenAttributeDagView(
         selectedId = null;
         userFocusId = null;
         hoveredId = null;
+        attentionHighlight = null;
         dagTopkToolTip.hideAndReset();
         linkMarkersDefs.selectAll('marker').remove();
         linkG.selectAll('*').remove();
@@ -2682,8 +2743,18 @@ export function initGenAttributeDagView(
     }
 
     function setDagPlaybackPlaying(playing: boolean): void {
+        const wasPlaying = dagPlaybackPlaying;
         dagPlaybackPlaying = playing;
+        if (!playing && (wasPlaying || attentionHighlight != null)) {
+            attentionHighlight = null;
+            refreshNodeLinkHighlight();
+        }
         syncDagPlayButton();
+    }
+
+    function setAttentionPlaybackHighlight(state: AttentionPlaybackHighlight): void {
+        attentionHighlight = state;
+        refreshNodeLinkHighlight();
     }
 
     /** 仅动画定时器在跑时视为 busy；`paused`/`ended` 不阻塞页面侧重放 DAG。 */
@@ -2723,6 +2794,13 @@ export function initGenAttributeDagView(
         hideExcludedTokens = hide;
         if (batchDepth > 0 || nodes.length === 0) return;
         invalidateLayoutIncludedNodeIdsKey();
+        refreshNodeLinkHighlight();
+    }
+
+    function setHideArrowsDuringAttention(hide: boolean): void {
+        if (hideArrowsDuringAttention === hide) return;
+        hideArrowsDuringAttention = hide;
+        if (batchDepth > 0 || nodes.length === 0) return;
         refreshNodeLinkHighlight();
     }
 
@@ -2881,6 +2959,7 @@ export function initGenAttributeDagView(
         setDagCompactness,
         setEdgeTopPCoverage,
         setHideExcludedTokens,
+        setHideArrowsDuringAttention,
         setDimInactiveTokens,
         setDimInactiveTokensThreshold,
         setDimInactiveNotDuringAnimation,
@@ -2888,6 +2967,7 @@ export function initGenAttributeDagView(
         setRecursiveAttributionEnabled,
         setRecursiveEdgeBatchAnimationDirection,
         refreshNodeLinkHighlight,
+        setAttentionPlaybackHighlight,
         playLightningEffectPreview,
         cancelLightningEffectPreview,
         enterLightningTauPreview,

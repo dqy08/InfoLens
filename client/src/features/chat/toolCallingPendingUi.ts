@@ -77,7 +77,7 @@ export function attachToolCallingPendingLine(stackEl: HTMLElement): ToolCallingP
     };
 }
 
-/** live 生成：mock tool 固定 1s。▶ 回放：等 response 的 3× token 时钟（见 genAttributeDagPropagationPlaybackPacing）。 */
+/** live 生成与 ▶ Simulate attention：mock tool 固定 1s；未勾选 simulate 的回放用 3× token 时钟。 */
 export async function runMockToolPendingGap(
     signal?: AbortSignal,
     ui?: ToolCallingPendingLine,

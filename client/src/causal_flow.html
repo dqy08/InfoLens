@@ -416,6 +416,64 @@
                             </label>
                         </span>
                     </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row gen-attr-dag-attention-cost-row">
+                        <span class="semantic-submode-group">
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_simulate_attention_cost"
+                                    title="When checked, step replay (▶) expands prompt and gen steps into attention scan + FFN animation. Requires step replay without Causal Flow focus. Saved locally."
+                                    data-i18n="title">
+                                <span data-i18n>Simulate attention</span>
+                            </label>
+                            <label class="semantic-submode-label" id="gen_attr_dag_skip_prefill_wrap" hidden>
+                                <input type="checkbox" id="gen_attr_dag_skip_prefill"
+                                    title="When checked, multi-token uncached prep skips per-token query rounds; scan still follows query position in context. Saved locally."
+                                    data-i18n="title">
+                                <span data-i18n>Skip prefill</span>
+                            </label>
+                            <span id="gen_attr_dag_prefill_style_wrap" class="gen-attr-dag-replay-value-wrap" hidden>
+                                <label class="semantic-submode-label" for="gen_attr_dag_prefill_style" data-i18n>Prefill style</label>
+                                <select id="gen_attr_dag_prefill_style" class="semantic-submode-select"
+                                    title="Plain: sequential left-to-right scan per query. Random: shuffled query batches, random attend burst highlight, persistent query outlines. Saved locally."
+                                    data-i18n="title">
+                                    <option value="plain" data-i18n>Plain</option>
+                                    <option value="random" data-i18n>Random</option>
+                                </select>
+                            </span>
+                            <span id="gen_attr_dag_query_burst_wrap" class="gen-attr-dag-replay-value-wrap" hidden>
+                                <span class="semantic-submode-label" data-i18n>query burst</span>
+                                <input type="number" id="gen_attr_dag_query_burst" class="gen-attr-dag-measure-width-input"
+                                    value="3" min="1" max="256" step="1"
+                                    title="Random prefill only: parallel query tokens established per attend step (ms). Saved locally."
+                                    data-i18n="title">
+                            </span>
+                            <span id="gen_attr_dag_ffn_ratio_wrap" class="gen-attr-dag-replay-value-wrap" hidden>
+                                <span class="semantic-submode-label" data-i18n>Dwell</span>
+                                <input type="number" id="gen_attr_dag_ffn_ratio" class="gen-attr-dag-measure-width-input"
+                                    value="3" min="0" max="20" step="1"
+                                    title="Dwell before and after each new gen token, as a multiple of one attend step (ms). Saved locally."
+                                    data-i18n="title">
+                                <span class="semantic-submode-label" data-i18n>× attend</span>
+                                <label class="semantic-submode-label gen-attr-dag-accumulative-hl-label">
+                                    <input type="checkbox" id="gen_attr_dag_accumulative_highlight"
+                                        title="When checked, attend phase keeps all previously scanned tokens highlighted instead of only the sliding band. Saved locally."
+                                        data-i18n="title">
+                                    <span data-i18n>Accumulative highlight</span>
+                                </label>
+                                <span class="semantic-submode-label" data-i18n>attend burst</span>
+                                <input type="number" id="gen_attr_dag_attend_burst" class="gen-attr-dag-measure-width-input"
+                                    value="1" min="1" max="256" step="1"
+                                    title="Tokens scanned in parallel per attend step (plain/gen scan) and random lit count per query. Saved locally."
+                                    data-i18n="title">
+                                <span class="semantic-submode-label">×</span>
+                                <label class="semantic-submode-label gen-attr-dag-hide-arrows-label">
+                                    <input type="checkbox" id="gen_attr_dag_hide_arrows_during_attention"
+                                        title="When checked, DAG edges (arrows) stay hidden while Simulate attention is enabled. Saved locally."
+                                        data-i18n="title">
+                                    <span data-i18n>Hide arrows</span>
+                                </label>
+                            </span>
+                        </span>
+                    </div>
                     <div class="gen-attr-dag-measure-width-row semantic-submode-row">
                         <span class="semantic-submode-group gen-attr-dag-replay-speed-row semantic-submode-group--emphasis">
                             <label class="semantic-submode-label" for="gen_attr_dag_replay_mode" data-i18n>Play speed</label>
@@ -438,7 +496,14 @@
                                     value="200" min="0" max="10000" step="10"
                                     title="Milliseconds per step. DAG step replay (▶) uses this as the 1× output-gen clock; with a focused token in Causal Flow Mode, propagation play (↯) scales each batch by layer weight. Saved locally; applied when you press play."
                                     data-i18n="title">
-                                <span class="semantic-submode-label">ms</span>
+                                <span id="gen_attr_dag_playback_step_ms_label" class="semantic-submode-label">ms</span>
+                            </span>
+                            <span id="gen_attr_dag_replay_attend_wrap" class="gen-attr-dag-replay-value-wrap" hidden>
+                                <input type="number" id="gen_attr_dag_attend_ms" class="gen-attr-dag-measure-width-input"
+                                    value="40" min="1" max="5000" step="5"
+                                    title="Milliseconds per attend step when Simulate attention is checked (step time mode). Saved locally."
+                                    data-i18n="title">
+                                <span class="semantic-submode-label" data-i18n>ms attend</span>
                             </span>
                             <label class="semantic-submode-label" id="gen_attr_dag_disable_smart_step_time_wrap" hidden>
                                 <input type="checkbox" id="gen_attr_dag_disable_smart_step_time"

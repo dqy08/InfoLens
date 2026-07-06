@@ -34,7 +34,7 @@ export type DagReplayPacingMode = 'total' | 'step';
  * | input 后首 output gen | {@link DAG_PLAYBACK_GEN_AFTER_INPUT_CLOCKS}× |
  * | 末 output gen（结束） | {@link DAG_PROPAGATION_BOUNDARY_FRAME_DWELL_MS} 固定收尾 |
  *
- * 仅影响 ▶ 与 ↯ 的时钟倍数；live mock tool 仍用固定 1s（`toolCallingPendingUi`）。
+ * 仅影响 ▶（未勾选 Simulate attention）与 ↯ 的时钟倍数；live / simulate attention 的 tool pending 用固定 1s（`toolCallingPendingUi`）。
  */
 /** tool response 出现前的模拟开销：工具调用 + 等 response（pending 期间展示）。 */
 export const DAG_PLAYBACK_TOOL_RESPONSE_CLOCKS = 3;

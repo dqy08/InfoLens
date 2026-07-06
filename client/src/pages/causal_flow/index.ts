@@ -23,6 +23,7 @@ import {
     extractPromptTokenSpans,
     filterPromptSpansInInputRanges,
     isDagGenStepTargetExcluded,
+    normalizePromptTokenSpans,
     type PromptTokenSpan,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagPreprocess';
 import {
@@ -56,7 +57,21 @@ import type {
     DagRecursiveEdgeReplayPacing,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagRecursiveEdgeAnimation';
 import {
+    ATTEND_BURST_DEFAULT,
+    QUERY_BURST_DEFAULT,
+    clampAttendBurst,
+    genStepTargetNodeId,
+    planForOutputGenEvent,
+    resolveAttentionPlaybackConfig,
+    type AttentionExcludeContext,
+    type AttentionPlaybackConfig,
+} from '../../shared/prediction_attribution/causal_flow/genAttributeDagAttentionPlayback';
+import { runAttentionPlayback } from '../../shared/prediction_attribution/causal_flow/runAttentionPlayback';
+import type { DagStepPlaybackEvent, DagStepPlaybackOutputGenPrep } from '../../shared/prediction_attribution/causal_flow/genAttributeDagStepPlayback';
+import {
     buildDagStepPlaybackEvents,
+    buildOutputGenLegacyPrepMs,
+    isToolCallingBoundaryBetweenSteps,
     resolveDagStepPlaybackClocksFromPacing,
     resolveDagStepPlaybackStart,
     runDagStepPlaybackLoop,
@@ -142,6 +157,7 @@ import {
 } from '../../features/chat/toolConfig';
 import {
     attachToolCallingPendingLine,
+    MOCK_TOOL_STEP_DELAY_MS,
     type ToolCallingPendingLine,
 } from '../../features/chat/toolCallingPendingUi';
 import { updateApiUsageDisplay, updateModel, validateMetricsElements } from '../../shared/cross/textMetricsUpdater';
@@ -227,6 +243,26 @@ const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MAX = 3600;
 /** 手输总量化的步长；原生 step=1 箭头在 `input` 里另取整。 */
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STEP = 0.1;
 
+const GEN_ATTR_DAG_SIMULATE_ATTENTION_STORAGE_KEY = 'info_radar_gen_attr_dag_simulate_attention';
+const GEN_ATTR_DAG_SKIP_PREFILL_STORAGE_KEY = 'info_radar_gen_attr_dag_skip_prefill';
+const GEN_ATTR_DAG_PREFILL_STYLE_STORAGE_KEY = 'info_radar_gen_attr_dag_prefill_style';
+/** @deprecated 读取兼容；新写入用 {@link GEN_ATTR_DAG_SKIP_PREFILL_STORAGE_KEY} */
+const GEN_ATTR_DAG_SKIP_PREFILL_STORAGE_KEY_LEGACY = 'info_radar_gen_attr_dag_skip_prompt_attention';
+const GEN_ATTR_DAG_ATTEND_MS_STORAGE_KEY = 'info_radar_gen_attr_dag_attend_ms';
+const GEN_ATTR_DAG_FFN_RATIO_STORAGE_KEY = 'info_radar_gen_attr_dag_ffn_ratio';
+const GEN_ATTR_DAG_ACCUMULATIVE_HIGHLIGHT_STORAGE_KEY =
+    'info_radar_gen_attr_dag_accumulative_highlight';
+const GEN_ATTR_DAG_ATTEND_BURST_STORAGE_KEY = 'info_radar_gen_attr_dag_attend_burst';
+const GEN_ATTR_DAG_QUERY_BURST_STORAGE_KEY = 'info_radar_gen_attr_dag_query_burst';
+const GEN_ATTR_DAG_HIDE_ARROWS_DURING_ATTENTION_STORAGE_KEY =
+    'info_radar_gen_attr_dag_hide_arrows_during_attention';
+const GEN_ATTR_DAG_ATTEND_MS_DEFAULT = 40;
+const GEN_ATTR_DAG_ATTEND_MS_MIN = 1;
+const GEN_ATTR_DAG_ATTEND_MS_MAX = 5000;
+const GEN_ATTR_DAG_FFN_RATIO_DEFAULT = 3;
+const GEN_ATTR_DAG_FFN_RATIO_MIN = 0;
+const GEN_ATTR_DAG_FFN_RATIO_MAX = 20;
+
 /** 与无 demoUiOptions 本地缓存时「读出默认」对齐，供重置与可读性单一的来源 */
 const DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS: GenAttrDemoUiOptions = {
     layoutMode: 'text-flow',
@@ -255,6 +291,15 @@ const DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS: GenAttrDemoUiOptions = {
     lightningSound: false,
     playbackTotalS: GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT,
     playbackStepMs: GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT,
+    simulateAttentionCost: false,
+    skipPrefillAttention: false,
+    prefillStyle: 'plain',
+    attendMs: GEN_ATTR_DAG_ATTEND_MS_DEFAULT,
+    ffnRatioAttend: GEN_ATTR_DAG_FFN_RATIO_DEFAULT,
+    accumulativeHighlight: false,
+    attendBurst: ATTEND_BURST_DEFAULT,
+    queryBurst: QUERY_BURST_DEFAULT,
+    hideArrowsDuringAttention: false,
     excludePromptPatternsEnabled: true,
     excludePromptPatternsText: DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT,
     excludeGeneratedPatternsEnabled: true,
@@ -537,6 +582,41 @@ const dagForwardSlideSharedNodesWrap = document.getElementById(
 const dagForwardSlideSharedNodesInput = document.getElementById(
     'gen_attr_dag_forward_slide_shared_nodes',
 ) as HTMLInputElement | null;
+const dagSimulateAttentionInput = document.getElementById(
+    'gen_attr_dag_simulate_attention_cost',
+) as HTMLInputElement | null;
+const dagSkipPrefillWrap = document.getElementById('gen_attr_dag_skip_prefill_wrap');
+const dagSkipPrefillInput = document.getElementById(
+    'gen_attr_dag_skip_prefill',
+) as HTMLInputElement | null;
+const dagPrefillStyleWrap = document.getElementById('gen_attr_dag_prefill_style_wrap');
+const dagPrefillStyleSelect = document.getElementById(
+    'gen_attr_dag_prefill_style',
+) as HTMLSelectElement | null;
+const dagQueryBurstWrap = document.getElementById('gen_attr_dag_query_burst_wrap');
+const dagQueryBurstInput = document.getElementById(
+    'gen_attr_dag_query_burst',
+) as HTMLInputElement | null;
+const dagFfnRatioWrap = document.getElementById('gen_attr_dag_ffn_ratio_wrap');
+const dagFfnRatioInput = document.getElementById(
+    'gen_attr_dag_ffn_ratio',
+) as HTMLInputElement | null;
+const dagAccumulativeHighlightInput = document.getElementById(
+    'gen_attr_dag_accumulative_highlight',
+) as HTMLInputElement | null;
+const dagAttendBurstInput = document.getElementById(
+    'gen_attr_dag_attend_burst',
+) as HTMLInputElement | null;
+const dagHideArrowsDuringAttentionInput = document.getElementById(
+    'gen_attr_dag_hide_arrows_during_attention',
+) as HTMLInputElement | null;
+const dagAttendMsInput = document.getElementById(
+    'gen_attr_dag_attend_ms',
+) as HTMLInputElement | null;
+const dagReplayAttendWrap = document.getElementById('gen_attr_dag_replay_attend_wrap');
+const dagAttentionCostRow = document.querySelector(
+    '.gen-attr-dag-attention-cost-row',
+) as HTMLElement | null;
 
 /** 与 `#gen_attr_dag_replay_mode` 同步；非法或缺失时视为 `total`。 */
 function currentDagReplayPacingMode(): DagReplayPacingMode {
@@ -568,8 +648,160 @@ function readDagReplayPacingFromControls(options?: { writeBack?: boolean }): Dag
 /** 切换下拉时更新 `hidden`；样式见 `.gen-attr-dag-replay-value-wrap:not([hidden])`。 */
 function applyDagReplaySpeedUi(): void {
     const mode = currentDagReplayPacingMode();
+    const sim = isAttentionSimulationConfigured();
     if (dagReplayTotalWrap) dagReplayTotalWrap.hidden = mode !== 'total';
-    if (dagReplayStepWrap) dagReplayStepWrap.hidden = mode !== 'step';
+    const showClassicStepMs = mode === 'step' && !sim;
+    const showAttendMs = mode === 'step' && sim;
+    if (dagReplayStepWrap) dagReplayStepWrap.hidden = !showClassicStepMs;
+    if (dagReplayAttendWrap) dagReplayAttendWrap.hidden = !showAttendMs;
+}
+
+function clampAttendMs(n: number): number {
+    return Math.max(
+        GEN_ATTR_DAG_ATTEND_MS_MIN,
+        Math.min(GEN_ATTR_DAG_ATTEND_MS_MAX, Math.round(n)),
+    );
+}
+
+function clampFfnRatio(n: number): number {
+    if (!Number.isFinite(n)) return GEN_ATTR_DAG_FFN_RATIO_DEFAULT;
+    return Math.max(
+        GEN_ATTR_DAG_FFN_RATIO_MIN,
+        Math.min(GEN_ATTR_DAG_FFN_RATIO_MAX, Math.round(n)),
+    );
+}
+
+function readStoredSimulateAttentionCost(): boolean {
+    return lsReadBool(
+        GEN_ATTR_DAG_SIMULATE_ATTENTION_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.simulateAttentionCost,
+        { encoding: '1' },
+    );
+}
+
+function readStoredSkipPrefillAttention(): boolean {
+    const legacy = lsGet(GEN_ATTR_DAG_SKIP_PREFILL_STORAGE_KEY_LEGACY);
+    if (legacy !== null) return legacy === '1';
+    return lsReadBool(
+        GEN_ATTR_DAG_SKIP_PREFILL_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.skipPrefillAttention,
+        { encoding: '1' },
+    );
+}
+
+function readStoredPrefillStyle(): 'plain' | 'random' {
+    const raw = lsGet(GEN_ATTR_DAG_PREFILL_STYLE_STORAGE_KEY);
+    return raw === 'random' ? 'random' : 'plain';
+}
+
+function readPrefillStyleFromControl(): 'plain' | 'random' {
+    const v = dagPrefillStyleSelect?.value;
+    return v === 'random' ? 'random' : 'plain';
+}
+
+function readStoredAttendMs(): number {
+    return lsReadNumber(GEN_ATTR_DAG_ATTEND_MS_STORAGE_KEY, GEN_ATTR_DAG_ATTEND_MS_DEFAULT, {
+        parse: 'int',
+        clamp: clampAttendMs,
+    });
+}
+
+function readStoredFfnRatioAttend(): number {
+    return lsReadNumber(GEN_ATTR_DAG_FFN_RATIO_STORAGE_KEY, GEN_ATTR_DAG_FFN_RATIO_DEFAULT, {
+        parse: 'int',
+        clamp: clampFfnRatio,
+    });
+}
+
+function readStoredAccumulativeHighlight(): boolean {
+    return lsReadBool(
+        GEN_ATTR_DAG_ACCUMULATIVE_HIGHLIGHT_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.accumulativeHighlight,
+        { encoding: '1' },
+    );
+}
+
+function readStoredAttendBurst(): number {
+    return lsReadNumber(GEN_ATTR_DAG_ATTEND_BURST_STORAGE_KEY, ATTEND_BURST_DEFAULT, {
+        parse: 'int',
+        clamp: clampAttendBurst,
+    });
+}
+
+function readStoredQueryBurst(): number {
+    return lsReadNumber(GEN_ATTR_DAG_QUERY_BURST_STORAGE_KEY, QUERY_BURST_DEFAULT, {
+        parse: 'int',
+        clamp: clampAttendBurst,
+    });
+}
+
+function readStoredHideArrowsDuringAttention(): boolean {
+    return lsReadBool(
+        GEN_ATTR_DAG_HIDE_ARROWS_DURING_ATTENTION_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.hideArrowsDuringAttention,
+        { encoding: '1' },
+    );
+}
+
+/** 勾选 Simulate attention 且非 Causal Flow Mode。 */
+function isAttentionSimulationConfigured(): boolean {
+    return (dagSimulateAttentionInput?.checked ?? false) && !isCausalFlowModeEnabled();
+}
+
+function isCausalFlowModeEnabled(): boolean {
+    return dagRecursiveAttributionInput?.checked ?? false;
+}
+
+function applyAttentionCostUi(): void {
+    const causalFlow = isCausalFlowModeEnabled();
+    if (dagAttentionCostRow) dagAttentionCostRow.hidden = causalFlow;
+    const sim = isAttentionSimulationConfigured();
+    if (dagFfnRatioWrap) dagFfnRatioWrap.hidden = !sim;
+    if (dagSkipPrefillWrap) dagSkipPrefillWrap.hidden = !sim;
+    const skipPrefill = readSkipPrefillAttentionFromControl();
+    if (dagPrefillStyleWrap) dagPrefillStyleWrap.hidden = !sim || skipPrefill;
+    const randomPrefill = readPrefillStyleFromControl() === 'random';
+    if (dagQueryBurstWrap) dagQueryBurstWrap.hidden = !sim || skipPrefill || !randomPrefill;
+    applyDagReplaySpeedUi();
+}
+
+function readSkipPrefillAttentionFromControl(): boolean {
+    return dagSkipPrefillInput?.checked ?? readStoredSkipPrefillAttention();
+}
+
+function readAttendMsFromControl(): number {
+    const raw = parseInt(dagAttendMsInput?.value ?? '', 10);
+    return Number.isFinite(raw) ? clampAttendMs(raw) : readStoredAttendMs();
+}
+
+function readFfnRatioFromControl(): number {
+    const raw = parseInt(dagFfnRatioInput?.value ?? '', 10);
+    return Number.isFinite(raw) ? clampFfnRatio(raw) : readStoredFfnRatioAttend();
+}
+
+function readAccumulativeHighlightFromControl(): boolean {
+    return dagAccumulativeHighlightInput?.checked ?? readStoredAccumulativeHighlight();
+}
+
+function readAttendBurstFromControl(): number {
+    const raw = parseInt(dagAttendBurstInput?.value ?? '', 10);
+    return Number.isFinite(raw) ? clampAttendBurst(raw) : readStoredAttendBurst();
+}
+
+function readQueryBurstFromControl(): number {
+    const raw = parseInt(dagQueryBurstInput?.value ?? '', 10);
+    return Number.isFinite(raw) ? clampAttendBurst(raw) : readStoredQueryBurst();
+}
+
+function readHideArrowsDuringAttentionFromControl(): boolean {
+    return (
+        dagHideArrowsDuringAttentionInput?.checked ?? readStoredHideArrowsDuringAttention()
+    );
+}
+
+/** Simulate attention 已启用且勾选 Hide arrows 时，仅在注意力动画进行中隐藏边。 */
+function effectiveHideArrowsDuringAttention(): boolean {
+    return isAttentionSimulationConfigured() && readHideArrowsDuringAttentionFromControl();
 }
 
 function currentDagLayoutMode(): DagLayoutMode {
@@ -762,7 +994,33 @@ const initialDagLightningSound = readStoredDagLightningSound();
 if (dagLightningSoundInput) {
     dagLightningSoundInput.checked = initialDagLightningSound;
 }
-applyDagReplaySpeedUi();
+const initialSimulateAttention = readStoredSimulateAttentionCost();
+if (dagSimulateAttentionInput) dagSimulateAttentionInput.checked = initialSimulateAttention;
+const initialSkipPrefillAttention = readStoredSkipPrefillAttention();
+if (dagSkipPrefillInput) {
+    dagSkipPrefillInput.checked = initialSkipPrefillAttention;
+}
+const initialPrefillStyle = readStoredPrefillStyle();
+if (dagPrefillStyleSelect) {
+    dagPrefillStyleSelect.value = initialPrefillStyle;
+}
+const initialAttendMs = readStoredAttendMs();
+if (dagAttendMsInput) dagAttendMsInput.value = String(initialAttendMs);
+const initialFfnRatio = readStoredFfnRatioAttend();
+if (dagFfnRatioInput) dagFfnRatioInput.value = String(initialFfnRatio);
+const initialAccumulativeHighlight = readStoredAccumulativeHighlight();
+if (dagAccumulativeHighlightInput) {
+    dagAccumulativeHighlightInput.checked = initialAccumulativeHighlight;
+}
+const initialAttendBurst = readStoredAttendBurst();
+if (dagAttendBurstInput) dagAttendBurstInput.value = String(initialAttendBurst);
+const initialQueryBurst = readStoredQueryBurst();
+if (dagQueryBurstInput) dagQueryBurstInput.value = String(initialQueryBurst);
+const initialHideArrowsDuringAttention = readStoredHideArrowsDuringAttention();
+if (dagHideArrowsDuringAttentionInput) {
+    dagHideArrowsDuringAttentionInput.checked = initialHideArrowsDuringAttention;
+}
+applyAttentionCostUi();
 
 const genAttrResultsNode = genAttrResultsEl.node() as HTMLElement | null;
 function readStoredDagNodeCiVisualScale(): boolean {
@@ -911,6 +1169,7 @@ function applyDagRecursiveAttributionSubmodeUi(): void {
     }
     syncPropagationPlaybackControlsVisibility();
     syncDimInactiveTokensThresholdInputUi();
+    applyAttentionCostUi();
 }
 
 function readStoredDagDimInactiveTokens(): boolean {
@@ -1007,6 +1266,7 @@ syncDimInactiveTokensThresholdInputUi();
 dagRecursiveAttributionInput?.addEventListener('change', () => {
     applyDagRecursiveAttributionSubmodeUi();
     dagHandle.setRecursiveAttributionEnabled(dagRecursiveAttributionInput.checked);
+    applyHideArrowsDuringAttentionToDag();
 });
 dagRecursiveEdgeAnimationDirectionSelect?.addEventListener('change', () => {
     const direction = currentDagRecursiveEdgeAnimationDirection();
@@ -1069,7 +1329,44 @@ dagPlaybackStepMsInput?.addEventListener('change', () => {
 });
 
 dagReplayModeSelect?.addEventListener('change', () => {
-    applyDagReplaySpeedUi();
+    applyAttentionCostUi();
+});
+
+dagSimulateAttentionInput?.addEventListener('change', () => {
+    applyAttentionCostUi();
+    applyHideArrowsDuringAttentionToDag();
+});
+
+dagSkipPrefillInput?.addEventListener('change', () => {
+    applyAttentionCostUi();
+});
+
+dagPrefillStyleSelect?.addEventListener('change', () => {
+    applyAttentionCostUi();
+});
+
+dagAttendMsInput?.addEventListener('change', () => {
+    if (!dagAttendMsInput) return;
+    const raw = parseInt(dagAttendMsInput.value, 10);
+    dagAttendMsInput.value = String(
+        Number.isFinite(raw) ? clampAttendMs(raw) : GEN_ATTR_DAG_ATTEND_MS_DEFAULT,
+    );
+});
+
+dagFfnRatioInput?.addEventListener('change', () => {
+    if (dagFfnRatioInput) dagFfnRatioInput.value = String(readFfnRatioFromControl());
+});
+
+dagAttendBurstInput?.addEventListener('change', () => {
+    if (dagAttendBurstInput) dagAttendBurstInput.value = String(readAttendBurstFromControl());
+});
+
+dagQueryBurstInput?.addEventListener('change', () => {
+    if (dagQueryBurstInput) dagQueryBurstInput.value = String(readQueryBurstFromControl());
+});
+
+dagHideArrowsDuringAttentionInput?.addEventListener('change', () => {
+    applyHideArrowsDuringAttentionToDag();
 });
 
 dagPlaybackTotalSInput?.addEventListener('input', (e) => {
@@ -1294,8 +1591,40 @@ function pushDagFromPreprocess(
     dagHandle.update(step, excludeIntervalContext);
 }
 
+/**
+ * ▶ 开始前将 DAG 对齐到 `genStepCount` 前缀（0 = 仅 prompt）。
+ * 缓存/demo 加载后图常为全量 replay，须先裁到播放起点，避免 `update()` 重复节点抛错中断。
+ */
+function syncDagToPlaybackPrefix(
+    steps: readonly TokenGenStep[],
+    genStepCount: number,
+    catalogSpans: PromptTokenSpan[],
+    excludeIntervalContext: string,
+): void {
+    dagHandle.reset(true);
+    if (steps.length === 0) return;
+    syncDagInputLayerAtStep({
+        catalogSpans,
+        layoutWire: steps[0]!.context,
+        inputRanges: steps[0]!.inputRanges,
+    });
+    for (let i = 0; i < genStepCount; i++) {
+        if (i > 0 && isToolCallingBoundaryBetweenSteps(steps, i - 1)) {
+            const step = steps[i]!;
+            syncDagInputLayerAtStep({
+                catalogSpans,
+                layoutWire: step.context,
+                inputRanges: step.inputRanges,
+            });
+        }
+        pushDagFromPreprocess(steps[i]!, i, false, excludeIntervalContext);
+    }
+}
+
 /** 下一步要 `pushDagFromPreprocess` 的步下标；与当前 DAG 前缀一致（暂停不重置） */
 let dagPlaybackNextIndex = 0;
+/** 暂停后恢复：跳过 prompt 段，从 `dagPlaybackNextIndex` 对应 gen 步继续。 */
+let dagPlaybackPausedMidRun = false;
 
 /** 在 {@link dagHandle} 初始化后赋值；回放 stop 等路径用 `?.hide()` 避免初始化顺序问题。 */
 let toolCallingPendingLine: ToolCallingPendingLine | null = null;
@@ -1337,6 +1666,7 @@ function syncDagInputLayerAtStep(opts: {
 function replayRunnerStepsIntoDag(h: TokenGenAttributionHandle, catalogSpans?: PromptTokenSpan[]): void {
     if (h.tokenCount === 0) {
         dagPlaybackNextIndex = 0;
+        dagPlaybackPausedMidRun = false;
         return;
     }
     const steps = h.getAllSteps();
@@ -1371,7 +1701,17 @@ function replayRunnerStepsIntoDag(h: TokenGenAttributionHandle, catalogSpans?: P
 const DAG_LAST_TOKEN_APPEARANCE_COST_MS = 500;
 
 let dagPlaybackTimer: ReturnType<typeof setTimeout> | null = null;
+let dagPlaybackCancel: (() => void) | null = null;
 let dagLastTokenDwellTimer: ReturnType<typeof setTimeout> | null = null;
+/** 本场 ▶ 注意力回放是否已播过会话首帧 dwell0（续播不重复）。 */
+let dagAttentionLeadDwell0Consumed = false;
+
+function cancelDagAttentionPlayback(): void {
+    if (dagPlaybackCancel !== null) {
+        dagPlaybackCancel();
+        dagPlaybackCancel = null;
+    }
+}
 
 function cancelDagLastTokenDwell(): void {
     if (dagLastTokenDwellTimer !== null) {
@@ -1397,9 +1737,104 @@ function stopDagPlayback(): void {
         clearTimeout(dagPlaybackTimer);
         dagPlaybackTimer = null;
     }
+    cancelDagAttentionPlayback();
     cancelDagLastTokenDwell();
     toolCallingPendingLine?.hide();
+    dagHandle.setAttentionPlaybackHighlight(null);
     dagHandle.setDagPlaybackPlaying(false);
+}
+
+function buildAttentionExcludeContext(
+    excludeIntervalContext: string,
+    excludePromptPatternsText: string,
+    excludeGeneratedPatternsText: string,
+    deletePromptPatternsText: string,
+): AttentionExcludeContext {
+    return {
+        excludeIntervalContext,
+        excludePromptPatternsText,
+        excludeGeneratedPatternsText,
+        deletePromptPatternsText,
+    };
+}
+
+function resolveAttentionAnimationConfig(
+    pacing: DagRecursiveEdgeReplayPacing,
+    clocks: ReturnType<typeof resolveDagStepPlaybackClocksFromPacing>,
+): AttentionPlaybackConfig {
+    return {
+        ...resolveAttentionPlaybackConfig(
+            pacing,
+            readAttendMsFromControl(),
+            readFfnRatioFromControl(),
+            clocks.outputGenClockMs,
+        ),
+        accumulativeHighlight: readAccumulativeHighlightFromControl(),
+        attendBurst: readAttendBurstFromControl(),
+        queryBurst: readQueryBurstFromControl(),
+        prefillStyle: readPrefillStyleFromControl(),
+    };
+}
+
+function buildOutputGenPrep(
+    events: readonly DagStepPlaybackEvent[],
+    steps: readonly TokenGenStep[],
+    clocks: ReturnType<typeof resolveDagStepPlaybackClocksFromPacing>,
+    animationConfig: AttentionPlaybackConfig,
+    ctx: AttentionExcludeContext,
+    catalogSpans: PromptTokenSpan[],
+    skipOutputGen: (stepIndex: number) => boolean,
+    isStale: () => boolean,
+    simulateAttention: boolean,
+): DagStepPlaybackOutputGenPrep {
+    const skipPrefill = readSkipPrefillAttentionFromControl();
+    const legacyPrepMs = buildOutputGenLegacyPrepMs(events, clocks, skipOutputGen);
+    return {
+        resolve: (stepIndex) => {
+            if (!simulateAttention) {
+                return { plan: null, prepMs: legacyPrepMs.get(stepIndex) ?? 0 };
+            }
+            const plan = planForOutputGenEvent(
+                steps,
+                stepIndex,
+                catalogSpans,
+                ctx,
+                skipOutputGen,
+                skipPrefill,
+            );
+            return { plan, prepMs: 0 };
+        },
+        playAnimation: simulateAttention
+            ? (stepIndex, plan, showGen, advance) => {
+                  const skipLeadDwell0 = dagAttentionLeadDwell0Consumed;
+                  if (!skipLeadDwell0) dagAttentionLeadDwell0Consumed = true;
+                  runAttentionPlayback({
+                      plan,
+                      config: animationConfig,
+                      skipLeadDwell0,
+                      setHighlight: (state) => dagHandle.setAttentionPlaybackHighlight(state),
+                      setCancel: (cancel) => {
+                          dagPlaybackCancel = cancel;
+                      },
+                      isCancelled: isStale,
+                      onGenAppear: () => {
+                          showGen();
+                          const genTokenId = genStepTargetNodeId(steps[stepIndex]!);
+                          dagHandle.setAttentionPlaybackHighlight({
+                              queryTokenId: genTokenId,
+                              litIds: [genTokenId],
+                              phase: 'ffn',
+                          });
+                      },
+                      onDone: () => {
+                          if (isStale()) return;
+                          dagHandle.setAttentionPlaybackHighlight(null);
+                          advance();
+                      },
+                  });
+              }
+            : undefined,
+    };
 }
 
 function handleDagPlaybackToggle(wantPlay: boolean): void {
@@ -1407,6 +1842,10 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
     if (userFocusId != null) return;
     const h = runnerHandle;
     if (!wantPlay) {
+        const steps = h?.getAllSteps();
+        if (h && steps && dagPlaybackNextIndex < steps.length) {
+            dagPlaybackPausedMidRun = true;
+        }
         stopDagPlayback();
         return;
     }
@@ -1416,14 +1855,30 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
         clearTimeout(dagPlaybackTimer);
         dagPlaybackTimer = null;
     }
+    cancelDagAttentionPlayback();
     cancelDagLastTokenDwell();
     const steps = h.getAllSteps();
     if (dagPlaybackNextIndex >= steps.length) {
         // 保留 `layoutDirty`：用户 pan/zoom 后 Auto zoom 仍应停止 fit。
         dagHandle.reset(true);
         dagPlaybackNextIndex = 0;
+        dagPlaybackPausedMidRun = false;
+        dagAttentionLeadDwell0Consumed = false;
+    }
+    const resumeFromPause = dagPlaybackPausedMidRun;
+    dagPlaybackPausedMidRun = false;
+    if (!resumeFromPause && dagPlaybackNextIndex === 0) {
+        dagAttentionLeadDwell0Consumed = false;
     }
     const excludeCtx = dagExcludeIntervalContextForReplay(steps);
+    if (!resumeFromPause) {
+        syncDagToPlaybackPrefix(
+            steps,
+            dagPlaybackNextIndex,
+            currentRunPromptSpans,
+            excludeCtx,
+        );
+    }
     const excludePromptPatternsText = genAttrEffectiveExcludePromptPatternsText();
     const excludeGeneratedPatternsText = genAttrEffectiveExcludeGeneratedPatternsText();
     const skipAppearanceCostForOutputGen = (stepIndex: number): boolean => {
@@ -1438,7 +1893,10 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
     };
     const pacing = readDagReplayPacingFromControls({ writeBack: true });
     const clocks = resolveDagStepPlaybackClocksFromPacing(steps, pacing);
-    const includePrompt = dagPlaybackNextIndex === 0 && currentRunPromptSpans.length > 0;
+    const includePrompt =
+        !resumeFromPause &&
+        dagPlaybackNextIndex === 0 &&
+        currentRunPromptSpans.length > 0;
     const events = buildDagStepPlaybackEvents(steps, includePrompt);
     const start = resolveDagStepPlaybackStart(
         events,
@@ -1458,7 +1916,9 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
     const finishDagPlayback = (): void => {
         cancelDagLastTokenDwell();
         dagPlaybackTimer = null;
+        cancelDagAttentionPlayback();
         toolCallingPendingLine?.hide();
+        dagHandle.setAttentionPlaybackHighlight(null);
         dagHandle.clearNodeSelection();
         dagHandle.setDagPlaybackPlaying(false);
     };
@@ -1468,11 +1928,32 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
         return;
     }
 
+    const attentionCtx = buildAttentionExcludeContext(
+        excludeCtx,
+        excludePromptPatternsText,
+        excludeGeneratedPatternsText,
+        genAttrEffectiveDeletePromptPatternsText(),
+    );
+    const simulateAttention = isAttentionSimulationConfigured();
+    const animationConfig = resolveAttentionAnimationConfig(pacing, clocks);
+    const outputGenPrep = buildOutputGenPrep(
+        events,
+        steps,
+        clocks,
+        animationConfig,
+        attentionCtx,
+        currentRunPromptSpans,
+        skipAppearanceCostForOutputGen,
+        isStalePlaybackHandle,
+        simulateAttention,
+    );
+
     runDagStepPlaybackLoop({
         events,
         start,
         clocks,
         isStale: isStalePlaybackHandle,
+        outputGenPrep,
         setTimer: (cb, delayMs) => {
             dagPlaybackTimer = setTimeout(() => {
                 dagPlaybackTimer = null;
@@ -1517,17 +1998,18 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
             dagPlaybackNextIndex = stepIndex + 1;
         },
         onAllOutputGensShown: () => {
-            scheduleDagLastTokenDwell(() => {
-                if (runnerHandle !== h) {
-                    dagHandle.setDagPlaybackPlaying(false);
-                    return;
-                }
-                toolCallingPendingLine?.hide();
-                dagHandle.clearNodeSelection();
+            if (runnerHandle !== h) {
                 dagHandle.setDagPlaybackPlaying(false);
-            });
+                return;
+            }
+            toolCallingPendingLine?.hide();
+            dagHandle.setDagPlaybackPlaying(false);
+            dagHandle.clearNodeSelection();
         },
         skipAppearanceCostForOutputGen,
+        ...(simulateAttention
+            ? { toolResponseAppearanceCostMs: MOCK_TOOL_STEP_DELAY_MS }
+            : {}),
     });
 }
 
@@ -1539,6 +2021,7 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
     },
     onDagRefresh: () => {
         stopDagPlayback();
+        dagPlaybackPausedMidRun = false;
         const h = runnerHandle;
         if (!h) return;
         replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
@@ -1548,6 +2031,7 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
     dagCompactness: initialDagCompactness,
     linearArcAdjacentGapPx: initialDagLinearArcGap,
     hideExcludedTokens: initialDagHideExcludedTokens,
+    hideArrowsDuringAttention: effectiveHideArrowsDuringAttention(),
     dimInactiveTokens: initialDagDimInactiveTokens,
     dimInactiveTokensThreshold: initialDagDimInactiveTokensThreshold,
     dimInactiveNotDuringAnimation: initialDagDimInactiveNotDuringAnimation,
@@ -1565,6 +2049,11 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
     onUserFocusChange: () => syncPropagationPlaybackControlsVisibility(),
 });
 
+function applyHideArrowsDuringAttentionToDag(): void {
+    dagHandle.setHideArrowsDuringAttention(effectiveHideArrowsDuringAttention());
+}
+
+applyHideArrowsDuringAttentionToDag();
 getDagUserFocusId = () => dagHandle.getUserFocusId();
 syncPropagationPlaybackControlsVisibility();
 dagLightningEffectInput?.addEventListener('change', () => {
@@ -1604,6 +2093,7 @@ function isDagBusy(): boolean {
     return (
         inFlight ||
         dagPlaybackTimer !== null ||
+        dagPlaybackCancel !== null ||
         dagLastTokenDwellTimer !== null ||
         dagHandle.isPropagationPlaybackEngaged()
     );
@@ -1731,6 +2221,15 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
         lightningSound: dagLightningSoundInput?.checked ?? false,
         playbackTotalS,
         playbackStepMs,
+        simulateAttentionCost: dagSimulateAttentionInput?.checked ?? false,
+        skipPrefillAttention: readSkipPrefillAttentionFromControl(),
+        prefillStyle: readPrefillStyleFromControl(),
+        attendMs: readAttendMsFromControl(),
+        ffnRatioAttend: readFfnRatioFromControl(),
+        accumulativeHighlight: readAccumulativeHighlightFromControl(),
+        attendBurst: readAttendBurstFromControl(),
+        queryBurst: readQueryBurstFromControl(),
+        hideArrowsDuringAttention: readHideArrowsDuringAttentionFromControl(),
         excludePromptPatternsEnabled: genAttrExcludePromptPatternsEnable?.checked ?? true,
         excludePromptPatternsText: genAttrExcludePromptPatternsTa?.value ?? '',
         excludeGeneratedPatternsEnabled: genAttrExcludeGeneratedPatternsEnable?.checked ?? true,
@@ -1828,6 +2327,30 @@ const GEN_ATTR_DEMO_UI_PERSIST_SPECS: ReadonlyArray<{
     { controlId: 'gen_attr_dag_playback_total_s', storageKey: GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY },
     { controlId: 'gen_attr_dag_playback_step_ms', storageKey: GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY },
     {
+        controlId: 'gen_attr_dag_simulate_attention_cost',
+        storageKey: GEN_ATTR_DAG_SIMULATE_ATTENTION_STORAGE_KEY,
+    },
+    {
+        controlId: 'gen_attr_dag_skip_prefill',
+        storageKey: GEN_ATTR_DAG_SKIP_PREFILL_STORAGE_KEY,
+    },
+    {
+        controlId: 'gen_attr_dag_prefill_style',
+        storageKey: GEN_ATTR_DAG_PREFILL_STYLE_STORAGE_KEY,
+    },
+    { controlId: 'gen_attr_dag_attend_ms', storageKey: GEN_ATTR_DAG_ATTEND_MS_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_ffn_ratio', storageKey: GEN_ATTR_DAG_FFN_RATIO_STORAGE_KEY },
+    {
+        controlId: 'gen_attr_dag_accumulative_highlight',
+        storageKey: GEN_ATTR_DAG_ACCUMULATIVE_HIGHLIGHT_STORAGE_KEY,
+    },
+    { controlId: 'gen_attr_dag_attend_burst', storageKey: GEN_ATTR_DAG_ATTEND_BURST_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_query_burst', storageKey: GEN_ATTR_DAG_QUERY_BURST_STORAGE_KEY },
+    {
+        controlId: 'gen_attr_dag_hide_arrows_during_attention',
+        storageKey: GEN_ATTR_DAG_HIDE_ARROWS_DURING_ATTENTION_STORAGE_KEY,
+    },
+    {
         controlId: 'gen_attr_dag_forward_slide_shared_nodes',
         storageKey: GEN_ATTR_DAG_FORWARD_SLIDE_SHARED_NODES_STORAGE_KEY,
     },
@@ -1906,6 +2429,23 @@ function persistGenAttrDemoUiOptionsToLocalStorage(snap: GenAttrDemoUiOptions): 
     );
     lsSet(GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STORAGE_KEY, String(snap.playbackTotalS));
     lsSet(GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY, String(snap.playbackStepMs));
+    lsWriteBool(GEN_ATTR_DAG_SIMULATE_ATTENTION_STORAGE_KEY, snap.simulateAttentionCost, '1');
+    lsWriteBool(GEN_ATTR_DAG_SKIP_PREFILL_STORAGE_KEY, snap.skipPrefillAttention, '1');
+    lsWriteString(GEN_ATTR_DAG_PREFILL_STYLE_STORAGE_KEY, snap.prefillStyle);
+    lsSet(GEN_ATTR_DAG_ATTEND_MS_STORAGE_KEY, String(snap.attendMs));
+    lsSet(GEN_ATTR_DAG_FFN_RATIO_STORAGE_KEY, String(snap.ffnRatioAttend));
+    lsWriteBool(
+        GEN_ATTR_DAG_ACCUMULATIVE_HIGHLIGHT_STORAGE_KEY,
+        snap.accumulativeHighlight,
+        '1',
+    );
+    lsSet(GEN_ATTR_DAG_ATTEND_BURST_STORAGE_KEY, String(snap.attendBurst));
+    lsSet(GEN_ATTR_DAG_QUERY_BURST_STORAGE_KEY, String(snap.queryBurst));
+    lsWriteBool(
+        GEN_ATTR_DAG_HIDE_ARROWS_DURING_ATTENTION_STORAGE_KEY,
+        snap.hideArrowsDuringAttention,
+        '1',
+    );
     lsSet(GEN_ATTR_DELETE_PROMPT_PATTERNS_STORAGE_KEY, snap.deletePromptPatternsText);
     lsWriteBool(GEN_ATTR_DELETE_PROMPT_PATTERNS_ENABLED_STORAGE_KEY, snap.deletePromptPatternsEnabled, '1');
     lsSet(GEN_ATTR_EXCLUDE_PROMPT_PATTERNS_STORAGE_KEY, snap.excludePromptPatternsText);
@@ -2115,6 +2655,38 @@ function applyGenAttrDemoUiOptionsSnap(snap: Partial<GenAttrDemoUiOptions>): voi
         const ms = clampDagPlaybackStepMs(snap.playbackStepMs);
         if (dagPlaybackStepMsInput) dagPlaybackStepMsInput.value = String(ms);
     }
+    if (snap.simulateAttentionCost !== undefined && dagSimulateAttentionInput) {
+        dagSimulateAttentionInput.checked = snap.simulateAttentionCost;
+    }
+    const skipPrefill =
+        snap.skipPrefillAttention ??
+        (snap as { skipPromptAttention?: boolean }).skipPromptAttention;
+    if (skipPrefill !== undefined && dagSkipPrefillInput) {
+        dagSkipPrefillInput.checked = skipPrefill;
+    }
+    if (snap.prefillStyle !== undefined && dagPrefillStyleSelect) {
+        dagPrefillStyleSelect.value = snap.prefillStyle === 'random' ? 'random' : 'plain';
+    }
+    if (snap.attendMs !== undefined && dagAttendMsInput) {
+        dagAttendMsInput.value = String(clampAttendMs(snap.attendMs));
+    }
+    if (snap.ffnRatioAttend !== undefined && dagFfnRatioInput) {
+        dagFfnRatioInput.value = String(clampFfnRatio(snap.ffnRatioAttend));
+    }
+    if (snap.accumulativeHighlight !== undefined && dagAccumulativeHighlightInput) {
+        dagAccumulativeHighlightInput.checked = snap.accumulativeHighlight;
+    }
+    if (snap.attendBurst !== undefined && dagAttendBurstInput) {
+        dagAttendBurstInput.value = String(clampAttendBurst(snap.attendBurst));
+    }
+    if (snap.queryBurst !== undefined && dagQueryBurstInput) {
+        dagQueryBurstInput.value = String(clampAttendBurst(snap.queryBurst));
+    }
+    if (snap.hideArrowsDuringAttention !== undefined && dagHideArrowsDuringAttentionInput) {
+        dagHideArrowsDuringAttentionInput.checked = snap.hideArrowsDuringAttention;
+    }
+    applyAttentionCostUi();
+    applyHideArrowsDuringAttentionToDag();
 
     applyGenAttrExcludePatternsFromDemoUiSnap(snap);
     syncGenAttrDemoUiOptionsToLocalStorage();
@@ -2472,7 +3044,9 @@ async function applyGenAttrCachedRun(
     lastRunInputSnapshot = getInputSnapshotForRun();
     syncSubmitButtonState();
     // 新缓存直接用 promptSpans；旧缓存无此字段时从 step 0 归因降级
-    const replayPromptSpans = rec.promptSpans ?? extractPromptTokenSpans(rec.steps[0]!);
+    const replayPromptSpans = normalizePromptTokenSpans(
+        rec.promptSpans ?? extractPromptTokenSpans(rec.steps[0]!),
+    );
     currentRunPromptSpans = replayPromptSpans;
     replayRunnerStepsIntoDag(runnerHandle, replayPromptSpans);
     dagHandle.fitViewportToContent();
@@ -2830,6 +3404,7 @@ async function runGeneration(): Promise<void> {
 
     stopDagPlayback();
     dagPlaybackNextIndex = 0;
+    dagPlaybackPausedMidRun = false;
 
     setGenLoading(true);
     toolCallingPendingLine?.hide();

@@ -29,7 +29,7 @@ export const translations: Translations = {
         '- attribute a predicted token to its context': '- 将预测 token 归因到上下文',
         'LLM Causal Flow': 'LLM Causal Flow 因果流',
         '- explore the context-attribution DAG': '- 探索上下文归因的 DAG 关系图',
-        '700K+ plays on RedNote': '小红书 70万+次播放',
+        '1M+ plays on RedNote': '小红书 100万+次播放',
         'Go to demo on RedNote: xhslink.com': '在小红书打开demo：xhslink.com',
         // 合成标题串（<title>）：英文 key 与 injectPageMeta documentTitleEn 拼接一致
         'Info Lens - A toolbox for exploring the informational nature of LLMs and language': 'Info Lens 信息透镜 - 用于探索 LLM 与语言的信息本质的工具箱',
@@ -131,6 +131,36 @@ export const translations: Translations = {
         'Restore DAG options, play speed, exclusions, etc. to defaults and clear saved preferences for those controls.':
             '将 DAG 参数、播放速度、排除正则等恢复为默认值，并清除这些控件的本地保存项。',
         'Play speed': '播放速度',
+        'Simulate attention': '模拟 attention',
+        'When checked, step replay (▶) expands prompt and gen steps into attention scan + FFN animation. Requires step replay without Causal Flow focus. Saved locally.':
+            '勾选后，步进重放（▶）将 prompt 与生成步展开为 attention 扫描 + FFN 动画。需在非因果流模式下使用 ▶。本地保存。',
+        'Skip prefill': '跳过 prefill',
+        'When checked, multi-token uncached prep skips per-token query rounds; scan still follows query position in context. Saved locally.':
+            '勾选后，uncached 多 token 时跳过逐 token query 轮次；scan 仍随 query 在 context 中的位置取前缀。',
+        'Prefill style': 'Prefill 样式',
+        'Plain': 'Plain',
+        'Random': 'Random',
+        'Plain: sequential left-to-right scan per query. Random: shuffled query batches, random attend burst highlight, persistent query outlines. Saved locally.':
+            'Plain：每个 query 逐轮从左到右扫描。Random：乱序 query 批处理、attend burst 随机高亮、query 外框持久。本地保存。',
+        'query burst': 'query burst',
+        'Random prefill only: parallel query tokens established per attend step (ms). Saved locally.':
+            '仅 Random prefill：每拍 attend（ms）并行建立的 query 数。本地保存。',
+        'Dwell': '停留',
+        '× attend': '× attend',
+        'ms attend': 'ms attend',
+        'Dwell before and after each new gen token, as a multiple of one attend step (ms). Saved locally.':
+            '每个新 gen token 出现前后的停留时间，为单次 attend（ms）的倍数。本地保存。',
+        'Milliseconds per attend step when Simulate attention is checked (step time mode). Saved locally.':
+            '勾选模拟 attention 且为 step time 模式时，每次 attend 的毫秒数。本地保存。',
+        'Accumulative highlight': '累积高亮',
+        'When checked, attend phase keeps all previously scanned tokens highlighted instead of only the sliding band. Saved locally.':
+            '勾选后，attend 阶段保留已扫过 token 的高亮，而非仅高亮当前滑过的区间。本地保存。',
+        'attend burst': 'attend burst',
+        'Tokens scanned in parallel per attend step (plain/gen scan) and random lit count per query. Saved locally.':
+            '每拍 attend 并行扫过的 token 数（plain/gen scan）及 random 每 query 随机高亮数。本地保存。',
+        'Hide arrows': '隐藏箭头',
+        'When checked, DAG edges (arrows) stay hidden while Simulate attention is enabled. Saved locally.':
+            '勾选后，在启用 Simulate attention 期间始终隐藏 DAG 边（箭头）。本地保存。',
         'Disable smart step time': '禁用智能步长时间',
         'When checked, propagation chain animation (↯) uses a uniform interval per frame instead of scaling by attribution weight. DAG step replay (▶) is unchanged. Saved locally; applied when you press play.':
             '勾选后，传播链动画（↯）各帧使用均匀间隔，不再按归因权重缩放；步进重放（▶）不受影响。本地保存；点击播放时生效。',
