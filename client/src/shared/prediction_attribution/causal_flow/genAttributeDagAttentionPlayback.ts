@@ -286,16 +286,6 @@ export function outputGenPrepMs(
     return attentionPlanTotalMs(plan, cfg);
 }
 
-export function resolveApproxAttendMsFromOutputGenClock(
-    outputGenClockMs: number,
-    ffnRatio: number,
-): number {
-    /** 单 token attend beat + 2× FFN（decode 最短路径；会话首帧 dwell0 另计）。 */
-    const denom = 1 + 2 * ffnRatio;
-    if (denom <= 0 || outputGenClockMs <= 0) return 0;
-    return outputGenClockMs / denom;
-}
-
 function lastNonExcludedGenIdBefore(
     steps: readonly TokenGenStep[],
     stepIndex: number,
@@ -442,19 +432,6 @@ export function computeAttentionBudgetBreakdown(
     }
 
     return { scanCount, roundCount };
-}
-
-export function resolveAttentionPlaybackConfig(
-    pacing: { mode: 'total' | 'step'; totalS: number; stepMs: number },
-    attendMsFromControl: number,
-    ffnRatio: number,
-    outputGenClockMs: number,
-): AttentionPlaybackConfig {
-    const attendMs =
-        pacing.mode === 'total'
-            ? resolveApproxAttendMsFromOutputGenClock(outputGenClockMs, ffnRatio)
-            : attendMsFromControl;
-    return { attendMs, ffnRatio };
 }
 
 /** 按文件头「原理 ↔ 实现」组 plan：context → scan 池，uncached → query 候选，skip 仅减轮次。 */

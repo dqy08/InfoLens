@@ -159,8 +159,8 @@ export const translations: Translations = {
         'Tokens scanned in parallel per attend step (plain/gen scan) and random lit count per query. Saved locally.':
             '每拍 attend 并行扫过的 token 数（plain/gen scan）及 random 每 query 随机高亮数。本地保存。',
         'Hide arrows': '隐藏箭头',
-        'When checked, DAG edges (arrows) stay hidden while Simulate attention is enabled. Saved locally.':
-            '勾选后，在启用 Simulate attention 期间始终隐藏 DAG 边（箭头）。本地保存。',
+        'When checked, DAG edges (arrows) stay hidden for the whole step replay (▶) session while Simulate attention is enabled. Saved locally.':
+            '勾选后，在启用 Simulate attention 的步进回放（▶）整场期间隐藏 DAG 边（箭头）。本地保存。',
         'Disable smart step time': '禁用智能步长时间',
         'When checked, propagation chain animation (↯) uses a uniform interval per frame instead of scaling by attribution weight. DAG step replay (▶) is unchanged. Saved locally; applied when you press play.':
             '勾选后，传播链动画（↯）各帧使用均匀间隔，不再按归因权重缩放；步进重放（▶）不受影响。本地保存；点击播放时生效。',

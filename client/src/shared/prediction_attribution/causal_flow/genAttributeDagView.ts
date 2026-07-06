@@ -631,7 +631,7 @@ export type GenAttributeDagHandle = {
     refreshNodeLinkHighlight(): void;
     /** ▶ attention 模拟播放中的 token 高亮；`null` 清除。 */
     setAttentionPlaybackHighlight(state: AttentionPlaybackHighlight): void;
-    /** Simulate attention ∧ Hide arrows 时，仅在 {@link setAttentionPlaybackHighlight} 非 null 期间隐藏边。 */
+    /** Simulate attention ∧ Hide arrows 时，步进回放（▶）整场隐藏 DAG 边。 */
     setHideArrowsDuringAttention(hide: boolean): void;
     /** 在 DAG 上播放一次闪电动画预览（需因果流模式、传播焦点、已勾选闪电）。 */
     playLightningEffectPreview(): void;
@@ -876,7 +876,7 @@ export type InitGenAttributeDagViewOptions = {
     linearArcAdjacentGapPx?: number;
     /** exclude / inactive（0.1）是否完全隐藏（true）还是 0.1 占位（false，默认）。 */
     hideExcludedTokens?: boolean;
-    /** Simulate attention ∧ Hide arrows 时，仅在注意力高亮进行中隐藏 DAG 边；默认 `false`。 */
+    /** Simulate attention ∧ Hide arrows 时，步进回放（▶）整场隐藏 DAG 边；默认 `false`。 */
     hideArrowsDuringAttention?: boolean;
     dimInactiveTokens?: boolean;
     dimInactiveTokensThreshold?: number;
@@ -1972,7 +1972,7 @@ export function initGenAttributeDagView(
                   )
                 : finalRenderStrength * lightningContentReveal;
             const edgeOpacityForRender =
-                hideArrowsDuringAttention && attentionHighlight != null ? 0 : opacityForRender;
+                hideArrowsDuringAttention && dagPlaybackPlaying ? 0 : opacityForRender;
             const g = d3.select(this);
             const srcAttrs = graph.getNodeAttributes(srcId) as DagNode;
             const tgtAttrs = graph.getNodeAttributes(tgtId) as DagNode;
@@ -2747,6 +2747,8 @@ export function initGenAttributeDagView(
         dagPlaybackPlaying = playing;
         if (!playing && (wasPlaying || attentionHighlight != null)) {
             attentionHighlight = null;
+        }
+        if (playing !== wasPlaying) {
             refreshNodeLinkHighlight();
         }
         syncDagPlayButton();

@@ -62,7 +62,6 @@ import {
     clampAttendBurst,
     genStepTargetNodeId,
     planForOutputGenEvent,
-    resolveAttentionPlaybackConfig,
     type AttentionExcludeContext,
     type AttentionPlaybackConfig,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagAttentionPlayback';
@@ -618,9 +617,24 @@ const dagAttentionCostRow = document.querySelector(
     '.gen-attr-dag-attention-cost-row',
 ) as HTMLElement | null;
 
-/** 与 `#gen_attr_dag_replay_mode` 同步；非法或缺失时视为 `total`。 */
+/** 与 `#gen_attr_dag_replay_mode` 同步；非法或缺失时视为 `total`。Simulate attention 强制 `step`。 */
 function currentDagReplayPacingMode(): DagReplayPacingMode {
+    if (isAttentionSimulationConfigured()) return 'step';
     return dagReplayModeSelect?.value === 'step' ? 'step' : 'total';
+}
+
+/** Simulate attention 与 total 播放模式不兼容：勾选时切 step 并禁用 total 选项。 */
+function applySimulateAttentionReplayPacingConstraint(): void {
+    if (!dagReplayModeSelect) return;
+    const totalOption = dagReplayModeSelect.querySelector(
+        'option[value="total"]',
+    ) as HTMLOptionElement | null;
+    const sim = isAttentionSimulationConfigured();
+    if (totalOption) totalOption.disabled = sim;
+    if (sim && dagReplayModeSelect.value !== 'step') {
+        dagReplayModeSelect.value = 'step';
+        lsWriteString(GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY, 'step');
+    }
 }
 
 /** DAG replay speed 控件 → 规范化节奏；生成回放、传播链动画、demo 导出共用。 */
@@ -762,6 +776,7 @@ function applyAttentionCostUi(): void {
     if (dagPrefillStyleWrap) dagPrefillStyleWrap.hidden = !sim || skipPrefill;
     const randomPrefill = readPrefillStyleFromControl() === 'random';
     if (dagQueryBurstWrap) dagQueryBurstWrap.hidden = !sim || skipPrefill || !randomPrefill;
+    applySimulateAttentionReplayPacingConstraint();
     applyDagReplaySpeedUi();
 }
 
@@ -799,7 +814,7 @@ function readHideArrowsDuringAttentionFromControl(): boolean {
     );
 }
 
-/** Simulate attention 已启用且勾选 Hide arrows 时，仅在注意力动画进行中隐藏边。 */
+/** Simulate attention 已启用且勾选 Hide arrows 时，步进回放（▶）整场隐藏边。 */
 function effectiveHideArrowsDuringAttention(): boolean {
     return isAttentionSimulationConfigured() && readHideArrowsDuringAttentionFromControl();
 }
@@ -1758,17 +1773,10 @@ function buildAttentionExcludeContext(
     };
 }
 
-function resolveAttentionAnimationConfig(
-    pacing: DagRecursiveEdgeReplayPacing,
-    clocks: ReturnType<typeof resolveDagStepPlaybackClocksFromPacing>,
-): AttentionPlaybackConfig {
+function resolveAttentionAnimationConfig(): AttentionPlaybackConfig {
     return {
-        ...resolveAttentionPlaybackConfig(
-            pacing,
-            readAttendMsFromControl(),
-            readFfnRatioFromControl(),
-            clocks.outputGenClockMs,
-        ),
+        attendMs: readAttendMsFromControl(),
+        ffnRatio: readFfnRatioFromControl(),
         accumulativeHighlight: readAccumulativeHighlightFromControl(),
         attendBurst: readAttendBurstFromControl(),
         queryBurst: readQueryBurstFromControl(),
@@ -1935,7 +1943,7 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
         genAttrEffectiveDeletePromptPatternsText(),
     );
     const simulateAttention = isAttentionSimulationConfigured();
-    const animationConfig = resolveAttentionAnimationConfig(pacing, clocks);
+    const animationConfig = resolveAttentionAnimationConfig();
     const outputGenPrep = buildOutputGenPrep(
         events,
         steps,
