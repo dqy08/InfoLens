@@ -30,11 +30,18 @@ export type AttentionPlaybackHighlight = {
     phase: 'attend' | 'ffn';
     /** prefill 已完成、K/V 已建立的 query：持久外框；gen 出现前一帧清掉。 */
     kvEstablishedQueryIds?: readonly string[];
+    /**
+     * 目标 query 的汇聚热度 [0,1]：随 attend 扫掠连续上升；
+     * UI 将 fill 从常规色插到 `*-fill-heat` 终点（向白抬亮）。
+     * 缺省（如 random prefill / dwell0）不驱动热度。
+     */
+    queryHeat?: number;
 } | null;
 
 export type RunAttentionPlaybackOptions = {
     plan: AttentionPlaybackPlan;
-    config: AttentionPlaybackConfig;
+    /** 每轮 round 开始前调用，便于 UI 实时改 Dwell / Attend burst 等。 */
+    getConfig: () => AttentionPlaybackConfig;
     setHighlight: (state: AttentionPlaybackHighlight) => void;
     /** FFN 前延迟结束后、FFN 后延迟开始前：展示 gen token 并转移高亮。 */
     onGenAppear?: () => void;
@@ -79,12 +86,18 @@ export function attendLitIdsForBand(
     return scanIds.slice(holdFrom, toExclusiveEnd);
 }
 
-export function attendLitIdsAccumulative(
-    scanIds: readonly string[],
-    toExclusiveEnd: number,
-): string[] {
-    if (toExclusiveEnd <= 0) return [];
-    return scanIds.slice(0, toExclusiveEnd);
+/** attend 扫掠进度 → queryHeat；beat 内按 elapsed/attendMs 连续插值。 */
+export function attendQueryHeat(
+    tokenCount: number,
+    beatFromExclusive: number,
+    sweptExclusiveEnd: number,
+    elapsedInBeat: number,
+    attendMs: number,
+): number {
+    if (tokenCount <= 0) return 1;
+    const span = Math.max(0, sweptExclusiveEnd - beatFromExclusive);
+    const t = attendMs > 0 ? Math.min(1, Math.max(0, elapsedInBeat / attendMs)) : 1;
+    return Math.min(1, (beatFromExclusive + t * span) / tokenCount);
 }
 
 function withKvEstablished(
@@ -157,7 +170,7 @@ function driveRoundWithRaf(opts: DriveRoundOptions): void {
             attachKvEstablished = false;
         }
     };
-    const { attendMs, ffnRatio, accumulativeHighlight, attendBurst: attendBurstRaw } = config;
+    const { attendMs, ffnRatio, attendBurst: attendBurstRaw } = config;
     const attendBurst = clampAttendBurst(attendBurstRaw ?? 1);
     const ffnMs = ffnRatio * attendMs;
     const tokenCount = round.scanIds.length;
@@ -188,19 +201,24 @@ function driveRoundWithRaf(opts: DriveRoundOptions): void {
     };
 
     const renderAttendBand = (sweptAtFrameStart: number): void => {
-        const litIds = accumulativeHighlight
-            ? attendLitIdsAccumulative(round.scanIds, sweptExclusiveEnd)
-            : attendLitIdsForBand(
-                  round.scanIds,
-                  sweptAtFrameStart,
-                  sweptExclusiveEnd,
-                  beatFromExclusive,
-              );
+        const litIds = attendLitIdsForBand(
+            round.scanIds,
+            sweptAtFrameStart,
+            sweptExclusiveEnd,
+            beatFromExclusive,
+        );
         if (litIds.length === 0) return;
         emit({
             queryTokenId: round.queryTokenId,
             litIds,
             phase: 'attend',
+            queryHeat: attendQueryHeat(
+                tokenCount,
+                beatFromExclusive,
+                sweptExclusiveEnd,
+                elapsed,
+                attendMs,
+            ),
         });
     };
 
@@ -209,6 +227,7 @@ function driveRoundWithRaf(opts: DriveRoundOptions): void {
             queryTokenId: round.queryTokenId,
             litIds: [round.queryTokenId],
             phase: 'ffn',
+            queryHeat: 1,
         });
     };
 
@@ -316,7 +335,7 @@ export function attendDwell0Highlight(
 }
 
 function runAttendDwell0Then(
-    config: AttentionPlaybackConfig,
+    getConfig: () => AttentionPlaybackConfig,
     setHighlight: (state: AttentionPlaybackHighlight) => void,
     kvEstablishedQueryIds: readonly string[] | undefined,
     onContinue: () => void,
@@ -325,7 +344,7 @@ function runAttendDwell0Then(
 ): void {
     setHighlight(attendDwell0Highlight(kvEstablishedQueryIds));
     delayMs(
-        attendDwell0Ms(config),
+        attendDwell0Ms(getConfig()),
         () => {
             if (isCancelled?.()) return;
             onContinue();
@@ -337,7 +356,7 @@ function runAttendDwell0Then(
 
 function runRandomPrefillThenGen(
     rounds: readonly AttentionRoundPlan[],
-    config: AttentionPlaybackConfig,
+    getConfig: () => AttentionPlaybackConfig,
     setHighlight: (state: AttentionPlaybackHighlight) => void,
     onGenAppear: (() => void) | undefined,
     onDone: () => void,
@@ -347,9 +366,6 @@ function runRandomPrefillThenGen(
     const prefillRounds = shuffleInPlace(rounds.slice(0, -1));
     const finalRound = rounds[rounds.length - 1]!;
     const kvEstablished: string[] = [];
-    const attendBurst = clampAttendBurst(config.attendBurst ?? ATTEND_BURST_DEFAULT);
-    const queryBurst = clampAttendBurst(config.queryBurst ?? QUERY_BURST_DEFAULT);
-    const dwellMs = config.ffnRatio * config.attendMs;
     let frameIndex = 0;
 
     const emit = (state: AttentionPlaybackHighlight): void => {
@@ -366,7 +382,7 @@ function runRandomPrefillThenGen(
     const startFinalRound = (): void => {
         driveRoundWithRaf({
             round: finalRound,
-            config,
+            config: getConfig(),
             dwellMode: 'gen',
             kvEstablishedQueryIds: kvEstablished,
             setHighlight,
@@ -383,6 +399,10 @@ function runRandomPrefillThenGen(
 
     const playFrame = (): void => {
         if (isCancelled?.()) return;
+        const config = getConfig();
+        const attendBurst = clampAttendBurst(config.attendBurst ?? ATTEND_BURST_DEFAULT);
+        const queryBurst = clampAttendBurst(config.queryBurst ?? QUERY_BURST_DEFAULT);
+        const dwellMs = config.ffnRatio * config.attendMs;
         if (frameIndex >= prefillRounds.length) {
             emit({
                 queryTokenId: null,
@@ -412,7 +432,7 @@ function runRandomPrefillThenGen(
 
 function runPrefillRounds(
     rounds: readonly AttentionRoundPlan[],
-    config: AttentionPlaybackConfig,
+    getConfig: () => AttentionPlaybackConfig,
     setHighlight: (state: AttentionPlaybackHighlight) => void,
     roundIndex: number,
     onGenAppear: (() => void) | undefined,
@@ -430,7 +450,7 @@ function runPrefillRounds(
     const isLastRound = roundIndex === rounds.length - 1;
     driveRoundWithRaf({
         round,
-        config,
+        config: getConfig(),
         dwellMode: isLastRound ? 'gen' : 'attendOnly',
         kvEstablishedQueryIds: kvEstablished.length > 0 ? kvEstablished : undefined,
         setHighlight,
@@ -442,7 +462,7 @@ function runPrefillRounds(
                 : [...kvEstablished, round.queryTokenId];
             runPrefillRounds(
                 rounds,
-                config,
+                getConfig,
                 setHighlight,
                 roundIndex + 1,
                 onGenAppear,
@@ -458,14 +478,14 @@ function runPrefillRounds(
 }
 
 export function runAttentionPlayback(opts: RunAttentionPlaybackOptions): void {
-    const { plan, config, setHighlight, onGenAppear, onDone, setCancel, isCancelled, skipLeadDwell0 } =
+    const { plan, getConfig, setHighlight, onGenAppear, onDone, setCancel, isCancelled, skipLeadDwell0 } =
         opts;
     const beginAfterLeadDwell0 = (begin: () => void): void => {
         if (skipLeadDwell0) {
             begin();
             return;
         }
-        runAttendDwell0Then(config, setHighlight, undefined, begin, setCancel, isCancelled);
+        runAttendDwell0Then(getConfig, setHighlight, undefined, begin, setCancel, isCancelled);
     };
     if (plan.kind === 'prefill') {
         if (plan.rounds.length === 0) {
@@ -473,11 +493,11 @@ export function runAttentionPlayback(opts: RunAttentionPlaybackOptions): void {
             onDone();
             return;
         }
-        if (config.prefillStyle === 'random' && plan.rounds.length > 1) {
+        if (getConfig().prefillStyle === 'random' && plan.rounds.length > 1) {
             beginAfterLeadDwell0(() =>
                 runRandomPrefillThenGen(
                     plan.rounds,
-                    config,
+                    getConfig,
                     setHighlight,
                     onGenAppear,
                     onDone,
@@ -490,7 +510,7 @@ export function runAttentionPlayback(opts: RunAttentionPlaybackOptions): void {
         beginAfterLeadDwell0(() =>
             runPrefillRounds(
                 plan.rounds,
-                config,
+                getConfig,
                 setHighlight,
                 0,
                 onGenAppear,
@@ -504,7 +524,7 @@ export function runAttentionPlayback(opts: RunAttentionPlaybackOptions): void {
     beginAfterLeadDwell0(() =>
         driveRoundWithRaf({
             round: plan.round,
-            config,
+            config: getConfig(),
             dwellMode: 'gen',
             setHighlight,
             onGenAppear,

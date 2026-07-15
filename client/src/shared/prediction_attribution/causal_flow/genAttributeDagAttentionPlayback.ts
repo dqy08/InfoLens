@@ -4,12 +4,12 @@
  * ## 原理 ↔ 实现
  * | | 推理 | 本模块 |
  * |---|------|--------|
- * | **scan** | 位置 i 的 Q 仅 attend K/V[0…i]（因果） | `scanIdsForQueryInContext(context, query)`；池 = `contextIdsBeforeOutputGen`（exclude + delete 过滤） |
+ * | **scan** | 位置 i 的 Q 仅 attend K/V[0…i]（因果） | `scanIdsForQueryInContext(context, query)`；池 = `contextIdsBeforeOutputGen`（delete 过滤；exclude 在 hide excluded 关时纳入 scan） |
  * | **query** | 尚无 K/V、需作输入 forward 的 token 逐位作 Q | `uncachedIdsBeforeOutputGen`：首 gen=整段 prompt；decode=上一 gen（已 cache，单轮）；tool 后=call 末+response（call 末仅采样未 forward） |
  * | **skip** | prefill 仍算全位，可只展示末轮 | 仅减 query 轮次；末轮 query/scan 与不 skip 的最后一轮相同 |
  *
  * ## 准备阶段（每个 outputGen 前）
- * - **context**（scan 池）：`contextIdsBeforeOutputGen`，exclude + delete 过滤（与 DAG 可见节点一致）
+ * - **context**（scan 池）：`contextIdsBeforeOutputGen`；delete 始终过滤；exclude 在 `includeExcludedInAttentionScan` 时纳入（hide excluded 开时与 DAG 可见一致）
  * - **query 候选**：`uncached`（见 {@link uncachedIdsBeforeOutputGen}）
  * - **未勾 Skip prefill** 且 uncached > 1：多轮 prefill（query 前移，scan 前缀伸长）
  * - **勾 Skip prefill** 或 uncached ≤ 1：单轮，query = 末候选
@@ -47,7 +47,6 @@ export type AttentionPlaybackConfig = {
     attendMs: number;
     /** dwell ratio：新 gen 前后 FFN 停留 = 此值 × attendMs（代码内亦称 ffnRatio）。 */
     ffnRatio: number;
-    accumulativeHighlight?: boolean;
     /** plain / gen scan：每 attend beat 并行扫过的 token 数；random 段内每 query 随机高亮数。 */
     attendBurst?: number;
     /** random prefill：每帧并行建立的 query 数。 */
@@ -107,7 +106,16 @@ export type AttentionExcludeContext = {
     excludeGeneratedPatternsText: string;
     /** 与 DAG {@link collectDeletePromptIntervals} 同源；未勾选 delete 时传 `''`。 */
     deletePromptPatternsText: string;
+    /**
+     * hide excluded 关时 true：scan/query 含 exclude token（delete 仍过滤）；归因与 excluded gen 步跳过不变。
+     * hide excluded 开或未传时 false：scan 与 DAG 可见节点一致。
+     */
+    includeExcludedInAttentionScan?: boolean;
 };
+
+function includeExcludedInScan(ctx: AttentionExcludeContext): boolean {
+    return ctx.includeExcludedInAttentionScan === true;
+}
 
 function excludeIntervalsForStep(
     step: Pick<TokenGenStep, 'inputRanges'>,
@@ -137,11 +145,15 @@ function promptSpanInAttentionPlan(
     end: number,
     excludeIntervals: readonly [number, number][],
     deleteIntervals: readonly [number, number][],
+    includeExcluded: boolean,
 ): boolean {
-    return (
-        !isOffsetSpanFullyExcluded(start, end, excludeIntervals) &&
-        !isOffsetSpanFullyExcluded(start, end, deleteIntervals)
-    );
+    if (
+        !includeExcluded &&
+        isOffsetSpanFullyExcluded(start, end, excludeIntervals)
+    ) {
+        return false;
+    }
+    return !isOffsetSpanFullyExcluded(start, end, deleteIntervals);
 }
 
 function spanToNodeId(span: PromptTokenSpan): string {
@@ -153,9 +165,12 @@ export function inputSpanNodeIdsInRanges(
     inputRanges: readonly [number, number][],
     excludeIntervals: readonly [number, number][],
     deleteIntervals: readonly [number, number][] = [],
+    includeExcludedInScan = false,
 ): string[] {
     return filterPromptSpansInInputRanges(normalizePromptTokenSpans(catalogSpans), [...inputRanges])
-        .filter(({ offset: [s, e] }) => promptSpanInAttentionPlan(s, e, excludeIntervals, deleteIntervals))
+        .filter(({ offset: [s, e] }) =>
+            promptSpanInAttentionPlan(s, e, excludeIntervals, deleteIntervals, includeExcludedInScan),
+        )
         .sort((a, b) => a.offset[0] - b.offset[0])
         .map(spanToNodeId);
 }
@@ -249,7 +264,7 @@ export function attentionPlanTotalMs(
         const n = plan.rounds.length;
         if (n === 0) return 0;
         const last = plan.rounds[n - 1]!;
-        if ((cfg.prefillStyle ?? 'plain') === 'random' && n > 1) {
+        if ((cfg.prefillStyle ?? 'random') === 'random' && n > 1) {
             const queryBurst = clampAttendBurst(cfg.queryBurst ?? QUERY_BURST_DEFAULT);
             const dwell = cfg.ffnRatio * cfg.attendMs;
             const randomFrames = attendBeatCount(n - 1, queryBurst);
@@ -286,7 +301,7 @@ export function outputGenPrepMs(
     return attentionPlanTotalMs(plan, cfg);
 }
 
-function lastNonExcludedGenIdBefore(
+function lastGenIdBeforeForAttention(
     steps: readonly TokenGenStep[],
     stepIndex: number,
     ctx: AttentionExcludeContext,
@@ -296,6 +311,7 @@ function lastNonExcludedGenIdBefore(
         if (skipOutputGen(j)) continue;
         const prev = steps[j]!;
         if (
+            !includeExcludedInScan(ctx) &&
             isDagGenStepTargetExcluded(
                 prev,
                 ctx.excludeIntervalContext,
@@ -324,12 +340,15 @@ export function uncachedIdsBeforeOutputGen(
     const step = steps[stepIndex];
     if (!step) return [];
 
+    const includeExcluded = includeExcludedInScan(ctx);
+
     if (stepIndex === 0) {
         return inputSpanNodeIdsInRanges(
             catalogSpans,
             step.inputRanges,
             excludeIntervalsForStep(step, ctx),
             deleteIntervalsForStep(step, ctx),
+            includeExcluded,
         );
     }
 
@@ -343,13 +362,14 @@ export function uncachedIdsBeforeOutputGen(
             newRanges,
             excludeIntervalsForStep(step, ctx),
             deleteIntervalsForStep(step, ctx),
+            includeExcluded,
         );
         if (toolResponseIds.length === 0) return [toolCallLastId];
         if (toolResponseIds[0] === toolCallLastId) return toolResponseIds;
         return [toolCallLastId, ...toolResponseIds];
     }
 
-    const prevGenId = lastNonExcludedGenIdBefore(steps, stepIndex, ctx, skipOutputGen);
+    const prevGenId = lastGenIdBeforeForAttention(steps, stepIndex, ctx, skipOutputGen);
     return prevGenId != null ? [prevGenId] : [];
 }
 
@@ -365,16 +385,20 @@ export function contextIdsBeforeOutputGen(
     if (!step) return [];
     const excludeIntervals = excludeIntervalsForStep(step, ctx);
     const deleteIntervals = deleteIntervalsForStep(step, ctx);
+    const includeExcluded = includeExcludedInScan(ctx);
     const entries: { id: string; start: number }[] = [];
     for (const span of filterPromptSpansInInputRanges(normalizePromptTokenSpans(catalogSpans), [...step.inputRanges])) {
         const [s, e] = span.offset;
-        if (!promptSpanInAttentionPlan(s, e, excludeIntervals, deleteIntervals)) continue;
+        if (!promptSpanInAttentionPlan(s, e, excludeIntervals, deleteIntervals, includeExcluded)) {
+            continue;
+        }
         entries.push({ id: spanToNodeId(span), start: s });
     }
     for (let j = 0; j < stepIndex; j++) {
         if (skipOutputGen(j)) continue;
         const prev = steps[j]!;
         if (
+            !includeExcluded &&
             isDagGenStepTargetExcluded(
                 prev,
                 ctx.excludeIntervalContext,

@@ -17,7 +17,7 @@ import {
     scanIdsForQueryInContext,
     uncachedIdsBeforeOutputGen,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagAttentionPlayback';
-import { attendLitIdsForBand, attendLitIdsAccumulative } from '../../shared/prediction_attribution/causal_flow/runAttentionPlayback';
+import { attendLitIdsForBand } from '../../shared/prediction_attribution/causal_flow/runAttentionPlayback';
 import { buildDagStepPlaybackEvents } from '../../shared/prediction_attribution/causal_flow/genAttributeDagStepPlayback';
 import type { TokenGenStep } from '../../shared/prediction_attribution/causal_flow/tokenGenAttributionRunner';
 
@@ -330,6 +330,71 @@ console.log('12. delete prompt patterns omit ghost tokens from attention plan');
         plan?.kind === 'prefill' ? plan.rounds[0]!.queryTokenId : '',
         '3_4',
     );
+}
+
+console.log('13. includeExcludedInAttentionScan restores exclude prompt to plan');
+{
+    const wire = 'SYSab';
+    const steps = [stubStep({ context: wire, inputRanges: [[0, wire.length]] })];
+    const spans = [
+        { offset: [0, 1] as [number, number], raw: 'S' },
+        { offset: [1, 2] as [number, number], raw: 'Y' },
+        { offset: [2, 3] as [number, number], raw: 'S' },
+        { offset: [3, 4] as [number, number], raw: 'a' },
+        { offset: [4, 5] as [number, number], raw: 'b' },
+    ];
+    const ctxWithExclude = {
+        ...emptyCtx,
+        excludeIntervalContext: wire,
+        excludePromptPatternsText: 'SYS',
+        includeExcludedInAttentionScan: true,
+    };
+    const uncached = uncachedIdsBeforeOutputGen(steps, 0, spans, ctxWithExclude, () => false);
+    assertEq('uncached all prompt tokens', uncached.join(','), '0_1,1_2,2_3,3_4,4_5');
+    const ctxFiltered = { ...ctxWithExclude, includeExcludedInAttentionScan: false };
+    const uncachedFiltered = uncachedIdsBeforeOutputGen(steps, 0, spans, ctxFiltered, () => false);
+    assertEq('without flag still filters exclude', uncachedFiltered.join(','), '3_4,4_5');
+}
+
+console.log('14. includeExcludedInAttentionScan still filters delete');
+{
+    const wire = 'SYSab';
+    const steps = [stubStep({ context: wire, inputRanges: [[0, wire.length]] })];
+    const spans = [
+        { offset: [0, 1] as [number, number], raw: 'S' },
+        { offset: [1, 2] as [number, number], raw: 'Y' },
+        { offset: [2, 3] as [number, number], raw: 'S' },
+        { offset: [3, 4] as [number, number], raw: 'a' },
+        { offset: [4, 5] as [number, number], raw: 'b' },
+    ];
+    const ctxWithDelete = {
+        ...emptyCtx,
+        excludeIntervalContext: wire,
+        deletePromptPatternsText: 'SYS',
+        includeExcludedInAttentionScan: true,
+    };
+    const uncached = uncachedIdsBeforeOutputGen(steps, 0, spans, ctxWithDelete, () => false);
+    assertEq('delete still omitted from scan', uncached.join(','), '3_4,4_5');
+}
+
+console.log('15. includeExcludedInAttentionScan includes prior excluded gen in context');
+{
+    const steps = [
+        stubStep({ context: 'a', token: 'b', inputRanges: [[0, 1]] }),
+        stubStep({ context: 'ab', token: 'c', inputRanges: [[0, 1]] }),
+    ];
+    const spans = [{ offset: [0, 1] as [number, number], raw: 'a' }];
+    const ctx = {
+        ...emptyCtx,
+        excludeIntervalContext: 'abc',
+        excludeGeneratedPatternsText: 'b',
+        includeExcludedInAttentionScan: true,
+    };
+    const ids = contextIdsBeforeOutputGen(steps, 1, spans, ctx, () => false);
+    assertEq('prompt + excluded gen', ids.join(','), '0_1,1_2');
+    const ctxFiltered = { ...ctx, includeExcludedInAttentionScan: false };
+    const idsFiltered = contextIdsBeforeOutputGen(steps, 1, spans, ctxFiltered, () => false);
+    assertEq('without flag omits excluded gen', idsFiltered.join(','), '0_1');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

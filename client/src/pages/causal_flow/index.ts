@@ -249,13 +249,11 @@ const GEN_ATTR_DAG_PREFILL_STYLE_STORAGE_KEY = 'info_radar_gen_attr_dag_prefill_
 const GEN_ATTR_DAG_SKIP_PREFILL_STORAGE_KEY_LEGACY = 'info_radar_gen_attr_dag_skip_prompt_attention';
 const GEN_ATTR_DAG_ATTEND_MS_STORAGE_KEY = 'info_radar_gen_attr_dag_attend_ms';
 const GEN_ATTR_DAG_FFN_RATIO_STORAGE_KEY = 'info_radar_gen_attr_dag_ffn_ratio';
-const GEN_ATTR_DAG_ACCUMULATIVE_HIGHLIGHT_STORAGE_KEY =
-    'info_radar_gen_attr_dag_accumulative_highlight';
 const GEN_ATTR_DAG_ATTEND_BURST_STORAGE_KEY = 'info_radar_gen_attr_dag_attend_burst';
 const GEN_ATTR_DAG_QUERY_BURST_STORAGE_KEY = 'info_radar_gen_attr_dag_query_burst';
 const GEN_ATTR_DAG_HIDE_ARROWS_DURING_ATTENTION_STORAGE_KEY =
     'info_radar_gen_attr_dag_hide_arrows_during_attention';
-const GEN_ATTR_DAG_ATTEND_MS_DEFAULT = 40;
+const GEN_ATTR_DAG_ATTEND_MS_DEFAULT = 33;
 const GEN_ATTR_DAG_ATTEND_MS_MIN = 1;
 const GEN_ATTR_DAG_ATTEND_MS_MAX = 5000;
 const GEN_ATTR_DAG_FFN_RATIO_DEFAULT = 3;
@@ -292,10 +290,9 @@ const DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS: GenAttrDemoUiOptions = {
     playbackStepMs: GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT,
     simulateAttentionCost: false,
     skipPrefillAttention: false,
-    prefillStyle: 'plain',
+    prefillStyle: 'random',
     attendMs: GEN_ATTR_DAG_ATTEND_MS_DEFAULT,
     ffnRatioAttend: GEN_ATTR_DAG_FFN_RATIO_DEFAULT,
-    accumulativeHighlight: false,
     attendBurst: ATTEND_BURST_DEFAULT,
     queryBurst: QUERY_BURST_DEFAULT,
     hideArrowsDuringAttention: false,
@@ -600,12 +597,11 @@ const dagFfnRatioWrap = document.getElementById('gen_attr_dag_ffn_ratio_wrap');
 const dagFfnRatioInput = document.getElementById(
     'gen_attr_dag_ffn_ratio',
 ) as HTMLInputElement | null;
-const dagAccumulativeHighlightInput = document.getElementById(
-    'gen_attr_dag_accumulative_highlight',
-) as HTMLInputElement | null;
+const dagAttendBurstWrap = document.getElementById('gen_attr_dag_attend_burst_wrap');
 const dagAttendBurstInput = document.getElementById(
     'gen_attr_dag_attend_burst',
 ) as HTMLInputElement | null;
+const dagHideArrowsWrap = document.getElementById('gen_attr_dag_hide_arrows_wrap');
 const dagHideArrowsDuringAttentionInput = document.getElementById(
     'gen_attr_dag_hide_arrows_during_attention',
 ) as HTMLInputElement | null;
@@ -705,7 +701,9 @@ function readStoredSkipPrefillAttention(): boolean {
 
 function readStoredPrefillStyle(): 'plain' | 'random' {
     const raw = lsGet(GEN_ATTR_DAG_PREFILL_STYLE_STORAGE_KEY);
-    return raw === 'random' ? 'random' : 'plain';
+    if (raw === 'plain') return 'plain';
+    if (raw === 'random') return 'random';
+    return DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.prefillStyle;
 }
 
 function readPrefillStyleFromControl(): 'plain' | 'random' {
@@ -725,14 +723,6 @@ function readStoredFfnRatioAttend(): number {
         parse: 'int',
         clamp: clampFfnRatio,
     });
-}
-
-function readStoredAccumulativeHighlight(): boolean {
-    return lsReadBool(
-        GEN_ATTR_DAG_ACCUMULATIVE_HIGHLIGHT_STORAGE_KEY,
-        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.accumulativeHighlight,
-        { encoding: '1' },
-    );
 }
 
 function readStoredAttendBurst(): number {
@@ -771,6 +761,8 @@ function applyAttentionCostUi(): void {
     if (dagAttentionCostRow) dagAttentionCostRow.hidden = causalFlow;
     const sim = isAttentionSimulationConfigured();
     if (dagFfnRatioWrap) dagFfnRatioWrap.hidden = !sim;
+    if (dagAttendBurstWrap) dagAttendBurstWrap.hidden = !sim;
+    if (dagHideArrowsWrap) dagHideArrowsWrap.hidden = !sim;
     if (dagSkipPrefillWrap) dagSkipPrefillWrap.hidden = !sim;
     const skipPrefill = readSkipPrefillAttentionFromControl();
     if (dagPrefillStyleWrap) dagPrefillStyleWrap.hidden = !sim || skipPrefill;
@@ -792,10 +784,6 @@ function readAttendMsFromControl(): number {
 function readFfnRatioFromControl(): number {
     const raw = parseInt(dagFfnRatioInput?.value ?? '', 10);
     return Number.isFinite(raw) ? clampFfnRatio(raw) : readStoredFfnRatioAttend();
-}
-
-function readAccumulativeHighlightFromControl(): boolean {
-    return dagAccumulativeHighlightInput?.checked ?? readStoredAccumulativeHighlight();
 }
 
 function readAttendBurstFromControl(): number {
@@ -1023,10 +1011,6 @@ const initialAttendMs = readStoredAttendMs();
 if (dagAttendMsInput) dagAttendMsInput.value = String(initialAttendMs);
 const initialFfnRatio = readStoredFfnRatioAttend();
 if (dagFfnRatioInput) dagFfnRatioInput.value = String(initialFfnRatio);
-const initialAccumulativeHighlight = readStoredAccumulativeHighlight();
-if (dagAccumulativeHighlightInput) {
-    dagAccumulativeHighlightInput.checked = initialAccumulativeHighlight;
-}
 const initialAttendBurst = readStoredAttendBurst();
 if (dagAttendBurstInput) dagAttendBurstInput.value = String(initialAttendBurst);
 const initialQueryBurst = readStoredQueryBurst();
@@ -1739,6 +1723,7 @@ function cancelDagLastTokenDwell(): void {
         clearTimeout(dagLastTokenDwellTimer);
         dagLastTokenDwellTimer = null;
     }
+    dagHandle.setLastTokenAppearanceDwellActive(false);
 }
 
 /**
@@ -1747,8 +1732,10 @@ function cancelDagLastTokenDwell(): void {
  */
 function scheduleDagLastTokenDwell(action: () => void, costMs: number = DAG_LAST_TOKEN_APPEARANCE_COST_MS): void {
     cancelDagLastTokenDwell();
+    dagHandle.setLastTokenAppearanceDwellActive(true);
     dagLastTokenDwellTimer = setTimeout(() => {
         dagLastTokenDwellTimer = null;
+        dagHandle.setLastTokenAppearanceDwellActive(false);
         action();
     }, costMs);
 }
@@ -1770,12 +1757,14 @@ function buildAttentionExcludeContext(
     excludePromptPatternsText: string,
     excludeGeneratedPatternsText: string,
     deletePromptPatternsText: string,
+    includeExcludedInAttentionScan: boolean,
 ): AttentionExcludeContext {
     return {
         excludeIntervalContext,
         excludePromptPatternsText,
         excludeGeneratedPatternsText,
         deletePromptPatternsText,
+        includeExcludedInAttentionScan,
     };
 }
 
@@ -1783,7 +1772,6 @@ function resolveAttentionAnimationConfig(): AttentionPlaybackConfig {
     return {
         attendMs: readAttendMsFromControl(),
         ffnRatio: readFfnRatioFromControl(),
-        accumulativeHighlight: readAccumulativeHighlightFromControl(),
         attendBurst: readAttendBurstFromControl(),
         queryBurst: readQueryBurstFromControl(),
         prefillStyle: readPrefillStyleFromControl(),
@@ -1794,7 +1782,6 @@ function buildOutputGenPrep(
     events: readonly DagStepPlaybackEvent[],
     steps: readonly TokenGenStep[],
     clocks: ReturnType<typeof resolveDagStepPlaybackClocksFromPacing>,
-    animationConfig: AttentionPlaybackConfig,
     ctx: AttentionExcludeContext,
     catalogSpans: PromptTokenSpan[],
     skipOutputGen: (stepIndex: number) => boolean,
@@ -1824,7 +1811,7 @@ function buildOutputGenPrep(
                   if (!skipLeadDwell0) dagAttentionLeadDwell0Consumed = true;
                   runAttentionPlayback({
                       plan,
-                      config: animationConfig,
+                      getConfig: resolveAttentionAnimationConfig,
                       skipLeadDwell0,
                       setHighlight: (state) => dagHandle.setAttentionPlaybackHighlight(state),
                       setCancel: (cancel) => {
@@ -1947,14 +1934,13 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
         excludePromptPatternsText,
         excludeGeneratedPatternsText,
         genAttrEffectiveDeletePromptPatternsText(),
+        !(dagHideExcludedTokensInput?.checked ?? false),
     );
     const simulateAttention = isAttentionSimulationConfigured();
-    const animationConfig = resolveAttentionAnimationConfig();
     const outputGenPrep = buildOutputGenPrep(
         events,
         steps,
         clocks,
-        animationConfig,
         attentionCtx,
         currentRunPromptSpans,
         skipAppearanceCostForOutputGen,
@@ -2242,7 +2228,6 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
         prefillStyle: readPrefillStyleFromControl(),
         attendMs: readAttendMsFromControl(),
         ffnRatioAttend: readFfnRatioFromControl(),
-        accumulativeHighlight: readAccumulativeHighlightFromControl(),
         attendBurst: readAttendBurstFromControl(),
         queryBurst: readQueryBurstFromControl(),
         hideArrowsDuringAttention: readHideArrowsDuringAttentionFromControl(),
@@ -2356,10 +2341,6 @@ const GEN_ATTR_DEMO_UI_PERSIST_SPECS: ReadonlyArray<{
     },
     { controlId: 'gen_attr_dag_attend_ms', storageKey: GEN_ATTR_DAG_ATTEND_MS_STORAGE_KEY },
     { controlId: 'gen_attr_dag_ffn_ratio', storageKey: GEN_ATTR_DAG_FFN_RATIO_STORAGE_KEY },
-    {
-        controlId: 'gen_attr_dag_accumulative_highlight',
-        storageKey: GEN_ATTR_DAG_ACCUMULATIVE_HIGHLIGHT_STORAGE_KEY,
-    },
     { controlId: 'gen_attr_dag_attend_burst', storageKey: GEN_ATTR_DAG_ATTEND_BURST_STORAGE_KEY },
     { controlId: 'gen_attr_dag_query_burst', storageKey: GEN_ATTR_DAG_QUERY_BURST_STORAGE_KEY },
     {
@@ -2450,11 +2431,6 @@ function persistGenAttrDemoUiOptionsToLocalStorage(snap: GenAttrDemoUiOptions): 
     lsWriteString(GEN_ATTR_DAG_PREFILL_STYLE_STORAGE_KEY, snap.prefillStyle);
     lsSet(GEN_ATTR_DAG_ATTEND_MS_STORAGE_KEY, String(snap.attendMs));
     lsSet(GEN_ATTR_DAG_FFN_RATIO_STORAGE_KEY, String(snap.ffnRatioAttend));
-    lsWriteBool(
-        GEN_ATTR_DAG_ACCUMULATIVE_HIGHLIGHT_STORAGE_KEY,
-        snap.accumulativeHighlight,
-        '1',
-    );
     lsSet(GEN_ATTR_DAG_ATTEND_BURST_STORAGE_KEY, String(snap.attendBurst));
     lsSet(GEN_ATTR_DAG_QUERY_BURST_STORAGE_KEY, String(snap.queryBurst));
     lsWriteBool(
@@ -2688,9 +2664,6 @@ function applyGenAttrDemoUiOptionsSnap(snap: Partial<GenAttrDemoUiOptions>): voi
     }
     if (snap.ffnRatioAttend !== undefined && dagFfnRatioInput) {
         dagFfnRatioInput.value = String(clampFfnRatio(snap.ffnRatioAttend));
-    }
-    if (snap.accumulativeHighlight !== undefined && dagAccumulativeHighlightInput) {
-        dagAccumulativeHighlightInput.checked = snap.accumulativeHighlight;
     }
     if (snap.attendBurst !== undefined && dagAttendBurstInput) {
         dagAttendBurstInput.value = String(clampAttendBurst(snap.attendBurst));

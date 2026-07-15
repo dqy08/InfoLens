@@ -19,6 +19,15 @@
     "label": "CN->EN | 翻译"
   },
   {
+    "slug": "注意力的具象化",
+    "label": "Attention｜注意力的具象化",
+    "featured": "bold"
+  },
+  {
+    "slug": "注意力 诗 螺旋版",
+    "label": "Attention｜注意力的具象化 螺旋版"
+  },
+  {
     "slug": "CoT｜苏州所在省的省会",
     "label": "CoT | 苏州所在省的省会",
     "featured": "bold"
@@ -62,9 +71,5 @@
   {
     "slug": "Attention",
     "label": "Attention"
-  },
-  {
-    "slug": "注意力2",
-    "label": "注意力2"
   }
 ]

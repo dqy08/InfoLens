@@ -116,7 +116,6 @@ export type GenAttrDemoUiOptions = {
     attendMs: number;
     /** dwell ratio（存储键仍为 ffnRatioAttend）；新 gen 前后 FFN 停留倍数。 */
     ffnRatioAttend: number;
-    accumulativeHighlight: boolean;
     /** random prefill：每帧并行建立的 query 数。 */
     queryBurst: number;
     attendBurst: number;

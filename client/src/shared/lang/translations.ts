@@ -138,11 +138,9 @@ export const translations: Translations = {
         'When checked, multi-token uncached prep skips per-token query rounds; scan still follows query position in context. Saved locally.':
             '勾选后，uncached 多 token 时跳过逐 token query 轮次；scan 仍随 query 在 context 中的位置取前缀。',
         'Prefill style': 'Prefill 样式',
-        'Plain': 'Plain',
-        'Random': 'Random',
         'Plain: sequential left-to-right scan per query. Random: shuffled query batches, random attend burst highlight, persistent query outlines. Saved locally.':
             'Plain：每个 query 逐轮从左到右扫描。Random：乱序 query 批处理、attend burst 随机高亮、query 外框持久。本地保存。',
-        'query burst': 'query burst',
+        'Prefill burst': 'Prefill burst',
         'Random prefill only: parallel query tokens established per attend step (ms). Saved locally.':
             '仅 Random prefill：每拍 attend（ms）并行建立的 query 数。本地保存。',
         'Dwell': '停留',
@@ -152,10 +150,7 @@ export const translations: Translations = {
             '每个新 gen token 出现前后的停留时间，为单次 attend（ms）的倍数。本地保存。',
         'Milliseconds per attend step when Simulate attention is checked (step time mode). Saved locally.':
             '勾选模拟 attention 且为 step time 模式时，每次 attend 的毫秒数。本地保存。',
-        'Accumulative highlight': '累积高亮',
-        'When checked, attend phase keeps all previously scanned tokens highlighted instead of only the sliding band. Saved locally.':
-            '勾选后，attend 阶段保留已扫过 token 的高亮，而非仅高亮当前滑过的区间。本地保存。',
-        'attend burst': 'attend burst',
+        'Attend burst': 'Attend burst',
         'Tokens scanned in parallel per attend step (plain/gen scan) and random lit count per query. Saved locally.':
             '每拍 attend 并行扫过的 token 数（plain/gen scan）及 random 每 query 随机高亮数。本地保存。',
         'Hide arrows': '隐藏箭头',

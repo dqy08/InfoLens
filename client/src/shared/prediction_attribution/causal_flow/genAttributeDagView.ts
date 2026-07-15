@@ -450,6 +450,8 @@ const CSS_VAR_DAG_HIGHLIGHT_LINE_OUT = '--dag-highlight-line-color-out';
 const CSS_VAR_DAG_LIGHTNING_LINE_COLOR = '--dag-lightning-line-color';
 /** 与 causal_flow.scss 中 `--recursive-chain` 的 `stroke-opacity` 一致（由 JS 写入 g 元素） */
 const CSS_VAR_DAG_NODE_RECURSIVE_SHARE = '--gen-attr-dag-node-recursive-share';
+/** attention 目标 token 汇聚热度 [0,1]；驱动 fill 的 color-mix（见 causal_flow.scss） */
+const CSS_VAR_DAG_NODE_QUERY_HEAT = '--gen-attr-dag-node-query-heat';
 
 /** DAG 节点 fill/text `opacity` 档位（exclude 完全隐藏时另用 `display:none`）；描边在 g 上不设 opacity。 */
 const DagNodeOpacityLevel = {
@@ -631,6 +633,8 @@ export type GenAttributeDagHandle = {
     refreshNodeLinkHighlight(): void;
     /** ▶ attention 模拟播放中的 token 高亮；`null` 清除。 */
     setAttentionPlaybackHighlight(state: AttentionPlaybackHighlight): void;
+    /** 末 token 展示后 500ms 收尾 dwell；与 attention 同属「动画期」exclude 亮度例外。 */
+    setLastTokenAppearanceDwellActive(active: boolean): void;
     /** Simulate attention ∧ Hide arrows 时，步进回放（▶）整场隐藏 DAG 边。 */
     setHideArrowsDuringAttention(hide: boolean): void;
     /** 在 DAG 上播放一次闪电动画预览（需因果流模式、传播焦点、已勾选闪电）。 */
@@ -989,6 +993,7 @@ export function initGenAttributeDagView(
             setRecursiveEdgeBatchAnimationDirection: noop,
             refreshNodeLinkHighlight: noop,
             setAttentionPlaybackHighlight: noop,
+            setLastTokenAppearanceDwellActive: noop,
             playLightningEffectPreview: noop,
             cancelLightningEffectPreview: noop,
             enterLightningTauPreview: noop,
@@ -1166,6 +1171,7 @@ export function initGenAttributeDagView(
     let hoveredId: string | null = null;
     /** ▶ Simulate attention：attend / FFN 阶段 token 高亮 */
     let attentionHighlight: AttentionPlaybackHighlight = null;
+    let lastTokenAppearanceDwellActive = false;
     /** 最近一次 {@link refreshNodeLinkHighlight} 计算出的归因状态（基于 {@link effectiveFocusId}）；tooltip 用于展示归因份额 */
     let currentFocusState: FocusAttributionState | null = null;
     /** 传播链动画进行中 tooltip 锚点；播放结束后为 null，恢复 target / hover。 */
@@ -1836,10 +1842,16 @@ export function initGenAttributeDagView(
                 : null;
         const resolveNodeFillOpacity = (d: DagNode): number => {
             const lowVis = nodeLowVisReasonById.get(d.id) ?? null;
+            const treatExcludedAsNormalInAttention =
+                !hideExcludedTokens &&
+                (attentionHighlight != null || lastTokenAppearanceDwellActive);
             let base: number;
             if (hideExcludedTokens && lowVis != null) {
                 base = DagNodeOpacityLevel.hidden;
-            } else if (isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)) {
+            } else if (
+                !treatExcludedAsNormalInAttention &&
+                isOffsetSpanFullyExcluded(d.start, d.end, dagExcludeIntervals)
+            ) {
                 base = DagNodeOpacityLevel.almostHidden;
             } else {
                 const nodeFullyHighlighted = recursiveAttributionEnabled
@@ -1870,6 +1882,17 @@ export function initGenAttributeDagView(
                 return DagNodeOpacityLevel.full;
             }
             return Math.min(base, DagNodeOpacityLevel.weakened);
+        };
+        const resolveNodeQueryHeat = (d: DagNode): string | null => {
+            const queryHeat = attentionHighlight?.queryHeat;
+            if (
+                queryHeat == null ||
+                !Number.isFinite(queryHeat) ||
+                !activeQueryIds?.has(d.id)
+            ) {
+                return null;
+            }
+            return String(Math.min(1, Math.max(0, queryHeat)));
         };
         const showNodeSelectedStroke = (d: DagNode): boolean => {
             if (attentionHighlight != null) {
@@ -1903,7 +1926,8 @@ export function initGenAttributeDagView(
                 if (!nodeOnChainForRender(d) && !isBackwardSlide(d)) return null;
                 const renderStrength = nodeStrokeRenderById?.get(d.id);
                 return renderStrength != null ? String(renderStrength) : null;
-            });
+            })
+            .style(CSS_VAR_DAG_NODE_QUERY_HEAT, resolveNodeQueryHeat);
         nodeSel
             .select('rect.gen-attr-dag-node-fill')
             .attr('opacity', resolveNodeFillOpacity);
@@ -2560,6 +2584,7 @@ export function initGenAttributeDagView(
         userFocusId = null;
         hoveredId = null;
         attentionHighlight = null;
+        lastTokenAppearanceDwellActive = false;
         dagTopkToolTip.hideAndReset();
         linkMarkersDefs.selectAll('marker').remove();
         linkG.selectAll('*').remove();
@@ -2708,9 +2733,8 @@ export function initGenAttributeDagView(
             disabled = onDagCanPlay != null && !onDagCanPlay();
         }
         playBtn.property('disabled', disabled);
-        const propagationHint =
-            propagationPlayUi && !playing && !disabled;
-        playBtn.classed('gen-attr-dag-play--propagation-hint', propagationHint);
+        // ▶ / ↯ 可点且未在播时脉动提示（与 CSS gen-attr-dag-play--propagation-hint 同源）
+        playBtn.classed('gen-attr-dag-play--propagation-hint', !playing && !disabled);
         playBtn
             .text(playing ? '⏸' : propagationPlayUi ? DAG_CAUSAL_FLOW_ICON : '▶')
             .attr(
@@ -2745,8 +2769,11 @@ export function initGenAttributeDagView(
     function setDagPlaybackPlaying(playing: boolean): void {
         const wasPlaying = dagPlaybackPlaying;
         dagPlaybackPlaying = playing;
-        if (!playing && (wasPlaying || attentionHighlight != null)) {
-            attentionHighlight = null;
+        if (!playing) {
+            lastTokenAppearanceDwellActive = false;
+            if (wasPlaying || attentionHighlight != null) {
+                attentionHighlight = null;
+            }
         }
         if (playing !== wasPlaying) {
             refreshNodeLinkHighlight();
@@ -2756,6 +2783,12 @@ export function initGenAttributeDagView(
 
     function setAttentionPlaybackHighlight(state: AttentionPlaybackHighlight): void {
         attentionHighlight = state;
+        refreshNodeLinkHighlight();
+    }
+
+    function setLastTokenAppearanceDwellActive(active: boolean): void {
+        if (lastTokenAppearanceDwellActive === active) return;
+        lastTokenAppearanceDwellActive = active;
         refreshNodeLinkHighlight();
     }
 
@@ -2970,6 +3003,7 @@ export function initGenAttributeDagView(
         setRecursiveEdgeBatchAnimationDirection,
         refreshNodeLinkHighlight,
         setAttentionPlaybackHighlight,
+        setLastTokenAppearanceDwellActive,
         playLightningEffectPreview,
         cancelLightningEffectPreview,
         enterLightningTauPreview,

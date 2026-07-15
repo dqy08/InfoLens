@@ -2,7 +2,10 @@
  * runAttentionPlayback RAF 状态机
  * 运行: cd client/src && npx tsx tests/prediction_attribution/runAttentionPlayback.test.ts
  */
-import { runAttentionPlayback } from '../../shared/prediction_attribution/causal_flow/runAttentionPlayback';
+import {
+    attendQueryHeat,
+    runAttentionPlayback,
+} from '../../shared/prediction_attribution/causal_flow/runAttentionPlayback';
 
 let passed = 0;
 let failed = 0;
@@ -64,7 +67,7 @@ console.log('0. dwell0：首帧空 litIds，dwell 后才开始扫');
         const highlights: Array<{ lit: string; query: string | null }> = [];
         runAttentionPlayback({
             plan: { kind: 'decode', round: { queryTokenId: 'q', scanIds: ['a', 'q'] } },
-            config: { attendMs: 10, ffnRatio: 2, attendBurst: 1 },
+            getConfig: () => ({ attendMs: 10, ffnRatio: 2, attendBurst: 1 }),
             setHighlight: (s) => {
                 if (s) highlights.push({ lit: s.litIds.join(','), query: s.queryTokenId });
             },
@@ -88,7 +91,7 @@ console.log('0b. skipLeadDwell0：无 dwell0 首帧，直接扫');
         const highlights: Array<{ lit: string; query: string | null }> = [];
         runAttentionPlayback({
             plan: { kind: 'decode', round: { queryTokenId: 'q', scanIds: ['a', 'q'] } },
-            config: { attendMs: 10, ffnRatio: 2, attendBurst: 1 },
+            getConfig: () => ({ attendMs: 10, ffnRatio: 2, attendBurst: 1 }),
             skipLeadDwell0: true,
             setHighlight: (s) => {
                 if (s) highlights.push({ lit: s.litIds.join(','), query: s.queryTokenId });
@@ -109,7 +112,7 @@ console.log('1. gen 单 token：onGenAppear 在 onDone 之前，且 onDone 会�
         let done = false;
         runAttentionPlayback({
             plan: { kind: 'decode', round: { queryTokenId: 'q', scanIds: ['q'] } },
-            config: { attendMs: 10, ffnRatio: 2 },
+            getConfig: () => ({ attendMs: 10, ffnRatio: 2 }),
             setHighlight: () => {},
             onGenAppear: () => {
                 appeared = true;
@@ -137,7 +140,7 @@ console.log('2. attendOnly：attend 结束后 onDone，不经 FFN');
                 kind: 'prefill',
                 rounds: [{ queryTokenId: 'a', scanIds: ['a', 'b'] }],
             },
-            config: { attendMs: 10, ffnRatio: 2 },
+            getConfig: () => ({ attendMs: 10, ffnRatio: 2 }),
             setHighlight: () => {},
             onDone: () => {
                 done = true;
@@ -166,7 +169,7 @@ console.log('3. random prefill playback');
                     { queryTokenId: 'c', scanIds: ['a', 'b', 'c'] },
                 ],
             },
-            config: { attendMs: 10, ffnRatio: 2, attendBurst: 1, queryBurst: 1, prefillStyle: 'random' },
+            getConfig: () => ({ attendMs: 10, ffnRatio: 2, attendBurst: 1, queryBurst: 1, prefillStyle: 'random' as const }),
             setHighlight: (s) => {
                 if (s) highlights.push({ kv: s.kvEstablishedQueryIds, lit: s.litIds.join(','), query: s.queryTokenId });
             },
@@ -206,7 +209,7 @@ console.log('3b. random prefill query burst batches');
                     { queryTokenId: 'c', scanIds: ['a', 'b', 'c'] },
                 ],
             },
-            config: { attendMs: 10, ffnRatio: 2, attendBurst: 1, queryBurst: 2, prefillStyle: 'random' },
+            getConfig: () => ({ attendMs: 10, ffnRatio: 2, attendBurst: 1, queryBurst: 2, prefillStyle: 'random' as const }),
             setHighlight: (s) => {
                 if (s) {
                     highlights.push({
@@ -255,7 +258,7 @@ console.log('4. plain prefill accumulates kv outlines');
                     { queryTokenId: 'c', scanIds: ['a', 'b', 'c'] },
                 ],
             },
-            config: { attendMs: 10, ffnRatio: 2, attendBurst: 10, prefillStyle: 'plain' },
+            getConfig: () => ({ attendMs: 10, ffnRatio: 2, attendBurst: 10, prefillStyle: 'plain' as const }),
             setHighlight: (s) => {
                 if (s) highlights.push({ kv: s.kvEstablishedQueryIds, query: s.queryTokenId, phase: s.phase });
             },
@@ -277,6 +280,41 @@ console.log('4. plain prefill accumulates kv outlines');
     } finally {
         restoreMockRaf();
     }
+}
+
+console.log('5. queryHeat：随 attend 扫掠从 0 升到 1，ffn 保持 1');
+{
+    installMockRaf();
+    try {
+        const heats: number[] = [];
+        runAttentionPlayback({
+            plan: { kind: 'decode', round: { queryTokenId: 'q', scanIds: ['a', 'b', 'q'] } },
+            getConfig: () => ({ attendMs: 48, ffnRatio: 1, attendBurst: 1 }),
+            skipLeadDwell0: true,
+            setHighlight: (s) => {
+                if (s?.queryHeat != null) heats.push(s.queryHeat);
+            },
+            onDone: () => {},
+        });
+        assertEq('first frame heat ~0', heats[0], 0);
+        flushRafFrames(3);
+        assert('heat rises during first beat', heats.some((h) => h > 0 && h < 1 / 3));
+        flushRafFrames(80);
+        assert('reaches heat 1 before/at ffn', heats.some((h) => h === 1));
+        assert('heat never exceeds 1', heats.every((h) => h <= 1));
+        assert('heat never negative', heats.every((h) => h >= 0));
+    } finally {
+        restoreMockRaf();
+    }
+}
+
+console.log('5b. attendQueryHeat 纯函数');
+{
+    assertEq('empty scan → 1', attendQueryHeat(0, 0, 0, 0, 10), 1);
+    assertEq('beat start', attendQueryHeat(4, 0, 1, 0, 10), 0);
+    assertEq('beat mid', attendQueryHeat(4, 0, 1, 5, 10), 0.125);
+    assertEq('beat end', attendQueryHeat(4, 0, 1, 10, 10), 0.25);
+    assertEq('last beat end', attendQueryHeat(4, 3, 4, 10, 10), 1);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
