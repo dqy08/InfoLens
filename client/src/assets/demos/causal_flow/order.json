@@ -19,6 +19,15 @@
     "label": "CN->EN | 翻译"
   },
   {
+    "slug": "注意力的具象化",
+    "label": "Attention｜注意力的具象化",
+    "featured": "bold"
+  },
+  {
+    "slug": "注意力 诗 螺旋版",
+    "label": "Attention｜注意力的具象化 螺旋版"
+  },
+  {
     "slug": "CoT｜苏州所在省的省会",
     "label": "CoT | 苏州所在省的省会",
     "featured": "bold"
@@ -58,5 +67,9 @@
   {
     "slug": "闪电效果 | 马斯克",
     "label": "闪电效果 | 马斯克"
+  },
+  {
+    "slug": "Attention",
+    "label": "Attention"
   }
 ]

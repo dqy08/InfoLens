@@ -135,6 +135,9 @@ $gen-attr-cached-demos-panel-width: 21em;
     --gen-attr-dag-prompt-node-fill: rgba(0, 255, 225, 0.28);
     // --gen-attr-dag-prompt-node-fill: rgba(0, 174, 255, 0.28);
     --gen-attr-dag-generated-node-fill: rgba(255, 165, 0, 0.28);
+    /** attention queryHeat 终点：同色相向白抬亮（起点为上列 fill） */
+    --gen-attr-dag-prompt-node-fill-heat: color-mix(in srgb, white 28%, rgba(0, 255, 225, 0.58));
+    --gen-attr-dag-generated-node-fill-heat: color-mix(in srgb, white 28%, rgba(255, 165, 0, 0.58));
     position: relative;
     // 测量层在流内可极高；basis 用 0% 避免「内容高度」参与 flex 初始主尺寸，把图区限制在 #results 剩余高度内，以免撑出 .right_panel 纵向滚动条；overflow 非 visible 使 flex 自动最小高度按 0 计（见 css-flexbox-1 #min-size-auto）
     flex: 1 1 0%;
@@ -215,11 +218,20 @@ $gen-attr-cached-demos-panel-width: 21em;
 
     .gen-attr-dag-node-fill {
       stroke: none;
-      fill: var(--gen-attr-dag-generated-node-fill);
+      // `--gen-attr-dag-node-query-heat`∈[0,1]：0=常规 fill，1=同色相 heat 终点（见 stack 上 *-fill-heat）
+      fill: color-mix(
+        in srgb,
+        var(--gen-attr-dag-generated-node-fill-heat) calc(var(--gen-attr-dag-node-query-heat, 0) * 100%),
+        var(--gen-attr-dag-generated-node-fill)
+      );
     }
 
     &--prompt .gen-attr-dag-node-fill {
-      fill: var(--gen-attr-dag-prompt-node-fill);
+      fill: color-mix(
+        in srgb,
+        var(--gen-attr-dag-prompt-node-fill-heat) calc(var(--gen-attr-dag-node-query-heat, 0) * 100%),
+        var(--gen-attr-dag-prompt-node-fill)
+      );
     }
 
     // 递归追因链上游描边（直接模式仅一跳，由蓝/红边表达）；stroke-opacity 见 stay→[0.3,1] 映射。
@@ -365,7 +377,7 @@ $gen-attr-cached-demos-panel-width: 21em;
     right: 84px;
   }
 
-  // 传播播放（↯）可点时：灰 ↔ 强调色脉动，提示可播传播链
+  // ▶ / ↯ 可点时：灰 ↔ 强调色脉动，提示可播（步进重放 / 传播链）
   @keyframes gen-attr-dag-propagation-play-hint {
     0%,
     100% {

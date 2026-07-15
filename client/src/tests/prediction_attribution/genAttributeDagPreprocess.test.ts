@@ -5,7 +5,9 @@
 import {
     collectDeletePromptIntervals,
     dagExcludeIntervalContextForReplay,
+    dedupePromptTokenSpansByOffset,
     isDagGenStepTargetExcluded,
+    normalizePromptTokenSpans,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagPreprocess';
 import type { TokenGenStep } from '../../shared/prediction_attribution/causal_flow/tokenGenAttributionRunner';
 
@@ -31,6 +33,53 @@ const inputRanges: [number, number][] = [
     [0, 11],
     [11, wire.length],
 ];
+
+console.log('dedupePromptTokenSpansByOffset');
+
+assertEq('empty → []', dedupePromptTokenSpansByOffset([]), []);
+
+assertEq(
+    'same offset keeps first',
+    dedupePromptTokenSpansByOffset([
+        { offset: [299, 300], raw: '做', token_id: 223 },
+        { offset: [299, 300], raw: '做', token_id: 248 },
+        { offset: [300, 302], raw: '匹配' },
+    ]),
+    [
+        { offset: [299, 300], raw: '做', token_id: 223 },
+        { offset: [300, 302], raw: '匹配' },
+    ],
+);
+
+console.log('normalizePromptTokenSpans');
+
+assertEq('empty → []', normalizePromptTokenSpans([]), []);
+
+assertEq(
+    'overlapping spans keep first (longer at same start)',
+    normalizePromptTokenSpans([
+        { offset: [298, 300], raw: ' 做' },
+        { offset: [299, 300], raw: '做', token_id: 223 },
+        { offset: [299, 300], raw: '做', token_id: 248 },
+        { offset: [300, 302], raw: '匹配' },
+    ]),
+    [
+        { offset: [298, 300], raw: ' 做' },
+        { offset: [300, 302], raw: '匹配' },
+    ],
+);
+
+assertEq(
+    'adjacent non-overlapping spans kept',
+    normalizePromptTokenSpans([
+        { offset: [0, 1], raw: 'a' },
+        { offset: [1, 2], raw: 'b' },
+    ]),
+    [
+        { offset: [0, 1], raw: 'a' },
+        { offset: [1, 2], raw: 'b' },
+    ],
+);
 
 console.log('collectDeletePromptIntervals');
 

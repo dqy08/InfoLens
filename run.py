@@ -140,6 +140,10 @@ def _load_and_run(args):
     if is_worker():
         print("[inforadar] worker mode: visit_stats persist and demo writes disabled", flush=True)
 
+    from backend.platform.remote_keepalive import start_remote_keepalive
+
+    start_remote_keepalive()
+
     if not getattr(ctx.args, "no_auto_load", False):
         def load_model_in_background():
             try:

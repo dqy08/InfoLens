@@ -90,6 +90,40 @@ function selectTokenAttributionByCumulativeShare<T extends { score: number; pool
 }
 
 /**
+ * DAG 节点 id 为 `${start}_${end}`；同源 offset 重复时保留首次出现（罕见 BPE 边界现象）。
+ */
+export function dedupePromptTokenSpansByOffset(spans: readonly PromptTokenSpan[]): PromptTokenSpan[] {
+    const out: PromptTokenSpan[] = [];
+    const seen = new Set<string>();
+    for (const span of spans) {
+        const k = `${span.offset[0]}_${span.offset[1]}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push(span);
+    }
+    return out;
+}
+
+/**
+ * 供 DAG 展示与 catalog：先去重 offset，再剔除与已保留 span 字符区间重叠的项（保留先出现的；同起点取长 span）。
+ */
+export function normalizePromptTokenSpans(spans: readonly PromptTokenSpan[]): PromptTokenSpan[] {
+    const sorted = [...dedupePromptTokenSpansByOffset(spans)].sort(
+        (a, b) => a.offset[0] - b.offset[0] || b.offset[1] - a.offset[1],
+    );
+    const out: PromptTokenSpan[] = [];
+    let occupiedEnd = 0;
+    for (const span of sorted) {
+        const [s, e] = span.offset;
+        if (s >= occupiedEnd) {
+            out.push(span);
+            occupiedEnd = e;
+        }
+    }
+    return out;
+}
+
+/**
  * 第 0 步：从 API 原始 `token_attribution` 按 offset 去重得到 prompt spans，供 DAG `setPromptTokenSpans`（配合 `context` 全文测量布局）。
  * 与 {@link excludeNodeAggregatedEntries} / {@link phase2RankAndSparsify} 无关（不 exclude、不归一化）。
  */
@@ -97,14 +131,9 @@ export function extractPromptTokenSpans(step: TokenGenStep): PromptTokenSpan[] {
     const ta = step.response.token_attribution;
     if (!ta?.length) return [];
 
-    const byKey = new Map<string, PromptTokenSpan>();
-    for (const t of ta) {
-        const k = `${t.offset[0]}_${t.offset[1]}`;
-        if (!byKey.has(k)) {
-            byKey.set(k, { offset: t.offset, raw: t.raw });
-        }
-    }
-    return [...byKey.values()];
+    return normalizePromptTokenSpans(
+        ta.map((t) => ({ offset: t.offset as [number, number], raw: t.raw })),
+    );
 }
 
 /** 保留完全落在任一 input 区间内的 span（步进回放 / 轮间追加时从全量 catalog 裁剪）。 */

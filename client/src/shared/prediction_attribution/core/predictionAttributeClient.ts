@@ -4,7 +4,7 @@
  */
 import { apiUrl } from '../../api/resolveApiBase';
 import type { AttributionApiResponse, PredictionAttributeModelVariant } from './attributionResultCache';
-import type { PromptTokenSpan } from '../causal_flow/genAttributeDagPreprocess';
+import { normalizePromptTokenSpans, type PromptTokenSpan } from '../causal_flow/genAttributeDagPreprocess';
 import {
     entryKey,
     removeCachedEntryByContentKey,
@@ -129,5 +129,5 @@ export async function fetchTokenize(
     if (!res.ok || !json.success) {
         throw new Error(json.message ?? `HTTP ${res.status}`);
     }
-    return json.spans ?? [];
+    return normalizePromptTokenSpans(json.spans ?? []);
 }
