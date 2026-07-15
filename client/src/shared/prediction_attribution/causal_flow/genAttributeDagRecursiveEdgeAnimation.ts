@@ -62,6 +62,8 @@ export type DagFocusAttributionState = {
     activeNodeIds: Set<string>;
     incomingEdgeShareByKey: Map<string, number>;
     downstreamEdgeStrengthByKey: Map<string, number>;
+    /** 下游影响传播的节点到达量（焦点为 1）；供红边渲染将每源最强出边刻度钉在 arrive。 */
+    downstreamArriveById: Map<string, number>;
     nodeShareById: Map<string, number>;
 };
 

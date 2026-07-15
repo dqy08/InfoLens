@@ -1155,7 +1155,8 @@ function applyDagRecursiveAttributionSubmodeUi(): void {
     const recursive = dagRecursiveAttributionInput?.checked ?? false;
     const forward = recursive && currentDagRecursiveEdgeAnimationDirection() === 'forward';
     if (dagShowDownstreamInfluenceGroup) {
-        dagShowDownstreamInfluenceGroup.hidden = recursive;
+        // 直接模式与因果流 forward 均显示；backward 仅上游蓝链，隐藏下游选项。
+        dagShowDownstreamInfluenceGroup.hidden = recursive && !forward;
     }
     if (dagRecursiveEdgeAnimationDirectionGroup) {
         dagRecursiveEdgeAnimationDirectionGroup.hidden = !recursive;

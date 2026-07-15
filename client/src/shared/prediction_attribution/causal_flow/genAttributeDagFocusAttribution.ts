@@ -24,6 +24,12 @@ export type DagFocusAttributionLink = {
 export type ComputeFocusAttributionOptions = {
     maxIncomingDepth: number;
     includeDownstreamInfluence: boolean;
+    /**
+     * 下游影响出边深度：`1` = 仅焦点一跳出边；`Infinity` = 递归
+     *（传播：`arrive ×` 一跳边权，汇合 sum；显示：每源最强出边刻度 = arrive）。
+     * 仅在 `includeDownstreamInfluence` 时有效；默认 `1`。
+     */
+    maxOutgoingDepth?: number;
     allowedEdgeKeys?: ReadonlySet<string>;
     /** 与「Decay attribution to high-surprisal targets」一致；默认 false。 */
     decayAttributionToHighSurprisalTarget?: boolean;
@@ -98,8 +104,66 @@ function compareNodesByOffsetDesc<T extends DagFocusAttributionNode>(
     return nb.end - na.end;
 }
 
+/** 下游影响处理序：offset 升序（因果边单调 ⇒ 先上游后下游）。 */
+function compareNodesByOffsetAsc<T extends DagFocusAttributionNode>(
+    graph: DirectedGraph<T>,
+    a: string,
+    b: string,
+): number {
+    return compareNodesByOffsetDesc(graph, b, a);
+}
+
+/**
+ * 从焦点沿出边向前累积影响强度（非份额：汇合 sum、不归 1、不乘传导 prop）。
+ * `strength = arrive × w`（`w` = {@link directAttributionStrength}）；
+ * 渲染侧另将每源出边缩放到最强 = arrive（不改本 map）。
+ */
+function accumulateDownstreamInfluence<T extends DagFocusAttributionNode>(
+    graph: DirectedGraph<T>,
+    focusId: string,
+    focusStart: number,
+    maxOutgoingDepth: number,
+    decay: boolean,
+    allowedEdgeKeys: ReadonlySet<string> | undefined,
+    activeNodeIds: Set<string>,
+    downstreamEdgeStrengthByKey: Map<string, number>,
+    arriveById: Map<string, number>,
+): void {
+    const remainingDepthByNodeId = new Map<string, number>([[focusId, maxOutgoingDepth]]);
+
+    const processOrder = graph
+        .mapNodes((id) => id)
+        .filter((id) => (graph.getNodeAttributes(id) as T).start >= focusStart)
+        .sort((a, b) => compareNodesByOffsetAsc(graph, a, b));
+
+    for (const nodeId of processOrder) {
+        const arrive = arriveById.get(nodeId) ?? 0;
+        const remainingDepth = remainingDepthByNodeId.get(nodeId) ?? 0;
+        if (arrive < DAG_MIN_ATTRIBUTION_SHARE || remainingDepth <= 0) continue;
+
+        graph.forEachOutEdge(nodeId, (_edgeId, edgeAttrs, srcId, tgtId) => {
+            const link = edgeAttrs as unknown as DagFocusAttributionLink;
+            const edgeKey = dagLinkEndpointKey(srcId, tgtId);
+            if (allowedEdgeKeys && !allowedEdgeKeys.has(edgeKey)) return;
+
+            const edgeWeight = directAttributionStrength(link, decay);
+            const strength = arrive * edgeWeight;
+            if (strength < DAG_MIN_ATTRIBUTION_SHARE) return;
+
+            downstreamEdgeStrengthByKey.set(edgeKey, strength);
+            activeNodeIds.add(tgtId);
+            arriveById.set(tgtId, (arriveById.get(tgtId) ?? 0) + strength);
+            remainingDepthByNodeId.set(
+                tgtId,
+                Math.max(remainingDepthByNodeId.get(tgtId) ?? 0, remainingDepth - 1),
+            );
+        });
+    }
+}
+
 /**
  * 从焦点沿入边反向传播归因份额（`start ≤ focus.start` 的节点按 offset 降序单遍）。
+ * 可选：沿出边向前累积下游影响强度（见 {@link accumulateDownstreamInfluence}）。
  * 前提：每条边 `src → tgt` 满足 `src.start < tgt.start`（context 前缀 + 合成边）。
  */
 export function computeFocusAttributionState<T extends DagFocusAttributionNode>(
@@ -114,6 +178,7 @@ export function computeFocusAttributionState<T extends DagFocusAttributionNode>(
     const activeNodeIds = new Set<string>([focusId]);
     const incomingEdgeShareByKey = new Map<string, number>();
     const downstreamEdgeStrengthByKey = new Map<string, number>();
+    const downstreamArriveById = new Map<string, number>([[focusId, 1]]);
     const nodeShareById = new Map<string, number>([[focusId, 1]]);
     const remainingDepthByNodeId = new Map<string, number>([[focusId, options.maxIncomingDepth]]);
 
@@ -152,14 +217,24 @@ export function computeFocusAttributionState<T extends DagFocusAttributionNode>(
     }
 
     if (options.includeDownstreamInfluence) {
-        graph.forEachOutEdge(focusId, (_edgeId, edgeAttrs, srcId, tgtId) => {
-            const link = edgeAttrs as unknown as DagFocusAttributionLink;
-            const strength = directAttributionStrength(link, decay);
-            if (strength < DAG_MIN_ATTRIBUTION_SHARE) return;
-            downstreamEdgeStrengthByKey.set(dagLinkEndpointKey(srcId, tgtId), strength);
-            activeNodeIds.add(tgtId);
-        });
+        accumulateDownstreamInfluence(
+            graph,
+            focusId,
+            focusStart,
+            options.maxOutgoingDepth ?? 1,
+            decay,
+            options.allowedEdgeKeys,
+            activeNodeIds,
+            downstreamEdgeStrengthByKey,
+            downstreamArriveById,
+        );
     }
 
-    return { activeNodeIds, incomingEdgeShareByKey, downstreamEdgeStrengthByKey, nodeShareById };
+    return {
+        activeNodeIds,
+        incomingEdgeShareByKey,
+        downstreamEdgeStrengthByKey,
+        downstreamArriveById,
+        nodeShareById,
+    };
 }

@@ -20,6 +20,7 @@ import {
     DAG_NODE_STROKE_OPACITY_BASE,
 } from './genAttributeDagEdgeDisplay';
 import {
+    buildDownstreamArriveScaledRenderStrengthByKey,
     buildMaxNormalizedRenderStrengthByKey,
     DAG_LIGHTNING_SLOW_MO_DEFAULT,
     DAG_LIGHTNING_THRESHOLD_TAU_DEFAULT,
@@ -645,7 +646,7 @@ export type GenAttributeDagHandle = {
     enterLightningTauPreview(): void;
     /** 结束 {@link enterLightningTauPreview}。 */
     exitLightningTauPreview(): void;
-    /** 是否在直接归因焦点上额外展示从焦点出发的下游影响出边。 */
+    /** 是否在焦点上额外展示下游影响出边（直接一跳 / 因果流递归）。 */
     setShowDownstreamInfluence(show: boolean): void;
     /** prompt 层节点是否已注入（即 {@link setPromptTokenSpans} 至少成功添加过一个节点） */
     hasPromptSpans(): boolean;
@@ -777,7 +778,7 @@ type DagLinkHighlightDisplay = {
     recursiveAttributionShare?: number;
 };
 
-/** 焦点下边的视觉规则：传播归因看“向上原因链”，直接看“一跳关系 + 可选下游影响”。 */
+/** 焦点下边的视觉规则：传播蓝边看向上原因链；可选红边看下游影响（一跳或递归）。 */
 function resolveDagLinkHighlightDisplay(
     d: DagLink,
     edgeKey: string,
@@ -895,7 +896,7 @@ export type InitGenAttributeDagViewOptions = {
     getReplayPacing?: () => DagRecursiveEdgeReplayPacing;
     /** forward 是否 slide 有 share 的 prompt 等节点；默认 `{ forwardSlideSharedNodes: false }`。 */
     getPropagationPlaybackOptions?: () => DagPropagationPlaybackOptions;
-    /** 直接归因模式下是否展示从焦点出发的下游影响出边；默认 `false`。 */
+    /** 是否展示从焦点出发的下游影响出边（直接一跳 / 因果流递归）；默认 `false`。 */
     showDownstreamInfluence?: boolean;
     /** 边 Top-P 覆盖阈值（候选池内累计份额）；默认 {@link DAG_EDGE_TOP_P_COVERAGE_DEFAULT}。 */
     edgeTopPCoverage?: number;
@@ -1652,10 +1653,20 @@ export function initGenAttributeDagView(
 
     function refreshNodeLinkHighlight(): void {
         const focusId = effectiveFocusId();
+        const propagationPlaybackPhase = recursiveEdgeAnimation.getPlaybackPhase();
+        const includeDownstreamInfluence =
+            showDownstreamInfluence &&
+            !(
+                recursiveAttributionEnabled &&
+                (recursiveEdgeAnimation.getDirection() === 'backward' ||
+                    propagationPlaybackPhase === 'playing' ||
+                    propagationPlaybackPhase === 'paused')
+            );
         const focusState = focusId
             ? computeFocusAttributionState(graph, incomingLinksByTarget, focusId, {
                 maxIncomingDepth: recursiveAttributionEnabled ? Number.POSITIVE_INFINITY : 1,
-                includeDownstreamInfluence: !recursiveAttributionEnabled && showDownstreamInfluence,
+                includeDownstreamInfluence,
+                maxOutgoingDepth: recursiveAttributionEnabled ? Number.POSITIVE_INFINITY : 1,
                 decayAttributionToHighSurprisalTarget: dagDecayAttributionToHighSurprisalTargetEnabled,
             })
             : null;
@@ -1707,9 +1718,12 @@ export function initGenAttributeDagView(
                       useAnimationIncomingHighlight ? animOverlay.incomingMaxForRender : undefined,
                   );
         const downstreamHighlightRenderByKey =
-            focusState == null
+            focusState == null || !includeDownstreamInfluence
                 ? new Map<string, number>()
-                : buildMaxNormalizedRenderStrengthByKey(focusState.downstreamEdgeStrengthByKey);
+                : buildDownstreamArriveScaledRenderStrengthByKey(
+                      focusState.downstreamEdgeStrengthByKey,
+                      focusState.downstreamArriveById,
+                  );
         grayRenderCache ??= buildGrayRenderStrengthByEdgeKey(graph, incomingLinksByTarget);
         const grayRenderByKey = grayRenderCache;
         const {
@@ -1764,7 +1778,6 @@ export function initGenAttributeDagView(
         );
         const nodeDisplay = (d: DagNode): string | null =>
             hideExcludedTokens && nodeLowVisReasonById.get(d.id) != null ? 'none' : null;
-        const propagationPlaybackPhase = recursiveEdgeAnimation.getPlaybackPhase();
         const lightningEffectEnabled = getPropagationPlaybackOptions().lightningEffect;
         const lightningPreviewActive =
             lightningEffectEnabled &&
@@ -2021,7 +2034,8 @@ export function initGenAttributeDagView(
             const incident =
                 linkFocusState != null &&
                 (linkFocusState.incomingEdgeShareByKey.has(edgeKey) ||
-                    (focusState?.downstreamEdgeStrengthByKey.has(edgeKey) ?? false));
+                    (includeDownstreamInfluence &&
+                        (focusState?.downstreamEdgeStrengthByKey.has(edgeKey) ?? false)));
             const parent = incident ? linkGFront : linkG;
             const parentNode = parent.node()!;
             if (this.parentNode !== parentNode) {

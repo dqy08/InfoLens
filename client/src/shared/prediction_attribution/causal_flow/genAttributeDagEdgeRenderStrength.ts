@@ -190,3 +190,35 @@ export function buildMaxNormalizedRenderStrengthByKey(
     }
     return byKey;
 }
+
+/**
+ * 下游红边渲染：每源出边 `display = arrive × (raw / maxRaw)`，故最强出边 = arrive；
+ * 再对 display 做全表 max 归一得到 opacity。传播原值仍在 `sharesByKey`（tooltip）。
+ */
+export function buildDownstreamArriveScaledRenderStrengthByKey(
+    sharesByKey: Map<string, number>,
+    arriveById: ReadonlyMap<string, number>,
+    maxOpacity = 1,
+): Map<string, number> {
+    const maxRawBySource = new Map<string, number>();
+    for (const [key, share] of sharesByKey) {
+        if (!(share > 0) || !Number.isFinite(share)) continue;
+        const sep = key.indexOf('->');
+        if (sep <= 0) continue;
+        const src = key.slice(0, sep);
+        const prev = maxRawBySource.get(src) ?? 0;
+        if (share > prev) maxRawBySource.set(src, share);
+    }
+    const displayByKey = new Map<string, number>();
+    for (const [key, share] of sharesByKey) {
+        const sep = key.indexOf('->');
+        if (sep <= 0) continue;
+        const src = key.slice(0, sep);
+        const maxRaw = maxRawBySource.get(src) ?? 0;
+        if (maxRaw <= 0) continue;
+        const arrive = arriveById.get(src) ?? 0;
+        if (!(arrive > 0) || !Number.isFinite(arrive)) continue;
+        displayByKey.set(key, arrive * (share / maxRaw));
+    }
+    return buildMaxNormalizedRenderStrengthByKey(displayByKey, maxOpacity);
+}

@@ -523,6 +523,7 @@ console.log('6. createDagRecursiveEdgeAnimationController pause/resume');
         activeNodeIds: new Set(['p', 'a', 'b', focusId]),
         incomingEdgeShareByKey: incoming,
         downstreamEdgeStrengthByKey: new Map<string, number>(),
+        downstreamArriveById: new Map<string, number>(),
         nodeShareById: nodeShare,
     };
     const ctx = {
@@ -593,6 +594,7 @@ console.log('7. backward skips first prompt region slide');
             activeNodeIds: new Set(['p', 'a', 'b', focusId]),
             incomingEdgeShareByKey: incoming,
             downstreamEdgeStrengthByKey: new Map<string, number>(),
+            downstreamArriveById: new Map<string, number>(),
             nodeShareById: nodeShare,
         };
         const ctx = {

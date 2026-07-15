@@ -179,8 +179,8 @@ export const translations: Translations = {
             '未勾选：原始直接归因（仅一跳前驱，默认）。勾选：因果流模式（↯）— 从焦点 token 向上追溯到信息来源。来源：prompt；高惊讶或 teacher-forced 的生成 token（MI 衰减可截断链）。传导：高置信中间 token，归因穿过。蓝边：传播份额；节点环：归因停留（解释落点处更强）。建议与「向高惊讶目标衰减归因」配合使用。DAG 上：↯ 播放焦点传播链；无焦点时 ▶ 步进重放生成过程。',
         'Direction for focus-chain batch animation when you press propagation play (↯) on the DAG with a focused token in Causal Flow Mode.':
             '因果流模式下，对已聚焦 token 在 DAG 上按传播播放（↯）时，焦点传播链分批动画的方向。',
-        'When checked, direct attribution focus also shows outgoing edges from the selected or hovered token as downstream influence. Causal Flow Mode keeps showing upstream attribution chains only.':
-            '勾选后，直接归因焦点下还会显示从选中/悬浮 token 出发的下游影响出边。因果流模式仍只显示向上游的归因链。',
+        'When checked, focus also shows outgoing edges as downstream influence (red). Direct mode: one hop. Causal Flow Mode: recursive — propagate as arrive × one-hop weight (sum at merges); display scales each source’s outs so strongest = arrive.':
+            '勾选后，焦点下额外显示下游影响出边（红）。直接模式：一跳。因果流模式：递归——传播为 arrive × 一跳边权（汇合相加）；显示时将每个源的出边缩放到最强 = arrive。',
         'Total duration or per-step simulated cost. DAG step replay (▶) divides evenly or uses a fixed per-token cost; propagation chain animation (↯) scales each frame by attribution weight.':
             '总时长或单步模拟开销。DAG 步进重放（▶）按步均分或固定单步开销；传播链动画（↯）按各层归因权重缩放每帧模拟开销。',
         'Total seconds. DAG step replay (▶) divides evenly across steps; propagation chain (↯) splits by layer weight. Saved locally; applied when you press play or select a focus node.':
