@@ -12,7 +12,7 @@ import {
     phase2RankAndSparsify,
     type PromptTokenSpan,
 } from './genAttributeDagPreprocess';
-import type { CharRange } from './tokenGenAttributionRunner';
+import type { CharRange, TokenGenStep } from './tokenGenAttributionRunner';
 import type { AttentionPlaybackHighlight } from './runAttentionPlayback';
 import {
     DAG_EDGE_MIN_NORMALIZED_SCORE,
@@ -72,7 +72,6 @@ import {
     type PieceEntry,
 } from './genAttributeDagIntervalResolve';
 import type { FrontendToken } from '../../../shared/api/GLTR_API';
-import type { TokenGenStep } from './tokenGenAttributionRunner';
 import { createGenAttributeDagTextMeasure } from './genAttributeDagTextMeasure';
 import { frontendTokenFromGenAttrStep } from './genAttributeDagTopkToken';
 import { SimpleEventHandler } from '../../core/SimpleEventHandler';
@@ -531,6 +530,47 @@ function syncNodeStrokeRects(
         .attr('ry', (d) => nodeRx(d) + p);
 }
 
+/** 布局多选外框：比焦点描边再外扩一档，避免与 `--selected` 描边重合。 */
+function syncNodeLayoutSelRects(
+    sel: d3.Selection<SVGGElement, DagNode, SVGGElement | null, unknown>,
+    displayScale: number,
+): void {
+    const p = displayScale * 2;
+    sel.select('rect.gen-attr-dag-node-layout-sel')
+        .attr('x', -p)
+        .attr('y', -p)
+        .attr('width', (d) => d.nodeW + 2 * p)
+        .attr('height', (d) => d.nodeH + 2 * p)
+        .attr('rx', (d) => nodeRx(d) + p)
+        .attr('ry', (d) => nodeRx(d) + p);
+}
+
+function isMultiSelectModifierKey(event: { metaKey?: boolean; ctrlKey?: boolean }): boolean {
+    return !!(event.metaKey || event.ctrlKey);
+}
+
+/** 轴对齐矩形相交（含边触碰）。 */
+function rectsIntersect(
+    a: { x0: number; y0: number; x1: number; y1: number },
+    b: { x0: number; y0: number; x1: number; y1: number },
+): boolean {
+    return a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0;
+}
+
+function nodeAabb(d: Pick<DagNode, 'cx' | 'cy' | 'nodeW' | 'nodeH'>): {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+} {
+    return {
+        x0: d.cx - d.nodeW / 2,
+        y0: d.cy - d.nodeH / 2,
+        x1: d.cx + d.nodeW / 2,
+        y1: d.cy + d.nodeH / 2,
+    };
+}
+
 export type SetPromptTokenSpansOpts = {
     /** exclude 语义；未传时默认 `[[0, layoutWire.length)]` */
     inputRanges?: CharRange[];
@@ -562,8 +602,9 @@ export type GenAttributeDagHandle = {
     /**
      * 清空图与测量状态；不修改当前 SVG 上的 d3 zoom 变换（视口平移/缩放由 `layoutDirty` 与
      * `fitViewportToContent` 控制）。
-     * @param preserveUserViewport 为 `true` 时保留调用前的 `layoutDirty`：设置项切换后重放、
-     * 步进重放从末尾重头播放等保留用户 pan/zoom。默认 `false`（新一次 run 等场景仍从干净视口起算）。
+     * @param preserveUserViewport 为 `true` 时保留调用前的 `layoutDirty` 与 `userDraggedNodes`
+     *（二者同进同退）：设置项切换后重放等保留用户 pan/zoom 及「拖过节点」语义。默认 `false`
+     *（新一次 run 等场景仍从干净视口起算）。
      */
     reset(preserveUserViewport?: boolean): void;
     /**
@@ -611,8 +652,13 @@ export type GenAttributeDagHandle = {
      * 已有节点的 `nodeW`/`nodeH` 仍为建点时的缩放结果；调用方在需要一致几何时应 `reset` 后重放。
      */
     setDagCompactness(c: number): void;
-    /** 更新边 Top-P 覆盖阈值；要重算当前 DAG 须 reset 后重放。 */
+    /** 更新边 Top-P 覆盖阈值；要重算当前 DAG 须 {@link rebuildEdges}（或 reset 后重放）。 */
     setEdgeTopPCoverage(coverage: number): void;
+    /**
+     * 按当前 Top-P / exclude / decay 等设置，仅重建边集；保留节点几何（含拖拽后的 cx/cy）与视口。
+     * 稳态改边相关选项时用此路径，勿整图 {@link reset}。
+     */
+    rebuildEdges(steps: readonly TokenGenStep[], excludeIntervalContext: string): void;
     /**
      * 切换 exclude / inactive（0.1 档）节点的隐藏模式（UI: Hide exclude/inactive tokens）：
      * - `true`：完全隐藏（`display:none`）；linear-arc 下同时不参与布局。
@@ -842,7 +888,8 @@ function resolveDagLinkHighlightDisplay(
  *
  * **Exclude 原则（建边时一次定稿）**：每步 `update()` / 合成边建链时读取**当时**的 exclude 正则；该步一旦建边即定稿，
  * 已建边不做事后删改或份额重算。**动态过程**（实时生成逐步入图、▶ 步进回放同一前缀未 reset）中修改 exclude 正则：
- * **对已建边不生效**；须 {@link GenAttributeDagHandle.reset} 后全步重放（页面 `tryResetAndReplayDag`，DAG 忙时为 no-op）。
+ * **对已建边不生效**。稳态下改 exclude / Top-P / decay：走 {@link GenAttributeDagHandle.rebuildEdges}
+ *（只重建边、保留节点几何与视口；页面 DAG 忙时为 no-op）。几何类选项仍须 {@link GenAttributeDagHandle.reset} 后重放。
  * API 归因入边：src 在 exclude 后置零并在可见池内重归一，target 整段命中则不建入边；
  * 合成边（tool_call → tool_response，N×M）仅连未 exclude 的 src 并均分，供传播归因拓扑；稳态不画灰边。
  * `dagExcludeIntervals` 每步仍按当前正则刷新，**仅**供节点透明度 / hide，不参与边集修正。
@@ -984,6 +1031,7 @@ export function initGenAttributeDagView(
             setLinearArcAdjacentGapPx: noop,
             setDagCompactness: noop,
             setEdgeTopPCoverage: noop,
+            rebuildEdges: noop,
             setHideExcludedTokens: noop,
             setHideArrowsDuringAttention: noop,
             setDimInactiveTokens: noop,
@@ -1147,6 +1195,10 @@ export function initGenAttributeDagView(
     applyInitialDagZoom();
 
     svg.on('click', () => clearNodeSelection());
+    // DAG 无上下文菜单；右键留给框选，并避免 Ctrl+单击（macOS）弹出菜单打断多选。
+    svg.on('contextmenu', (event) => {
+        event.preventDefault();
+    });
 
     const linkG = rootG.append('g').attr('class', 'gen-attr-dag-links');
     const nodeG = rootG.append('g').attr('class', 'gen-attr-dag-nodes');
@@ -1154,6 +1206,8 @@ export function initGenAttributeDagView(
     const linkGFront = rootG.append('g').attr('class', 'gen-attr-dag-links-front');
     /** 与视觉节点同几何的透明命中层，置于 linkGFront 之上，避免蓝线挡住 hover/click */
     const nodeGHit = rootG.append('g').attr('class', 'gen-attr-dag-nodes-hit');
+    /** 右键框选橡胶筋（图坐标系，随 zoom） */
+    const marqueeG = rootG.append('g').attr('class', 'gen-attr-dag-marquee').style('pointer-events', 'none');
 
     const graph = new DirectedGraph<DagNodeAttrs>();
     let nodes: DagNode[] = [];
@@ -1168,6 +1222,13 @@ export function initGenAttributeDagView(
     let selectedId: string | null = null;
     /** 用户点击确立的播放焦点；`update` 不修改，用于 ▶ 传播链路由 */
     let userFocusId: string | null = null;
+    /**
+     * 布局多选集合（蓝虚线框）：与焦点互清；仅用于多节点拖拽。
+     * Cmd/Ctrl+点、右键框选写入；普通单击/点空白清空。
+     */
+    let layoutSelectedIds = new Set<string>();
+    /** Cmd/Ctrl 是否按下：与多选集一起决定悬停用虚线框而非焦点描边。 */
+    let multiSelectModifierDown = false;
     /** 悬浮节点 id；无选中时参与归因预览焦点，有选中时仅驱动 `--hover` 等样式，不改归因焦点 */
     let hoveredId: string | null = null;
     /** ▶ Simulate attention：attend / FFN 阶段 token 高亮 */
@@ -1298,9 +1359,39 @@ export function initGenAttributeDagView(
         getPropagationPlaybackOptions,
     });
 
-    /** 归因预览焦点：用户播放焦点优先，否则选中 / 悬浮 */
+    /** 多选交互态：悬停用虚线框，不用焦点描边 / 归因悬停预览 / tooltip。 */
+    function layoutSelectHoverActive(): boolean {
+        return (
+            layoutSelectedIds.size > 0 ||
+            multiSelectModifierDown ||
+            marqueeSession != null
+        );
+    }
+
+    /**
+     * 实线焦点框对应节点（`--hover` / `--selected`）：
+     * 非多选虚线态下悬停优先，否则为点击确立的焦点；与 tooltip 同源。
+     */
+    function solidFrameFocusId(): string | null {
+        if (!layoutSelectHoverActive() && hoveredId != null && graph.hasNode(hoveredId)) {
+            return hoveredId;
+        }
+        const id = userFocusId ?? selectedId;
+        return id != null && graph.hasNode(id) ? id : null;
+    }
+
+    /** 归因预览焦点：播放/选中优先；仅无选中时才用悬停（多选虚线态忽略悬停）。 */
     function effectiveFocusId(): string | null {
+        if (layoutSelectHoverActive()) return userFocusId ?? selectedId;
         return userFocusId ?? selectedId ?? hoveredId;
+    }
+
+    /** tooltip 锚点：传播播放 > {@link solidFrameFocusId}（与实线框一致）。 */
+    function tooltipFocusId(): string | null {
+        if (propagationPlaybackTooltip != null && graph.hasNode(propagationPlaybackTooltip.nodeId)) {
+            return propagationPlaybackTooltip.nodeId;
+        }
+        return solidFrameFocusId();
     }
 
     function dimInactiveTokensEffective(): boolean {
@@ -1447,16 +1538,6 @@ export function initGenAttributeDagView(
         return propagationSlideTgtId ?? anim.plan.batches[anim.batchIndex]?.tgtId ?? null;
     }
 
-    /** tooltip 锚点：传播播放（忽略 hover）> hover > 焦点 */
-    function tooltipFocusId(): string | null {
-        if (propagationPlaybackTooltip != null && graph.hasNode(propagationPlaybackTooltip.nodeId)) {
-            return propagationPlaybackTooltip.nodeId;
-        }
-        if (hoveredId != null && graph.hasNode(hoveredId)) {
-            return hoveredId;
-        }
-        return effectiveFocusId();
-    }
     /**
      * 与预处理同源的 exclude 半开区间；**仅**供节点透明度 / hide（{@link isOffsetSpanFullyExcluded}），
      * 不参与边集事后修正（边 exclude 在建边时定稿，见模块顶注释「Exclude 原则」）。
@@ -1473,14 +1554,16 @@ export function initGenAttributeDagView(
      * 用户是否手动改动过布局：拖节点 或 用户手势 zoom/pan。
      * - true 时：容器尺寸变化（窗口 resize / 侧栏）不再自动 fit，保留用户视图
      * - false 时：任何尺寸变化都自动 fit
-     * 清零点：{@link reset}、{@link fitViewportToContent}（fit 本身把视图带回默认）
+     * 清零点：{@link reset}（默认）、{@link fitViewportToContent}（fit 本身把视图带回默认）；
+     * `reset(true)` 时与 userDraggedNodes 一并保留。
      */
     let layoutDirty = false;
     /**
      * 用户是否拖动过节点（仅拖节点，不含画布 pan/zoom）。
      * - {@link layoutDirty} 在 pan/zoom 时也会为 true；刷新时若仅 pan/zoom 则仍 {@link fitViewportToContent}，
      *   若拖过节点则回放数据恢复节点几何并保留当前 pan/zoom。
-     * 清零点：{@link reset}（图清空）、成功 {@link fitViewportToContent} 后视为回到默认视图语义（与 layoutDirty 一并清）
+     * 清零点：{@link reset}（默认）、成功 {@link fitViewportToContent}（与 layoutDirty 一并清）；
+     * `reset(true)` 时与 layoutDirty 一并保留。
      */
     let userDraggedNodes = false;
 
@@ -1498,10 +1581,30 @@ export function initGenAttributeDagView(
         nodeHitSel.attr('transform', (_d, i) => d3.select(visualNodes[i]).attr('transform'));
     }
 
+    function layoutInteractionLocked(): boolean {
+        return (
+            dagPlaybackPlaying || recursiveEdgeAnimation.getPlaybackPhase() === 'playing'
+        );
+    }
+
+    function clearLayoutSelectionOnly(): void {
+        if (layoutSelectedIds.size === 0) return;
+        layoutSelectedIds = new Set();
+    }
+
+    function clearFocusForLayoutSelection(): void {
+        selectedId = null;
+        userFocusId = null;
+        recursiveEdgeAnimation.stopPlayback();
+        notifyUserFocusChange();
+    }
+
     function bindNodePointerHandlers(
         sel: d3.Selection<SVGGElement, DagNode, SVGGElement | null, unknown>,
     ): void {
-        sel.on('mouseenter', (_event, d) => {
+        sel.on('mouseenter', (event, d) => {
+            // 若在节点上按下/松开修饰键可能丢 key 事件，用 pointer 状态对齐
+            syncMultiSelectModifierDown(isMultiSelectModifierKey(event));
             hoveredId = d.id;
             refreshNodeLinkHighlight();
         })
@@ -1511,6 +1614,18 @@ export function initGenAttributeDagView(
             })
             .on('click', (event, d) => {
                 event.stopPropagation();
+                if (layoutInteractionLocked()) return;
+                if (isMultiSelectModifierKey(event)) {
+                    clearFocusForLayoutSelection();
+                    const next = new Set(layoutSelectedIds);
+                    if (next.has(d.id)) next.delete(d.id);
+                    else next.add(d.id);
+                    layoutSelectedIds = next;
+                    refreshNodeLinkHighlight();
+                    syncDagPlayButtonImpl();
+                    return;
+                }
+                clearLayoutSelectionOnly();
                 const next = userFocusId === d.id ? null : d.id;
                 userFocusId = next;
                 selectedId = next;
@@ -1537,6 +1652,7 @@ export function initGenAttributeDagView(
 
     function paint(): void {
         syncNodeStrokeRects(nodeSel, displayScale);
+        syncNodeLayoutSelRects(nodeSel, displayScale);
         if (layoutMode === 'linear-arc' || layoutMode === 'linear-arc-step-down') {
             const layoutNodes = nodes.filter((n) => nodeIncludedInLayout(n));
             paintLinearArcLayout({
@@ -1570,14 +1686,16 @@ export function initGenAttributeDagView(
     let dragPointerOffset: { x: number; y: number } | null = null;
     const drag = d3
         .drag<SVGGElement, DagNode>()
-        // 与 d3 默认 filter 一致，并仅在「当前节点已单击选中」时允许拖动手势生效，减少误拖
-        // 仅 text-flow（UI 的 default）支持拖拽；linear-arc 下禁拖
+        // 左键且无修饰键；布局多选非空时拖集内节点，否则仅焦点节点可拖；修饰键留给点选/框选
         .filter(
             (event, d) =>
-                !event.ctrlKey &&
+                !isMultiSelectModifierKey(event) &&
                 !event.button &&
-                selectedId === d.id &&
-                layoutMode === 'text-flow'
+                layoutMode === 'text-flow' &&
+                !layoutInteractionLocked() &&
+                (layoutSelectedIds.size > 0
+                    ? layoutSelectedIds.has(d.id)
+                    : selectedId === d.id)
         )
         .on('start', (event, d) => {
             event.sourceEvent?.stopPropagation();
@@ -1589,14 +1707,152 @@ export function initGenAttributeDagView(
             userDraggedNodes = true;
             const [x, y] = d3.pointer(event, rootG.node());
             const offset = dragPointerOffset ?? { x: 0, y: 0 };
-            d.cx = x - offset.x;
-            d.cy = y - offset.y;
+            const nextCx = x - offset.x;
+            const nextCy = y - offset.y;
+            const dx = nextCx - d.cx;
+            const dy = nextCy - d.cy;
+            if (dx === 0 && dy === 0) return;
+            const moving =
+                layoutSelectedIds.size > 0
+                    ? nodes.filter((n) => layoutSelectedIds.has(n.id))
+                    : [d];
+            for (const n of moving) {
+                n.cx += dx;
+                n.cy += dy;
+            }
             paint();
             syncGenAttrDagTopkTooltipImpl();
         })
         .on('end', () => {
             dragPointerOffset = null;
         });
+
+    type MarqueeSession = {
+        x0: number;
+        y0: number;
+        additive: boolean;
+        rect: d3.Selection<SVGRectElement, unknown, null, undefined>;
+    };
+    let marqueeSession: MarqueeSession | null = null;
+    /** 框选拖动中与橡胶筋相交的节点（虚线预览）；mouseup 后清空。 */
+    let marqueePreviewIds = new Set<string>();
+
+    function endMarqueeSession(event: MouseEvent): void {
+        if (!marqueeSession) return;
+        const session = marqueeSession;
+        marqueeSession = null;
+        marqueePreviewIds = new Set();
+        window.removeEventListener('mousemove', onMarqueeMouseMove);
+        window.removeEventListener('mouseup', onMarqueeMouseUp);
+        const [x1, y1] = d3.pointer(event, rootG.node());
+        const box = {
+            x0: Math.min(session.x0, x1),
+            y0: Math.min(session.y0, y1),
+            x1: Math.max(session.x0, x1),
+            y1: Math.max(session.y0, y1),
+        };
+        session.rect.remove();
+        const hits = nodes.filter((n) => rectsIntersect(box, nodeAabb(n))).map((n) => n.id);
+        if (session.additive) {
+            if (hits.length === 0) {
+                refreshNodeLinkHighlight();
+                return;
+            }
+            clearFocusForLayoutSelection();
+            const next = new Set(layoutSelectedIds);
+            for (const id of hits) next.add(id);
+            layoutSelectedIds = next;
+        } else {
+            clearFocusForLayoutSelection();
+            layoutSelectedIds = new Set(hits);
+        }
+        refreshNodeLinkHighlight();
+        syncDagPlayButtonImpl();
+    }
+
+    function onMarqueeMouseMove(event: MouseEvent): void {
+        if (!marqueeSession) return;
+        const [x, y] = d3.pointer(event, rootG.node());
+        const x0 = Math.min(marqueeSession.x0, x);
+        const y0 = Math.min(marqueeSession.y0, y);
+        const x1 = Math.max(marqueeSession.x0, x);
+        const y1 = Math.max(marqueeSession.y0, y);
+        marqueeSession.rect
+            .attr('x', x0)
+            .attr('y', y0)
+            .attr('width', x1 - x0)
+            .attr('height', y1 - y0);
+        const box = { x0, y0, x1, y1 };
+        const next = new Set(
+            nodes.filter((n) => rectsIntersect(box, nodeAabb(n))).map((n) => n.id),
+        );
+        if (
+            next.size === marqueePreviewIds.size &&
+            [...next].every((id) => marqueePreviewIds.has(id))
+        ) {
+            return;
+        }
+        marqueePreviewIds = next;
+        refreshNodeLinkHighlight();
+    }
+
+    function onMarqueeMouseUp(event: MouseEvent): void {
+        if (event.button !== 2) return;
+        endMarqueeSession(event);
+    }
+
+    svg.on('mousedown.marquee', (event: MouseEvent) => {
+        if (event.button !== 2) return;
+        if (layoutInteractionLocked()) return;
+        const target = event.target as Element | null;
+        if (target?.closest?.('.gen-attr-dag-node-hit')) return;
+        event.preventDefault();
+        const [x0, y0] = d3.pointer(event, rootG.node());
+        marqueeG.selectAll('*').remove();
+        const rect = marqueeG
+            .append('rect')
+            .attr('class', 'gen-attr-dag-marquee-rect')
+            .attr('x', x0)
+            .attr('y', y0)
+            .attr('width', 0)
+            .attr('height', 0);
+        marqueeSession = {
+            x0,
+            y0,
+            additive: isMultiSelectModifierKey(event),
+            rect,
+        };
+        marqueePreviewIds = new Set();
+        window.addEventListener('mousemove', onMarqueeMouseMove);
+        window.addEventListener('mouseup', onMarqueeMouseUp);
+        // 进入框选态：立刻关掉焦点悬停
+        refreshNodeLinkHighlight();
+    });
+
+    function syncMultiSelectModifierDown(next: boolean): void {
+        if (next === multiSelectModifierDown) return;
+        multiSelectModifierDown = next;
+        refreshNodeLinkHighlight();
+    }
+
+    function onMultiSelectModifierKeyDown(event: KeyboardEvent): void {
+        if (event.key !== 'Meta' && event.key !== 'Control') return;
+        syncMultiSelectModifierDown(true);
+    }
+
+    function onMultiSelectModifierKeyUp(event: KeyboardEvent): void {
+        if (event.key !== 'Meta' && event.key !== 'Control') return;
+        // keyup 时对应修饰键已松开；另一侧若仍按住则保持
+        syncMultiSelectModifierDown(event.metaKey || event.ctrlKey);
+    }
+
+    function onMultiSelectModifierBlur(): void {
+        syncMultiSelectModifierDown(false);
+    }
+
+    window.addEventListener('keydown', onMultiSelectModifierKeyDown);
+    window.addEventListener('keyup', onMultiSelectModifierKeyUp);
+    window.addEventListener('blur', onMultiSelectModifierBlur);
 
     /** 焦点高亮：递归强调来源链，直接强调一跳关系。 */
     let lightningFadeRaf: number | null = null;
@@ -1915,13 +2171,21 @@ export function initGenAttributeDagView(
             return showFocusSelectedStroke(d);
         };
         const suppressAttributionChainNodeStyle = attentionHighlight != null;
+        const layoutHover = layoutSelectHoverActive();
+        // 实线悬停框：与 {@link solidFrameFocusId} / tooltip 同源，多选虚线态不下发
+        const showFocusHover = (d: DagNode): boolean => {
+            if (attentionHighlight != null || layoutHover) return false;
+            return hoveredId === d.id;
+        };
+        const showLayoutHover = (d: DagNode): boolean => {
+            if (attentionHighlight != null || !layoutHover) return false;
+            return hoveredId === d.id || marqueePreviewIds.has(d.id);
+        };
         nodeSel
-            .classed('gen-attr-dag-node--hover', (d) => {
-                // attend 阶段仅 fill 提亮，不加 hover 描边
-                if (attentionHighlight != null) return false;
-                return hoveredId === d.id;
-            })
+            .classed('gen-attr-dag-node--hover', showFocusHover)
+            .classed('gen-attr-dag-node--layout-hover', showLayoutHover)
             .classed('gen-attr-dag-node--selected', showNodeSelectedStroke)
+            .classed('gen-attr-dag-node--layout-selected', (d) => layoutSelectedIds.has(d.id))
             .style('display', nodeDisplay)
             .style('opacity', null)
             .classed(
@@ -1948,11 +2212,10 @@ export function initGenAttributeDagView(
             .select('text.gen-attr-dag-node-text')
             .attr('opacity', resolveNodeFillOpacity);
         nodeHitSel
-            .classed('gen-attr-dag-node--hover', (d) => {
-                if (attentionHighlight != null) return false;
-                return hoveredId === d.id;
-            })
+            .classed('gen-attr-dag-node--hover', showFocusHover)
+            .classed('gen-attr-dag-node--layout-hover', showLayoutHover)
             .classed('gen-attr-dag-node--selected', showNodeSelectedStroke)
+            .classed('gen-attr-dag-node--layout-selected', (d) => layoutSelectedIds.has(d.id))
             .style('display', nodeDisplay);
         nodeG.style(
             'opacity',
@@ -2119,10 +2382,14 @@ export function initGenAttributeDagView(
             pred_topk: [],
         };
 
-        // 反向播放：当前 token 展示稳态归因份额（同 hover）；正向播放 / 非播放：仅 hover 时展示
+        // 归因份额行：仅实线悬停（或反向播放锚点）时展示；虚线多选悬停不计入
         const rowsBeforeInfo: ToolTipUpdateAugment['rowsBeforeInfo'] = [];
         const shareSourceId =
-            propagationPlaybackTooltip?.direction === 'backward' ? focusIdNext : hoveredId;
+            propagationPlaybackTooltip?.direction === 'backward'
+                ? focusIdNext
+                : hoveredId != null && solidFrameFocusId() === hoveredId
+                  ? hoveredId
+                  : null;
         if (
             selectedId &&
             shareSourceId &&
@@ -2158,12 +2425,14 @@ export function initGenAttributeDagView(
         if (id != null && !graph.hasNode(id)) {
             throw new Error(`genAttributeDagView: unknown node id ${id}`);
         }
+        clearLayoutSelectionOnly();
         selectedId = id;
         refreshNodeLinkHighlight();
         syncDagPlayButtonImpl();
     }
 
     function clearNodeSelection(): void {
+        layoutSelectedIds = new Set();
         selectedId = null;
         userFocusId = null;
         recursiveEdgeAnimation.stopPlayback();
@@ -2180,6 +2449,7 @@ export function initGenAttributeDagView(
         if (!graph.hasNode(id)) {
             throw new Error(`genAttributeDagView: unknown node id ${id}`);
         }
+        layoutSelectedIds = new Set();
         userFocusId = id;
         selectedId = id;
         recursiveEdgeAnimation.stopPlayback();
@@ -2253,6 +2523,7 @@ export function initGenAttributeDagView(
                     .attr('class', 'gen-attr-dag-node')
                     .style('--gen-attr-dag-node-ci-visual-scale', (d: DagNode) => String(d.ciVisualScale));
                 g.classed('gen-attr-dag-node--prompt', (d: DagNode) => d.step === -1);
+                g.append('rect').attr('class', 'gen-attr-dag-node-layout-sel');
                 g.append('rect').attr('class', 'gen-attr-dag-node-stroke');
                 g.append('rect')
                     .attr('class', 'gen-attr-dag-node-fill')
@@ -2384,59 +2655,9 @@ export function initGenAttributeDagView(
         // 图数据供传播拓扑；稳态灰边 opacity 为 0（见 perTargetIncomingEdgeShare / tool_response 传导系数）。
         // exclude 在建边时定稿：仅连未 exclude 的 tool_call（见模块顶注释「Exclude 原则」）。
         // 仅处理本次新增节点，避免重复建边。
-        if (inputRanges.length > 1 && addedNodes.length > 0) {
-            for (let k = 1; k < inputRanges.length; k++) {
-                const [trStart, trEnd] = inputRanges[k]!;
-                const [, prevEnd] = inputRanges[k - 1]!;
-                // tool_call 区间 = 上一 input 区结尾到本 input 区起点（生成节点，step >= 0）
-                const tcStart = prevEnd;
-                const tcEnd = trStart;
-                // 本次新增、落在 tool_response 区的 step=-1 节点
-                const trNodes = addedNodes.filter(
-                    (n) => n.step < 0 && n.start >= trStart && n.end <= trEnd,
-                );
-                if (trNodes.length === 0) continue;
-                // 图中已有的 tool_call 节点（step >= 0，落在对应生成区间）
-                const tcNodes = nodes.filter(
-                    (n) => n.step >= 0 && n.start >= tcStart && n.end <= tcEnd,
-                );
-                if (tcNodes.length === 0) {
-                    throw new Error(
-                        `genAttributeDagView: tool_response input [${trStart}, ${trEnd}) added before tool_call nodes exist in [${tcStart}, ${tcEnd}); check setPromptTokenSpans vs update() ordering`,
-                    );
-                }
-                const activeTcNodes =
-                    dagExcludeIntervals.length === 0
-                        ? tcNodes
-                        : tcNodes.filter(
-                              (n) => !isOffsetSpanFullyExcluded(n.start, n.end, dagExcludeIntervals),
-                          );
-                if (activeTcNodes.length === 0) continue;
-                const share = 1 / activeTcNodes.length;
-                for (const trNode of trNodes) {
-                    const syntheticLinks: DagLink[] = [];
-                    for (const tcNode of activeTcNodes) {
-                        if (graph.hasEdge(tcNode.id, trNode.id)) continue;
-                        const edgeAttrs = {
-                            normalizedScore: share,
-                            attributionShare: share,
-                            mutualInformationRatio: 1,
-                        };
-                        graph.addEdge(tcNode.id, trNode.id, edgeAttrs);
-                        syntheticLinks.push({
-                            source: tcNode.id,
-                            target: trNode.id,
-                            synthetic: true,
-                            ...edgeAttrs,
-                        });
-                    }
-                    if (syntheticLinks.length > 0) {
-                        links.push(...syntheticLinks);
-                        incomingLinksByTarget.set(trNode.id, syntheticLinks);
-                        grayRenderCache = null;
-                    }
-                }
-            }
+        if (addedNodes.length > 0) {
+            const addedIds = new Set(addedNodes.map((n) => n.id));
+            addSyntheticEdgesForInputRanges(inputRanges, (n) => addedIds.has(n.id));
         }
         // prompt 节点 step=-1 始终排在末尾；可多次调用（已有节点跳过）。
         nodesSortedByStepDesc = [...nodes].sort((a, b) => b.step - a.step || b.start - a.start);
@@ -2446,6 +2667,156 @@ export function initGenAttributeDagView(
     /** 将当前 `nodes` 映射为对齐层所需的最小区间信息（按插入序，align 内部会再按 start 排序）。 */
     function nodeIntervalsForAlign(): NodeInterval[] {
         return nodes.map((n) => ({ id: n.id, start: n.start, end: n.end, label: n.label }));
+    }
+
+    /** 清空边集（保留节点与几何）；供 {@link rebuildEdges} 使用。 */
+    function clearAllEdges(): void {
+        graph.clearEdges();
+        links = [];
+        incomingLinksByTarget.clear();
+        grayRenderCache = null;
+    }
+
+    /**
+     * 为已有 target 节点按当前 exclude / Top-P / decay 建归因入边。
+     * `alignStep` 仅用于对齐告警；须与节点 `step` 一致。
+     */
+    function addAttributionIncomingEdges(
+        step: TokenGenStep,
+        targetId: string,
+        targetStart: number,
+        targetEnd: number,
+        alignStep: number,
+        excludeIntervalContext: string | undefined,
+        excludeIntervals: [number, number][],
+    ): void {
+        const { token, response } = step;
+        if (isOffsetSpanFullyExcluded(targetStart, targetEnd, excludeIntervals)) return;
+        const pieces: PieceEntry[] = (response.token_attribution ?? []).map((t) => ({
+            offset: t.offset as [number, number],
+            raw: t.raw,
+            score: t.score,
+        }));
+        const aggregated = alignAndAggregateByNode(pieces, nodeIntervalsForAlign(), {
+            step: alignStep,
+            targetToken: token,
+            ...(dagDeleteIntervals.length > 0
+                ? { skipWarnIfFullyInIntervals: dagDeleteIntervals }
+                : {}),
+        });
+        const afterExclude = excludeNodeAggregatedEntries(
+            step,
+            aggregated,
+            excludeIntervalContext,
+            getEffectiveExcludePromptPatternsText(),
+            getEffectiveExcludeGeneratedPatternsText(),
+        );
+        const selected = phase2RankAndSparsify(afterExclude, { cumulativeShare: edgeTopPCoverage });
+
+        const mutualInformationRatio = computeMutualInformationRatio(response.target_prob);
+        const selectedForDisplay = selected.filter((item) => {
+            const normalizedScore = item.score;
+            const edgeVisibility =
+                (dagDecayAttributionToHighSurprisalTargetEnabled ? mutualInformationRatio : 1) *
+                normalizedScore;
+            return edgeVisibility >= DAG_EDGE_MIN_NORMALIZED_SCORE;
+        });
+        const massSum = selectedForDisplay.reduce((acc, t) => acc + Math.max(0, t.poolMassFrac), 0);
+        const linksForTarget: DagLink[] = [];
+        for (const item of selectedForDisplay) {
+            const srcId = item.nodeId;
+            if (!graph.hasNode(srcId)) {
+                throw new Error(
+                    `genAttributeDagView: attribution nodeId ${srcId} has no graph node at alignStep=${alignStep} (align/DAG out of sync)`
+                );
+            }
+            const share = massSum > 0 ? item.poolMassFrac / massSum : undefined;
+            const alignmentNote =
+                item.alignmentTooltipLines && item.alignmentTooltipLines.length > 0
+                    ? item.alignmentTooltipLines.join('\n\n')
+                    : undefined;
+            if (graph.hasEdge(srcId, targetId)) {
+                throw new Error(
+                    `genAttributeDagView: unexpected duplicate edge ${srcId} -> ${targetId} at alignStep=${alignStep} (duplicate nodeId in selected or repeat update?)`
+                );
+            }
+            const edgeAttrs = {
+                normalizedScore: item.score,
+                mutualInformationRatio,
+                attributionShare: share,
+                ...(alignmentNote ? { alignmentNote } : {}),
+            };
+            graph.addEdge(srcId, targetId, edgeAttrs);
+            const newLink: DagLink = {
+                source: srcId,
+                target: targetId,
+                ...edgeAttrs,
+            };
+            links.push(newLink);
+            linksForTarget.push(newLink);
+        }
+        if (linksForTarget.length > 0) incomingLinksByTarget.set(targetId, linksForTarget);
+    }
+
+    /** 按 inputRanges 为 tool_response 节点建合成入边（`trNodeFilter` 限制候选，增量时仅新增节点）。 */
+    function addSyntheticEdgesForInputRanges(
+        inputRanges: CharRange[],
+        trNodeFilter: (n: DagNode) => boolean,
+    ): void {
+        if (inputRanges.length <= 1) return;
+        for (let k = 1; k < inputRanges.length; k++) {
+            const [trStart, trEnd] = inputRanges[k]!;
+            const [, prevEnd] = inputRanges[k - 1]!;
+            const tcStart = prevEnd;
+            const tcEnd = trStart;
+            const trNodes = nodes.filter(
+                (n) =>
+                    n.step < 0 &&
+                    n.start >= trStart &&
+                    n.end <= trEnd &&
+                    trNodeFilter(n),
+            );
+            if (trNodes.length === 0) continue;
+            const tcNodes = nodes.filter(
+                (n) => n.step >= 0 && n.start >= tcStart && n.end <= tcEnd,
+            );
+            if (tcNodes.length === 0) {
+                throw new Error(
+                    `genAttributeDagView: tool_response input [${trStart}, ${trEnd}) added before tool_call nodes exist in [${tcStart}, ${tcEnd}); check setPromptTokenSpans vs update() ordering`,
+                );
+            }
+            const activeTcNodes =
+                dagExcludeIntervals.length === 0
+                    ? tcNodes
+                    : tcNodes.filter(
+                          (n) => !isOffsetSpanFullyExcluded(n.start, n.end, dagExcludeIntervals),
+                      );
+            if (activeTcNodes.length === 0) continue;
+            const share = 1 / activeTcNodes.length;
+            for (const trNode of trNodes) {
+                const syntheticLinks: DagLink[] = [];
+                for (const tcNode of activeTcNodes) {
+                    if (graph.hasEdge(tcNode.id, trNode.id)) continue;
+                    const edgeAttrs = {
+                        normalizedScore: share,
+                        attributionShare: share,
+                        mutualInformationRatio: 1,
+                    };
+                    graph.addEdge(tcNode.id, trNode.id, edgeAttrs);
+                    syntheticLinks.push({
+                        source: tcNode.id,
+                        target: trNode.id,
+                        synthetic: true,
+                        ...edgeAttrs,
+                    });
+                }
+                if (syntheticLinks.length > 0) {
+                    links.push(...syntheticLinks);
+                    incomingLinksByTarget.set(trNode.id, syntheticLinks);
+                    grayRenderCache = null;
+                }
+            }
+        }
     }
 
     function update(step: TokenGenStep, excludeIntervalContext?: string): void {
@@ -2501,75 +2872,19 @@ export function initGenAttributeDagView(
         dagExcludeIntervals = excludeIntervals;
 
         // align → exclude → rank → 建边（exclude 一次定稿，见模块顶注释「Exclude 原则」）。
-        if (!isOffsetSpanFullyExcluded(targetStart, targetEnd, excludeIntervals)) {
-            const pieces: PieceEntry[] = (response.token_attribution ?? []).map((t) => ({
-                offset: t.offset as [number, number],
-                raw: t.raw,
-                score: t.score,
-            }));
-            const aggregated = alignAndAggregateByNode(pieces, nodeIntervalsForAlign(), {
-                step: stepProcessed,
-                targetToken: token,
-                ...(dagDeleteIntervals.length > 0
-                    ? { skipWarnIfFullyInIntervals: dagDeleteIntervals }
-                    : {}),
-            });
-            const afterExclude = excludeNodeAggregatedEntries(
-                step,
-                aggregated,
-                excludeIntervalContext,
-                getEffectiveExcludePromptPatternsText(),
-                getEffectiveExcludeGeneratedPatternsText(),
-            );
-            const selected = phase2RankAndSparsify(afterExclude, { cumulativeShare: edgeTopPCoverage });
-
-            const mutualInformationRatio = computeMutualInformationRatio(response.target_prob);
-            const selectedForDisplay = selected.filter((item) => {
-                const normalizedScore = item.score;
-                const edgeVisibility =
-                    (dagDecayAttributionToHighSurprisalTargetEnabled ? mutualInformationRatio : 1) *
-                    normalizedScore;
-                return edgeVisibility >= DAG_EDGE_MIN_NORMALIZED_SCORE;
-            });
-            const massSum = selectedForDisplay.reduce((acc, t) => acc + Math.max(0, t.poolMassFrac), 0);
-            const linksForTarget: DagLink[] = [];
-            for (const item of selectedForDisplay) {
-                const srcId = item.nodeId;
-                if (!graph.hasNode(srcId)) {
-                    throw new Error(
-                        `genAttributeDagView: attribution nodeId ${srcId} has no graph node at stepProcessed=${stepProcessed} (align/DAG out of sync)`
-                    );
-                }
-                const share = massSum > 0 ? item.poolMassFrac / massSum : undefined;
-                const alignmentNote =
-                    item.alignmentTooltipLines && item.alignmentTooltipLines.length > 0
-                        ? item.alignmentTooltipLines.join('\n\n')
-                        : undefined;
-                if (graph.hasEdge(srcId, targetId)) {
-                    throw new Error(
-                        `genAttributeDagView: unexpected duplicate edge ${srcId} -> ${targetId} at stepProcessed=${stepProcessed} (duplicate nodeId in selected or repeat update?)`
-                    );
-                }
-                const edgeAttrs = {
-                    normalizedScore: item.score,
-                    mutualInformationRatio,
-                    attributionShare: share,
-                    ...(alignmentNote ? { alignmentNote } : {}),
-                };
-                graph.addEdge(srcId, targetId, edgeAttrs);
-                const newLink: DagLink = {
-                    source: srcId,
-                    target: targetId,
-                    ...edgeAttrs,
-                };
-                links.push(newLink);
-                linksForTarget.push(newLink);
-            }
-            if (linksForTarget.length > 0) incomingLinksByTarget.set(targetId, linksForTarget);
-        }
+        addAttributionIncomingEdges(
+            step,
+            targetId,
+            targetStart,
+            targetEnd,
+            stepProcessed,
+            excludeIntervalContext,
+            excludeIntervals,
+        );
 
         stepProcessed++;
         // 每步生成后：默认选中本步新生成的 token；无其它选中时悬浮仍可临时预览
+        layoutSelectedIds = new Set();
         selectedId = targetId;
         recursiveEdgeAnimation.stopPlayback();
         if (batchDepth === 0) {
@@ -2581,8 +2896,70 @@ export function initGenAttributeDagView(
         }
     }
 
+    /**
+     * 仅重建边集：保留节点（含拖拽 cx/cy）、layoutDirty / userDraggedNodes、选中与视口。
+     * 调用前须已更新 edgeTopPCoverage / exclude 生效全文等。
+     */
+    function rebuildEdges(steps: readonly TokenGenStep[], excludeIntervalContext: string): void {
+        recursiveEdgeAnimation.stopPlayback();
+        if (nodes.length === 0 || steps.length === 0) return;
+
+        clearAllEdges();
+        clearGenAttributeDagAlignmentWarnDedupe();
+
+        const last = steps[steps.length - 1]!;
+        dagExcludeIntervals = collectGenAttrDagExcludeIntervals(
+            excludeIntervalContext,
+            last.inputRanges,
+            getEffectiveExcludePromptPatternsText(),
+            getEffectiveExcludeGeneratedPatternsText(),
+        );
+        addSyntheticEdgesForInputRanges(last.inputRanges, () => true);
+
+        for (let i = 0; i < steps.length; i++) {
+            const step = steps[i]!;
+            const { context, token, response } = step;
+            if (!response.token_attribution || !token) continue;
+            const targetStart = context.length;
+            const targetEnd = context.length + token.length;
+            const targetId = `${targetStart}_${targetEnd}`;
+            if (!graph.hasNode(targetId)) {
+                throw new Error(
+                    `genAttributeDagView: rebuildEdges missing target node ${targetId} at step=${i}`
+                );
+            }
+            const targetNode = graph.getNodeAttributes(targetId) as DagNode;
+            const stepExcludeIntervals = collectGenAttrDagExcludeIntervals(
+                excludeIntervalContext,
+                step.inputRanges,
+                getEffectiveExcludePromptPatternsText(),
+                getEffectiveExcludeGeneratedPatternsText(),
+            );
+            addAttributionIncomingEdges(
+                step,
+                targetId,
+                targetStart,
+                targetEnd,
+                targetNode.step,
+                excludeIntervalContext,
+                stepExcludeIntervals,
+            );
+        }
+
+        // 节点 opacity / hide 用全量上下文的 exclude 区间
+        dagExcludeIntervals = collectGenAttrDagExcludeIntervals(
+            excludeIntervalContext,
+            last.inputRanges,
+            getEffectiveExcludePromptPatternsText(),
+            getEffectiveExcludeGeneratedPatternsText(),
+        );
+        invalidateLayoutIncludedNodeIdsKey();
+        if (batchDepth === 0) syncGraphToSvg();
+    }
+
     function reset(preserveUserViewport: boolean = false): void {
         const wasLayoutDirty = layoutDirty;
+        const wasUserDraggedNodes = userDraggedNodes;
         clearGenAttributeDagAlignmentWarnDedupe();
         recursiveEdgeAnimation.onClear();
         textMeasure.reset();
@@ -2596,6 +2973,7 @@ export function initGenAttributeDagView(
         stepProcessed = 0;
         selectedId = null;
         userFocusId = null;
+        layoutSelectedIds = new Set();
         hoveredId = null;
         attentionHighlight = null;
         lastTokenAppearanceDwellActive = false;
@@ -2616,7 +2994,7 @@ export function initGenAttributeDagView(
             .selectAll<SVGGElement, DagNode>('g.gen-attr-dag-node-hit')
             .data<DagNode>([], (d) => d.id);
         layoutDirty = preserveUserViewport ? wasLayoutDirty : false;
-        userDraggedNodes = false;
+        userDraggedNodes = preserveUserViewport ? wasUserDraggedNodes : false;
         syncDagPlayButtonImpl();
         notifyUserFocusChange();
     }
@@ -2969,6 +3347,16 @@ export function initGenAttributeDagView(
     syncSvgSize();
 
     function detach(): void {
+        if (marqueeSession) {
+            window.removeEventListener('mousemove', onMarqueeMouseMove);
+            window.removeEventListener('mouseup', onMarqueeMouseUp);
+            marqueeSession.rect.remove();
+            marqueeSession = null;
+            marqueePreviewIds = new Set();
+        }
+        window.removeEventListener('keydown', onMultiSelectModifierKeyDown);
+        window.removeEventListener('keyup', onMultiSelectModifierKeyUp);
+        window.removeEventListener('blur', onMultiSelectModifierBlur);
         cancelLightningEffectPreview();
         cancelLightningFadeRaf();
         lightningSound.dispose();
@@ -3007,6 +3395,7 @@ export function initGenAttributeDagView(
         setLinearArcAdjacentGapPx,
         setDagCompactness,
         setEdgeTopPCoverage,
+        rebuildEdges,
         setHideExcludedTokens,
         setHideArrowsDuringAttention,
         setDimInactiveTokens,

@@ -897,11 +897,15 @@ const genAttrResetUiOptionsBtn = document.getElementById(
 ) as HTMLButtonElement | null;
 const completeReasonEl = d3.select('#gen_attr_complete_reason');
 
-/** exclude / delete 正则生效变更：须 reset 全步重放；动态过程（DAG 忙）中不生效。exclude 不改节点几何，保留视口。 */
-function onDagPatternsEffectiveChange(opts?: { refit?: boolean }): void {
+/** exclude / delete 正则生效变更：须重算边或整图重放；动态过程（DAG 忙）中不生效。exclude 不改节点几何。 */
+function onDagPatternsEffectiveChange(opts?: { rebuildEdgesOnly?: boolean }): void {
     const h = runnerHandle;
     if (!h || h.tokenCount === 0) return;
-    tryResetAndReplayDag(opts);
+    if (opts?.rebuildEdgesOnly) {
+        tryRebuildDagEdges();
+        return;
+    }
+    tryResetAndReplayDag();
 }
 
 bindExcludePatternsUi({
@@ -923,7 +927,7 @@ bindExcludePatternsUi({
     },
     textInput: genAttrExcludePromptPatternsTa,
     enableCheckbox: genAttrExcludePromptPatternsEnable,
-    onEffectiveChange: () => onDagPatternsEffectiveChange({ refit: false }),
+    onEffectiveChange: () => onDagPatternsEffectiveChange({ rebuildEdgesOnly: true }),
     defaultTextWhenKeyAbsent: DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT,
     skipLocalStoragePersist: true,
 });
@@ -934,7 +938,7 @@ bindExcludePatternsUi({
     },
     textInput: genAttrExcludeGeneratedPatternsTa,
     enableCheckbox: genAttrExcludeGeneratedPatternsEnable,
-    onEffectiveChange: () => onDagPatternsEffectiveChange({ refit: false }),
+    onEffectiveChange: () => onDagPatternsEffectiveChange({ rebuildEdgesOnly: true }),
     defaultTextWhenKeyAbsent: DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT,
     skipLocalStoragePersist: true,
 });
@@ -1051,7 +1055,7 @@ if (dagDecayAttributionHighSurprisalInput) {
 setDagDecayAttributionToHighSurprisalTargetEnabled(initialDagDecayAttributionHighSurprisal);
 dagDecayAttributionHighSurprisalInput?.addEventListener('change', () => {
     setDagDecayAttributionToHighSurprisalTargetEnabled(dagDecayAttributionHighSurprisalInput.checked);
-    tryResetAndReplayDag({ refit: false });
+    tryRebuildDagEdges();
 });
 
 function applyDagHideInactiveEdges(hide: boolean): void {
@@ -2088,13 +2092,14 @@ dagLayoutModeSelect?.addEventListener('change', () => {
 });
 
 /**
- * DAG 是否处于「不方便」状态：流式生成中或 DAG 播放中（含末 token dwell）。
- * 这些状态下改测量宽度只更新设置、不触发重绘，避免打断正在进行的流程/定时器状态机；
- * 否则（稳态显示已完成结果）则自动 reset + replay + fit 到新宽度。
+ * DAG 是否处于「不方便」状态：流式生成中、▶ 播放中（含暂停中途）、或传播播放中。
+ * 这些状态下改测量宽度 / Top-P 等只更新设置、不触发重绘或 rebuild（暂停中途改边无意义）。
+ * 否则（稳态显示已完成结果）则自动 reset + replay + fit，或 rebuildEdges。
  */
 function isDagBusy(): boolean {
     return (
         inFlight ||
+        dagPlaybackPausedMidRun ||
         dagPlaybackTimer !== null ||
         dagPlaybackCancel !== null ||
         dagLastTokenDwellTimer !== null ||
@@ -2103,27 +2108,34 @@ function isDagBusy(): boolean {
 }
 
 /**
- * 非忙状态下 reset + replay，按需 fit，供各设置项切换后复用。忙时为 no-op。
- * exclude / Top-P 等影响建边的选项变更后须走此路径（DAG exclude 在建边时定稿，见 genAttributeDagView）。
- * 生成或 ▶ 回放进行中（{@link isDagBusy}）时改 exclude 正则为 no-op，动态过程内对已建边不生效。
- * 默认保留 DAG 选中节点；整页重置 UI 等场景传 `preserveNodeSelection: false`。
- * `refit: false` 时 `reset(true)` 保留 pan/zoom（仅边集/样式类变更）。
+ * 非忙状态下按当前设置仅重建边集（保留节点几何与视口），供 Top-P / exclude / decay 等边相关选项。
+ * 忙时（含 ▶ 暂停中途）为 no-op。
  */
-function tryResetAndReplayDag(opts?: { preserveNodeSelection?: boolean; refit?: boolean }): void {
+function tryRebuildDagEdges(): void {
     dagHandle.stopPropagationPlayback();
     if (isDagBusy()) return;
-    const refit = opts?.refit !== false;
+    const h = runnerHandle;
+    if (!h || h.tokenCount === 0) return;
+    const steps = h.getAllSteps();
+    dagHandle.rebuildEdges(steps, dagExcludeIntervalContextForReplay(steps));
+}
+
+/**
+ * 非忙状态下 reset + replay + fit，供几何类设置项切换后复用。忙时为 no-op。
+ * 默认保留 DAG 选中节点；整页重置 UI 等场景传 `preserveNodeSelection: false`。
+ */
+function tryResetAndReplayDag(opts?: { preserveNodeSelection?: boolean }): void {
+    dagHandle.stopPropagationPlayback();
+    if (isDagBusy()) return;
     const preserveSelection = opts?.preserveNodeSelection !== false;
     const preservedSelectedId = preserveSelection ? dagHandle.getSelectedNodeId() : null;
     const preservedUserFocusId = preserveSelection ? dagHandle.getUserFocusId() : null;
     const h = runnerHandle;
-    dagHandle.reset(!refit);
+    dagHandle.reset();
     if (h && h.tokenCount > 0) {
         replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
     }
-    if (refit) {
-        dagHandle.fitViewportToContent();
-    }
+    dagHandle.fitViewportToContent();
     if (preservedUserFocusId != null) {
         dagHandle.setUserFocusNodeId(preservedUserFocusId);
     } else if (preservedSelectedId != null) {
@@ -2158,7 +2170,7 @@ dagEdgeTopPCoverageInput?.addEventListener('change', () => {
         : DAG_EDGE_TOP_P_COVERAGE_DEFAULT;
     dagEdgeTopPCoverageInput.value = String(c);
     dagHandle.setEdgeTopPCoverage(c);
-    tryResetAndReplayDag({ refit: false });
+    tryRebuildDagEdges();
 });
 
 dagLinearArcIntervalInput?.addEventListener('change', () => {
@@ -3580,10 +3592,7 @@ submitBtn.on('click', () => {
 });
 
 function refreshDagForThemeChange(): void {
-    stopDagPlayback();
-    const h = runnerHandle;
-    if (!h || h.tokenCount === 0) return;
-    tryResetAndReplayDag({ refit: false });
+    dagHandle.refreshNodeLinkHighlight();
 }
 
 const themeManager = initThemeManager(

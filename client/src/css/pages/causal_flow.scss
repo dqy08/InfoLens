@@ -209,6 +209,13 @@ $gen-attr-cached-demos-panel-width: 21em;
 
   // 节点 fill/stroke 分层：置灰仅作用于 fill/text（genAttributeDagView）；stroke 不受 fill opacity 影响。
   #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node {
+    .gen-attr-dag-node-layout-sel {
+      fill: none;
+      stroke: none;
+      stroke-width: 0;
+      pointer-events: none;
+    }
+
     .gen-attr-dag-node-stroke {
       fill: none;
       stroke: none;
@@ -246,18 +253,38 @@ $gen-attr-cached-demos-panel-width: 21em;
       stroke: var(--dag-highlight-line-color-out);
     }
 
-    // 选中/悬停 = 焦点（追因起点，nodeShare=1）；置于 recursive-chain 之后以覆盖链上节点的 stroke-opacity
+    // 实线焦点框（悬停 / 点击选中）：tooltip 与归因悬停预览只跟这套走
     &--hover .gen-attr-dag-node-stroke,
     &--selected .gen-attr-dag-node-stroke {
       stroke: var(--dag-highlight-line-color-in);
       stroke-width: calc(2 * var(--gen-attr-dag-display-scale, 1));
       stroke-opacity: 1;
     }
+
+    // 布局多选虚线框（含悬停预览 / 框选预览）；色从蓝色描边衍生；不驱动 tooltip
+    &--layout-selected .gen-attr-dag-node-layout-sel,
+    &--layout-hover .gen-attr-dag-node-layout-sel {
+      stroke: var(--dag-highlight-line-color-in);
+      stroke-width: calc(1.5 * var(--gen-attr-dag-display-scale, 1));
+      stroke-dasharray: calc(4 * var(--gen-attr-dag-display-scale, 1))
+        calc(3 * var(--gen-attr-dag-display-scale, 1));
+      stroke-opacity: 1;
+    }
   }
 
-  // 与 genAttributeDagView 中「仅 default(text-flow) 且选中时可拖」一致：可拖时提示 grab（命中层与视觉层共用 class）
+  // 右键框选橡胶筋（与布局多选虚线框同色源）
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-marquee-rect {
+    fill: color-mix(in srgb, var(--dag-highlight-line-color-in) 22%, transparent);
+    stroke: var(--dag-highlight-line-color-in);
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+  }
+
+  // 与 genAttributeDagView 中「text-flow 下焦点或布局多选可拖」一致：可拖时提示 grab
   #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node--selected,
-  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node-hit.gen-attr-dag-node--selected {
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node-hit.gen-attr-dag-node--selected,
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node--layout-selected,
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node-hit.gen-attr-dag-node--layout-selected {
     cursor: grab;
     &:active {
       cursor: grabbing;
@@ -272,7 +299,15 @@ $gen-attr-cached-demos-panel-width: 21em;
   #results.gen-attr-results-surface.LMF
     .gen-attr-dag-stack.gen-attr-dag-no-node-drag-layout
     .gen-attr-dag-svg
-    .gen-attr-dag-node-hit.gen-attr-dag-node--selected {
+    .gen-attr-dag-node-hit.gen-attr-dag-node--selected,
+  #results.gen-attr-results-surface.LMF
+    .gen-attr-dag-stack.gen-attr-dag-no-node-drag-layout
+    .gen-attr-dag-svg
+    .gen-attr-dag-node--layout-selected,
+  #results.gen-attr-results-surface.LMF
+    .gen-attr-dag-stack.gen-attr-dag-no-node-drag-layout
+    .gen-attr-dag-svg
+    .gen-attr-dag-node-hit.gen-attr-dag-node--layout-selected {
     cursor: default;
     &:active {
       cursor: default;
