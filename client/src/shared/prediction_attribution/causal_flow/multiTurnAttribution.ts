@@ -7,16 +7,14 @@ import type { PromptTokenSpan } from './genAttributeDagPreprocess';
 import type { CharRange, TokenGenStep } from './tokenGenAttributionRunner';
 import { startTokenGenAttribution } from './tokenGenAttributionRunner';
 import { fetchTokenize } from '../core/predictionAttributeClient';
-import { postCompletionsPromptIncremental } from '../../api/completionsClient';
 import type { CompletionFinishReason } from '../../cross/generationEndReasonLabel';
 import type { ToolConfig } from '../../../features/chat/toolConfig';
-import { resolveMockTool } from '../../../features/chat/mockExecutor';
-import { parseToolCallFromCompletion } from '../../../features/chat/toolCallParser';
-import { MAX_TOOL_ROUNDS } from '../../../features/chat/multiTurnToolCalling';
 import {
-    runMockToolPendingGap,
-    type ToolCallingPendingLine,
-} from '../../../features/chat/toolCallingPendingUi';
+    isAbortError,
+    MAX_TOOL_ROUNDS,
+    prepareToolRoundContinuation,
+} from '../../../features/chat/wireMultiTurn';
+import type { ToolCallingPendingLine } from '../../../features/chat/toolCallingPendingUi';
 import { tr } from '../../lang/i18n-lite';
 
 export type RunMultiTurnAttributionOptions = {
@@ -43,24 +41,6 @@ export type RunMultiTurnAttributionOptions = {
 export type MultiTurnAttributionHandle = {
     abort(): void;
 };
-
-function isAbortError(err: unknown): boolean {
-    return err instanceof DOMException && err.name === 'AbortError';
-}
-
-async function fetchIncrementalSuffix(
-    model: string,
-    enableThinking: boolean,
-    toolName: string,
-    toolContent: string,
-    signal?: AbortSignal,
-): Promise<string> {
-    const { incremental_suffix } = await postCompletionsPromptIncremental(
-        { model, tool_content: toolContent, tool_name: toolName, enable_thinking: enableThinking },
-        { signal },
-    );
-    return incremental_suffix;
-}
 
 export function runMultiTurnAttribution(opts: RunMultiTurnAttributionOptions): MultiTurnAttributionHandle {
     let aborted = false;
@@ -136,43 +116,31 @@ export function runMultiTurnAttribution(opts: RunMultiTurnAttributionOptions): M
             const lastStep = steps[steps.length - 1]!;
             wire = lastStep.context + lastStep.token;
             // currentText = 当轮 generatedText（含首轮 teacher forcing 逐步消费的 token + 其后模型续写）。
-            // 与 chat multiTurnToolCalling 不同：那边 TF 预先拼在 wire 上、completion 只返回增量，故需 parseToolCallFromWireRound。
+            // 与 chat multiTurnToolCalling 不同：那边 TF 预先拼在 wire 上、completion 只返回增量，故需按 offset 切片。
             const turnGenerated = lastStep.currentText;
 
-            const parsed = parseToolCallFromCompletion(turnGenerated);
-            if (parsed.status === 'malformed') {
+            const continuation = await prepareToolRoundContinuation({
+                assistantTurnText: turnGenerated,
+                toolConfig: opts.toolConfig,
+                model: opts.model,
+                enableThinking: opts.enableThinking,
+                signal: opts.signal,
+                mockToolGapUi: opts.mockToolGapUi,
+            });
+            if (continuation.status === 'malformed') {
                 opts.onError(new Error(tr('Invalid tool_call JSON in model output')));
                 opts.onAllComplete('error');
                 return;
             }
-            if (parsed.status === 'absent') {
+            if (continuation.status === 'stop') {
                 opts.onAllComplete(reason);
                 return;
             }
-
-            const mockContent = resolveMockTool(
-                opts.toolConfig,
-                parsed.call.name,
-                parsed.call.arguments,
-            );
-            if (mockContent === null) {
-                opts.onAllComplete(reason);
-                return;
-            }
-
-            await runMockToolPendingGap(opts.signal, opts.mockToolGapUi);
-            const incrementalSuffix = await fetchIncrementalSuffix(
-                opts.model,
-                opts.enableThinking,
-                parsed.call.name,
-                mockContent,
-                opts.signal,
-            );
 
             const suffixStart = wire.length;
-            wire += incrementalSuffix;
+            wire += continuation.incrementalSuffix;
 
-            const spans = await fetchTokenize(opts.apiPrefix, incrementalSuffix, opts.model);
+            const spans = await fetchTokenize(opts.apiPrefix, continuation.incrementalSuffix, opts.model);
             const globalSpans: PromptTokenSpan[] = spans.map((s) => ({
                 ...s,
                 offset: [s.offset[0] + suffixStart, s.offset[1] + suffixStart] as [number, number],

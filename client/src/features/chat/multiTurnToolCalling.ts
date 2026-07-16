@@ -1,26 +1,25 @@
 import {
     postCompletions,
     postCompletionsPrompt,
-    postCompletionsPromptIncremental,
     type OpenAICompletionsResponse,
     type PostCompletionsOptions,
 } from '../../shared/api/completionsClient';
 import type { ChatMessage } from './chatMessages';
 import type { ChatDisplaySegment, ChatMultiTurnRun } from './chatSegments';
-import { resolveMockTool } from './mockExecutor';
 import {
     assistantOutputOffsetForRound,
-    parseToolCallFromWireRound,
 } from './toolCallParser';
 import { tr } from '../../shared/lang/i18n-lite';
 import { assertStreamMatchesFinal } from './completionStreamAssert';
 import { toolConfigToolsSchema, type ToolConfig } from './toolConfig';
+import { TOOL_CALLING_PENDING_LABEL } from './toolCallingPendingUi';
 import {
-    runMockToolPendingGap,
-    TOOL_CALLING_PENDING_LABEL,
-} from './toolCallingPendingUi';
+    isAbortError,
+    MAX_TOOL_ROUNDS,
+    prepareToolRoundContinuation,
+} from './wireMultiTurn';
 
-export const MAX_TOOL_ROUNDS = 16;
+export { MAX_TOOL_ROUNDS } from './wireMultiTurn';
 export { MOCK_TOOL_STEP_DELAY_MS, TOOL_CALLING_PENDING_LABEL } from './toolCallingPendingUi';
 
 export type RunMultiTurnOptions = {
@@ -65,13 +64,6 @@ export async function assembleFirstTurnPrompt(
     return opts.teacherForcing ? prompt + opts.teacherForcing : prompt;
 }
 
-function isAbortError(err: unknown): boolean {
-    return (
-        err instanceof DOMException &&
-        err.name === 'AbortError'
-    );
-}
-
 /** 拼装首轮完整 prompt（模式 B：需 messages，返回 prompt_used）。 */
 async function assembleFullPrompt(
     model: string,
@@ -90,21 +82,6 @@ async function assembleFullPrompt(
         { signal }
     );
     return res.prompt_used!;
-}
-
-/** 请求 tool response 的 incremental_suffix（POST /v1/completions/prompt-incremental）。 */
-async function fetchIncrementalSuffix(
-    model: string,
-    enableThinking: boolean,
-    toolName: string,
-    toolContent: string,
-    signal?: AbortSignal
-): Promise<string> {
-    const { incremental_suffix } = await postCompletionsPromptIncremental(
-        { model, tool_content: toolContent, tool_name: toolName, enable_thinking: enableThinking },
-        { signal }
-    );
-    return incremental_suffix;
 }
 
 async function runCompletion(
@@ -194,39 +171,27 @@ export async function runMultiTurnToolCalling(
             });
             opts.onSegmentsUpdate?.(segments);
 
-            const parsed = parseToolCallFromWireRound(wire, assistantOutputOffset);
-            if (parsed.status === 'malformed') {
+            // TF 预先拼在 wire 上、completion 只返回增量 → 按 offset 切片再解析
+            const continuation = await prepareToolRoundContinuation({
+                assistantTurnText: wire.slice(assistantOutputOffset),
+                toolConfig: opts.toolConfig,
+                model: opts.model,
+                enableThinking: opts.enableThinking,
+                signal: opts.signal,
+                onMockResolved: () => {
+                    segments.push({ kind: 'input', text: TOOL_CALLING_PENDING_LABEL, pending: true });
+                    opts.onSegmentsUpdate?.(segments);
+                },
+            });
+            if (continuation.status === 'malformed') {
                 throw new Error(tr('Invalid tool_call JSON in model output'));
             }
-            if (parsed.status === 'absent') {
+            if (continuation.status === 'stop') {
                 return { segments };
             }
 
-            const mockContent = resolveMockTool(
-                opts.toolConfig,
-                parsed.call.name,
-                parsed.call.arguments,
-            );
-            if (mockContent === null) {
-                return { segments };
-            }
-
-            segments.push({ kind: 'input', text: TOOL_CALLING_PENDING_LABEL, pending: true });
-            opts.onSegmentsUpdate?.(segments);
-
-            await runMockToolPendingGap(opts.signal);
-
-            // 向后端请求本条 tool response 的 incremental_suffix
-            const incremental_suffix = await fetchIncrementalSuffix(
-                opts.model,
-                opts.enableThinking,
-                parsed.call.name,
-                mockContent,
-                opts.signal
-            );
-
-            wire += incremental_suffix;
-            segments[segments.length - 1] = { kind: 'input', text: incremental_suffix };
+            wire += continuation.incrementalSuffix;
+            segments[segments.length - 1] = { kind: 'input', text: continuation.incrementalSuffix };
             opts.onSegmentsUpdate?.(segments);
 
             round += 1;
