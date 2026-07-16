@@ -1,3 +1,6 @@
+/**
+ * Chat 多轮 tool calling：走 `/v1/completions`，与 Causal Flow 共享 `wireMultiTurn` 内核。
+ */
 import {
     postCompletions,
     postCompletionsPrompt,

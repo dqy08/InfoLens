@@ -1,3 +1,4 @@
+/** Config tools：编辑 tool config 快照的弹窗。 */
 import * as d3 from 'd3';
 import { tr } from '../../shared/lang/i18n-lite';
 import { showDialog } from '../../shared/ui/dialog';

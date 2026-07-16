@@ -1,7 +1,11 @@
-/** Tool config：catalog 形状条目的快照，由运行时持有。 */
+/**
+ * Tool config：用户勾选/编辑后的 catalog 形状快照（`entries`），运行时持有；
+ * 注入 chat template 的 tools schema 由此派生。
+ */
 
 import { lsGet, lsSet } from '../../shared/storage/localStorageHelpers';
 
+/** Mock candidate：`mock_results` 一项；可选 `trigger_keyword` 按参数选用。 */
 export type ToolCatalogMockCandidate = {
     response: Record<string, unknown>;
     trigger_keyword?: string;

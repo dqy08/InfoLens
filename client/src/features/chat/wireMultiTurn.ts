@@ -1,7 +1,11 @@
 /**
- * Wire-model multi-turn runtime kernel（ADR-0001：前端编排）。
+ * Wire-model multi-turn runtime kernel（前端编排）。
  * Chat / Causal Flow 各自提供「本轮生成」adapter；本模块拥有：
  * 解析 tool call → 解析 mock candidate → pending gap → incremental_suffix。
+ *
+ * 为何不在模型后端做 agent loop：仓库只有前端与模型服务，无独立应用后端；
+ * 编排进模型层会混淆职责，且多轮流式需额外轮次信令，而前端每轮 SSE 天然独立。
+ * Tool config 存前端 Run Draft；模型后端只套 chat template + generate，不感知轮次。
  */
 import { postCompletionsPromptIncremental } from '../../shared/api/completionsClient';
 import { resolveMockTool } from './mockExecutor';

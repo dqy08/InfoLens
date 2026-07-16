@@ -1,6 +1,6 @@
 /**
- * 多轮 mock tool calling 的逐 token 归因编排：每轮独立 `startTokenGenAttribution` session，
- * 检测 tool call 后注入 incremental_suffix 并启动下一轮。
+ * Causal Flow 多轮 tool calling：与 chat 共享 wire/mock（`wireMultiTurn`）；
+ * 每轮独立 `startTokenGenAttribution`，检测 tool call 后注入 incremental_suffix。
  */
 import type { PredictionAttributeModelVariant } from '../core/attributionResultCache';
 import type { PromptTokenSpan } from './genAttributeDagPreprocess';

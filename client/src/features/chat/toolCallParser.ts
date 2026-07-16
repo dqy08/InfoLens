@@ -1,3 +1,5 @@
+/** Tool call：模型产出的 `<tool_call>…</tool_call>` 片段（本项目只解析/展示，不执行真实工具）。 */
+
 export type ParsedToolCall = {
     name: string;
     arguments: Record<string, unknown>;

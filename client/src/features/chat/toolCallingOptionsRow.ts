@@ -1,3 +1,7 @@
+/**
+ * Tool calling 开关：开启后注入 tool schema（单轮）；可选「多轮 & mock」做回灌。
+ * 「Config tools」打开 toolConfigDialog。
+ */
 import { tr } from '../../shared/lang/i18n-lite';
 import { lsReadBool, lsWriteBool } from '../../shared/storage/localStorageHelpers';
 import { showEditableToolConfigDialog } from './toolConfigDialog';

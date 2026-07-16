@@ -1,3 +1,4 @@
+/** Tool catalog：代码内只读的可用 tool 全集（`toolCatalog.json`）。 */
 import catalogJson from './toolCatalog.json';
 import type { ToolCatalogEntry } from './toolConfig';
 
