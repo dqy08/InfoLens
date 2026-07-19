@@ -67,9 +67,9 @@ function mergeDeleteIntervals(intervals: [number, number][]): [number, number][]
 }
 
 export type GenAttrDagTokenGeom = {
-    /** token 基础矩形（1× 尺寸）的中心坐标；同行 token 的 cy 相同，与 CI 缩放无关。 */
-    cx: number;
-    cy: number;
+    /** token 基础矩形（1×）左上角（与 Range fragment 同源）；同行 token 的 `y` 相同。 */
+    x: number;
+    y: number;
     width: number;
     height: number;
 };
@@ -155,8 +155,8 @@ function geomFromTokenFragments(frags: TokenFragmentRect[], raw: string): GenAtt
         : 1;
     const widthSum = Math.max(geomWidthSum, expandedFloor);
     return {
-        cx: first.x + widthSum / 2,
-        cy: first.y + hFirst / 2,
+        x: first.x,
+        y: first.y,
         width: widthSum,
         height: hFirst,
     };
@@ -355,7 +355,7 @@ export function createGenAttributeDagTextMeasure(
 }
 
 export type TrailingSuffixLineAnchor = {
-    /** 与 text-flow 节点 `cx/cy` 同系的测量层坐标（相对 measureRoot 左上角）。 */
+    /** 相对 measureRoot 左上角；suffix 首行左上。 */
     x: number;
     y: number;
 };

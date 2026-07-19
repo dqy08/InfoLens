@@ -138,6 +138,8 @@ $gen-attr-cached-demos-panel-width: 21em;
     /** attention queryHeat 终点：同色相向白抬亮（起点为上列 fill） */
     --gen-attr-dag-prompt-node-fill-heat: color-mix(in srgb, white 28%, rgba(0, 255, 225, 0.58));
     --gen-attr-dag-generated-node-fill-heat: color-mix(in srgb, white 28%, rgba(255, 165, 0, 0.58));
+    // 空格与 DAG 画布同色（暗色为 --gen-attr-dag-canvas-bg；亮色无该变量时回退 text-area-bg）
+    --gen-attr-dag-matrix-cell-empty: var(--gen-attr-dag-canvas-bg, var(--text-area-bg));
     position: relative;
     // 测量层在流内可极高；basis 用 0% 避免「内容高度」参与 flex 初始主尺寸，把图区限制在 #results 剩余高度内，以免撑出 .right_panel 纵向滚动条；overflow 非 visible 使 flex 自动最小高度按 0 计（见 css-flexbox-1 #min-size-auto）
     flex: 1 1 0%;
@@ -174,8 +176,56 @@ $gen-attr-cached-demos-panel-width: 21em;
 
   // 勾选「Hide inactive edges」时隐藏未与焦点相邻的灰边（linkG 容器内的边）；
   // 与焦点相邻的高亮边由 genAttributeDagView 运行时搬运到 .gen-attr-dag-links-front 中，不受影响。
-  #results.gen-attr-results-surface.LMF.gen-attr-dag-hide-inactive-edges .gen-attr-dag-svg .gen-attr-dag-links {
-    display: none;
+  // attribution-matrix：灰格透明，透出 .gen-attr-dag-matrix-grid-bg（空格同色）。
+  #results.gen-attr-results-surface.LMF.gen-attr-dag-hide-inactive-edges .gen-attr-dag-svg {
+    .gen-attr-dag-links {
+      display: none;
+    }
+
+    .gen-attr-dag-matrix .gen-attr-dag-matrix-cell--inactive:not(.gen-attr-dag-matrix-self-cell) {
+      opacity: 0 !important;
+      pointer-events: none;
+    }
+  }
+
+  // attribution-matrix：attention 式热力图 + 轴 token（复用 .gen-attr-dag-node 背景/三态描边，见 genAttributeDagViewMatrixMode）
+  #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-matrix {
+    .gen-attr-dag-matrix-cell {
+      transition: none;
+    }
+
+    .gen-attr-dag-matrix-frame {
+      stroke: color-mix(in srgb, var(--text-color, #222) 28%, transparent);
+      stroke-width: 1;
+    }
+
+    // 轴 token 尺寸固定（不随 compactness 缩放），字号固定以保证可读
+    .gen-attr-dag-matrix-token .gen-attr-dag-node-text {
+      font-size: 11px;
+    }
+
+    // 蓝框线宽固定 2（与 chip 几何一致，不跟 display-scale）；外扩 pad 见 appendTokenChip
+    .gen-attr-dag-matrix-token.gen-attr-dag-node--hover .gen-attr-dag-node-stroke,
+    .gen-attr-dag-matrix-token.gen-attr-dag-node--selected .gen-attr-dag-node-stroke {
+      stroke-width: 2;
+    }
+
+    .gen-attr-dag-matrix-self-label {
+      font-size: 10px;
+      fill: color-mix(in srgb, var(--text-color, #222) 72%, transparent);
+      pointer-events: none;
+    }
+
+    .gen-attr-dag-matrix-axis-title {
+      font-size: 9px;
+      fill: color-mix(in srgb, var(--text-color, #222) 48%, transparent);
+      pointer-events: none;
+    }
+
+    .gen-attr-dag-matrix-axis-corner-line {
+      stroke: color-mix(in srgb, var(--text-color, #222) 28%, transparent);
+      stroke-width: 1;
+    }
   }
 
   // 合成边稳态灰边不画；仅在焦点传播链高亮时可见，用虚线区分 API 归因边（genAttributeDagView DagLink.synthetic）
@@ -412,27 +462,75 @@ $gen-attr-cached-demos-panel-width: 21em;
     right: 84px;
   }
 
-  // ▶ / ↯ 可点时：灰 ↔ 强调色脉动，提示可播（步进重放 / 传播链）
-  @keyframes gen-attr-dag-propagation-play-hint {
-    0%,
-    100% {
-      color: var(--refresh-btn-color);
-    }
-
-    50% {
-      color: var(--accent-color);
-    }
-  }
-
+  // ▶ / ↯ 可点且未在播：固定强调色（气泡已承担首次引导，不再脉动）
   #results.gen-attr-results-surface.LMF
     > button.gen-attr-dag-play.gen-attr-dag-play--propagation-hint:not(:disabled) {
-    animation: gen-attr-dag-propagation-play-hint 1.6s ease-in-out infinite;
+    color: var(--accent-color);
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    #results.gen-attr-results-surface.LMF
-      > button.gen-attr-dag-play.gen-attr-dag-play--propagation-hint {
-      animation: none;
+  // ▶ / ↯ 首次可点教练气泡（各一次；对齐 play 按钮 right: 84px）
+  #results.gen-attr-results-surface.LMF > .gen-attr-dag-play-coachmark {
+    position: absolute;
+    top: 48px;
+    right: 28px;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    max-width: min(280px, calc(100% - 24px));
+    pointer-events: none;
+
+    &[hidden] {
+      display: none !important;
+    }
+  }
+
+  #results.gen-attr-results-surface.LMF > .gen-attr-dag-play-coachmark .gen-attr-dag-play-coachmark-arrow {
+    width: 0;
+    height: 0;
+    margin-right: 60px;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-bottom: 9px solid var(--accent-color);
+  }
+
+  #results.gen-attr-results-surface.LMF > .gen-attr-dag-play-coachmark .gen-attr-dag-play-coachmark-body {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 14px 16px;
+    border-radius: 8px;
+    background: var(--bg-color, #fff);
+    color: var(--text-color);
+    border: 1px solid var(--accent-color);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+    pointer-events: auto;
+  }
+
+  #results.gen-attr-results-surface.LMF > .gen-attr-dag-play-coachmark .gen-attr-dag-play-coachmark-text {
+    font-size: 15px;
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+
+  #results.gen-attr-results-surface.LMF > .gen-attr-dag-play-coachmark .gen-attr-dag-play-coachmark-dismiss {
+    align-self: flex-end;
+    margin: 0;
+    padding: 0;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.2;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--refresh-btn-color);
+    cursor: pointer;
+    box-shadow: none;
+
+    &:hover {
+      color: var(--accent-color);
+      background: transparent;
     }
   }
 
@@ -472,6 +570,17 @@ $gen-attr-cached-demos-panel-width: 21em;
 :root[data-theme="dark"] .gen-attribute-page #results.gen-attr-results-surface.LMF .gen-attr-dag-stack {
   background: var(--gen-attr-dag-canvas-bg);
   // --gen-attr-dag-prompt-node-fill: rgba(203, 160, 115, 0.28);
+}
+
+// matrix：外围略亮（--text-area-bg #191919），空格仍用画布深色（--gen-attr-dag-canvas-bg）
+:root[data-theme="dark"] .gen-attribute-page #results.gen-attr-results-surface.LMF:has(.gen-attr-dag-matrix-layout),
+:root[data-theme="dark"] .gen-attribute-page #results.gen-attr-results-surface.LMF:has(.gen-attr-dag-matrix-layout):fullscreen,
+:root[data-theme="dark"] .gen-attribute-page #results.gen-attr-results-surface.LMF.css-pseudo-fullscreen-target:has(.gen-attr-dag-matrix-layout) {
+  background: var(--text-area-bg);
+}
+
+:root[data-theme="dark"] .gen-attribute-page #results.gen-attr-results-surface.LMF .gen-attr-dag-stack.gen-attr-dag-matrix-layout {
+  background: var(--text-area-bg);
 }
 
 // 与 Chat 页 .text-metrics-chat #metric_usage 对齐（本页使用独立 id）

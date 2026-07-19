@@ -34,6 +34,11 @@ export type ToolTipOptions = {
 
 /** {@link ToolTip.updateData} 可选增补（如 DAG：CI/MI 行紧跟 surprisal 之后） */
 export type ToolTipUpdateAugment = {
+    /**
+     * 覆盖红色标题区：每行单独走 {@link tooltipTokenDisplayHtml}，以 `<br/>` 连接。
+     * 未设则用 `tokenData.raw`（整段可视化；其中的换行会变成 `[LF]`）。
+     */
+    headerLines?: string[];
     /** 在 surprisal / 信息密度行之前渲染（紧跟 token 文字，位于所有 info 行上方） */
     rowsBeforeInfo?: Array<{ label: string; value: string; valueColor?: boolean }>;
     rowsAfterSurprisal?: Array<{ label: string; value: string; valueColor?: boolean }>;
@@ -312,10 +317,13 @@ export class ToolTip {
     private _updateContent(ri: GLTR_RenderItem, augment?: ToolTipUpdateAugment): void {
         const { selectedColor, detailColor, valueColor } = this.themeColors;
 
-        // 更新当前token显示（第一行）
+        // 更新当前 token 显示（红色标题区）
         this.currentToken.html(() => {
-            const visualizedToken = tooltipTokenDisplayHtml(ri.tokenData.raw);
-            return `<span style="color: ${selectedColor};">${visualizedToken}</span>`;
+            const body =
+                augment?.headerLines != null
+                    ? augment.headerLines.map((line) => tooltipTokenDisplayHtml(line)).join('<br/>')
+                    : tooltipTokenDisplayHtml(ri.tokenData.raw);
+            return `<span style="color: ${selectedColor};">${body}</span>`;
         });
 
         const tokenData = ri.tokenData as FrontendToken;

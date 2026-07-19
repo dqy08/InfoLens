@@ -205,13 +205,34 @@
                             <label class="semantic-submode-label" for="gen_attr_dag_layout_mode">DAG layout</label>
                             <select id="gen_attr_dag_layout_mode"
                                 class="semantic-submode-select gen-attr-dag-layout-mode-select"
-                                title="Choose DAG layout. 'text-flow' follows text layout geometry; 'linear-arc' uses fixed-order linear nodes with arc links; 'linear-arc-step-down' is like linear-arc but drops each successive token vertically by CI (baseline = unscaled node height); 'spiral' lays nodes on an Archimedean spiral (for fun)."
+                                title="Choose DAG layout. 'text-flow' follows text layout geometry; 'linear-arc' uses fixed-order linear nodes with arc links; 'linear-arc-step-down' is like linear-arc but drops each successive token vertically by CI (baseline = unscaled node height); 'spiral' lays nodes on an Archimedean spiral (for fun); 'matrix' shows a heatmap of attribution strength (attention-matrix style)."
                                 data-i18n="title">
                                 <option value="text-flow">text</option>
+                                <option value="spiral">spiral (for fun)</option>
+                                <option value="attribution-matrix">matrix</option>
                                 <option value="linear-arc">linear-arc</option>
                                 <option value="linear-arc-step-down">step-down(beta)</option>
-                                <option value="spiral">spiral (for fun)</option>
                             </select>
+                        </span>
+                        <span class="semantic-submode-group" id="gen_attr_dag_matrix_transpose_group" hidden>
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_matrix_transpose"
+                                    title="Swap matrix row and column axes (symmetric layout). Sources stay sources; only the on-screen orientation flips. Self becomes a column when enabled."
+                                    data-i18n="title">
+                                Switch axis
+                            </label>
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_matrix_switch_horizontal_label"
+                                    title="Flip which side the horizontal-axis token labels sit on. Off: top. On: bottom."
+                                    data-i18n="title">
+                                Flip x label
+                            </label>
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_matrix_switch_vertical_label"
+                                    title="Flip which side the vertical-axis token labels sit on. Off: left. On: right."
+                                    data-i18n="title">
+                                Flip y label
+                            </label>
                         </span>
                         <span class="semantic-submode-group" id="gen_attr_dag_compactness_group">
                             <label class="semantic-submode-label" for="gen_attr_dag_compactness" data-i18n>Compactness</label>
@@ -238,7 +259,7 @@
                         </span>
                     </div>
                     <div class="gen-attr-dag-measure-width-row gen-attr-dag-surprisal-toggles-row semantic-submode-row">
-                        <span class="semantic-submode-group">
+                        <span class="semantic-submode-group" id="gen_attr_dag_node_ci_visual_scale_group">
                             <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_node_ci_visual_scale"
                                     title="When checked, generated nodes are visually enlarged based on their conditional information (surprisal). Takes effect on next generation."
@@ -325,7 +346,7 @@
                         <span class="semantic-submode-group">
                             <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_hide_inactive_edges"
-                                    title="When checked, gray DAG edges not adjacent to the hovered or selected node are hidden."
+                                    title="When checked, gray DAG edges (or gray matrix cells) not highlighted by the current focus are hidden."
                                     data-i18n="title">
                                 Hide inactive edges
                             </label>
@@ -516,6 +537,14 @@
                                     data-i18n="title">
                                 <span data-i18n>Auto zoom</span>
                             </label>
+                            <span class="semantic-submode-group" id="gen_attr_dag_matrix_pin_source_group" hidden>
+                                <label class="semantic-submode-label">
+                                    <input type="checkbox" id="gen_attr_dag_matrix_pin_source"
+                                        title="Matrix only: during step replay (▶), keep the source axis at the screen position it had when you pressed play (usually the finished view); other matrix content moves into place. Works with or without Auto zoom (stops if you pan or zoom). Saved locally."
+                                        data-i18n="title">
+                                    Pin source tokens
+                                </label>
+                            </span>
                         </span>
                     </div>
                     <div id="gen_attr_dag_lightning_options_row" class="gen-attr-dag-measure-width-row semantic-submode-row gen-attr-dag-lightning-options-row" hidden>

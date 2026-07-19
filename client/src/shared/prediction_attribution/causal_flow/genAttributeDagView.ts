@@ -35,6 +35,7 @@ import {
 } from './genAttributeDagEdgeRenderStrength';
 import { createDagLightningSoundController } from './genAttributeDagLightningSound';
 import { DAG_CAUSAL_FLOW_ICON } from './genAttributeDagIcons';
+import { lsReadBool, lsWriteBool } from '../../storage/localStorageHelpers';
 import {
     backwardSlideIncomingEdgeKeysForBatch,
     createDagRecursiveEdgeAnimationController,
@@ -45,6 +46,7 @@ import {
     type DagPropagationPlaybackOptions,
     type DagPropagationPlaybackPhase,
     type DagRecursiveEdgeAnimationDirection,
+    type RecursiveEdgeAnimationRenderOverlay,
 } from './genAttributeDagRecursiveEdgeAnimation';
 import {
     clampDimInactiveTokensThreshold,
@@ -92,18 +94,60 @@ import {
     LINEAR_ARC_STEP_DOWN_DISTANCE_SCALE,
     paintLinearArcLayout,
 } from './genAttributeDagViewLinearArcMode';
-import { paintTextFlowLayout } from './genAttributeDagViewTextFlowMode';
+import {
+    dagNodeBaseWidth,
+    dagTextFlowPaintOrigin,
+    paintTextFlowLayout,
+} from './genAttributeDagViewTextFlowMode';
 import { paintSpiralLayout } from './genAttributeDagViewSpiralMode';
+import {
+    attributionMatrixCellKey,
+    attributionMatrixEdgeEndpoints,
+    MATRIX_TOKEN_OPACITY_FULL,
+    MATRIX_TOKEN_OPACITY_WEAKENED,
+    disposeMatrixPointerHit,
+    paintAttributionMatrixLayout,
+    restyleAttributionMatrixLayout,
+    type MatrixCellVisual,
+    type MatrixInteractionHandlers,
+    type MatrixTokenVisual,
+} from './genAttributeDagViewMatrixMode';
 import { tr } from '../../../shared/lang/i18n-lite';
+
+/** ▶ / ↯ 首次可点教练提示：各记一次（Got it 或实际点击播放）。 */
+type DagPlayCoachmarkKind = 'step' | 'propagation';
+const DAG_PLAY_COACHMARK_SEEN_KEYS: Record<DagPlayCoachmarkKind, string> = {
+    step: 'info_radar_gen_attr_dag_play_coachmark_step',
+    propagation: 'info_radar_gen_attr_dag_play_coachmark_propagation',
+};
+
+function isDagPlayCoachmarkSeen(kind: DagPlayCoachmarkKind): boolean {
+    return lsReadBool(DAG_PLAY_COACHMARK_SEEN_KEYS[kind], false, { encoding: '1' });
+}
+
+function markDagPlayCoachmarkSeen(kind: DagPlayCoachmarkKind): void {
+    lsWriteBool(DAG_PLAY_COACHMARK_SEEN_KEYS[kind], true, '1');
+}
 
 /** 再次挂载前执行上一轮 detach（当前为空操作，保留扩展点） */
 const detachGenAttributeDagPanel = new WeakMap<HTMLElement, () => void>();
 
-/** 节点布局模式：`text-flow` 按文字排版层几何；`linear-arc` / `linear-arc-step-down` 为线性序 + 弧线连边（后者按 CI 逐级下移）；`spiral` 螺旋排布。 */
-export type DagLayoutMode = 'text-flow' | 'linear-arc' | 'linear-arc-step-down' | 'spiral';
+/** 节点布局模式：`text-flow` 按文字排版层几何；`linear-arc` / `linear-arc-step-down` 为线性序 + 弧线连边（后者按 CI 逐级下移）；`spiral` 螺旋排布；`attribution-matrix` 归因强度热力图（attention-matrix 式）。 */
+export type DagLayoutMode =
+    | 'text-flow'
+    | 'linear-arc'
+    | 'linear-arc-step-down'
+    | 'spiral'
+    | 'attribution-matrix';
 function isLinearArcFamilyLayout(mode: DagLayoutMode): mode is 'linear-arc' | 'linear-arc-step-down' {
     return mode === 'linear-arc' || mode === 'linear-arc-step-down';
 }
+
+/** attribution-matrix 交互目标：见 {@link matrixHoverTarget}。 */
+type MatrixInteractionTarget =
+    | { type: 'row'; id: string }
+    | { type: 'col'; id: string }
+    | { type: 'cell'; srcId: string; tgtId: string };
 
 export const DAG_COMPACTNESS_DEFAULT = 0.5;
 /** 下限取小正数以满足 {@link readDisplayScaleFromCss}「必须为正」且不出现零宽度边线。 */
@@ -231,11 +275,11 @@ type DagNodeAttrs = {
     start: number;
     end: number;
     /**
-     * 节点矩形中心坐标。center 不随 CI 缩放变化，故同行 token 的 cy 始终相等，
-     * 可直接用于 {@link snapSubwordNode} 同行检测，无需额外 baseY 字段。
+     * 测量层矩形左上角（1×）。compactness / CI 不改此值；text-flow 绘制偏移见 {@link dagTextFlowPaintOrigin}。
+     * 同行 `y` 相等供 {@link snapSubwordNode}；compactness 水平贴左，避免长 token 相对短 token 右偏。
      */
-    cx: number;
-    cy: number;
+    x: number;
+    y: number;
     /** 测量层几何 × display-scale × CI 缩放 后的宽、高 */
     nodeW: number;
     nodeH: number;
@@ -376,6 +420,26 @@ function computeSteadyStateStayShareById(
     return byNodeId;
 }
 
+/** Self 行蓝格 opacity：stay 池内 max 归一 + 焦点 MI 刻度，与蓝入边 {@link buildMaxNormalizedRenderStrengthByKey} 同尺度。 */
+function buildMatrixSelfCellOpacityByCol(
+    stayById: Map<string, number>,
+    colNodes: DagNode[],
+    focusTargetMiRatio: number,
+    maxShareOverride?: number,
+): Map<number, number> {
+    const renderByNodeId = buildMaxNormalizedRenderStrengthByKey(
+        stayById,
+        focusTargetMiRatio,
+        maxShareOverride,
+    );
+    const byCol = new Map<number, number>();
+    for (let col = 0; col < colNodes.length; col++) {
+        const opacity = renderByNodeId.get(colNodes[col]!.id);
+        if (opacity != null) byCol.set(col, opacity);
+    }
+    return byCol;
+}
+
 /** 递归链候选节点描边强度：stay 池内 max 归一后映射到 `[{@link DAG_NODE_STROKE_OPACITY_BASE}, 1]`。 */
 function buildNodeStrokeRenderStrengthById(
     stayByNodeId: Map<string, number>,
@@ -416,6 +480,8 @@ const DAG_INITIAL_ZOOM_BOOST_TEXT_FLOW = 2;
 const DAG_INITIAL_ZOOM_BOOST_LINEAR_ARC = 4;
 /** spiral：同上 */
 const DAG_INITIAL_ZOOM_BOOST_SPIRAL = 2;
+/** attribution-matrix：同上 */
+const DAG_INITIAL_ZOOM_BOOST_ATTRIBUTION_MATRIX = 2;
 
 function dagInitialZoomBoost(mode: DagLayoutMode): number {
     switch (mode) {
@@ -426,6 +492,8 @@ function dagInitialZoomBoost(mode: DagLayoutMode): number {
             return DAG_INITIAL_ZOOM_BOOST_LINEAR_ARC;
         case 'spiral':
             return DAG_INITIAL_ZOOM_BOOST_SPIRAL;
+        case 'attribution-matrix':
+            return DAG_INITIAL_ZOOM_BOOST_ATTRIBUTION_MATRIX;
         default: {
             const _: never = mode;
             throw new Error(`genAttributeDagView: unknown DagLayoutMode (${String(_)})`);
@@ -557,17 +625,21 @@ function rectsIntersect(
     return a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0;
 }
 
-function nodeAabb(d: Pick<DagNode, 'cx' | 'cy' | 'nodeW' | 'nodeH'>): {
+function nodeAabb(
+    d: Pick<DagNode, 'x' | 'y' | 'nodeW' | 'nodeH' | 'ciVisualScale'>,
+    displayScale: number,
+): {
     x0: number;
     y0: number;
     x1: number;
     y1: number;
 } {
+    const p = dagTextFlowPaintOrigin(d, displayScale);
     return {
-        x0: d.cx - d.nodeW / 2,
-        y0: d.cy - d.nodeH / 2,
-        x1: d.cx + d.nodeW / 2,
-        y1: d.cy + d.nodeH / 2,
+        x0: p.x,
+        y0: p.y,
+        x1: p.x + d.nodeW,
+        y1: p.y + d.nodeH,
     };
 }
 
@@ -655,7 +727,7 @@ export type GenAttributeDagHandle = {
     /** 更新边 Top-P 覆盖阈值；要重算当前 DAG 须 {@link rebuildEdges}（或 reset 后重放）。 */
     setEdgeTopPCoverage(coverage: number): void;
     /**
-     * 按当前 Top-P / exclude / decay 等设置，仅重建边集；保留节点几何（含拖拽后的 cx/cy）与视口。
+     * 按当前 Top-P / exclude / decay 等设置，仅重建边集；保留节点几何（含拖拽后的 x/y）与视口。
      * 稳态改边相关选项时用此路径，勿整图 {@link reset}。
      */
     rebuildEdges(steps: readonly TokenGenStep[], excludeIntervalContext: string): void;
@@ -674,6 +746,29 @@ export type GenAttributeDagHandle = {
     setShowTokenInfoOnSelected(show: boolean): void;
     /** 是否启用传播归因（UI: Propagated attribution mode；`recursiveAttributionEnabled`）。 */
     setRecursiveAttributionEnabled(enabled: boolean): void;
+    /** attribution-matrix：行列屏幕轴对调（对称布局）。 */
+    setMatrixTranspose(transpose: boolean): void;
+    /** attribution-matrix：横轴标签翻到远侧（默认近侧：上）。 */
+    setMatrixSwitchHorizontalLabel(on: boolean): void;
+    /** attribution-matrix：纵轴标签翻到远侧（默认近侧：左）。 */
+    setMatrixSwitchVerticalLabel(on: boolean): void;
+    /**
+     * attribution-matrix：播放跟随时钉住第一个语义 source token 的屏幕位置
+     *（稳态取自点击 ▶ 时的视口，多为播完画面；可与 Auto zoom 同用）。
+     */
+    setMatrixPinSourceTokens(pin: boolean): void;
+    /**
+     * 从当前已绘矩阵视口捕获 pin 稳态（须在点击 ▶、裁前缀 / `reset` 之前调用）。
+     */
+    captureMatrixPinSteady(): void;
+    /** 清除 {@link captureMatrixPinSteady} 的结果。 */
+    clearMatrixPinSteady(): void;
+    /**
+     * 步进回放中：按当前缩放平移视口，使第一个 source 锚点落在 {@link captureMatrixPinSteady} 的屏幕位置。
+     * 与 Auto zoom 正交——先 fit 再调本方法。
+     * 播放前的 pan/zoom 不妨碍钉住（稳态即捕获自当时视口）；播放中用户再 pan/zoom 则停止跟随。
+     */
+    syncMatrixPinViewport(): void;
     /** 传播链播放方向（forward / backward）。 */
     setRecursiveEdgeBatchAnimationDirection(direction: DagRecursiveEdgeAnimationDirection): void;
     /** 重算节点/边高亮（如 slide prompt 等仅影响渲染、不改图数据的选项切换后）。 */
@@ -740,33 +835,87 @@ type DagLinkTitleSnapshot = {
     linkStrength: number;
 };
 
+const DAG_LINK_TOOLTIP_LABEL_OPTS = { spaceDotExceptBeforeAsciiLetterOrNumber: true as const };
+
+/** 边 tooltip 指标（SVG `<title>` 与 matrix 格 HUD 同源）。 */
+function buildLinkTitleMetricRows(snapshot: DagLinkTitleSnapshot): {
+    staticRows: Array<{ label: string; value: string }>;
+    dynamicRows: Array<{ label: string; value: string }>;
+    alignmentNote?: string;
+} {
+    return {
+        staticRows: [
+            {
+                label: 'Attribution score:',
+                value: formatTooltipAttributionScore(snapshot.normalizedScore),
+            },
+            {
+                label: 'Target MI ratio:',
+                value: formatMutualInformationRatioForTooltip(snapshot.mutualInformationRatio),
+            },
+            {
+                label: 'Attribution share (Adjacent):',
+                value: formatTooltipDirectAttributionShare(
+                    snapshot.attributionShare,
+                    snapshot.mutualInformationRatio,
+                ),
+            },
+        ],
+        alignmentNote: snapshot.alignmentNote,
+        dynamicRows: [
+            {
+                label: 'Attribution share (Propagated):',
+                value: formatTooltipRecursiveAttributionShare(snapshot.recursiveAttributionShare),
+            },
+            {
+                label: 'Link strength:',
+                value: formatTooltipLinkStrength(snapshot.linkStrength),
+            },
+        ],
+    };
+}
+
 function buildLinkTitleText(snapshot: DagLinkTitleSnapshot): string {
     // 建边后不变；空行以下随焦点/传播归因变化（Attribution share (Propagated)、Link strength）。
-    const staticMetrics = [
-        `Attribution score: ${formatTooltipAttributionScore(snapshot.normalizedScore)}`,
-        `Target MI ratio: ${formatMutualInformationRatioForTooltip(snapshot.mutualInformationRatio)}`,
-        `Attribution share (Adjacent): ${formatTooltipDirectAttributionShare(
-            snapshot.attributionShare,
-            snapshot.mutualInformationRatio,
-        )}`,
-    ];
-    if (snapshot.alignmentNote) {
-        staticMetrics.push(snapshot.alignmentNote);
-    }
+    const { staticRows, dynamicRows, alignmentNote } = buildLinkTitleMetricRows(snapshot);
+    const staticMetrics = staticRows.map((r) => `${r.label} ${r.value}`);
+    if (alignmentNote) staticMetrics.push(alignmentNote);
 
     const metrics = [
         staticMetrics.join('\n'),
         '',
-        `Attribution share (Propagated): ${formatTooltipRecursiveAttributionShare(snapshot.recursiveAttributionShare)}`,
-        `Link strength: ${formatTooltipLinkStrength(snapshot.linkStrength)}`,
+        ...dynamicRows.map((r) => `${r.label} ${r.value}`),
     ];
 
-    const dagTooltipLabelOpts = { spaceDotExceptBeforeAsciiLetterOrNumber: true as const };
     return [
-        `From:\n${visualizeSpecialChars(snapshot.src.label, dagTooltipLabelOpts)}\nOffset: ${formatNodeOffsetRange(snapshot.src.id)}`,
-        `To:\n${visualizeSpecialChars(snapshot.tgt.label, dagTooltipLabelOpts)}\nOffset: ${formatNodeOffsetRange(snapshot.tgt.id)}`,
+        `From:\n${visualizeSpecialChars(snapshot.src.label, DAG_LINK_TOOLTIP_LABEL_OPTS)}\nOffset: ${formatNodeOffsetRange(snapshot.src.id)}`,
+        `To:\n${visualizeSpecialChars(snapshot.tgt.label, DAG_LINK_TOOLTIP_LABEL_OPTS)}\nOffset: ${formatNodeOffsetRange(snapshot.tgt.id)}`,
         metrics.join('\n'),
     ].join('\n\n');
+}
+
+/** tooltip「Link strength」/ Propagated 份额：与 {@link resolveDagLinkHighlightDisplay} 同源。 */
+function resolveDagLinkTooltipStrengths(
+    d: Pick<DagLink, 'attributionShare' | 'normalizedScore' | 'mutualInformationRatio'>,
+    edgeKey: string,
+    focusState: DagFocusAttributionState | null,
+    recursiveAttributionEnabled: boolean,
+): { linkStrength: number; recursiveAttributionShare?: number } {
+    const directStrength = directAttributionStrength(d);
+    if (focusState) {
+        const downstreamStrength = focusState.downstreamEdgeStrengthByKey.get(edgeKey);
+        if (downstreamStrength != null) {
+            return { linkStrength: downstreamStrength };
+        }
+        const incomingShare = focusState.incomingEdgeShareByKey.get(edgeKey);
+        if (incomingShare != null) {
+            return {
+                linkStrength: incomingShare,
+                recursiveAttributionShare: recursiveAttributionEnabled ? incomingShare : undefined,
+            };
+        }
+    }
+    return { linkStrength: directStrength };
 }
 
 /**
@@ -776,15 +925,15 @@ function buildLinkTitleText(snapshot: DagLinkTitleSnapshot): string {
 const GLUE_EDGE_CHAR = /^(?:(?!\p{Script=Han})\p{L}|['\-_])$/u;
 
 /**
- * 子词拼接：offset 紧贴、同行（cy 相等）、prev 末码点与当前首码点均满足 {@link GLUE_EDGE_CHAR}
- * → 将当前节点中心 cx 紧贴 prev 右缘（链式调用时 prev.cx 已调整，自动支持多段续片）。
+ * 子词拼接：offset 紧贴、同行（y 相等）、prev 末码点与当前首码点均满足 {@link GLUE_EDGE_CHAR}
+ * → 将当前测量左缘按 compactness 底宽紧贴 prev（不含 CI 外扩）。
  */
 function snapSubwordNode(node: DagNode, prev: DagNode | null): void {
-    if (!prev || prev.end !== node.start || node.cy !== prev.cy) return;
+    if (!prev || prev.end !== node.start || node.y !== prev.y) return;
     const last = [...prev.label].at(-1) ?? '';
     const first = [...node.label][0] ?? '';
     if (!GLUE_EDGE_CHAR.test(last) || !GLUE_EDGE_CHAR.test(first)) return;
-    node.cx = prev.cx + (prev.nodeW + node.nodeW) / 2;
+    node.x = prev.x + dagNodeBaseWidth(prev);
 }
 
 /**
@@ -837,6 +986,12 @@ function resolveDagLinkHighlightDisplay(
 ): DagLinkHighlightDisplay {
     const directStrength = directAttributionStrength(d);
     const grayRender = grayRenderByKey.get(edgeKey) ?? directStrength;
+    const { linkStrength, recursiveAttributionShare } = resolveDagLinkTooltipStrengths(
+        d,
+        edgeKey,
+        focusState,
+        recursiveAttributionEnabled,
+    );
 
     if (focusState) {
         const downstreamStrength = focusState.downstreamEdgeStrengthByKey.get(edgeKey);
@@ -844,7 +999,7 @@ function resolveDagLinkHighlightDisplay(
             return {
                 stroke: `var(${CSS_VAR_DAG_HIGHLIGHT_LINE_OUT})`,
                 renderStrength: downstreamHighlightRenderByKey.get(edgeKey)!,
-                linkStrength: downstreamStrength,
+                linkStrength,
             };
         }
 
@@ -858,8 +1013,8 @@ function resolveDagLinkHighlightDisplay(
                         : `var(${CSS_VAR_DAG_HIGHLIGHT_LINE_IN})`,
                 renderStrength:
                     backwardSlideRender ?? incomingHighlightRenderByKey.get(edgeKey)!,
-                linkStrength: incomingShare,
-                recursiveAttributionShare: recursiveAttributionEnabled ? incomingShare : undefined,
+                linkStrength,
+                recursiveAttributionShare,
             };
         }
     }
@@ -867,7 +1022,7 @@ function resolveDagLinkHighlightDisplay(
     return {
         stroke: `var(${CSS_VAR_DAG_NORMAL_LINE_COLOR})`,
         renderStrength: grayRender,
-        linkStrength: directStrength,
+        linkStrength,
     };
 }
 
@@ -992,6 +1147,26 @@ export function initGenAttributeDagView(
     let dimInactiveNotDuringAnimation: boolean = options?.dimInactiveNotDuringAnimation ?? false;
     let showTokenInfoOnSelected: boolean = options?.showTokenInfoOnSelected ?? false;
     let recursiveAttributionEnabled: boolean = options?.recursiveAttributionEnabled ?? false;
+    /** attribution-matrix：true 时横=目标、纵=源；Self 为右列。 */
+    let matrixTranspose = false;
+    /** attribution-matrix：横轴标签在远侧（下）。 */
+    let matrixSwitchHorizontalLabel = false;
+    /** attribution-matrix：纵轴标签在远侧（右）。 */
+    let matrixSwitchVerticalLabel = false;
+    /** attribution-matrix：播放跟随时钉住第一个语义 source token。 */
+    let matrixPinSourceTokens = false;
+    /** 最近一次 matrix paint 的第一个 source 锚点（matrixG 坐标）；无源轴时为 null。 */
+    let matrixFirstSourceAnchor: { x: number; y: number } | null = null;
+    /**
+     * pin 稳态：点击 ▶ 时第一个 source 的屏幕位置（多为播完画面；含用户已 pan/zoom 的位置）。
+     * 播放中 fit 之后 {@link syncMatrixPinViewport} 对齐到此，使 source 轴停在该位置。
+     */
+    let matrixPinSteady: { x: number; y: number } | null = null;
+    /**
+     * 捕获稳态后允许跟随；播放中用户 pan/zoom 置 false（与 Auto zoom 的 mid-play 打断同理）。
+     * 不用 `layoutDirty`：播放前拖拽也会 dirty，但 pin 正要钉在那时的位置。
+     */
+    let matrixPinFollowActive = false;
     let showDownstreamInfluence: boolean = options?.showDownstreamInfluence ?? false;
     let edgeTopPCoverage = clampDagEdgeTopPCoverage(
         options?.edgeTopPCoverage ?? DAG_EDGE_TOP_P_COVERAGE_DEFAULT,
@@ -1039,6 +1214,13 @@ export function initGenAttributeDagView(
             setDimInactiveNotDuringAnimation: noop,
             setShowTokenInfoOnSelected: noop,
             setRecursiveAttributionEnabled: noop,
+            setMatrixTranspose: noop,
+            setMatrixSwitchHorizontalLabel: noop,
+            setMatrixSwitchVerticalLabel: noop,
+            setMatrixPinSourceTokens: noop,
+            captureMatrixPinSteady: noop,
+            clearMatrixPinSteady: noop,
+            syncMatrixPinViewport: noop,
             setRecursiveEdgeBatchAnimationDirection: noop,
             refreshNodeLinkHighlight: noop,
             setAttentionPlaybackHighlight: noop,
@@ -1064,7 +1246,7 @@ export function initGenAttributeDagView(
     detachGenAttributeDagPanel.get(rootEl)?.();
     resultsRoot
         .selectAll(
-            '.gen-attr-dag-stack, .gen-attr-dag-topk-tooltip, svg.gen-attr-dag-svg, button.gen-attr-dag-refresh, button.gen-attr-dag-play, button.gen-attr-dag-fullscreen'
+            '.gen-attr-dag-stack, .gen-attr-dag-topk-tooltip, svg.gen-attr-dag-svg, button.gen-attr-dag-refresh, button.gen-attr-dag-play, button.gen-attr-dag-fullscreen, .gen-attr-dag-play-coachmark'
         )
         .remove();
 
@@ -1094,6 +1276,7 @@ export function initGenAttributeDagView(
     /** 非 text-flow 时节点不可拖；用该类覆盖选中态的 grab 光标（linear-arc / spiral 等）。 */
     function syncStackLayoutDragUi(): void {
         stackEl.classList.toggle('gen-attr-dag-no-node-drag-layout', layoutMode !== 'text-flow');
+        stackEl.classList.toggle('gen-attr-dag-matrix-layout', layoutMode === 'attribution-matrix');
     }
     syncStackLayoutDragUi();
 
@@ -1181,9 +1364,13 @@ export function initGenAttributeDagView(
         .zoom<SVGSVGElement, unknown>()
         .on('zoom', (event) => {
             rootG.attr('transform', event.transform);
-            // 仅用户交互（滚轮/拖平移/双击）计入「改动布局」；程序触发的 transform
-            // （init 初始缩放、`fitViewportToContent`）`sourceEvent === null`，不置 dirty。
-            if (event.sourceEvent) layoutDirty = true;
+            // 仅用户交互（滚轮/拖平移）计入「改动布局」；程序触发的 transform
+            // （init 初始缩放、`fitViewportToContent`、pin 跟随）`sourceEvent === null`，不置 dirty。
+            if (event.sourceEvent) {
+                layoutDirty = true;
+                // 播放中用户改视口：停止 pin 跟随（播放前的 dirty 不经过这里打断）。
+                if (matrixPinSteady != null) matrixPinFollowActive = false;
+            }
             syncGenAttrDagTopkTooltipImpl();
         });
 
@@ -1192,9 +1379,17 @@ export function initGenAttributeDagView(
     }
 
     svg.call(zoomBehavior);
+    // 不要 d3.zoom 默认的双击放大。
+    svg.on('dblclick.zoom', null);
     applyInitialDagZoom();
 
-    svg.on('click', () => clearNodeSelection());
+    // matrix 命中也挂在 svg 上；同元素上 stopPropagation 挡不住本监听器，
+    // 若此处仍 clear，会先清空再被 matrixHit 重新选中，导致无法 toggle 取消。
+    // matrix 空白点击由 onBackgroundClick → clearNodeSelection。
+    svg.on('click', () => {
+        if (layoutMode === 'attribution-matrix') return;
+        clearNodeSelection();
+    });
     // DAG 无上下文菜单；右键留给框选，并避免 Ctrl+单击（macOS）弹出菜单打断多选。
     svg.on('contextmenu', (event) => {
         event.preventDefault();
@@ -1206,6 +1401,12 @@ export function initGenAttributeDagView(
     const linkGFront = rootG.append('g').attr('class', 'gen-attr-dag-links-front');
     /** 与视觉节点同几何的透明命中层，置于 linkGFront 之上，避免蓝线挡住 hover/click */
     const nodeGHit = rootG.append('g').attr('class', 'gen-attr-dag-nodes-hit');
+    /** attribution-matrix 热力图层（与节点/边互斥显示；`pointer-events` 由 {@link syncLayoutLayerVisibility} 随模式开关） */
+    const matrixG = rootG
+        .append('g')
+        .attr('class', 'gen-attr-dag-matrix')
+        .style('display', 'none')
+        .style('pointer-events', 'none');
     /** 右键框选橡胶筋（图坐标系，随 zoom） */
     const marqueeG = rootG.append('g').attr('class', 'gen-attr-dag-marquee').style('pointer-events', 'none');
 
@@ -1231,11 +1432,22 @@ export function initGenAttributeDagView(
     let multiSelectModifierDown = false;
     /** 悬浮节点 id；无选中时参与归因预览焦点，有选中时仅驱动 `--hover` 等样式，不改归因焦点 */
     let hoveredId: string | null = null;
+    /**
+     * attribution-matrix 交互态：
+     * - `row` 点击与 {@link userFocusId} 互通（播放入口）。
+     * - `col`/`cell`：仅静态检查（红下游 / 单边），不设焦点、不驱动 ↯。
+     * - 高亮经 {@link refreshNodeLinkHighlight}；无焦点时悬停可预览（含 Self 行）。
+     * - 有焦点/lock 时悬停只加框，不改归因。点击空白清 lock + 焦点。
+     */
+    let matrixHoverTarget: MatrixInteractionTarget | null = null;
+    let matrixLockedTarget: MatrixInteractionTarget | null = null;
     /** ▶ Simulate attention：attend / FFN 阶段 token 高亮 */
     let attentionHighlight: AttentionPlaybackHighlight = null;
     let lastTokenAppearanceDwellActive = false;
     /** 最近一次 {@link refreshNodeLinkHighlight} 计算出的归因状态（基于 {@link effectiveFocusId}）；tooltip 用于展示归因份额 */
     let currentFocusState: FocusAttributionState | null = null;
+    /** 边 tooltip 用的焦点态（含动画 overlay 的 `linkFocusState`）；与 `<title>` / Link strength 同源 */
+    let currentLinkFocusState: FocusAttributionState | null = null;
     /** 传播链动画进行中 tooltip 锚点；播放结束后为 null，恢复 target / hover。 */
     let propagationPlaybackTooltip: {
         nodeId: string;
@@ -1253,7 +1465,7 @@ export function initGenAttributeDagView(
         options?.onUserFocusChange?.(userFocusId);
     }
 
-    const getPropagationPlaybackOptions =
+    const getPropagationPlaybackOptionsRaw =
         options?.getPropagationPlaybackOptions ??
         ((): DagPropagationPlaybackOptions => ({
             forwardSlideSharedNodes: false,
@@ -1262,6 +1474,13 @@ export function initGenAttributeDagView(
             lightningSlowMo: DAG_LIGHTNING_SLOW_MO_DEFAULT,
             lightningSound: false,
         }));
+    /** matrix 不接 Lightning（图隐藏且无格上等价效果）；强制关掉以免仍播雷声。 */
+    const getPropagationPlaybackOptions = (): DagPropagationPlaybackOptions => {
+        const opts = getPropagationPlaybackOptionsRaw();
+        if (layoutMode !== 'attribution-matrix') return opts;
+        if (!opts.lightningEffect && !opts.lightningSound) return opts;
+        return { ...opts, lightningEffect: false, lightningSound: false };
+    };
 
     let lightningPreviewStartedAt: number | null = null;
     let lightningTauAdjustPreview = false;
@@ -1386,12 +1605,64 @@ export function initGenAttributeDagView(
         return userFocusId ?? selectedId ?? hoveredId;
     }
 
-    /** tooltip 锚点：传播播放 > {@link solidFrameFocusId}（与实线框一致）。 */
+    /**
+     * matrix 交互 → 节点 tooltip token：行/列=对应轴 token。
+     * 格走边 tooltip（见 {@link syncGenAttrDagTopkTooltipImpl}），不经此函数。
+     */
+    function matrixTooltipTokenId(target: MatrixInteractionTarget | null): string | null {
+        if (target == null || target.type === 'cell') return null;
+        return target.id;
+    }
+
+    /**
+     * matrix 实线悬停对应的「被读份额」节点：与 text 的 `hoveredId` 同角色。
+     * 仅行/列；格用边指标，不走节点份额行。
+     */
+    function matrixShareSourceId(): string | null {
+        const hover = matrixHoverTarget;
+        if (hover == null || hover.type === 'cell') return null;
+        return hover.id;
+    }
+
+    /** tooltip 锚点：传播播放 > matrix hover/lock > {@link solidFrameFocusId}。 */
     function tooltipFocusId(): string | null {
         if (propagationPlaybackTooltip != null && graph.hasNode(propagationPlaybackTooltip.nodeId)) {
             return propagationPlaybackTooltip.nodeId;
         }
+        if (layoutMode === 'attribution-matrix') {
+            const matrixId = matrixTooltipTokenId(matrixHoverTarget ?? matrixLockedTarget);
+            if (matrixId != null && graph.hasNode(matrixId)) return matrixId;
+        }
         return solidFrameFocusId();
+    }
+
+    /** matrix 可见 chip 的 fill rect（HUD 定位不依赖几何，但 update 路径要求非空锚点）。 */
+    function matrixTooltipAnchorRect(nodeId: string, target: MatrixInteractionTarget | null): SVGRectElement | null {
+        const preferCol = target?.type === 'col';
+        const tokens = matrixG.selectAll<SVGGElement, unknown>('g.gen-attr-dag-matrix-token');
+        const fillOf = (sel: d3.Selection<SVGGElement, unknown, SVGGElement, unknown>) =>
+            sel.select<SVGRectElement>('rect.gen-attr-dag-node-fill').node();
+        const preferred = tokens.filter(function () {
+            const el = this as SVGGElement;
+            if (el.getAttribute('data-node-id') !== nodeId) return false;
+            const isCol = el.classList.contains('gen-attr-dag-matrix-col-token');
+            return preferCol ? isCol : !isCol;
+        });
+        return (
+            fillOf(preferred) ??
+            fillOf(tokens.filter(function () {
+                return (this as SVGGElement).getAttribute('data-node-id') === nodeId;
+            }))
+        );
+    }
+
+    /** matrix 格 HUD 锚点：优先格子本身，否则回退列 chip。 */
+    function matrixCellTooltipAnchorRect(srcId: string, tgtId: string): SVGRectElement | null {
+        const cell = matrixG
+            .selectAll<SVGRectElement, { srcId: string; tgtId: string }>('rect.gen-attr-dag-matrix-cell')
+            .filter((d) => d != null && d.srcId === srcId && d.tgtId === tgtId)
+            .node();
+        return cell ?? matrixTooltipAnchorRect(srcId, { type: 'col', id: srcId });
     }
 
     function dimInactiveTokensEffective(): boolean {
@@ -1480,8 +1751,25 @@ export function initGenAttributeDagView(
     function layoutModeExcludesLowVisibilityFromGeometry(): boolean {
         return (
             isLinearArcFamilyLayout(layoutMode) ||
-            layoutMode === 'spiral'
+            layoutMode === 'spiral' ||
+            layoutMode === 'attribution-matrix'
         );
+    }
+
+    /** 矩阵布局时隐藏节点/边层；其它布局隐藏矩阵层。 */
+    function syncLayoutLayerVisibility(): void {
+        const matrix = layoutMode === 'attribution-matrix';
+        const graphDisplay = matrix ? 'none' : null;
+        linkG.style('display', graphDisplay);
+        nodeG.style('display', graphDisplay);
+        linkGFront.style('display', graphDisplay);
+        nodeGHit.style('display', graphDisplay);
+        matrixG.style('display', matrix ? null : 'none').style('pointer-events', matrix ? 'auto' : 'none');
+        if (!matrix) {
+            disposeMatrixPointerHit();
+            matrixG.selectAll('*').remove();
+            matrixFirstSourceAnchor = null;
+        }
     }
 
     /** 步进重放（▶）期间为 true；fit 由页面 `afterStepShown` + Auto zoom 统一处理，见 {@link syncLayoutForLowVisibilityMembership}。 */
@@ -1550,6 +1838,11 @@ export function initGenAttributeDagView(
      * 命中区间内的 prompt token 不进入图也不进入测量层（textMeasure 物理压缩布局空间）。
      */
     let dagDeleteIntervals: [number, number][] = [];
+    /**
+     * 当前 input 区划分（prompt + 后续 tool_response）；与 step/`setPromptTokenSpans` 同源。
+     * attribution-matrix 行轴用：排除 `inputRanges[0]`，保留 k≥1 的 tool_response。
+     */
+    let dagInputRanges: CharRange[] = [];
     /**
      * 用户是否手动改动过布局：拖节点 或 用户手势 zoom/pan。
      * - true 时：容器尺寸变化（窗口 resize / 侧栏）不再自动 fit，保留用户视图
@@ -1641,6 +1934,533 @@ export function initGenAttributeDagView(
         svg.attr('width', w).attr('height', h);
     }
 
+    /**
+     * attribution-matrix 列轴（源）：与其它布局一致按 `nodeIncludedInLayout` 过滤，按 offset 定序。
+     * 行轴（目标）见 {@link matrixRowNodes}。
+     */
+    function matrixColNodes(): DagNode[] {
+        return nodes
+            .filter((n) => nodeIncludedInLayout(n))
+            .slice()
+            .sort((a, b) => a.start - b.start || a.end - b.end);
+    }
+
+    /** 是否落在 tool_response input 区（`dagInputRanges[k]`, k≥1）；与合成边建边判定一致。 */
+    function nodeInToolResponseInput(n: DagNode): boolean {
+        for (let k = 1; k < dagInputRanges.length; k++) {
+            const [trStart, trEnd] = dagInputRanges[k]!;
+            if (n.step < 0 && n.start >= trStart && n.end <= trEnd) return true;
+        }
+        return false;
+    }
+
+    /**
+     * attribution-matrix 行轴（目标）：生成 token + tool_response（第二段及之后 input）；
+     * 首轮 prompt（`inputRanges[0]`）不作被归因目标，不占纵向。
+     */
+    function matrixRowNodes(): DagNode[] {
+        return matrixColNodes().filter((n) => n.step !== -1 || nodeInToolResponseInput(n));
+    }
+
+    /** 行焦点 ↔ matrix 行 lock；非行焦点时清掉行 lock（保留 col/cell 静态 lock）。 */
+    function syncMatrixRowLockWithUserFocus(): void {
+        if (userFocusId != null && matrixRowNodes().some((n) => n.id === userFocusId)) {
+            matrixLockedTarget = { type: 'row', id: userFocusId };
+            return;
+        }
+        if (matrixLockedTarget?.type === 'row') matrixLockedTarget = null;
+    }
+
+    /** 已确立的行焦点（点击 / userFocus / ▶ selected / 行 lock）。 */
+    function matrixCommittedRowFocusId(): string | null {
+        if (!recursiveAttributionEnabled) return null;
+        if (userFocusId != null && matrixRowNodes().some((n) => n.id === userFocusId)) {
+            return userFocusId;
+        }
+        if (selectedId != null && matrixRowNodes().some((n) => n.id === selectedId)) {
+            return selectedId;
+        }
+        if (matrixLockedTarget?.type === 'row') return matrixLockedTarget.id;
+        return null;
+    }
+
+    /** Self 行：已确立行焦点；无焦点时悬停行 token 预览。 */
+    function matrixRowFocusId(): string | null {
+        const committed = matrixCommittedRowFocusId();
+        if (committed != null) return committed;
+        if (matrixHoverTarget?.type === 'row') return matrixHoverTarget.id;
+        return null;
+    }
+
+    function resolveMatrixSelfCellOpacityByCol(
+        rowFocusId: string,
+        propagationShared: MatrixPropagationHighlightShared | null,
+    ): Map<number, number> | undefined {
+        const focusState =
+            propagationShared?.focusState ??
+            computeFocusAttributionState(graph, incomingLinksByTarget, rowFocusId, {
+                maxIncomingDepth: Number.POSITIVE_INFINITY,
+                includeDownstreamInfluence: false,
+                decayAttributionToHighSurprisalTarget: dagDecayAttributionToHighSurprisalTargetEnabled,
+            });
+        if (focusState == null) return undefined;
+        const stayById =
+            propagationShared?.animOverlay.nodeStrokeShareById ??
+            computeSteadyStateStayShareById(
+                focusState.nodeShareById,
+                graph,
+                incomingLinksByTarget,
+                rowFocusId,
+            );
+        if (stayById.size === 0) return undefined;
+        const focusNode = graph.getNodeAttributes(rowFocusId) as DagNode;
+        const animOverlay = propagationShared?.animOverlay;
+        const maxShareOverride =
+            animOverlay?.animationFrontierPartial && !animOverlay.forwardPromptPreambleFrame
+                ? animOverlay.nodeStrokeMaxForRender
+                : undefined;
+        return buildMatrixSelfCellOpacityByCol(
+            stayById,
+            matrixColNodes(),
+            nodeTargetMiRatio(focusNode),
+            maxShareOverride,
+        );
+    }
+
+    /** 点列/格时清掉传播焦点，避免播放钮仍指向旧行。 */
+    function clearUserFocusForMatrixStaticLock(): void {
+        if (userFocusId == null && selectedId == null) return;
+        userFocusId = null;
+        selectedId = null;
+        recursiveEdgeAnimation.stopPlayback();
+        notifyUserFocusChange();
+        syncDagPlayButtonImpl();
+    }
+
+    const matrixInteractionHandlers: MatrixInteractionHandlers = {
+        onRowEnter: (id) => {
+            if (layoutInteractionLocked()) return;
+            matrixHoverTarget = { type: 'row', id };
+            refreshNodeLinkHighlight();
+        },
+        onRowLeave: (id) => {
+            if (matrixHoverTarget?.type === 'row' && matrixHoverTarget.id === id) matrixHoverTarget = null;
+            refreshNodeLinkHighlight();
+        },
+        onRowClick: (id) => {
+            if (layoutInteractionLocked()) return;
+            clearLayoutSelectionOnly();
+            const next = userFocusId === id ? null : id;
+            userFocusId = next;
+            selectedId = next;
+            matrixLockedTarget = next != null ? { type: 'row', id: next } : null;
+            matrixHoverTarget = null;
+            recursiveEdgeAnimation.stopPlayback();
+            refreshNodeLinkHighlight();
+            syncDagPlayButtonImpl();
+            notifyUserFocusChange();
+        },
+        onColEnter: (id) => {
+            if (layoutInteractionLocked()) return;
+            matrixHoverTarget = { type: 'col', id };
+            refreshNodeLinkHighlight();
+        },
+        onColLeave: (id) => {
+            if (matrixHoverTarget?.type === 'col' && matrixHoverTarget.id === id) matrixHoverTarget = null;
+            refreshNodeLinkHighlight();
+        },
+        onColClick: (id) => {
+            if (layoutInteractionLocked()) return;
+            clearUserFocusForMatrixStaticLock();
+            const same = matrixLockedTarget?.type === 'col' && matrixLockedTarget.id === id;
+            matrixLockedTarget = same ? null : { type: 'col', id };
+            matrixHoverTarget = null;
+            refreshNodeLinkHighlight();
+        },
+        onCellEnter: (srcId, tgtId) => {
+            if (layoutInteractionLocked()) return;
+            matrixHoverTarget = { type: 'cell', srcId, tgtId };
+            refreshNodeLinkHighlight();
+        },
+        onCellLeave: (srcId, tgtId) => {
+            if (
+                matrixHoverTarget?.type === 'cell' &&
+                matrixHoverTarget.srcId === srcId &&
+                matrixHoverTarget.tgtId === tgtId
+            ) {
+                matrixHoverTarget = null;
+            }
+            refreshNodeLinkHighlight();
+        },
+        onCellClick: (srcId, tgtId) => {
+            if (layoutInteractionLocked()) return;
+            clearUserFocusForMatrixStaticLock();
+            const same =
+                matrixLockedTarget?.type === 'cell' &&
+                matrixLockedTarget.srcId === srcId &&
+                matrixLockedTarget.tgtId === tgtId;
+            matrixLockedTarget = same ? null : { type: 'cell', srcId, tgtId };
+            matrixHoverTarget = null;
+            refreshNodeLinkHighlight();
+        },
+        onBackgroundClick: () => {
+            clearNodeSelection();
+        },
+    };
+
+    type MatrixVisualMaps = {
+        cellVisualByKey: Map<string, MatrixCellVisual>;
+        rowTokenVisualById: Map<string, MatrixTokenVisual>;
+        colTokenVisualById: Map<string, MatrixTokenVisual>;
+    };
+
+    function emptyMatrixVisualMaps(): MatrixVisualMaps {
+        return {
+            cellVisualByKey: new Map(),
+            rowTokenVisualById: new Map(),
+            colTokenVisualById: new Map(),
+        };
+    }
+
+    function weakenUnsetMatrixTokens(maps: MatrixVisualMaps): void {
+        for (const n of matrixRowNodes()) {
+            if (!maps.rowTokenVisualById.has(n.id)) {
+                maps.rowTokenVisualById.set(n.id, { fillOpacity: MATRIX_TOKEN_OPACITY_WEAKENED });
+            }
+        }
+        for (const n of matrixColNodes()) {
+            if (!maps.colTokenVisualById.has(n.id)) {
+                maps.colTokenVisualById.set(n.id, { fillOpacity: MATRIX_TOKEN_OPACITY_WEAKENED });
+            }
+        }
+    }
+
+    /**
+     * 行焦点蓝入边链 → 蓝格 + **列（source）轴**抬亮。
+     * 格：与 text 入边同一套 opacity / frontier 门控。
+     * 轴：链上 stay / 1 跳 active / slide 只抬 source 侧；target 侧仅焦点行（+ 框）。
+     */
+    function computeMatrixIncomingChainVisuals(
+        focusId: string,
+        incomingRenderByKey: Map<string, number>,
+        options?: {
+            isEdgeVisible?: (key: string) => boolean;
+            showFocusFrame?: boolean;
+            /** text 的 nodeStrokeShareById / activeNodeIds */
+            chainNodeIds?: ReadonlySet<string> | null;
+            slideTgtId?: string | null;
+            /** 与 text `highlightStayNodesFill` 一致；false 时仅焦点+slide 全亮 */
+            highlightStayNodesFill?: boolean;
+            forwardPromptPreambleFrame?: boolean;
+        },
+    ): MatrixVisualMaps {
+        const maps = emptyMatrixVisualMaps();
+        const isEdgeVisible = options?.isEdgeVisible ?? (() => true);
+        for (const [key, opacity] of incomingRenderByKey) {
+            if (!isEdgeVisible(key)) continue;
+            maps.cellVisualByKey.set(key, { kind: 'blue', opacity });
+        }
+
+        const chain = options?.chainNodeIds ?? null;
+        const slideTgtId = options?.slideTgtId ?? null;
+        const showFocusFrame = options?.showFocusFrame !== false;
+        const highlightStay = options?.highlightStayNodesFill !== false;
+        const preamble = options?.forwardPromptPreambleFrame === true;
+
+        const sourceFull = (id: string): boolean => {
+            if (id === focusId) return false; // 焦点只在 target（行）侧亮
+            if (preamble) {
+                return (
+                    graph.hasNode(id) &&
+                    (graph.getNodeAttributes(id) as DagNode).step === -1 &&
+                    (chain?.has(id) ?? false)
+                );
+            }
+            const isSlide = slideTgtId != null && id === slideTgtId;
+            if (highlightStay) return isSlide || (chain?.has(id) ?? false);
+            return isSlide;
+        };
+
+        const lightSourceAxis = (id: string): void => {
+            const colPrev = maps.colTokenVisualById.get(id);
+            maps.colTokenVisualById.set(id, {
+                fillOpacity: MATRIX_TOKEN_OPACITY_FULL,
+                frame: colPrev?.frame,
+            });
+        };
+
+        if (chain != null) {
+            for (const id of chain) {
+                if (sourceFull(id)) lightSourceAxis(id);
+            }
+        }
+        if (slideTgtId != null && sourceFull(slideTgtId)) lightSourceAxis(slideTgtId);
+
+        // 行焦点框（text 的 selected）；被归因 token 不在 target 侧抬亮。
+        if (showFocusFrame) {
+            maps.rowTokenVisualById.set(focusId, {
+                fillOpacity: MATRIX_TOKEN_OPACITY_FULL,
+                frame: 'solid',
+            });
+        }
+
+        weakenUnsetMatrixTokens(maps);
+        return maps;
+    }
+
+    /**
+     * 按当前矩阵交互目标解析格子 / 行轴 / 列轴视觉态（行·列分表，同 id 不联动）：
+     * - `row`：行焦点蓝框；蓝格对应的**列** token 抬亮；其余半亮
+     * - `col`：列焦点蓝框；红格对应的**行** token 抬亮；其余半亮
+     * - `cell`：列 src + 行 tgt 蓝框抬亮；其余半亮
+     */
+    function computeMatrixVisuals(target: MatrixInteractionTarget | null): MatrixVisualMaps {
+        const maps = emptyMatrixVisualMaps();
+        if (target == null) return maps;
+
+        if (target.type === 'cell') {
+            const { srcId, tgtId } = target;
+            if (graph.hasNode(srcId) && graph.hasNode(tgtId) && graph.hasEdge(srcId, tgtId)) {
+                // 与行焦点同一套公式（{@link buildMaxNormalizedRenderStrengthByKey}），只是强制 1 跳：
+                // 保证「悬停格子」与「悬停该格所在行」对同一条边给出完全一致的蓝色透明度。
+                const tgtNode = graph.getNodeAttributes(tgtId) as DagNode;
+                const focusState = computeFocusAttributionState(graph, incomingLinksByTarget, tgtId, {
+                    maxIncomingDepth: 1,
+                    includeDownstreamInfluence: false,
+                    decayAttributionToHighSurprisalTarget: dagDecayAttributionToHighSurprisalTargetEnabled,
+                });
+                const key = attributionMatrixCellKey(srcId, tgtId);
+                const opacity =
+                    focusState == null
+                        ? 0
+                        : buildMaxNormalizedRenderStrengthByKey(
+                              focusState.incomingEdgeShareByKey,
+                              nodeTargetMiRatio(tgtNode),
+                          ).get(key) ?? 0;
+                maps.cellVisualByKey.set(key, { kind: 'blue', opacity });
+                maps.colTokenVisualById.set(srcId, {
+                    frame: 'solid',
+                    fillOpacity: MATRIX_TOKEN_OPACITY_FULL,
+                });
+                maps.rowTokenVisualById.set(tgtId, {
+                    frame: 'solid',
+                    fillOpacity: MATRIX_TOKEN_OPACITY_FULL,
+                });
+            }
+            weakenUnsetMatrixTokens(maps);
+            return maps;
+        }
+
+        const focusId = target.id;
+        if (!graph.hasNode(focusId)) return maps;
+        const focusNode = graph.getNodeAttributes(focusId) as DagNode;
+
+        if (target.type === 'row') {
+            const focusState = computeFocusAttributionState(graph, incomingLinksByTarget, focusId, {
+                maxIncomingDepth: recursiveAttributionEnabled ? Number.POSITIVE_INFINITY : 1,
+                includeDownstreamInfluence: false,
+                decayAttributionToHighSurprisalTarget: dagDecayAttributionToHighSurprisalTargetEnabled,
+            });
+            if (focusState == null) return maps;
+            const forwardSlideSharedNodes = getPropagationPlaybackOptions().forwardSlideSharedNodes;
+            const chainNodeIds = recursiveAttributionEnabled
+                ? new Set(
+                      computeSteadyStateStayShareById(
+                          focusState.nodeShareById,
+                          graph,
+                          incomingLinksByTarget,
+                          focusId,
+                      ).keys(),
+                  )
+                : focusState.activeNodeIds;
+            return computeMatrixIncomingChainVisuals(
+                focusId,
+                buildMaxNormalizedRenderStrengthByKey(
+                    focusState.incomingEdgeShareByKey,
+                    nodeTargetMiRatio(focusNode),
+                ),
+                {
+                    chainNodeIds,
+                    // 非递归：chain=activeNodeIds，须抬亮；递归：与 text highlightStayNodesFill 一致。
+                    highlightStayNodesFill: !recursiveAttributionEnabled || !forwardSlideSharedNodes,
+                },
+            );
+        }
+
+        // target.type === 'col'：下游红链；矩阵模式下恒计算，不受 `showDownstreamInfluence` 开关影响。
+        const focusState = computeFocusAttributionState(graph, incomingLinksByTarget, focusId, {
+            maxIncomingDepth: 0,
+            includeDownstreamInfluence: true,
+            maxOutgoingDepth: recursiveAttributionEnabled ? Number.POSITIVE_INFINITY : 1,
+            decayAttributionToHighSurprisalTarget: dagDecayAttributionToHighSurprisalTargetEnabled,
+        });
+        if (focusState == null) return maps;
+        const downstreamRenderByKey = buildDownstreamArriveScaledRenderStrengthByKey(
+            focusState.downstreamEdgeStrengthByKey,
+            focusState.downstreamArriveById,
+        );
+        for (const [key, opacity] of downstreamRenderByKey) {
+            maps.cellVisualByKey.set(key, { kind: 'red', opacity });
+            const ends = attributionMatrixEdgeEndpoints(key);
+            if (ends) {
+                maps.rowTokenVisualById.set(ends.tgtId, { fillOpacity: MATRIX_TOKEN_OPACITY_FULL });
+            }
+        }
+        maps.colTokenVisualById.set(focusId, {
+            frame: 'solid',
+            fillOpacity: MATRIX_TOKEN_OPACITY_FULL,
+        });
+        weakenUnsetMatrixTokens(maps);
+        return maps;
+    }
+
+    /** ▶ / `update` 写入的 `selectedId` 若在行轴上，视为行焦点（与 text `effectiveFocusId` 对齐）。 */
+    function matrixSelectedRowTarget(): MatrixInteractionTarget | null {
+        if (selectedId == null) return null;
+        if (!matrixRowNodes().some((n) => n.id === selectedId)) return null;
+        return { type: 'row', id: selectedId };
+    }
+
+    /**
+     * matrix 静态归因目标：▶ selected 行 → userFocus 行 → lock → selected 行；无锁时悬停可预览。
+     */
+    function matrixStaticHighlightTarget(): MatrixInteractionTarget | null {
+        const selectedRow = matrixSelectedRowTarget();
+        if (dagPlaybackPlaying && selectedRow != null) return selectedRow;
+        const userFocusRow: MatrixInteractionTarget | null =
+            userFocusId != null && matrixRowNodes().some((n) => n.id === userFocusId)
+                ? { type: 'row', id: userFocusId }
+                : null;
+        const committed = userFocusRow ?? matrixLockedTarget ?? selectedRow;
+        if (committed != null) return committed;
+        return matrixHoverTarget;
+    }
+
+    /** 有锁时悬停只加框，不改格子归因（对齐 text `--hover`）。 */
+    function applyMatrixHoverFrame(maps: MatrixVisualMaps): void {
+        if (matrixCommittedRowFocusId() != null || matrixLockedTarget != null) {
+            const hover = matrixHoverTarget;
+            if (hover == null) return;
+            const bump = (map: Map<string, MatrixTokenVisual>, id: string) => {
+                const prev = map.get(id);
+                map.set(id, {
+                    fillOpacity: prev?.fillOpacity ?? MATRIX_TOKEN_OPACITY_WEAKENED,
+                    frame: prev?.frame === 'solid' ? 'solid' : 'hover',
+                });
+            };
+            if (hover.type === 'row') bump(maps.rowTokenVisualById, hover.id);
+            else if (hover.type === 'col') bump(maps.colTokenVisualById, hover.id);
+            else {
+                bump(maps.colTokenVisualById, hover.srcId);
+                bump(maps.rowTokenVisualById, hover.tgtId);
+            }
+        }
+    }
+
+    /** ↯ 进行中：userFocus 行焦点 + playing/paused。 */
+    function matrixPropagationHighlightActive(): boolean {
+        const phase = recursiveEdgeAnimation.getPlaybackPhase();
+        return (
+            recursiveAttributionEnabled &&
+            userFocusId != null &&
+            graph.hasNode(userFocusId) &&
+            (phase === 'playing' || phase === 'paused')
+        );
+    }
+
+    /**
+     * text {@link refreshNodeLinkHighlight} 本帧算出的 ↯ 中间态。
+     * matrix 高亮只由此入口消费，不再本地 resolve。
+     */
+    type MatrixPropagationHighlightShared = {
+        focusId: string;
+        focusState: FocusAttributionState;
+        animOverlay: RecursiveEdgeAnimationRenderOverlay;
+        incomingHighlightRenderByKey: Map<string, number>;
+        /** text 同帧：backward 本批 slide 入边 → 红。 */
+        backwardSlideIncomingRenderByKey: Map<string, number> | null;
+        propagationSlideTgtId: string | null;
+    };
+
+    function matrixVisualsFromPropagationShared(
+        shared: MatrixPropagationHighlightShared,
+    ): MatrixVisualMaps {
+        const {
+            focusId,
+            focusState,
+            animOverlay,
+            incomingHighlightRenderByKey,
+            backwardSlideIncomingRenderByKey,
+            propagationSlideTgtId,
+        } = shared;
+        const forwardSlideSharedNodes =
+            animOverlay.anim?.direction === 'backward'
+                ? false
+                : (animOverlay.anim?.weightScope.forwardSlideSharedNodes ??
+                  getPropagationPlaybackOptions().forwardSlideSharedNodes);
+        const chainNodeIds =
+            animOverlay.nodeStrokeShareById != null
+                ? new Set(animOverlay.nodeStrokeShareById.keys())
+                : null;
+        const isEdgeVisible = (key: string) =>
+            animOverlay.edgeVisibility(key, focusState.incomingEdgeShareByKey.has(key)) > 0;
+        const maps = computeMatrixIncomingChainVisuals(focusId, incomingHighlightRenderByKey, {
+            isEdgeVisible,
+            showFocusFrame: !animOverlay.deferFocusHighlightDuringAnim,
+            chainNodeIds,
+            slideTgtId: propagationSlideTgtId,
+            highlightStayNodesFill: !forwardSlideSharedNodes,
+            forwardPromptPreambleFrame: animOverlay.forwardPromptPreambleFrame,
+        });
+        // 对齐 text `resolveDagLinkHighlightDisplay`：本批 backward slide 入边改红。
+        if (backwardSlideIncomingRenderByKey != null) {
+            for (const [key, opacity] of backwardSlideIncomingRenderByKey) {
+                if (!isEdgeVisible(key)) continue;
+                maps.cellVisualByKey.set(key, { kind: 'red', opacity });
+            }
+        }
+        return maps;
+    }
+
+    /**
+     * 矩阵重上色（仅由 {@link refreshNodeLinkHighlight} 调用）。
+     * ↯：必须带本帧 shared；缺失则空态（报错取向，不偷偷重算）。
+     * 静态：{@link matrixStaticHighlightTarget}。
+     */
+    function refreshMatrixHighlight(
+        propagationShared: MatrixPropagationHighlightShared | null,
+    ): void {
+        if (layoutMode !== 'attribution-matrix') return;
+        grayRenderCache ??= buildGrayRenderStrengthByEdgeKey(graph, incomingLinksByTarget);
+
+        let visuals: MatrixVisualMaps;
+        if (matrixPropagationHighlightActive()) {
+            if (propagationShared == null || propagationShared.focusId !== userFocusId) {
+                throw new Error(
+                    'genAttributeDagView: matrix ↯ highlight requires shared overlay from refreshNodeLinkHighlight',
+                );
+            }
+            visuals = matrixVisualsFromPropagationShared(propagationShared);
+        } else {
+            visuals = computeMatrixVisuals(matrixStaticHighlightTarget());
+        }
+        applyMatrixHoverFrame(visuals);
+
+        const rowFocusId = matrixRowFocusId();
+        const selfCellOpacityByCol =
+            rowFocusId != null ? resolveMatrixSelfCellOpacityByCol(rowFocusId, propagationShared) : undefined;
+
+        restyleAttributionMatrixLayout({
+            matrixG,
+            grayOpacityByKey: grayRenderCache,
+            cellVisualByKey: visuals.cellVisualByKey,
+            rowTokenVisualById: visuals.rowTokenVisualById,
+            colTokenVisualById: visuals.colTokenVisualById,
+            selfCellOpacityByCol,
+        });
+        // tooltip 由 refreshNodeLinkHighlight 末尾统一 sync，此处不重复。
+    }
+
     /** 传播归因 + backward：仅 UI 路径反向，不改边数据与归因 key。 */
     function linkEndpointsForPaint(d: DagLink): { src: DagNode; tgt: DagNode } {
         const src = endpointNode(d.source, graph);
@@ -1651,6 +2471,34 @@ export function initGenAttributeDagView(
     }
 
     function paint(): void {
+        syncLayoutLayerVisibility();
+        if (layoutMode === 'attribution-matrix') {
+            // 从其它布局切回时，用 userFocusId 恢复行 lock（col/cell 静态 lock 保留）。
+            syncMatrixRowLockWithUserFocus();
+            const toMatrixNode = (n: DagNode) => ({
+                id: n.id,
+                displayLabel: n.displayLabel,
+                isPrompt: n.step === -1,
+            });
+            matrixFirstSourceAnchor = paintAttributionMatrixLayout({
+                matrixG,
+                svg: svg.node()!,
+                rowNodes: matrixRowNodes().map(toMatrixNode),
+                colNodes: matrixColNodes().map(toMatrixNode),
+                links: links.map((d) => ({
+                    source: endpointNode(d.source, graph).id,
+                    target: endpointNode(d.target, graph).id,
+                    ...(d.synthetic === true ? { synthetic: true as const } : {}),
+                })),
+                handlers: matrixInteractionHandlers,
+                showSelfRow: recursiveAttributionEnabled,
+                transpose: matrixTranspose,
+                switchHorizontalLabel: matrixSwitchHorizontalLabel,
+                switchVerticalLabel: matrixSwitchVerticalLabel,
+            });
+            // 颜色由调用方随后的 refreshNodeLinkHighlight → refreshMatrixHighlight 写入。
+            return;
+        }
         syncNodeStrokeRects(nodeSel, displayScale);
         syncNodeLayoutSelRects(nodeSel, displayScale);
         if (layoutMode === 'linear-arc' || layoutMode === 'linear-arc-step-down') {
@@ -1677,6 +2525,7 @@ export function initGenAttributeDagView(
                 linkSel,
                 nodeSel,
                 linkEndInsetPx,
+                displayScale,
                 getLinkNodes: linkEndpointsForPaint,
             });
         }
@@ -1699,26 +2548,26 @@ export function initGenAttributeDagView(
         )
         .on('start', (event, d) => {
             event.sourceEvent?.stopPropagation();
-            const [x, y] = d3.pointer(event, rootG.node());
-            dragPointerOffset = { x: x - d.cx, y: y - d.cy };
+            const [px, py] = d3.pointer(event, rootG.node());
+            dragPointerOffset = { x: px - d.x, y: py - d.y };
         })
         .on('drag', (event, d) => {
             layoutDirty = true;
             userDraggedNodes = true;
-            const [x, y] = d3.pointer(event, rootG.node());
+            const [px, py] = d3.pointer(event, rootG.node());
             const offset = dragPointerOffset ?? { x: 0, y: 0 };
-            const nextCx = x - offset.x;
-            const nextCy = y - offset.y;
-            const dx = nextCx - d.cx;
-            const dy = nextCy - d.cy;
+            const nextX = px - offset.x;
+            const nextY = py - offset.y;
+            const dx = nextX - d.x;
+            const dy = nextY - d.y;
             if (dx === 0 && dy === 0) return;
             const moving =
                 layoutSelectedIds.size > 0
                     ? nodes.filter((n) => layoutSelectedIds.has(n.id))
                     : [d];
             for (const n of moving) {
-                n.cx += dx;
-                n.cy += dy;
+                n.x += dx;
+                n.y += dy;
             }
             paint();
             syncGenAttrDagTopkTooltipImpl();
@@ -1752,7 +2601,7 @@ export function initGenAttributeDagView(
             y1: Math.max(session.y0, y1),
         };
         session.rect.remove();
-        const hits = nodes.filter((n) => rectsIntersect(box, nodeAabb(n))).map((n) => n.id);
+        const hits = nodes.filter((n) => rectsIntersect(box, nodeAabb(n, displayScale))).map((n) => n.id);
         if (session.additive) {
             if (hits.length === 0) {
                 refreshNodeLinkHighlight();
@@ -1784,7 +2633,7 @@ export function initGenAttributeDagView(
             .attr('height', y1 - y0);
         const box = { x0, y0, x1, y1 };
         const next = new Set(
-            nodes.filter((n) => rectsIntersect(box, nodeAabb(n))).map((n) => n.id),
+            nodes.filter((n) => rectsIntersect(box, nodeAabb(n, displayScale))).map((n) => n.id),
         );
         if (
             next.size === marqueePreviewIds.size &&
@@ -1946,6 +2795,7 @@ export function initGenAttributeDagView(
                 ? { nodeId: playbackNodeId, direction: animOverlay.anim.direction }
                 : null;
         const linkFocusState = animOverlay.linkFocusState ?? focusState;
+        currentLinkFocusState = linkFocusState;
         const focusNodeIds = focusState?.activeNodeIds ?? null;
         const nodeStrokeShareById = animOverlay.nodeStrokeShareById;
         const nodeStrokeRenderById =
@@ -2307,6 +3157,26 @@ export function initGenAttributeDagView(
         });
 
         syncLayoutForLowVisibilityMembership(focusId, focusState);
+
+        // matrix：唯一上色入口；须在 layout sync（可能 rebuild 几何）之后。
+        if (layoutMode === 'attribution-matrix') {
+            const propagationShared: MatrixPropagationHighlightShared | null =
+                matrixPropagationHighlightActive() &&
+                focusId != null &&
+                focusId === userFocusId &&
+                focusState != null
+                    ? {
+                          focusId,
+                          focusState,
+                          animOverlay,
+                          incomingHighlightRenderByKey,
+                          backwardSlideIncomingRenderByKey,
+                          propagationSlideTgtId,
+                      }
+                    : null;
+            refreshMatrixHighlight(propagationShared);
+        }
+
         syncGenAttrDagTopkTooltipImpl();
 
         if (dagFlashOverlayOpacity > 0) {
@@ -2356,6 +3226,68 @@ export function initGenAttributeDagView(
             dagTopkToolTip.hideAndReset();
             return;
         }
+
+        // matrix 格 = 边：HUD 展示与 text 边 `<title>` 同源的指标（非节点 Top‑K）。
+        const matrixTarget =
+            layoutMode === 'attribution-matrix' ? (matrixHoverTarget ?? matrixLockedTarget) : null;
+        if (matrixTarget?.type === 'cell') {
+            const { srcId, tgtId } = matrixTarget;
+            if (!graph.hasNode(srcId) || !graph.hasNode(tgtId)) {
+                dagTopkToolTip.hideAndReset();
+                return;
+            }
+            const link = (incomingLinksByTarget.get(tgtId) ?? []).find((l) => l.source === srcId);
+            if (link == null) {
+                dagTopkToolTip.hideAndReset();
+                return;
+            }
+            const rect = matrixCellTooltipAnchorRect(srcId, tgtId);
+            if (!rect) {
+                dagTopkToolTip.hideAndReset();
+                return;
+            }
+            const src = graph.getNodeAttributes(srcId) as DagNode;
+            const tgt = graph.getNodeAttributes(tgtId) as DagNode;
+            const edgeKey = dagLinkEndpointKey(srcId, tgtId);
+            const { linkStrength, recursiveAttributionShare } = resolveDagLinkTooltipStrengths(
+                link,
+                edgeKey,
+                currentLinkFocusState,
+                recursiveAttributionEnabled,
+            );
+            const snapshot: DagLinkTitleSnapshot = {
+                normalizedScore: link.normalizedScore,
+                mutualInformationRatio: link.mutualInformationRatio,
+                attributionShare: link.attributionShare,
+                alignmentNote: link.alignmentNote,
+                src,
+                tgt,
+                recursiveAttributionShare,
+                linkStrength,
+            };
+            const { staticRows, dynamicRows, alignmentNote } = buildLinkTitleMetricRows(snapshot);
+            const rowsBeforeInfo: NonNullable<ToolTipUpdateAugment['rowsBeforeInfo']> = [...staticRows];
+            if (alignmentNote) {
+                rowsBeforeInfo.push({ label: alignmentNote, value: '', valueColor: false });
+            }
+            rowsBeforeInfo.push(...dynamicRows);
+            dagTopkToolTip.updateData(
+                {
+                    tokenData: {
+                        raw: src.label,
+                        offset: [src.start, src.end],
+                        pred_topk: [],
+                    },
+                },
+                rect,
+                {
+                    headerLines: [src.label, '↓', tgt.label],
+                    rowsBeforeInfo,
+                },
+            );
+            return;
+        }
+
         const focusIdNext = tooltipFocusId();
         if (!focusIdNext || !graph.hasNode(focusIdNext)) {
             dagTopkToolTip.hideAndReset();
@@ -2368,10 +3300,14 @@ export function initGenAttributeDagView(
             dagTopkToolTip.hideAndReset();
             return;
         }
-        const rect = nodeSel
-            .filter((d: DagNode) => d.id === focusIdNext)
-            .select<SVGRectElement>('rect.gen-attr-dag-node-fill')
-            .node();
+        const rect =
+            (matrixTarget != null
+                ? matrixTooltipAnchorRect(focusIdNext, matrixTarget)
+                : null) ??
+            nodeSel
+                .filter((d: DagNode) => d.id === focusIdNext)
+                .select<SVGRectElement>('rect.gen-attr-dag-node-fill')
+                .node();
         if (!rect) {
             dagTopkToolTip.hideAndReset();
             return;
@@ -2387,20 +3323,24 @@ export function initGenAttributeDagView(
         const shareSourceId =
             propagationPlaybackTooltip?.direction === 'backward'
                 ? focusIdNext
-                : hoveredId != null && solidFrameFocusId() === hoveredId
-                  ? hoveredId
-                  : null;
+                : layoutMode === 'attribution-matrix'
+                  ? matrixShareSourceId()
+                  : hoveredId != null && solidFrameFocusId() === hoveredId
+                    ? hoveredId
+                    : null;
         if (
             selectedId &&
             shareSourceId &&
             currentFocusState &&
             shareSourceId !== selectedId &&
-            graph.hasNode(selectedId)
+            graph.hasNode(selectedId) &&
+            graph.hasNode(shareSourceId)
         ) {
             // 链内链外均显示份额；低于 {@link DAG_MIN_ATTRIBUTION_SHARE} 时 format 为 "< x%"
             const share = currentFocusState.nodeShareById.get(shareSourceId) ?? 0;
             if (recursiveAttributionEnabled) {
-                const stay = share * (1 - nodeUpstreamPropagationRatio(attrs, incomingLinksByTarget, dagDecayAttributionToHighSurprisalTargetEnabled));
+                const shareNode = graph.getNodeAttributes(shareSourceId) as DagNode;
+                const stay = share * (1 - nodeUpstreamPropagationRatio(shareNode, incomingLinksByTarget, dagDecayAttributionToHighSurprisalTargetEnabled));
                 rowsBeforeInfo.push(
                     { label: tr('Attribution share (Total):'), value: formatAttributionSharePercentForTooltip(share) },
                     { label: tr('Attribution share (Self):'), value: formatAttributionSharePercentForTooltip(stay) },
@@ -2435,6 +3375,8 @@ export function initGenAttributeDagView(
         layoutSelectedIds = new Set();
         selectedId = null;
         userFocusId = null;
+        matrixLockedTarget = null;
+        matrixHoverTarget = null;
         recursiveEdgeAnimation.stopPlayback();
         refreshNodeLinkHighlight();
         syncDagPlayButtonImpl();
@@ -2452,6 +3394,8 @@ export function initGenAttributeDagView(
         layoutSelectedIds = new Set();
         userFocusId = id;
         selectedId = id;
+        matrixHoverTarget = null;
+        syncMatrixRowLockWithUserFocus();
         recursiveEdgeAnimation.stopPlayback();
         refreshNodeLinkHighlight();
         syncDagPlayButtonImpl();
@@ -2593,6 +3537,7 @@ export function initGenAttributeDagView(
     ): void {
         allInputSpans = normalizePromptTokenSpans(allInputSpans);
         const inputRanges = opts?.inputRanges ?? [[0, layoutWire.length] as [number, number]];
+        dagInputRanges = inputRanges;
         dagDeleteIntervals = collectDeletePromptIntervals(
             layoutWire,
             inputRanges,
@@ -2629,8 +3574,8 @@ export function initGenAttributeDagView(
                 step: -1,
                 start: ns,
                 end: ne,
-                cx: g.cx,
-                cy: g.cy,
+                x: g.x,
+                y: g.y,
                 nodeW: g.width * displayScale,
                 nodeH: g.height * displayScale,
                 ciVisualScale: 1,
@@ -2823,6 +3768,7 @@ export function initGenAttributeDagView(
         const { context, token, response } = step;
         if (!response.token_attribution || !token) return;
 
+        dagInputRanges = step.inputRanges;
         const intervalCtx = excludeIntervalContext ?? step.context;
 
         const targetStart = context.length;
@@ -2847,8 +3793,8 @@ export function initGenAttributeDagView(
             step: stepProcessed,
             start: targetStart,
             end: targetEnd,
-            cx: g.cx,
-            cy: g.cy,
+            x: g.x,
+            y: g.y,
             nodeW: g.width * displayScale * ciVisualScale,
             nodeH: g.height * displayScale * ciVisualScale,
             ciVisualScale,
@@ -2897,7 +3843,7 @@ export function initGenAttributeDagView(
     }
 
     /**
-     * 仅重建边集：保留节点（含拖拽 cx/cy）、layoutDirty / userDraggedNodes、选中与视口。
+     * 仅重建边集：保留节点（含拖拽 x/y）、layoutDirty / userDraggedNodes、选中与视口。
      * 调用前须已更新 edgeTopPCoverage / exclude 生效全文等。
      */
     function rebuildEdges(steps: readonly TokenGenStep[], excludeIntervalContext: string): void {
@@ -2908,6 +3854,7 @@ export function initGenAttributeDagView(
         clearGenAttributeDagAlignmentWarnDedupe();
 
         const last = steps[steps.length - 1]!;
+        dagInputRanges = last.inputRanges;
         dagExcludeIntervals = collectGenAttrDagExcludeIntervals(
             excludeIntervalContext,
             last.inputRanges,
@@ -2975,6 +3922,8 @@ export function initGenAttributeDagView(
         userFocusId = null;
         layoutSelectedIds = new Set();
         hoveredId = null;
+        matrixHoverTarget = null;
+        matrixLockedTarget = null;
         attentionHighlight = null;
         lastTokenAppearanceDwellActive = false;
         dagTopkToolTip.hideAndReset();
@@ -2983,8 +3932,12 @@ export function initGenAttributeDagView(
         linkGFront.selectAll('*').remove();
         nodeG.selectAll('*').remove();
         nodeGHit.selectAll('*').remove();
+        disposeMatrixPointerHit();
+        matrixG.selectAll('*').remove();
+        matrixFirstSourceAnchor = null;
         dagExcludeIntervals = [];
         dagDeleteIntervals = [];
+        dagInputRanges = [];
         layoutIncludedNodeIdsKey = LAYOUT_INCLUDED_ALL_KEY;
         linkSel = rootG
             .selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link')
@@ -3048,12 +4001,15 @@ export function initGenAttributeDagView(
                 const tx = pad + halfW;
                 const ty = pad + halfH;
                 svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
-            } else if (layoutMode === 'text-flow') {
-                /** `rootG` 整包 bbox + 宽高双约束顶对齐 */
+            } else if (layoutMode === 'text-flow' || layoutMode === 'attribution-matrix') {
+                /** `rootG` 整包 bbox + 宽高双约束顶对齐（矩阵与 text-flow 相同） */
                 const padTf = DAG_TEXT_FLOW_FIT_PAD_PX;
                 const innerWTextFlow = Math.max(w - 2 * padTf, 1);
                 const innerHTextFlow = Math.max(h - 2 * padTf, 1);
-                const b = rootG.node()!.getBBox();
+                const b =
+                    layoutMode === 'attribution-matrix'
+                        ? matrixG.node()!.getBBox()
+                        : rootG.node()!.getBBox();
                 const bw = Math.max(b.width, 1e-6);
                 const bh = Math.max(b.height, 1e-6);
                 const kRaw = Math.min(innerWTextFlow / bw, innerHTextFlow / bh);
@@ -3098,6 +4054,9 @@ export function initGenAttributeDagView(
         .on('click', (event) => {
             event.stopPropagation();
             if (playBtn.property('disabled')) return;
+            const kind: DagPlayCoachmarkKind =
+                userFocusId != null && recursiveAttributionEnabled ? 'propagation' : 'step';
+            dismissDagPlayCoachmark(kind);
             if (userFocusId != null) {
                 togglePropagationPlayback();
                 return;
@@ -3105,6 +4064,61 @@ export function initGenAttributeDagView(
             if (!onDagPlaybackToggle) return;
             onDagPlaybackToggle(!dagPlaybackPlaying);
         });
+
+    const playCoachmark = resultsRoot
+        .append('div')
+        .attr('class', 'gen-attr-dag-play-coachmark')
+        .attr('role', 'status');
+    playCoachmark.property('hidden', true);
+    playCoachmark.append('div').attr('class', 'gen-attr-dag-play-coachmark-arrow').attr('aria-hidden', 'true');
+    const playCoachmarkBody = playCoachmark
+        .append('div')
+        .attr('class', 'gen-attr-dag-play-coachmark-body');
+    playCoachmarkBody
+        .append('span')
+        .attr('class', 'gen-attr-dag-play-coachmark-text')
+        .text('Click to play');
+    playCoachmarkBody
+        .append('button')
+        .attr('type', 'button')
+        .attr('class', 'gen-attr-dag-play-coachmark-dismiss')
+        .text('Got it')
+        .on('click', (event) => {
+            event.stopPropagation();
+            const raw = playCoachmark.attr('data-kind');
+            if (raw === 'step' || raw === 'propagation') {
+                dismissDagPlayCoachmark(raw);
+            } else {
+                hideDagPlayCoachmark();
+            }
+        });
+
+    let playCoachmarkKindShown: DagPlayCoachmarkKind | null = null;
+
+    function hideDagPlayCoachmark(): void {
+        playCoachmark.property('hidden', true).attr('data-kind', null);
+        playCoachmarkKindShown = null;
+    }
+
+    function dismissDagPlayCoachmark(kind: DagPlayCoachmarkKind): void {
+        markDagPlayCoachmarkSeen(kind);
+        hideDagPlayCoachmark();
+    }
+
+    function syncDagPlayCoachmark(playing: boolean, disabled: boolean, propagationPlayUi: boolean): void {
+        if (!onDagPlaybackToggle) {
+            hideDagPlayCoachmark();
+            return;
+        }
+        const kind: DagPlayCoachmarkKind = propagationPlayUi ? 'propagation' : 'step';
+        if (playing || disabled || isDagPlayCoachmarkSeen(kind)) {
+            if (playCoachmarkKindShown != null) hideDagPlayCoachmark();
+            return;
+        }
+        if (playCoachmarkKindShown === kind) return;
+        playCoachmark.attr('data-kind', kind).property('hidden', false);
+        playCoachmarkKindShown = kind;
+    }
 
     function syncDagPlayButton(): void {
         const propPhase = recursiveEdgeAnimation.getPlaybackPhase();
@@ -3125,7 +4139,7 @@ export function initGenAttributeDagView(
             disabled = onDagCanPlay != null && !onDagCanPlay();
         }
         playBtn.property('disabled', disabled);
-        // ▶ / ↯ 可点且未在播时脉动提示（与 CSS gen-attr-dag-play--propagation-hint 同源）
+        // ▶ / ↯ 可点且未在播：固定强调色（见 CSS gen-attr-dag-play--propagation-hint）
         playBtn.classed('gen-attr-dag-play--propagation-hint', !playing && !disabled);
         playBtn
             .text(playing ? '⏸' : propagationPlayUi ? DAG_CAUSAL_FLOW_ICON : '▶')
@@ -3137,6 +4151,7 @@ export function initGenAttributeDagView(
                       ? 'Propagation (↯)'
                       : 'Step replay (▶)'
             );
+        syncDagPlayCoachmark(playing, disabled, propagationPlayUi);
     }
     syncDagPlayButtonImpl = syncDagPlayButton;
     syncDagPlayButton();
@@ -3197,6 +4212,8 @@ export function initGenAttributeDagView(
     function setLayoutMode(mode: DagLayoutMode): void {
         if (layoutMode === mode) return;
         layoutMode = mode;
+        matrixPinSteady = null;
+        matrixPinFollowActive = false;
         syncStackLayoutDragUi();
         if (batchDepth > 0) return;
         syncGraphToSvg();
@@ -3257,6 +4274,93 @@ export function initGenAttributeDagView(
         if (showTokenInfoOnSelected === show) return;
         showTokenInfoOnSelected = show;
         syncGenAttrDagTopkTooltipImpl();
+    }
+
+    /** attribution-matrix 轴/方向选项变更后：清 pin、重绘并 fit。 */
+    function afterMatrixAxisOptionChange(): void {
+        matrixPinSteady = null;
+        matrixPinFollowActive = false;
+        if (batchDepth > 0 || layoutMode !== 'attribution-matrix') return;
+        paint();
+        refreshNodeLinkHighlight();
+        fitViewportToContent(true);
+    }
+
+    /** attribution-matrix 对称布局：切换后立即重绘。 */
+    function setMatrixTranspose(transpose: boolean): void {
+        if (matrixTranspose === transpose) return;
+        matrixTranspose = transpose;
+        afterMatrixAxisOptionChange();
+    }
+
+    function setMatrixSwitchHorizontalLabel(on: boolean): void {
+        if (matrixSwitchHorizontalLabel === on) return;
+        matrixSwitchHorizontalLabel = on;
+        afterMatrixAxisOptionChange();
+    }
+
+    function setMatrixSwitchVerticalLabel(on: boolean): void {
+        if (matrixSwitchVerticalLabel === on) return;
+        matrixSwitchVerticalLabel = on;
+        afterMatrixAxisOptionChange();
+    }
+
+    /** attribution-matrix：播放时钉住第一个语义 source token（稳态取自点击 ▶ 时的屏幕位置）。 */
+    function setMatrixPinSourceTokens(pin: boolean): void {
+        if (matrixPinSourceTokens === pin) return;
+        matrixPinSourceTokens = pin;
+        if (!pin) {
+            matrixPinSteady = null;
+            matrixPinFollowActive = false;
+        }
+    }
+
+    /** 从当前视口捕获 pin 稳态（点击 ▶、裁前缀 / `reset` 之前；含用户已拖到的位置）。 */
+    function captureMatrixPinSteady(): void {
+        if (layoutMode !== 'attribution-matrix') {
+            matrixPinSteady = null;
+            matrixPinFollowActive = false;
+            return;
+        }
+        // 锚点可能尚未写入（仅 restyle / 切回布局）：补一次 paint。
+        if (matrixFirstSourceAnchor == null && nodes.length > 0) {
+            paint();
+        }
+        if (matrixFirstSourceAnchor == null) {
+            matrixPinSteady = null;
+            matrixPinFollowActive = false;
+            return;
+        }
+        const t = d3.zoomTransform(svg.node()!);
+        const { x: ax, y: ay } = matrixFirstSourceAnchor;
+        matrixPinSteady = { x: t.x + t.k * ax, y: t.y + t.k * ay };
+        matrixPinFollowActive = true;
+    }
+
+    function clearMatrixPinSteady(): void {
+        matrixPinSteady = null;
+        matrixPinFollowActive = false;
+    }
+
+    /**
+     * 平移视口使当前第一个 source 锚点对齐 pin 稳态屏幕位置（保持当前 k）。
+     * 不看 `layoutDirty`：播放前拖拽后仍钉在捕获位置；播放中用户再改视口则 `matrixPinFollowActive` 为 false。
+     */
+    function syncMatrixPinViewport(): void {
+        if (
+            layoutMode !== 'attribution-matrix' ||
+            !matrixPinSourceTokens ||
+            !matrixPinFollowActive ||
+            matrixPinSteady == null ||
+            matrixFirstSourceAnchor == null
+        ) {
+            return;
+        }
+        const { x: ax, y: ay } = matrixFirstSourceAnchor;
+        const k = d3.zoomTransform(svg.node()!).k;
+        const tx = matrixPinSteady.x - k * ax;
+        const ty = matrixPinSteady.y - k * ay;
+        svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
     }
 
     /** 传播归因（UI: Propagated attribution mode；`recursiveAttributionEnabled`）：向上追到来源；关闭则为直接归因（一跳）。 */
@@ -3368,7 +4472,7 @@ export function initGenAttributeDagView(
         dagTopkToolTip.dispose();
         resultsRoot
             .selectAll(
-                '.gen-attr-dag-stack, .gen-attr-dag-topk-tooltip, button.gen-attr-dag-refresh, button.gen-attr-dag-play, button.gen-attr-dag-fullscreen'
+                '.gen-attr-dag-stack, .gen-attr-dag-topk-tooltip, button.gen-attr-dag-refresh, button.gen-attr-dag-play, button.gen-attr-dag-fullscreen, .gen-attr-dag-play-coachmark'
             )
             .remove();
         detachGenAttributeDagPanel.delete(rootEl);
@@ -3403,6 +4507,13 @@ export function initGenAttributeDagView(
         setDimInactiveNotDuringAnimation,
         setShowTokenInfoOnSelected,
         setRecursiveAttributionEnabled,
+        setMatrixTranspose,
+        setMatrixSwitchHorizontalLabel,
+        setMatrixSwitchVerticalLabel,
+        setMatrixPinSourceTokens,
+        captureMatrixPinSteady,
+        clearMatrixPinSteady,
+        syncMatrixPinViewport,
         setRecursiveEdgeBatchAnimationDirection,
         refreshNodeLinkHighlight,
         setAttentionPlaybackHighlight,

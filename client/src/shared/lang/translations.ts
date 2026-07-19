@@ -56,8 +56,8 @@ export const translations: Translations = {
             '每行一条正则，`g`，仅在已生成后缀内匹配；token 的 offset 完全落在某次匹配区间内则 score 视为 0。',
         'Coverage is the cumulative mass share within each generation step\'s Top-N candidate pool (after sorting candidates into the pool and normalizing mass inside that pool). Higher values keep more incoming edges. The denominator is this pool only, not every token-attribution entry returned for the step.':
             'Coverage 指每一步在 Top-N 候选池内的累计质量份额（先入池、池内归一后按强度排序再累加）。数值越大保留的 DAG 入边越多；分母仅为该候选池，不是该步 API 返回的全部归因 token。',
-        'When checked, gray DAG edges not adjacent to the hovered or selected node are hidden.':
-            '勾选后，DAG 中未与当前悬浮/选中节点相邻的灰色边将被隐藏。',
+        'When checked, gray DAG edges (or gray matrix cells) not highlighted by the current focus are hidden.':
+            '勾选后，未处于当前焦点高亮态的灰色边（或 matrix 灰格）将被隐藏。',
         'Show token tooltip':
             '显示 token 提示',
         'When checked, selecting or hovering a token node shows token information in the results area.':

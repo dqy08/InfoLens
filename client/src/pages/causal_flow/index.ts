@@ -179,6 +179,12 @@ const showToast = createToast('#toast').show;
 
 const GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY = 'info_radar_gen_attr_dag_measure_width';
 const GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_mode';
+const GEN_ATTR_DAG_MATRIX_TRANSPOSE_STORAGE_KEY = 'info_radar_gen_attr_dag_matrix_transpose';
+const GEN_ATTR_DAG_MATRIX_SWITCH_HORIZONTAL_LABEL_STORAGE_KEY =
+    'info_radar_gen_attr_dag_matrix_switch_horizontal_label';
+const GEN_ATTR_DAG_MATRIX_SWITCH_VERTICAL_LABEL_STORAGE_KEY =
+    'info_radar_gen_attr_dag_matrix_switch_vertical_label';
+const GEN_ATTR_DAG_MATRIX_PIN_SOURCE_STORAGE_KEY = 'info_radar_gen_attr_dag_matrix_pin_source';
 const GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY = 'info_radar_gen_attr_dag_playback_step_ms';
 const GEN_ATTR_DAG_REPLAY_PACING_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_replay_pacing_mode';
 const GEN_ATTR_DAG_REPLAY_AUTO_ZOOM_STORAGE_KEY = 'info_radar_gen_attr_dag_replay_auto_zoom';
@@ -457,9 +463,29 @@ function readStoredDagLightningSound(): boolean {
 function readStoredDagLayoutMode(): DagLayoutMode {
     return lsReadEnum(
         GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY,
-        ['text-flow', 'linear-arc', 'linear-arc-step-down', 'spiral'] as const,
+        ['text-flow', 'linear-arc', 'linear-arc-step-down', 'spiral', 'attribution-matrix'] as const,
         DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.layoutMode,
     );
+}
+
+function readStoredDagMatrixTranspose(): boolean {
+    return lsReadBool(GEN_ATTR_DAG_MATRIX_TRANSPOSE_STORAGE_KEY, false, { encoding: '1' });
+}
+
+function readStoredDagMatrixSwitchHorizontalLabel(): boolean {
+    return lsReadBool(GEN_ATTR_DAG_MATRIX_SWITCH_HORIZONTAL_LABEL_STORAGE_KEY, false, {
+        encoding: '1',
+    });
+}
+
+function readStoredDagMatrixSwitchVerticalLabel(): boolean {
+    return lsReadBool(GEN_ATTR_DAG_MATRIX_SWITCH_VERTICAL_LABEL_STORAGE_KEY, false, {
+        encoding: '1',
+    });
+}
+
+function readStoredDagMatrixPinSource(): boolean {
+    return lsReadBool(GEN_ATTR_DAG_MATRIX_PIN_SOURCE_STORAGE_KEY, false, { encoding: '1' });
 }
 
 const bodyElement = d3.select('body').node() as Element;
@@ -520,6 +546,20 @@ const metricModel = d3.select('#gen_attr_metric_model');
 const genAttrResultsEl = d3.select('#results.gen-attr-results-surface');
 
 const dagLayoutModeSelect = document.getElementById('gen_attr_dag_layout_mode') as HTMLSelectElement | null;
+const dagMatrixTransposeGroup = document.getElementById('gen_attr_dag_matrix_transpose_group');
+const dagMatrixTransposeInput = document.getElementById(
+    'gen_attr_dag_matrix_transpose',
+) as HTMLInputElement | null;
+const dagMatrixSwitchHorizontalLabelInput = document.getElementById(
+    'gen_attr_dag_matrix_switch_horizontal_label',
+) as HTMLInputElement | null;
+const dagMatrixSwitchVerticalLabelInput = document.getElementById(
+    'gen_attr_dag_matrix_switch_vertical_label',
+) as HTMLInputElement | null;
+const dagMatrixPinSourceGroup = document.getElementById('gen_attr_dag_matrix_pin_source_group');
+const dagMatrixPinSourceInput = document.getElementById(
+    'gen_attr_dag_matrix_pin_source',
+) as HTMLInputElement | null;
 const dagMeasureWidthGroup = document.getElementById('gen_attr_dag_measure_width_group');
 const dagCompactnessGroup = document.getElementById('gen_attr_dag_compactness_group');
 const dagMeasureWidthInput = document.getElementById(
@@ -747,8 +787,9 @@ function readStoredHideArrowsDuringAttention(): boolean {
     );
 }
 
-/** 勾选 Simulate attention 且非 Causal Flow Mode。 */
+/** 勾选 Simulate attention 且非 Causal Flow Mode；attribution-matrix 不适用。 */
 function isAttentionSimulationConfigured(): boolean {
+    if (isAttributionMatrixLayout()) return false;
     return (dagSimulateAttentionInput?.checked ?? false) && !isCausalFlowModeEnabled();
 }
 
@@ -757,8 +798,9 @@ function isCausalFlowModeEnabled(): boolean {
 }
 
 function applyAttentionCostUi(): void {
+    const matrix = isAttributionMatrixLayout();
     const causalFlow = isCausalFlowModeEnabled();
-    if (dagAttentionCostRow) dagAttentionCostRow.hidden = causalFlow;
+    if (dagAttentionCostRow) dagAttentionCostRow.hidden = matrix || causalFlow;
     const sim = isAttentionSimulationConfigured();
     if (dagFfnRatioWrap) dagFfnRatioWrap.hidden = !sim;
     if (dagAttendBurstWrap) dagAttendBurstWrap.hidden = !sim;
@@ -809,8 +851,19 @@ function effectiveHideArrowsDuringAttention(): boolean {
 
 function currentDagLayoutMode(): DagLayoutMode {
     const v = dagLayoutModeSelect?.value;
-    if (v === 'linear-arc' || v === 'linear-arc-step-down' || v === 'spiral') return v;
+    if (
+        v === 'linear-arc' ||
+        v === 'linear-arc-step-down' ||
+        v === 'spiral' ||
+        v === 'attribution-matrix'
+    ) {
+        return v;
+    }
     return 'text-flow';
+}
+
+function isAttributionMatrixLayout(): boolean {
+    return currentDagLayoutMode() === 'attribution-matrix';
 }
 
 function currentDagRecursiveEdgeAnimationDirection(): DagRecursiveEdgeAnimationDirection {
@@ -819,9 +872,19 @@ function currentDagRecursiveEdgeAnimationDirection(): DagRecursiveEdgeAnimationD
 
 function applyDagLayoutModeUi(): void {
     const mode = currentDagLayoutMode();
+    const matrix = mode === 'attribution-matrix';
+    if (dagMatrixTransposeGroup) {
+        dagMatrixTransposeGroup.hidden = !matrix;
+    }
+    if (dagMatrixPinSourceGroup) {
+        dagMatrixPinSourceGroup.hidden = !matrix;
+    }
     if (dagCompactnessGroup) {
-        /** text-flow / spiral 均使用 display-scale 驱动的节点宽高与边回缩；linear-arc 家族不适用。 */
-        dagCompactnessGroup.hidden = mode === 'linear-arc' || mode === 'linear-arc-step-down';
+        /** text-flow / spiral 均使用 display-scale 驱动的节点宽高与边回缩；linear-arc / matrix 不适用。 */
+        dagCompactnessGroup.hidden =
+            mode === 'linear-arc' ||
+            mode === 'linear-arc-step-down' ||
+            matrix;
     }
     if (dagMeasureWidthGroup) {
         dagMeasureWidthGroup.hidden = mode !== 'text-flow';
@@ -829,6 +892,11 @@ function applyDagLayoutModeUi(): void {
     if (dagLinearArcIntervalGroup) {
         dagLinearArcIntervalGroup.hidden = mode !== 'linear-arc' && mode !== 'linear-arc-step-down';
     }
+    if (dagNodeCiVisualScaleGroup) {
+        // attribution-matrix：轴 token 固定尺寸，不按 CI 放大。
+        dagNodeCiVisualScaleGroup.hidden = matrix;
+    }
+    syncPropagationPlaybackControlsVisibility();
 }
 
 const dagHideExcludedTokensInput = document.getElementById(
@@ -837,6 +905,7 @@ const dagHideExcludedTokensInput = document.getElementById(
 const dagShowTopkOnSelectedInput = document.getElementById(
     'gen_attr_dag_show_topk_on_selected'
 ) as HTMLInputElement | null;
+const dagNodeCiVisualScaleGroup = document.getElementById('gen_attr_dag_node_ci_visual_scale_group');
 const dagNodeCiVisualScaleInput = document.getElementById(
     'gen_attr_dag_node_ci_visual_scale'
 ) as HTMLInputElement | null;
@@ -961,6 +1030,18 @@ function genAttrEffectiveExcludeGeneratedPatternsText(): string {
 
 const initialDagLayoutMode = readStoredDagLayoutMode();
 if (dagLayoutModeSelect) dagLayoutModeSelect.value = initialDagLayoutMode;
+const initialDagMatrixTranspose = readStoredDagMatrixTranspose();
+if (dagMatrixTransposeInput) dagMatrixTransposeInput.checked = initialDagMatrixTranspose;
+const initialDagMatrixSwitchHorizontalLabel = readStoredDagMatrixSwitchHorizontalLabel();
+if (dagMatrixSwitchHorizontalLabelInput) {
+    dagMatrixSwitchHorizontalLabelInput.checked = initialDagMatrixSwitchHorizontalLabel;
+}
+const initialDagMatrixSwitchVerticalLabel = readStoredDagMatrixSwitchVerticalLabel();
+if (dagMatrixSwitchVerticalLabelInput) {
+    dagMatrixSwitchVerticalLabelInput.checked = initialDagMatrixSwitchVerticalLabel;
+}
+const initialDagMatrixPinSource = readStoredDagMatrixPinSource();
+if (dagMatrixPinSourceInput) dagMatrixPinSourceInput.checked = initialDagMatrixPinSource;
 applyDagLayoutModeUi();
 const initialDagMeasureWidth = readStoredDagMeasureWidth();
 if (dagMeasureWidthInput) dagMeasureWidthInput.value = String(initialDagMeasureWidth);
@@ -1141,8 +1222,10 @@ function syncPropagationPlaybackControlsVisibility(): void {
         return;
     }
     const show = (dagRecursiveAttributionInput?.checked ?? false) && getDagUserFocusId() != null;
+    const matrix = isAttributionMatrixLayout();
     if (dagDisableSmartStepTimeWrap) dagDisableSmartStepTimeWrap.hidden = !show;
-    if (dagLightningOptionsRow) dagLightningOptionsRow.hidden = !show;
+    // attribution-matrix 不接 Lightning（无格上等价效果）。
+    if (dagLightningOptionsRow) dagLightningOptionsRow.hidden = matrix || !show;
     syncLightningSuboptionsVisibility();
 }
 
@@ -1160,13 +1243,16 @@ function applyDagRecursiveAttributionSubmodeUi(): void {
     const forward = recursive && currentDagRecursiveEdgeAnimationDirection() === 'forward';
     if (dagShowDownstreamInfluenceGroup) {
         // 直接模式与因果流 forward 均显示；backward 仅上游蓝链，隐藏下游选项。
-        dagShowDownstreamInfluenceGroup.hidden = recursive && !forward;
+        // attribution-matrix：列 token 交互恒显示下游（红），本开关无意义，隐藏。
+        dagShowDownstreamInfluenceGroup.hidden =
+            isAttributionMatrixLayout() || (recursive && !forward);
     }
     if (dagRecursiveEdgeAnimationDirectionGroup) {
         dagRecursiveEdgeAnimationDirectionGroup.hidden = !recursive;
     }
     if (dagDimInactiveTokensGroup) {
-        dagDimInactiveTokensGroup.hidden = !recursive;
+        // attribution-matrix：轴 token 无 0.1 淡显，与 text 节点 dim 不对齐，隐藏。
+        dagDimInactiveTokensGroup.hidden = isAttributionMatrixLayout() || !recursive;
     }
     if (dagForwardSlideSharedNodesWrap) {
         dagForwardSlideSharedNodesWrap.hidden = !forward;
@@ -1438,6 +1524,7 @@ setPageOptsGetter(() => {
         layout_linear_arc: mode === 'linear-arc',
         layout_step_down: mode === 'linear-arc-step-down',
         layout_spiral: mode === 'spiral',
+        layout_attribution_matrix: mode === 'attribution-matrix',
         causal_flow: dagRecursiveAttributionInput?.checked ?? false,
         causal_flow_anim_backward: currentDagRecursiveEdgeAnimationDirection() === 'backward',
         downstream: dagShowDownstreamInfluenceInput?.checked ?? false,
@@ -1864,6 +1951,17 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
     cancelDagAttentionPlayback();
     cancelDagLastTokenDwell();
     const steps = h.getAllSteps();
+    const resumeFromPause = dagPlaybackPausedMidRun;
+    // Pin 必须在任何 reset 之前捕获：播完再 ▶ 时 nextIndex 已到末尾，原先先 reset 会清空矩阵导致捕获失败。
+    if (!resumeFromPause) {
+        const pinSource =
+            isAttributionMatrixLayout() && (dagMatrixPinSourceInput?.checked ?? false);
+        if (pinSource) {
+            dagHandle.captureMatrixPinSteady();
+        } else {
+            dagHandle.clearMatrixPinSteady();
+        }
+    }
     if (dagPlaybackNextIndex >= steps.length) {
         // 保留 `layoutDirty`：用户 pan/zoom 后 Auto zoom 仍应停止 fit。
         dagHandle.reset(true);
@@ -1871,7 +1969,6 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
         dagPlaybackPausedMidRun = false;
         dagAttentionLeadDwell0Consumed = false;
     }
-    const resumeFromPause = dagPlaybackPausedMidRun;
     dagPlaybackPausedMidRun = false;
     if (!resumeFromPause && dagPlaybackNextIndex === 0) {
         dagAttentionLeadDwell0Consumed = false;
@@ -1911,6 +2008,17 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
         includePrompt,
     );
     dagHandle.setDagPlaybackPlaying(true);
+
+    const pinSourceNow =
+        isAttributionMatrixLayout() && (dagMatrixPinSourceInput?.checked ?? false);
+    const autoZoomNow = dagReplayAutoZoomInput?.checked ?? false;
+    // 裁到前缀后立刻钉一次，不等到 afterStepShown（否则 prompt 段 source 已漂走）。
+    if (autoZoomNow) {
+        dagHandle.fitViewportToContent();
+    }
+    if (pinSourceNow) {
+        dagHandle.syncMatrixPinViewport();
+    }
 
     const isStalePlaybackHandle = (): boolean => {
         if (runnerHandle === h) return false;
@@ -1978,8 +2086,14 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
             });
         },
         afterStepShown: () => {
-            if (dagReplayAutoZoomInput?.checked) {
+            const autoZoom = dagReplayAutoZoomInput?.checked ?? false;
+            const pinSource =
+                isAttributionMatrixLayout() && (dagMatrixPinSourceInput?.checked ?? false);
+            if (autoZoom) {
                 dagHandle.fitViewportToContent();
+            }
+            if (pinSource) {
+                dagHandle.syncMatrixPinViewport();
             }
         },
         showToolResponse: (stepIndex) => {
@@ -2061,6 +2175,10 @@ function applyHideArrowsDuringAttentionToDag(): void {
 }
 
 applyHideArrowsDuringAttentionToDag();
+dagHandle.setMatrixTranspose(initialDagMatrixTranspose);
+dagHandle.setMatrixSwitchHorizontalLabel(initialDagMatrixSwitchHorizontalLabel);
+dagHandle.setMatrixSwitchVerticalLabel(initialDagMatrixSwitchVerticalLabel);
+dagHandle.setMatrixPinSourceTokens(initialDagMatrixPinSource);
 getDagUserFocusId = () => dagHandle.getUserFocusId();
 syncPropagationPlaybackControlsVisibility();
 dagLightningEffectInput?.addEventListener('change', () => {
@@ -2088,7 +2206,32 @@ dagForwardSlideSharedNodesInput?.addEventListener('change', () => {
 
 dagLayoutModeSelect?.addEventListener('change', () => {
     applyDagLayoutModeUi();
+    applyDagRecursiveAttributionSubmodeUi();
     dagHandle.setLayoutMode(currentDagLayoutMode());
+});
+
+dagMatrixTransposeInput?.addEventListener('change', () => {
+    const on = dagMatrixTransposeInput.checked;
+    lsWriteBool(GEN_ATTR_DAG_MATRIX_TRANSPOSE_STORAGE_KEY, on, '1');
+    dagHandle.setMatrixTranspose(on);
+});
+
+dagMatrixSwitchHorizontalLabelInput?.addEventListener('change', () => {
+    const on = dagMatrixSwitchHorizontalLabelInput.checked;
+    lsWriteBool(GEN_ATTR_DAG_MATRIX_SWITCH_HORIZONTAL_LABEL_STORAGE_KEY, on, '1');
+    dagHandle.setMatrixSwitchHorizontalLabel(on);
+});
+
+dagMatrixSwitchVerticalLabelInput?.addEventListener('change', () => {
+    const on = dagMatrixSwitchVerticalLabelInput.checked;
+    lsWriteBool(GEN_ATTR_DAG_MATRIX_SWITCH_VERTICAL_LABEL_STORAGE_KEY, on, '1');
+    dagHandle.setMatrixSwitchVerticalLabel(on);
+});
+
+dagMatrixPinSourceInput?.addEventListener('change', () => {
+    const on = dagMatrixPinSourceInput.checked;
+    lsWriteBool(GEN_ATTR_DAG_MATRIX_PIN_SOURCE_STORAGE_KEY, on, '1');
+    dagHandle.setMatrixPinSourceTokens(on);
 });
 
 /**
@@ -2530,6 +2673,7 @@ function applyGenAttrDemoUiOptionsSnap(snap: Partial<GenAttrDemoUiOptions>): voi
             dagLayoutModeSelect.value = mode;
         }
         applyDagLayoutModeUi();
+        applyDagRecursiveAttributionSubmodeUi();
         dagHandle.setLayoutMode(mode);
     }
 

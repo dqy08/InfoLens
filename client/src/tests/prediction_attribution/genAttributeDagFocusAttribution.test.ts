@@ -19,8 +19,8 @@ type DagNodeAttrs = {
     step: number;
     start: number;
     end: number;
-    cx: number;
-    cy: number;
+    x: number;
+    y: number;
     nodeW: number;
     nodeH: number;
     ciVisualScale: number;
@@ -62,8 +62,8 @@ function mkNode(
         step,
         start,
         end,
-        cx: start,
-        cy: 0,
+        x: start,
+        y: 0,
         nodeW: 10,
         nodeH: 10,
         ciVisualScale: 1,

@@ -277,7 +277,8 @@ function isDagLayoutModePayload(v: unknown): v is DagLayoutMode {
         v === 'text-flow' ||
         v === 'linear-arc' ||
         v === 'linear-arc-step-down' ||
-        v === 'spiral'
+        v === 'spiral' ||
+        v === 'attribution-matrix'
     );
 }
 
