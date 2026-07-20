@@ -214,6 +214,22 @@
                                 <option value="linear-arc-step-down">step-down(beta)</option>
                             </select>
                         </span>
+                        <span class="semantic-submode-group" id="gen_attr_dag_layout_transition_group">
+                            <label class="semantic-submode-label">
+                                <input type="checkbox" id="gen_attr_dag_layout_transition"
+                                    title="When checked, animate DAG layout switches. Duration is in seconds. Saved locally."
+                                    data-i18n="title"
+                                    checked>
+                                <span data-i18n>Transition</span>
+                            </label>
+                            <input type="number" id="gen_attr_dag_layout_transition_s" class="gen-attr-dag-measure-width-input"
+                                value="1" min="0.1" max="30" step="0.1"
+                                title="Seconds for layout transition animation when Transition is checked. Saved locally."
+                                data-i18n="title">
+                            <span class="semantic-submode-label">s</span>
+                        </span>
+                    </div>
+                    <div class="gen-attr-dag-measure-width-row semantic-submode-row">
                         <span class="semantic-submode-group" id="gen_attr_dag_matrix_transpose_group" hidden>
                             <label class="semantic-submode-label">
                                 <input type="checkbox" id="gen_attr_dag_matrix_transpose"

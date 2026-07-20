@@ -228,7 +228,7 @@ $gen-attr-cached-demos-panel-width: 21em;
     }
   }
 
-  // 合成边稳态灰边不画；仅在焦点传播链高亮时可见，用虚线区分 API 归因边（genAttributeDagView DagLink.synthetic）
+  // 合成边稳态虚线（转场 fly 用同比例用户单位写入 pose，见 flySyntheticDashPair）
   #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-link--synthetic .gen-attr-dag-link-visible {
     stroke-dasharray: calc(8px * var(--gen-attr-dag-compactness, 0.5)) calc(6px * var(--gen-attr-dag-compactness, 0.5));
   }

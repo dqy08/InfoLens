@@ -70,6 +70,11 @@ export const translations: Translations = {
         'Horizontal gap (px) between the outer left/right edges of adjacent token nodes in linear-arc layout only. When idle, the DAG refits; during generation or DAG step replay (▶), the value is stored and applied on the next sync.':
             '仅 linear-arc / linear-arc-step-down 布局下生效：相邻 token 节点矩形外侧边之间的水平间隙（px）。修改后：稳态下立即重绘并 fit；若正在生成或 DAG 步进重放（▶）中，仅写入存储，下一轮同步时再反映。',
         'Compactness': 'DAG 紧凑度',
+        'Transition': '转场',
+        'When checked, animate DAG layout switches. Duration is in seconds. Saved locally.':
+            '勾选后，切换 DAG layout 时播放转场动画；时长单位为秒。写入本地存储。',
+        'Seconds for layout transition animation when Transition is checked. Saved locally.':
+            '勾选 Transition 时，layout 转场动画时长（秒）。写入本地存储。',
         'Scales DAG node boxes and labels relative to the measurement layer; 1 matches full readout scale. When idle, changes replay and fit automatically; during generation or DAG step replay (▶), the setting updates for the next run or refresh.':
             '相对测量层缩放 DAG 节点框与标签；1 与正文阅读比例一致。修改后：稳态下自动重放并 fit；若正在生成或 DAG 步进重放（▶）中，仅更新设置，下次运行或刷新时生效。',
         'Delay in milliseconds between steps during DAG step replay (▶). Stored locally; the value is read when you press play—changing it mid-playback does not affect the current run.':

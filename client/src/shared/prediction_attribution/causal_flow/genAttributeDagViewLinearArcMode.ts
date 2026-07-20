@@ -1,5 +1,6 @@
 import * as d3 from 'd3';
 import { dagStepDownEffectiveCiRatio } from '../../cross/surprisalMath';
+import type { DagNodeLayoutPose } from './genAttributeDagViewTextFlowMode';
 
 /** linear-arc：相邻节点矩形水平方向「外侧边与边之间的空隙」（px，SVG 内部坐标） */
 export const LINEAR_ARC_ADJACENT_GAP_DEFAULT = 0;
@@ -26,7 +27,7 @@ export function clampLinearArcAdjacentGap(px: number): number {
     );
 }
 
-type LinearArcNodeLike = { nodeW: number; nodeH: number; ciVisualScale: number };
+type LinearArcNodeLike = { id: string; nodeW: number; nodeH: number; ciVisualScale: number };
 
 /** `step === -1` 表示 prompt（与 `genAttributeDagView` 中 `DagNode.step` 约定一致） */
 type LinearArcSteppedNode = LinearArcNodeLike & { step: number };
@@ -80,6 +81,32 @@ function computeNodeCenterXs(nodes: LinearArcSteppedNode[], adjacentGapPx: numbe
     return xs;
 }
 
+/** linear-arc：参与布局节点的绘制 translate（左上角）。 */
+export function computeLinearArcNodeRects(
+    nodes: LinearArcSteppedNode[],
+    adjacentGapPx: number,
+    variant: LinearArcPaintVariant = 'flat',
+): Map<string, DagNodeLayoutPose> {
+    const centerXs = computeNodeCenterXs(nodes, adjacentGapPx);
+    const offsetYs =
+        variant === 'step-down' ? computeLinearArcStepDownOffsetYs(nodes as LinearArcStepDownNode[]) : null;
+    const out = new Map<string, DagNodeLayoutPose>();
+    for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i]!;
+        const cx = centerXs[i]!;
+        const oy = offsetYs?.[i] ?? 0;
+        out.set(n.id, {
+            id: n.id,
+            x: cx - n.nodeW / 2,
+            y: LINEAR_ARC_BASELINE_Y - n.nodeH / 2 + oy,
+            nodeW: n.nodeW,
+            nodeH: n.nodeH,
+            scale: 1,
+        });
+    }
+    return out;
+}
+
 /** linear-arc 模式：节点线性排布，边使用顶部向上弧线。
  *
  * `nodes` 为参与布局的可见节点子集（可能少于 `nodeSel` 绑定的全量节点）；
@@ -100,21 +127,14 @@ export function paintLinearArcLayout<
 }): void {
     const { linkSel, nodeSel, nodes, adjacentGapPx, getLinkNodes, variant = 'flat' } = params;
 
-    const centerXs = computeNodeCenterXs(nodes, adjacentGapPx);
-
-    // Map datum → centerX：支持 nodeSel 含超出 nodes 范围的节点（如被隐藏的节点）。
+    const poses = computeLinearArcNodeRects(nodes, adjacentGapPx, variant);
     const centerXByNode = new Map<NodeDatum, number>();
-    for (let i = 0; i < nodes.length; i++) {
-        centerXByNode.set(nodes[i]!, centerXs[i]!);
-    }
-
-    const offsetYs =
-        variant === 'step-down' ? computeLinearArcStepDownOffsetYs(nodes as LinearArcStepDownNode[]) : null;
     const offsetYByNode = new Map<NodeDatum, number>();
-    if (offsetYs) {
-        for (let i = 0; i < nodes.length; i++) {
-            offsetYByNode.set(nodes[i]!, offsetYs[i]!);
-        }
+    for (const n of nodes) {
+        const p = poses.get(n.id);
+        if (!p) continue;
+        centerXByNode.set(n, p.x + n.nodeW / 2);
+        offsetYByNode.set(n, p.y - (LINEAR_ARC_BASELINE_Y - n.nodeH / 2));
     }
 
     const arcTopY = (n: NodeDatum): number => {
@@ -141,7 +161,7 @@ export function paintLinearArcLayout<
         return `M ${srcCx} ${yStart} C ${p1x} ${upY}, ${p2x} ${upY}, ${tgtCx} ${yEnd}`;
     };
 
-    linkSel.each(function(d) {
+    linkSel.each(function (d) {
         const { src, tgt } = getLinkNodes(d);
         if (!centerXByNode.has(src) || !centerXByNode.has(tgt)) {
             return; // 端点未参与布局（Hide exclude/inactive 等），路径由 highlight 隐藏
@@ -152,9 +172,8 @@ export function paintLinearArcLayout<
     });
 
     nodeSel.attr('transform', (d) => {
-        const cx = centerXByNode.get(d);
-        if (cx === undefined) return null; // 不在布局列表中（已 display:none），不更新 transform
-        const oy = offsetYByNode.get(d) ?? 0;
-        return `translate(${cx - d.nodeW / 2},${LINEAR_ARC_BASELINE_Y - d.nodeH / 2 + oy})`;
+        const p = poses.get(d.id);
+        if (p === undefined) return null; // 不在布局列表中（已 display:none），不更新 transform
+        return `translate(${p.x},${p.y})`;
     });
 }

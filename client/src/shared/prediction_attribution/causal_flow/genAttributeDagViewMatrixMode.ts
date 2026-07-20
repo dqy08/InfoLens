@@ -1,7 +1,8 @@
 import * as d3 from 'd3';
+import type { DagNodeLayoutPose } from './genAttributeDagViewTextFlowMode';
 
-/** 单元格边长（SVG 内部坐标 px） */
-const MATRIX_CELL_SIZE = 18;
+/** 单元格边长（SVG 内部坐标 px）；转场 fly 终点尺寸与此对齐。 */
+export const MATRIX_CELL_SIZE = 18;
 /** 格子间隙（0 = 无缝贴合） */
 const MATRIX_CELL_GAP = 0;
 /** 含间隙的一格步长 */
@@ -20,9 +21,11 @@ const MATRIX_H_CHIP_HEIGHT = MATRIX_CELL_SIZE - 2;
  */
 const MATRIX_H_LABEL_NUDGE = 4;
 
-/** 与 genAttributeDagView 中 `DagNodeOpacityLevel.full` / `.weakened` 同值（矩阵只用高亮/半亮两档）。 */
+/** 与 genAttributeDagView 中 `DagNodeOpacityLevel` 同值。 */
 export const MATRIX_TOKEN_OPACITY_FULL = 1;
 export const MATRIX_TOKEN_OPACITY_WEAKENED = 0.6;
+/** exclude / inactive 占位（Hide 关闭时）；与 text `almostHidden` 一致。 */
+export const MATRIX_TOKEN_OPACITY_ALMOST_HIDDEN = 0.1;
 
 export type MatrixNodeLike = {
     id: string;
@@ -159,11 +162,177 @@ function hAxisTiltTransform(
     width: number,
     onFarSide: boolean,
 ): string {
-    const alignX = onFarSide ? -width : 0;
     const nudgeX = onFarSide ? MATRIX_H_LABEL_NUDGE : -MATRIX_H_LABEL_NUDGE;
-    return `translate(${cx + nudgeX},${cy}) rotate(-45) translate(${alignX},${
-        -MATRIX_H_CHIP_HEIGHT / 2
-    })`;
+    return hAxisChipTransformFromPose(
+        {
+            id: '',
+            x: cx + nudgeX,
+            y: cy,
+            nodeW: width,
+            nodeH: MATRIX_H_CHIP_HEIGHT,
+            scale: 1,
+        },
+        onFarSide,
+    );
+}
+
+/** 横轴 chip：由 {@link computeMatrixTokenRects} 的锚点位姿生成含 tilt 的 transform。 */
+function hAxisChipTransformFromPose(p: DagNodeLayoutPose, onFarSide: boolean): string {
+    const alignX = onFarSide ? -p.nodeW : 0;
+    return `translate(${p.x},${p.y}) rotate(-45) translate(${alignX},${-MATRIX_H_CHIP_HEIGHT / 2})`;
+}
+
+/** 矩阵轴标签 element key（与布局转场配对一致）。 */
+export function matrixRowElementKey(id: string): string {
+    return `matrix-row:${id}`;
+}
+export function matrixColElementKey(id: string): string {
+    return `matrix-col:${id}`;
+}
+
+/** 矩阵格网与轴侧几何（paint / chip 位姿共用）。 */
+export type MatrixLayoutMetrics = {
+    transpose: boolean;
+    vOnFarSide: boolean;
+    hOnFarSide: boolean;
+    selfOnFarSide: boolean;
+    vAxisNodes: MatrixNodeLike[];
+    hAxisNodes: MatrixNodeLike[];
+    vAxisIsRowToken: boolean;
+    hAxisIsRowToken: boolean;
+    mainGridW: number;
+    mainGridH: number;
+    gridW: number;
+    gridH: number;
+    mainOriginX: number;
+    mainOriginY: number;
+    selfOriginX: number;
+    selfOriginY: number;
+};
+
+export function computeMatrixLayoutMetrics(params: {
+    rowNodes: MatrixNodeLike[];
+    colNodes: MatrixNodeLike[];
+    showSelfRow?: boolean;
+    transpose?: boolean;
+    switchHorizontalLabel?: boolean;
+    switchVerticalLabel?: boolean;
+}): MatrixLayoutMetrics {
+    const {
+        rowNodes,
+        colNodes,
+        showSelfRow = false,
+        transpose = false,
+        switchHorizontalLabel = false,
+        switchVerticalLabel = false,
+    } = params;
+    const nTgts = rowNodes.length;
+    const nSrcs = colNodes.length;
+    const showSelf = showSelfRow;
+    const vAxisNodes = transpose ? colNodes : rowNodes;
+    const hAxisNodes = transpose ? rowNodes : colNodes;
+    const vOnFarSide = switchVerticalLabel;
+    const hOnFarSide = switchHorizontalLabel;
+    const selfOnFarSide = transpose ? switchVerticalLabel : switchHorizontalLabel;
+
+    const mainHCount = transpose ? nSrcs : nTgts;
+    const mainWCount = transpose ? nTgts : nSrcs;
+    const fullWCount = mainWCount + (showSelf && transpose ? 1 : 0);
+    const fullHCount = mainHCount + (showSelf && !transpose ? 1 : 0);
+    const mainGridW = mainWCount > 0 ? mainWCount * MATRIX_CELL_PITCH - MATRIX_CELL_GAP : 0;
+    const mainGridH = mainHCount > 0 ? mainHCount * MATRIX_CELL_PITCH - MATRIX_CELL_GAP : 0;
+    const gridW = fullWCount > 0 ? fullWCount * MATRIX_CELL_PITCH - MATRIX_CELL_GAP : 0;
+    const gridH = fullHCount > 0 ? fullHCount * MATRIX_CELL_PITCH - MATRIX_CELL_GAP : 0;
+    const mainOriginX = showSelf && transpose && !selfOnFarSide ? MATRIX_CELL_PITCH : 0;
+    const mainOriginY = showSelf && !transpose && !selfOnFarSide ? MATRIX_CELL_PITCH : 0;
+    const selfOriginX = showSelf && transpose ? (selfOnFarSide ? mainGridW + MATRIX_CELL_GAP : 0) : 0;
+    const selfOriginY = showSelf && !transpose ? (selfOnFarSide ? mainGridH + MATRIX_CELL_GAP : 0) : 0;
+
+    return {
+        transpose,
+        vOnFarSide,
+        hOnFarSide,
+        selfOnFarSide,
+        vAxisNodes,
+        hAxisNodes,
+        vAxisIsRowToken: !transpose,
+        hAxisIsRowToken: transpose,
+        mainGridW,
+        mainGridH,
+        gridW,
+        gridH,
+        mainOriginX,
+        mainOriginY,
+        selfOriginX,
+        selfOriginY,
+    };
+}
+
+export type ComputeMatrixTokenRectsParams = {
+    rowNodes: MatrixNodeLike[];
+    colNodes: MatrixNodeLike[];
+    /** token id → chip 宽度（与 {@link appendTokenChip} 实测一致） */
+    chipWidthById: Map<string, number>;
+    showSelfRow?: boolean;
+    transpose?: boolean;
+    switchHorizontalLabel?: boolean;
+    switchVerticalLabel?: boolean;
+};
+
+/**
+ * 矩阵行/列 chip 在 matrixG（≡ rootG 子层）下的绘制位姿。
+ * - 纵轴：x/y = translate 左上角，scale=1
+ * - 横轴：x/y = tilt 前的锚点 `(cx+nudge, cy)`（转场只插值该点；旋转在提交后由真实 DOM 承担）
+ */
+export function computeMatrixTokenRectsFromMetrics(
+    m: MatrixLayoutMetrics,
+    chipWidthById: Map<string, number>,
+): Map<string, DagNodeLayoutPose> {
+    const out = new Map<string, DagNodeLayoutPose>();
+    for (let i = 0; i < m.vAxisNodes.length; i++) {
+        const node = m.vAxisNodes[i]!;
+        const chipW = chipWidthById.get(node.id) ?? 4;
+        const chipX = m.vOnFarSide ? m.gridW + MATRIX_LABEL_PAD : -MATRIX_LABEL_PAD - chipW;
+        const chipY =
+            (m.transpose ? 0 : m.mainOriginY) +
+            cellOrigin(i) +
+            (MATRIX_CELL_SIZE - MATRIX_V_CHIP_HEIGHT) / 2;
+        const key = m.vAxisIsRowToken ? matrixRowElementKey(node.id) : matrixColElementKey(node.id);
+        out.set(key, {
+            id: node.id,
+            x: chipX,
+            y: chipY,
+            nodeW: chipW,
+            nodeH: MATRIX_V_CHIP_HEIGHT,
+            scale: 1,
+        });
+    }
+    for (let i = 0; i < m.hAxisNodes.length; i++) {
+        const node = m.hAxisNodes[i]!;
+        const chipW = chipWidthById.get(node.id) ?? 4;
+        const cx = (m.transpose ? m.mainOriginX : 0) + cellOrigin(i) + MATRIX_CELL_SIZE / 2;
+        const cy = m.hOnFarSide ? m.gridH + MATRIX_LABEL_PAD : -MATRIX_LABEL_PAD;
+        const nudgeX = m.hOnFarSide ? MATRIX_H_LABEL_NUDGE : -MATRIX_H_LABEL_NUDGE;
+        const key = m.hAxisIsRowToken ? matrixRowElementKey(node.id) : matrixColElementKey(node.id);
+        out.set(key, {
+            id: node.id,
+            x: cx + nudgeX,
+            y: cy,
+            nodeW: chipW,
+            nodeH: MATRIX_H_CHIP_HEIGHT,
+            scale: 1,
+        });
+    }
+    return out;
+}
+
+export function computeMatrixTokenRects(
+    params: ComputeMatrixTokenRectsParams,
+): Map<string, DagNodeLayoutPose> {
+    return computeMatrixTokenRectsFromMetrics(
+        computeMatrixLayoutMetrics(params),
+        params.chipWidthById,
+    );
 }
 
 /**
@@ -417,6 +586,31 @@ export function paintAttributionMatrixLayout(params: {
     const nTgts = rowNodes.length;
     const nSrcs = colNodes.length;
     const showSelf = showSelfRow;
+    const m = computeMatrixLayoutMetrics({
+        rowNodes,
+        colNodes,
+        showSelfRow,
+        transpose,
+        switchHorizontalLabel,
+        switchVerticalLabel,
+    });
+    const {
+        vOnFarSide,
+        hOnFarSide,
+        selfOnFarSide,
+        vAxisNodes,
+        hAxisNodes,
+        vAxisIsRowToken,
+        hAxisIsRowToken,
+        mainGridW,
+        mainGridH,
+        gridW,
+        gridH,
+        mainOriginX,
+        mainOriginY,
+        selfOriginX,
+        selfOriginY,
+    } = m;
 
     disposeMatrixPointerHit();
     matrixG.selectAll('*').remove();
@@ -430,25 +624,31 @@ export function paintAttributionMatrixLayout(params: {
 
     const validEdgeKeys = new Set<string>();
     const syntheticEdgeKeys = new Set<string>();
+    // 稀疏 DOM：只为有边的格建 rect；空区靠 grid-bg（命中亦只认 validEdgeKeys）。
+    const edgeCells: MatrixEdgeCellDatum[] = [];
     for (const link of links) {
         const si = colIndexById.get(link.source);
         const tiCol = colIndexById.get(link.target);
         const tiRow = rowIndexById.get(link.target);
         if (si === undefined || tiCol === undefined || tiRow === undefined || si >= tiCol) continue;
         const key = attributionMatrixCellKey(link.source, link.target);
-        validEdgeKeys.add(key);
         if (link.synthetic === true) syntheticEdgeKeys.add(key);
+        if (validEdgeKeys.has(key)) continue;
+        validEdgeKeys.add(key);
+        edgeCells.push({
+            kind: 'edge',
+            row: tiRow,
+            col: si,
+            srcId: link.source,
+            tgtId: link.target,
+            key,
+            hasEdge: true,
+            synthetic: false,
+        });
     }
-
-    // 竖轴 / 横轴：样子跟屏幕轴走，class 跟语义走（row=目标，col=源）。
-    const vAxisNodes = transpose ? colNodes : rowNodes;
-    const hAxisNodes = transpose ? rowNodes : colNodes;
-    const vAxisIsRowToken = !transpose;
-    const hAxisIsRowToken = transpose;
-    // 远侧：纵右 / 横下；近侧：纵左 / 横上。Self 跟源轴所在屏幕轴的标签侧。
-    const vOnFarSide = switchVerticalLabel;
-    const hOnFarSide = switchHorizontalLabel;
-    const selfOnFarSide = transpose ? switchVerticalLabel : switchHorizontalLabel;
+    for (const cell of edgeCells) {
+        cell.synthetic = syntheticEdgeKeys.has(cell.key);
+    }
 
     const vLabels = matrixG.append('g').attr('class', 'gen-attr-dag-matrix-row-labels');
     const hLabels = matrixG.append('g').attr('class', 'gen-attr-dag-matrix-col-labels');
@@ -465,20 +665,10 @@ export function paintAttributionMatrixLayout(params: {
         hChips.push({ g, chipW, node, i });
     }
 
-    const mainHCount = transpose ? nSrcs : nTgts;
-    const mainWCount = transpose ? nTgts : nSrcs;
-    const fullWCount = mainWCount + (showSelf && transpose ? 1 : 0);
-    const fullHCount = mainHCount + (showSelf && !transpose ? 1 : 0);
-
-    const mainGridW = mainWCount > 0 ? mainWCount * MATRIX_CELL_PITCH - MATRIX_CELL_GAP : 0;
-    const mainGridH = mainHCount > 0 ? mainHCount * MATRIX_CELL_PITCH - MATRIX_CELL_GAP : 0;
-    const gridW = fullWCount > 0 ? fullWCount * MATRIX_CELL_PITCH - MATRIX_CELL_GAP : 0;
-    const gridH = fullHCount > 0 ? fullHCount * MATRIX_CELL_PITCH - MATRIX_CELL_GAP : 0;
-    // Self 在近侧时占满格区起点，主矩阵让出一步长。
-    const mainOriginX = showSelf && transpose && !selfOnFarSide ? MATRIX_CELL_PITCH : 0;
-    const mainOriginY = showSelf && !transpose && !selfOnFarSide ? MATRIX_CELL_PITCH : 0;
-    const selfOriginX = showSelf && transpose ? (selfOnFarSide ? mainGridW + MATRIX_CELL_GAP : 0) : 0;
-    const selfOriginY = showSelf && !transpose ? (selfOnFarSide ? mainGridH + MATRIX_CELL_GAP : 0) : 0;
+    const chipWidthById = new Map<string, number>();
+    for (const c of vChips) chipWidthById.set(c.node.id, c.chipW);
+    for (const c of hChips) chipWidthById.set(c.node.id, c.chipW);
+    const tokenPoses = computeMatrixTokenRectsFromMetrics(m, chipWidthById);
 
     const grid = matrixG
         .append('g')
@@ -495,33 +685,9 @@ export function paintAttributionMatrixLayout(params: {
             .style('pointer-events', 'none');
     }
 
-    const cells: MatrixCellDatum[] = [];
-    for (let row = 0; row < nTgts; row++) {
-        for (let col = 0; col < nSrcs; col++) {
-            const srcId = colNodes[col]!.id;
-            const tgtId = rowNodes[row]!.id;
-            const key = attributionMatrixCellKey(srcId, tgtId);
-            cells.push({
-                kind: 'edge',
-                row,
-                col,
-                srcId,
-                tgtId,
-                key,
-                hasEdge: validEdgeKeys.has(key),
-                synthetic: syntheticEdgeKeys.has(key),
-            });
-        }
-    }
-    if (showSelf) {
-        for (let col = 0; col < nSrcs; col++) {
-            cells.push({
-                kind: 'self',
-                col,
-                nodeId: colNodes[col]!.id,
-            });
-        }
-    }
+    const selfCells: MatrixSelfCellDatum[] = showSelf
+        ? colNodes.map((node, col) => ({ kind: 'self' as const, col, nodeId: node.id }))
+        : [];
 
     const edgeCellXY = (srcIdx: number, tgtIdx: number) =>
         transpose
@@ -538,7 +704,6 @@ export function paintAttributionMatrixLayout(params: {
             ? { x: selfOriginX, y: cellOrigin(srcIdx) }
             : { x: cellOrigin(srcIdx), y: selfOriginY };
 
-    const edgeCells = cells.filter((d): d is MatrixEdgeCellDatum => d.kind === 'edge');
     const edgeCellSel = grid
         .selectAll<SVGRectElement, MatrixEdgeCellDatum>('rect.gen-attr-dag-matrix-cell--edge')
         .data(edgeCells)
@@ -552,7 +717,6 @@ export function paintAttributionMatrixLayout(params: {
     edgeCellSel.style('pointer-events', 'none');
 
     if (showSelf) {
-        const selfCells = cells.filter((d): d is MatrixSelfCellDatum => d.kind === 'self');
         grid
             .selectAll<SVGRectElement, MatrixSelfCellDatum>('rect.gen-attr-dag-matrix-self-cell')
             .data(selfCells)
@@ -594,26 +758,25 @@ export function paintAttributionMatrixLayout(params: {
             .style('pointer-events', 'none');
     }
 
-    for (const { g, chipW, i } of vChips) {
-        const chipX = vOnFarSide
-            ? gridW + MATRIX_LABEL_PAD
-            : -MATRIX_LABEL_PAD - chipW;
-        // 纵轴节点跟主矩阵行对齐（转置时源轴无 Self 纵向偏移）
-        const chipY =
-            (transpose ? 0 : mainOriginY) +
-            cellOrigin(i) +
-            (MATRIX_CELL_SIZE - MATRIX_V_CHIP_HEIGHT) / 2;
-        g.attr('transform', `translate(${chipX},${chipY})`)
+    for (const { g, node } of vChips) {
+        const key = vAxisIsRowToken ? matrixRowElementKey(node.id) : matrixColElementKey(node.id);
+        const p = tokenPoses.get(key);
+        if (!p) {
+            throw new Error(`paintAttributionMatrixLayout: missing v-axis pose for ${key}`);
+        }
+        g.attr('transform', `translate(${p.x},${p.y})`)
             .classed('gen-attr-dag-matrix-row-token', vAxisIsRowToken)
             .classed('gen-attr-dag-matrix-col-token', !vAxisIsRowToken);
     }
 
-    // 横轴 chip：与 Self 顶/底文案共用 {@link hAxisTiltTransform}
-    for (const { g, chipW, i } of hChips) {
-        const cx =
-            (transpose ? mainOriginX : 0) + cellOrigin(i) + MATRIX_CELL_SIZE / 2;
-        const cy = hOnFarSide ? gridH + MATRIX_LABEL_PAD : -MATRIX_LABEL_PAD;
-        g.attr('transform', hAxisTiltTransform(cx, cy, chipW, hOnFarSide))
+    // 横轴 chip：与 Self 顶/底文案共用 {@link hAxisTiltTransform} / pose tilt
+    for (const { g, node } of hChips) {
+        const key = hAxisIsRowToken ? matrixRowElementKey(node.id) : matrixColElementKey(node.id);
+        const p = tokenPoses.get(key);
+        if (!p) {
+            throw new Error(`paintAttributionMatrixLayout: missing h-axis pose for ${key}`);
+        }
+        g.attr('transform', hAxisChipTransformFromPose(p, hOnFarSide))
             .classed('gen-attr-dag-matrix-row-token', hAxisIsRowToken)
             .classed('gen-attr-dag-matrix-col-token', !hAxisIsRowToken);
     }
@@ -758,12 +921,7 @@ export function restyleAttributionMatrixLayout(params: {
                 }
                 return;
             }
-            if (!d.hasEdge) {
-                el.classed('gen-attr-dag-matrix-cell--inactive', false)
-                    .attr('fill', 'var(--gen-attr-dag-matrix-cell-empty)')
-                    .attr('opacity', 1);
-                return;
-            }
+            // 稀疏 DOM：仅 hasEdge 格存在；空区由 grid-bg 承担。
             const override = cellVisualByKey.get(d.key);
             if (d.synthetic) {
                 // 合成边：灰/蓝/红均最强色 + 2×2 棋盘（半格透明），不跟 API 边透明度公式。

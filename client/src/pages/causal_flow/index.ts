@@ -52,6 +52,7 @@ import {
     DAG_COMPACTNESS_DEFAULT,
     LINEAR_ARC_ADJACENT_GAP_DEFAULT,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagView';
+import { DAG_LAYOUT_TRANSITION_MS } from '../../shared/prediction_attribution/causal_flow/genAttributeDagLayoutTransition';
 import type {
     DagPropagationPlaybackOptions,
     DagRecursiveEdgeReplayPacing,
@@ -179,6 +180,8 @@ const showToast = createToast('#toast').show;
 
 const GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY = 'info_radar_gen_attr_dag_measure_width';
 const GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_mode';
+const GEN_ATTR_DAG_LAYOUT_TRANSITION_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_transition';
+const GEN_ATTR_DAG_LAYOUT_TRANSITION_S_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_transition_s';
 const GEN_ATTR_DAG_MATRIX_TRANSPOSE_STORAGE_KEY = 'info_radar_gen_attr_dag_matrix_transpose';
 const GEN_ATTR_DAG_MATRIX_SWITCH_HORIZONTAL_LABEL_STORAGE_KEY =
     'info_radar_gen_attr_dag_matrix_switch_horizontal_label';
@@ -248,6 +251,11 @@ const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MAX = 3600;
 /** 手输总量化的步长；原生 step=1 箭头在 `input` 里另取整。 */
 const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_STEP = 0.1;
 
+const GEN_ATTR_DAG_LAYOUT_TRANSITION_S_DEFAULT = DAG_LAYOUT_TRANSITION_MS / 1000;
+const GEN_ATTR_DAG_LAYOUT_TRANSITION_S_MIN = 0.1;
+const GEN_ATTR_DAG_LAYOUT_TRANSITION_S_MAX = 30;
+const GEN_ATTR_DAG_LAYOUT_TRANSITION_S_STEP = 0.1;
+
 const GEN_ATTR_DAG_SIMULATE_ATTENTION_STORAGE_KEY = 'info_radar_gen_attr_dag_simulate_attention';
 const GEN_ATTR_DAG_SKIP_PREFILL_STORAGE_KEY = 'info_radar_gen_attr_dag_skip_prefill';
 const GEN_ATTR_DAG_PREFILL_STYLE_STORAGE_KEY = 'info_radar_gen_attr_dag_prefill_style';
@@ -269,6 +277,8 @@ const GEN_ATTR_DAG_FFN_RATIO_MAX = 20;
 /** 与无 demoUiOptions 本地缓存时「读出默认」对齐，供重置与可读性单一的来源 */
 const DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS: GenAttrDemoUiOptions = {
     layoutMode: 'text-flow',
+    layoutTransitionEnabled: true,
+    layoutTransitionDurationS: GEN_ATTR_DAG_LAYOUT_TRANSITION_S_DEFAULT,
     measureWidthPx: GEN_ATTR_DAG_MEASURE_WIDTH_DEFAULT,
     dagCompactness: DAG_COMPACTNESS_DEFAULT,
     linearArcAdjacentGapPx: LINEAR_ARC_ADJACENT_GAP_DEFAULT,
@@ -468,6 +478,36 @@ function readStoredDagLayoutMode(): DagLayoutMode {
     );
 }
 
+function clampDagLayoutTransitionS(n: number): number {
+    const stepped =
+        Math.round(n / GEN_ATTR_DAG_LAYOUT_TRANSITION_S_STEP) * GEN_ATTR_DAG_LAYOUT_TRANSITION_S_STEP;
+    return Math.max(
+        GEN_ATTR_DAG_LAYOUT_TRANSITION_S_MIN,
+        Math.min(GEN_ATTR_DAG_LAYOUT_TRANSITION_S_MAX, stepped),
+    );
+}
+
+function formatDagLayoutTransitionS(n: number): string {
+    const s = clampDagLayoutTransitionS(n);
+    return Number.isInteger(s) ? String(s) : s.toFixed(1);
+}
+
+function readStoredDagLayoutTransitionEnabled(): boolean {
+    return lsReadBool(
+        GEN_ATTR_DAG_LAYOUT_TRANSITION_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.layoutTransitionEnabled,
+        { encoding: '1' },
+    );
+}
+
+function readStoredDagLayoutTransitionS(): number {
+    return lsReadNumber(
+        GEN_ATTR_DAG_LAYOUT_TRANSITION_S_STORAGE_KEY,
+        DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.layoutTransitionDurationS,
+        { parse: 'float', clamp: clampDagLayoutTransitionS },
+    );
+}
+
 function readStoredDagMatrixTranspose(): boolean {
     return lsReadBool(GEN_ATTR_DAG_MATRIX_TRANSPOSE_STORAGE_KEY, false, { encoding: '1' });
 }
@@ -546,6 +586,12 @@ const metricModel = d3.select('#gen_attr_metric_model');
 const genAttrResultsEl = d3.select('#results.gen-attr-results-surface');
 
 const dagLayoutModeSelect = document.getElementById('gen_attr_dag_layout_mode') as HTMLSelectElement | null;
+const dagLayoutTransitionInput = document.getElementById(
+    'gen_attr_dag_layout_transition',
+) as HTMLInputElement | null;
+const dagLayoutTransitionSInput = document.getElementById(
+    'gen_attr_dag_layout_transition_s',
+) as HTMLInputElement | null;
 const dagMatrixTransposeGroup = document.getElementById('gen_attr_dag_matrix_transpose_group');
 const dagMatrixTransposeInput = document.getElementById(
     'gen_attr_dag_matrix_transpose',
@@ -1030,6 +1076,18 @@ function genAttrEffectiveExcludeGeneratedPatternsText(): string {
 
 const initialDagLayoutMode = readStoredDagLayoutMode();
 if (dagLayoutModeSelect) dagLayoutModeSelect.value = initialDagLayoutMode;
+const initialDagLayoutTransitionEnabled = readStoredDagLayoutTransitionEnabled();
+const initialDagLayoutTransitionS = readStoredDagLayoutTransitionS();
+if (dagLayoutTransitionInput) dagLayoutTransitionInput.checked = initialDagLayoutTransitionEnabled;
+if (dagLayoutTransitionSInput) {
+    dagLayoutTransitionSInput.value = formatDagLayoutTransitionS(initialDagLayoutTransitionS);
+}
+function syncDagLayoutTransitionSInputUi(): void {
+    if (dagLayoutTransitionSInput) {
+        dagLayoutTransitionSInput.disabled = !(dagLayoutTransitionInput?.checked ?? false);
+    }
+}
+syncDagLayoutTransitionSInputUi();
 const initialDagMatrixTranspose = readStoredDagMatrixTranspose();
 if (dagMatrixTransposeInput) dagMatrixTransposeInput.checked = initialDagMatrixTranspose;
 const initialDagMatrixSwitchHorizontalLabel = readStoredDagMatrixSwitchHorizontalLabel();
@@ -2148,6 +2206,8 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
         replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
     },
     layoutMode: initialDagLayoutMode,
+    layoutTransitionEnabled: initialDagLayoutTransitionEnabled,
+    layoutTransitionDurationMs: initialDagLayoutTransitionS * 1000,
     measureWidthPx: initialDagMeasureWidth,
     dagCompactness: initialDagCompactness,
     linearArcAdjacentGapPx: initialDagLinearArcGap,
@@ -2208,6 +2268,27 @@ dagLayoutModeSelect?.addEventListener('change', () => {
     applyDagLayoutModeUi();
     applyDagRecursiveAttributionSubmodeUi();
     dagHandle.setLayoutMode(currentDagLayoutMode());
+});
+
+function applyDagLayoutTransitionFromControls(): void {
+    const enabled = dagLayoutTransitionInput?.checked ?? false;
+    syncDagLayoutTransitionSInputUi();
+    const raw = parseFloat(dagLayoutTransitionSInput?.value ?? '');
+    const s = Number.isFinite(raw)
+        ? clampDagLayoutTransitionS(raw)
+        : GEN_ATTR_DAG_LAYOUT_TRANSITION_S_DEFAULT;
+    if (dagLayoutTransitionSInput) {
+        dagLayoutTransitionSInput.value = formatDagLayoutTransitionS(s);
+    }
+    dagHandle.setLayoutTransitionEnabled(enabled);
+    dagHandle.setLayoutTransitionDurationMs(s * 1000);
+}
+
+dagLayoutTransitionInput?.addEventListener('change', () => {
+    applyDagLayoutTransitionFromControls();
+});
+dagLayoutTransitionSInput?.addEventListener('change', () => {
+    applyDagLayoutTransitionFromControls();
 });
 
 dagMatrixTransposeInput?.addEventListener('change', () => {
@@ -2351,6 +2432,13 @@ function readGenAttrDemoUiOptionsFromControls(): GenAttrDemoUiOptions {
     } = readDagReplayPacingFromControls();
     return {
         layoutMode: currentDagLayoutMode(),
+        layoutTransitionEnabled: dagLayoutTransitionInput?.checked ?? false,
+        layoutTransitionDurationS: (() => {
+            const raw = parseFloat(dagLayoutTransitionSInput?.value ?? '');
+            return Number.isFinite(raw)
+                ? clampDagLayoutTransitionS(raw)
+                : GEN_ATTR_DAG_LAYOUT_TRANSITION_S_DEFAULT;
+        })(),
         measureWidthPx,
         dagCompactness,
         linearArcAdjacentGapPx,
@@ -2429,6 +2517,11 @@ const GEN_ATTR_DEMO_UI_PERSIST_SPECS: ReadonlyArray<{
     readonly storageKey: string;
 }> = [
     { controlId: 'gen_attr_dag_layout_mode', storageKey: GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY },
+    { controlId: 'gen_attr_dag_layout_transition', storageKey: GEN_ATTR_DAG_LAYOUT_TRANSITION_STORAGE_KEY },
+    {
+        controlId: 'gen_attr_dag_layout_transition_s',
+        storageKey: GEN_ATTR_DAG_LAYOUT_TRANSITION_S_STORAGE_KEY,
+    },
     { controlId: 'gen_attr_dag_compactness', storageKey: GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY },
     { controlId: 'gen_attr_dag_measure_width', storageKey: GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY },
     { controlId: 'gen_attr_dag_linear_arc_interval', storageKey: GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY },
@@ -2542,6 +2635,8 @@ function removeGenAttrDemoUiOptionsFromLocalStorage(): void {
 
 function persistGenAttrDemoUiOptionsToLocalStorage(snap: GenAttrDemoUiOptions): void {
     lsWriteString(GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY, snap.layoutMode);
+    lsWriteBool(GEN_ATTR_DAG_LAYOUT_TRANSITION_STORAGE_KEY, snap.layoutTransitionEnabled, '1');
+    lsSet(GEN_ATTR_DAG_LAYOUT_TRANSITION_S_STORAGE_KEY, String(snap.layoutTransitionDurationS));
     lsSet(GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY, String(snap.measureWidthPx));
     lsSet(GEN_ATTR_DAG_COMPACTNESS_STORAGE_KEY, String(snap.dagCompactness));
     lsSet(GEN_ATTR_DAG_LINEAR_ARC_GAP_STORAGE_KEY, String(snap.linearArcAdjacentGapPx));
@@ -2675,6 +2770,21 @@ function applyGenAttrDemoUiOptionsSnap(snap: Partial<GenAttrDemoUiOptions>): voi
         applyDagLayoutModeUi();
         applyDagRecursiveAttributionSubmodeUi();
         dagHandle.setLayoutMode(mode);
+    }
+
+    if (snap.layoutTransitionEnabled !== undefined) {
+        if (dagLayoutTransitionInput) {
+            dagLayoutTransitionInput.checked = snap.layoutTransitionEnabled;
+        }
+    }
+    if (snap.layoutTransitionDurationS !== undefined) {
+        const s = clampDagLayoutTransitionS(snap.layoutTransitionDurationS);
+        if (dagLayoutTransitionSInput) {
+            dagLayoutTransitionSInput.value = formatDagLayoutTransitionS(s);
+        }
+    }
+    if (snap.layoutTransitionEnabled !== undefined || snap.layoutTransitionDurationS !== undefined) {
+        applyDagLayoutTransitionFromControls();
     }
 
     if (snap.measureWidthPx !== undefined) {

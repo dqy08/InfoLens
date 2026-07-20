@@ -98,20 +98,60 @@ import {
     dagNodeBaseWidth,
     dagTextFlowPaintOrigin,
     paintTextFlowLayout,
+    type DagNodeLayoutPose,
 } from './genAttributeDagViewTextFlowMode';
 import { paintSpiralLayout } from './genAttributeDagViewSpiralMode';
 import {
     attributionMatrixCellKey,
     attributionMatrixEdgeEndpoints,
+    MATRIX_CELL_SIZE,
+    MATRIX_TOKEN_OPACITY_ALMOST_HIDDEN,
     MATRIX_TOKEN_OPACITY_FULL,
     MATRIX_TOKEN_OPACITY_WEAKENED,
     disposeMatrixPointerHit,
     paintAttributionMatrixLayout,
     restyleAttributionMatrixLayout,
+    matrixRowElementKey,
+    matrixColElementKey,
     type MatrixCellVisual,
     type MatrixInteractionHandlers,
     type MatrixTokenVisual,
 } from './genAttributeDagViewMatrixMode';
+import { computeFitZoomTransform } from './genAttributeDagFitZoom';
+import {
+    annotateLayoutTransitionFlyRoles,
+    flyArrowMarkerLayout,
+    flyArrowTracksPoseHeight,
+    flyArrowTransform,
+    flyArrowTwistFromAngles,
+    flyPoseTransform,
+    buildEdgeCellFlyPairs,
+    buildEdgeEdgeFlyPairs,
+    buildLayoutTransitionPairs,
+    dagLayoutEdgeTransitionKind,
+    cellFlyPoseFromRect,
+    dagLayoutNodeKey,
+    DAG_LAYOUT_FLY_DEFAULT_COLOR,
+    DAG_LAYOUT_TRANSITION_FLY_MAX,
+    DAG_LAYOUT_TRANSITION_MS,
+    edgeFlyPoseFromPathTangent,
+    flySyntheticDashPair,
+    isSteadyPainted,
+    layoutTransitionFlyCombinedOpacity,
+    lerp,
+    lerpFlyPose,
+    lerpPose,
+    parsePoseFromTransform,
+    poseToTransform,
+    readSteadyPaintOpacity,
+    remapFlyPosesAcrossZoom,
+    remapPosesAcrossZoom,
+    runLayoutTransitionClock,
+    type DagLayoutFlyPose,
+    type DagLayoutElementKind,
+    type DagLayoutTransitionCardinality,
+    type SteadyPaintKind,
+} from './genAttributeDagLayoutTransition';
 import { tr } from '../../../shared/lang/i18n-lite';
 
 /** ▶ / ↯ 首次可点教练提示：各记一次（Got it 或实际点击播放）。 */
@@ -459,9 +499,6 @@ function buildNodeStrokeRenderStrengthById(
 const SVG_MIN_W = 320;
 const SVG_MIN_H = 280;
 
-/** text-flow：`fitViewportToContent` 四边对称边距（px）。 */
-const DAG_TEXT_FLOW_FIT_PAD_PX = 24;
-
 /**
  * `.gen-attr-dag-stack` 布局尺寸(px)，供 SVG width/height 与 `fitViewportToContent` 共用。
  * 用 offsetWidth/offsetHeight（布局流尺寸）而非 getBoundingClientRect，
@@ -681,7 +718,7 @@ export type GenAttributeDagHandle = {
     reset(preserveUserViewport?: boolean): void;
     /**
      * zoom identity 后按内容适配视口；空图走默认缩放；`k` 上限 `k₀`（随当前布局模式的初始 zoom 倍率变化）。
-     * - `text-flow`：`rootG.getBBox()`（含边）等比落入内框；四边对称各 {@link DAG_TEXT_FLOW_FIT_PAD_PX}px。
+     * - `text-flow`：`rootG.getBBox()`（含边）等比落入内框；四边对称各 24px（见 `DAG_TEXT_FLOW_FIT_PAD_PX`）。
      * - `linear-arc` / `linear-arc-step-down`：仅按 `gen-attr-dag-nodes` 行宽定比，token 行相对内框竖直居中（弧不参与）。
      * 若 `layoutDirty` 为真则 no-op（仅已执行的 `syncSvgSize` 生效，不改 pan/zoom），但 `force` 为真时仍
      * fit 并清 dirty（例如刷新按钮的强制适配）。
@@ -714,6 +751,10 @@ export type GenAttributeDagHandle = {
     setMeasureWidthPx(widthPx: number | null): void;
     /** 切换 DAG 节点布局模式并立即重排现有节点/边。 */
     setLayoutMode(mode: DagLayoutMode): void;
+    /** 是否在切换 layout 时播放转场；关闭则瞬切。 */
+    setLayoutTransitionEnabled(enabled: boolean): void;
+    /** layout 转场时长（毫秒）；≤0 视为瞬切。 */
+    setLayoutTransitionDurationMs(ms: number): void;
     /**
      * linear-arc 家族下相邻节点矩形外侧边的水平间隙（px）。仅影响该家族几何；若在生成/播放中途调用且
      * `skipRefit` 为真，仅写入值，下一轮 `syncGraphToSvg`/空闲后再反映（与测量宽度语义一致）。
@@ -1076,6 +1117,10 @@ export type InitGenAttributeDagViewOptions = {
     measureWidthPx?: number;
     /** DAG 节点布局模式；默认 `text-flow`。 */
     layoutMode?: DagLayoutMode;
+    /** 切换 layout 时是否播放转场；默认 `true`。 */
+    layoutTransitionEnabled?: boolean;
+    /** layout 转场时长（ms）；默认 {@link DAG_LAYOUT_TRANSITION_MS}。 */
+    layoutTransitionDurationMs?: number;
     /**
      * linear-arc 家族：相邻节点矩形外侧边的水平间隙（px），决定水平方向疏密；
      * 默认 {@link LINEAR_ARC_ADJACENT_GAP_DEFAULT}。
@@ -1130,6 +1175,12 @@ export function initGenAttributeDagView(
     const onDagCanPlay = options?.onDagCanPlay;
     const onFullscreenError = options?.onFullscreenError;
     let layoutMode: DagLayoutMode = options?.layoutMode ?? 'text-flow';
+    let layoutTransitionEnabled = options?.layoutTransitionEnabled ?? true;
+    let layoutTransitionDurationMs =
+        options?.layoutTransitionDurationMs !== undefined &&
+        Number.isFinite(options.layoutTransitionDurationMs)
+            ? Math.max(0, options.layoutTransitionDurationMs)
+            : DAG_LAYOUT_TRANSITION_MS;
     let linearArcAdjacentGapPx = LINEAR_ARC_ADJACENT_GAP_DEFAULT;
     if (options?.linearArcAdjacentGapPx !== undefined) {
         const iv = options.linearArcAdjacentGapPx;
@@ -1147,6 +1198,9 @@ export function initGenAttributeDagView(
     let dimInactiveNotDuringAnimation: boolean = options?.dimInactiveNotDuringAnimation ?? false;
     let showTokenInfoOnSelected: boolean = options?.showTokenInfoOnSelected ?? false;
     let recursiveAttributionEnabled: boolean = options?.recursiveAttributionEnabled ?? false;
+    /** 布局转场进行中：忽略再次切 mode / 拖节点 / 框选 / zoom */
+    let layoutTransitionLocked = false;
+    let cancelLayoutTransition: (() => void) | null = null;
     /** attribution-matrix：true 时横=目标、纵=源；Self 为右列。 */
     let matrixTranspose = false;
     /** attribution-matrix：横轴标签在远侧（下）。 */
@@ -1203,6 +1257,8 @@ export function initGenAttributeDagView(
             setDagPlaybackPlaying: noop,
             setMeasureWidthPx: noop,
             setLayoutMode: noop,
+            setLayoutTransitionEnabled: noop,
+            setLayoutTransitionDurationMs: noop,
             setLinearArcAdjacentGapPx: noop,
             setDagCompactness: noop,
             setEdgeTopPCoverage: noop,
@@ -1276,9 +1332,17 @@ export function initGenAttributeDagView(
     /** 非 text-flow 时节点不可拖；用该类覆盖选中态的 grab 光标（linear-arc / spiral 等）。 */
     function syncStackLayoutDragUi(): void {
         stackEl.classList.toggle('gen-attr-dag-no-node-drag-layout', layoutMode !== 'text-flow');
-        stackEl.classList.toggle('gen-attr-dag-matrix-layout', layoutMode === 'attribution-matrix');
+    }
+
+    /**
+     * matrix 稳态双色外围（`gen-attr-dag-matrix-layout`）。
+     * 转场约定：只动画节点与边/格；背景等其余元素稳态再显现。
+     */
+    function syncMatrixLayoutBgClass(active: boolean): void {
+        stackEl.classList.toggle('gen-attr-dag-matrix-layout', active);
     }
     syncStackLayoutDragUi();
+    syncMatrixLayoutBgClass(layoutMode === 'attribution-matrix');
 
     if (options?.dagCompactness !== undefined && options?.displayScale !== undefined) {
         throw new Error('genAttributeDagView: pass only one of dagCompactness or displayScale');
@@ -1362,6 +1426,13 @@ export function initGenAttributeDagView(
 
     const zoomBehavior = d3
         .zoom<SVGSVGElement, unknown>()
+        // 与 d3-zoom 默认一致（放行 pinch 的 wheel+ctrlKey），另在转场中锁交互
+        .filter(
+            (event) =>
+                !layoutTransitionLocked &&
+                (!event.ctrlKey || event.type === 'wheel') &&
+                !event.button,
+        )
         .on('zoom', (event) => {
             rootG.attr('transform', event.transform);
             // 仅用户交互（滚轮/拖平移）计入「改动布局」；程序触发的 transform
@@ -1876,7 +1947,9 @@ export function initGenAttributeDagView(
 
     function layoutInteractionLocked(): boolean {
         return (
-            dagPlaybackPlaying || recursiveEdgeAnimation.getPlaybackPhase() === 'playing'
+            layoutTransitionLocked ||
+            dagPlaybackPlaying ||
+            recursiveEdgeAnimation.getPlaybackPhase() === 'playing'
         );
     }
 
@@ -2357,6 +2430,37 @@ export function initGenAttributeDagView(
         }
     }
 
+    /**
+     * 行列 token 亮度对齐 text {@link resolveNodeFillOpacity} 的 exclude / inactive 档：
+     * Hide 关闭时压到 {@link MATRIX_TOKEN_OPACITY_ALMOST_HIDDEN}；框样式保留。
+     * attention / 末 token dwell 期间 exclude 不压暗（与 text `treatExcludedAsNormalInAttention` 一致）。
+     */
+    function applyMatrixTokenLowVisibilityOpacity(maps: MatrixVisualMaps): void {
+        const treatExcludedAsNormalInAttention =
+            !hideExcludedTokens &&
+            (attentionHighlight != null || lastTokenAppearanceDwellActive);
+        const focusId = effectiveFocusId();
+        const focusState = currentFocusState;
+        const dimEffective = dimInactiveTokensEffective();
+
+        const apply = (map: Map<string, MatrixTokenVisual>, n: DagNode) => {
+            const lowVis = nodeLowVisibilityReasonFor(n, focusId, focusState, dimEffective);
+            const forceAlmostHidden =
+                (!treatExcludedAsNormalInAttention &&
+                    isOffsetSpanFullyExcluded(n.start, n.end, dagExcludeIntervals)) ||
+                lowVis === 'inactive';
+            if (!forceAlmostHidden) return;
+            const prev = map.get(n.id);
+            map.set(n.id, {
+                fillOpacity: MATRIX_TOKEN_OPACITY_ALMOST_HIDDEN,
+                frame: prev?.frame,
+            });
+        };
+
+        for (const n of matrixRowNodes()) apply(maps.rowTokenVisualById, n);
+        for (const n of matrixColNodes()) apply(maps.colTokenVisualById, n);
+    }
+
     /** ↯ 进行中：userFocus 行焦点 + playing/paused。 */
     function matrixPropagationHighlightActive(): boolean {
         const phase = recursiveEdgeAnimation.getPlaybackPhase();
@@ -2445,6 +2549,7 @@ export function initGenAttributeDagView(
             visuals = computeMatrixVisuals(matrixStaticHighlightTarget());
         }
         applyMatrixHoverFrame(visuals);
+        applyMatrixTokenLowVisibilityOpacity(visuals);
 
         const rowFocusId = matrixRowFocusId();
         const selfCellOpacityByCol =
@@ -3076,7 +3181,14 @@ export function initGenAttributeDagView(
             lightningVisualActive && lightningContentReveal < 1 ? String(lightningContentReveal) : null,
         );
         // 每条边：颜色/强度（见 resolveDagLinkHighlightDisplay）、`<title>` 一并刷新（含 linkGFront 高亮边）。
-        rootG.selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link').each(function(d) {
+        // 只扫真实边层（linkG / linkGFront），避免误伤无 datum 的临时层。
+        const realLinkNodes = (
+            linkG.selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link').nodes() as SVGGElement[]
+        ).concat(linkGFront.selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link').nodes() as SVGGElement[]);
+        d3.selectAll<SVGGElement, DagLink>(realLinkNodes).each(function (d) {
+            if (d == null) {
+                throw new Error('refreshNodeLinkHighlight: link datum missing on real link layer');
+            }
             const srcId = endpointNode(d.source, graph).id;
             const tgtId = endpointNode(d.target, graph).id;
             const edgeKey = dagLinkEndpointKey(srcId, tgtId);
@@ -3907,6 +4019,7 @@ export function initGenAttributeDagView(
     function reset(preserveUserViewport: boolean = false): void {
         const wasLayoutDirty = layoutDirty;
         const wasUserDraggedNodes = userDraggedNodes;
+        clearLayoutTransitionArtifacts();
         clearGenAttributeDagAlignmentWarnDedupe();
         recursiveEdgeAnimation.onClear();
         textMeasure.reset();
@@ -3952,6 +4065,16 @@ export function initGenAttributeDagView(
         notifyUserFocusChange();
     }
 
+    function contentBBoxForFit(mode: DagLayoutMode): DOMRect {
+        if (isLinearArcFamilyLayout(mode)) {
+            return nodeG.node()!.getBBox();
+        }
+        if (mode === 'attribution-matrix') {
+            return matrixG.node()!.getBBox();
+        }
+        return rootG.node()!.getBBox();
+    }
+
     function fitViewportToContent(force: boolean = false): void {
         syncSvgSize();
         if (layoutDirty && !force) {
@@ -3961,66 +4084,16 @@ export function initGenAttributeDagView(
         if (nodes.length === 0) {
             applyInitialDagZoom();
         } else {
-            svg.call(zoomBehavior.transform, d3.zoomIdentity);
-            const pad = 12;
             const { w, h } = stackLayoutViewportPx(stackEl);
-            const innerW = Math.max(w - 2 * pad, 1);
-            const innerH = Math.max(h - 2 * pad, 1);
-            if (isLinearArcFamilyLayout(layoutMode)) {
-                /** 仅用 token 行宽度定比；竖直按行中心居中（弧不参与 bbox → 不致上下抖） */
-                const bn = nodeG.node()!.getBBox();
-                const bw = Math.max(bn.width, 1e-6);
-                const kRaw = innerW / bw;
-                const k = Math.min(Number.isFinite(kRaw) && kRaw > 0 ? kRaw : k0, k0);
-                const tx = pad * 2 - k * bn.x;
-                const rowMidY = bn.y + bn.height / 2;
-                const ty = pad + innerH / 2 - k * rowMidY;
-                svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
-            } else if (layoutMode === 'spiral') {
-                /**
-                 * 螺旋：等比缩放 + 视口中心对齐曲线原点 (0,0)（{@link paintSpiralLayout} 坐标），
-                 * 避免按 bbox 中心 fit 时随步进增长 centroid 漂移导致播放抖动。
-                 */
-                const b = rootG.node()!.getBBox();
-                const xmin = b.x;
-                const xmax = b.x + b.width;
-                const ymin = b.y;
-                const ymax = b.y + b.height;
-                const halfW = innerW / 2;
-                const halfH = innerH / 2;
-                let kFromOrigin = Infinity;
-                if (xmax > 0) kFromOrigin = Math.min(kFromOrigin, halfW / xmax);
-                if (xmin < 0) kFromOrigin = Math.min(kFromOrigin, halfW / (-xmin));
-                if (ymax > 0) kFromOrigin = Math.min(kFromOrigin, halfH / ymax);
-                if (ymin < 0) kFromOrigin = Math.min(kFromOrigin, halfH / (-ymin));
-                const bw = Math.max(b.width, 1e-6);
-                const bh = Math.max(b.height, 1e-6);
-                const kFromSides = Math.min(innerW / bw, innerH / bh);
-                const kRaw = Number.isFinite(kFromOrigin) && kFromOrigin > 0 ? kFromOrigin : kFromSides;
-                const k = Math.min(kRaw, k0);
-                const tx = pad + halfW;
-                const ty = pad + halfH;
-                svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
-            } else if (layoutMode === 'text-flow' || layoutMode === 'attribution-matrix') {
-                /** `rootG` 整包 bbox + 宽高双约束顶对齐（矩阵与 text-flow 相同） */
-                const padTf = DAG_TEXT_FLOW_FIT_PAD_PX;
-                const innerWTextFlow = Math.max(w - 2 * padTf, 1);
-                const innerHTextFlow = Math.max(h - 2 * padTf, 1);
-                const b =
-                    layoutMode === 'attribution-matrix'
-                        ? matrixG.node()!.getBBox()
-                        : rootG.node()!.getBBox();
-                const bw = Math.max(b.width, 1e-6);
-                const bh = Math.max(b.height, 1e-6);
-                const kRaw = Math.min(innerWTextFlow / bw, innerHTextFlow / bh);
-                const k = Math.min(Number.isFinite(kRaw) && kRaw > 0 ? kRaw : k0, k0);
-                const tx = padTf - k * b.x;
-                const ty = padTf - k * b.y;
-                svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
-            } else {
-                const _: never = layoutMode;
-                throw new Error(`genAttributeDagView: unsupported layoutMode for fit (${String(_)})`);
-            }
+            const contentBBox = contentBBoxForFit(layoutMode);
+            const z = computeFitZoomTransform({
+                mode: layoutMode,
+                contentBBox,
+                viewportW: w,
+                viewportH: h,
+                k0,
+            });
+            svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(z.x, z.y).scale(z.k));
         }
         // 任何成功 fit（含 RO 自动 fit、refresh）都回到默认视图语义，下个 dirty 周期重新起算。
         layoutDirty = false;
@@ -4209,15 +4282,779 @@ export function initGenAttributeDagView(
         syncDagPlayButton();
     }
 
-    function setLayoutMode(mode: DagLayoutMode): void {
-        if (layoutMode === mode) return;
+    function layoutElementKind(mode: DagLayoutMode): DagLayoutElementKind {
+        return mode === 'attribution-matrix' ? 'matrix' : 'graph';
+    }
+
+    function prefersReducedMotion(): boolean {
+        return (
+            typeof matchMedia === 'function' &&
+            matchMedia('(prefers-reduced-motion: reduce)').matches
+        );
+    }
+
+    /**
+     * 转场捕获可见性（相对 svg 根）。
+     * 契约：只使用稳态已画出的元素；判断见 {@link isSteadyPainted}；须在压层前调用。
+     */
+    function painted(el: Element, kind: SteadyPaintKind): boolean {
+        return isSteadyPainted(el, kind, { root: svg.node() });
+    }
+
+    function paintOpacity(el: Element, kind: SteadyPaintKind): number {
+        return readSteadyPaintOpacity(el, kind, { root: svg.node() });
+    }
+
+    /** 矩阵轴 token → element key；非行列 chip 返回 null。 */
+    function matrixTokenKeyFromEl(el: Element): string | null {
+        const id = el.getAttribute('data-node-id');
+        if (!id) return null;
+        if (el.classList.contains('gen-attr-dag-matrix-row-token')) return matrixRowElementKey(id);
+        if (el.classList.contains('gen-attr-dag-matrix-col-token')) return matrixColElementKey(id);
+        return null;
+    }
+
+    /** 枚举稳态可见 token（图节点或矩阵行列 chip）。 */
+    function forEachPaintedToken(
+        mode: DagLayoutMode,
+        fn: (key: string, el: SVGGElement, node: DagNode | null) => void,
+    ): void {
+        if (mode === 'attribution-matrix') {
+            matrixG.selectAll<SVGGElement, unknown>('g.gen-attr-dag-matrix-token').each(function () {
+                if (!painted(this, 'token')) return;
+                const key = matrixTokenKeyFromEl(this);
+                if (!key) return;
+                fn(key, this, null);
+            });
+            return;
+        }
+        nodeG.selectAll<SVGGElement, DagNode>('g.gen-attr-dag-node').each(function (d) {
+            if (!d || !painted(this, 'token')) return;
+            fn(dagLayoutNodeKey(d.id), this, d);
+        });
+    }
+
+    function captureTokenPosesFromDom(mode: DagLayoutMode): Map<string, DagNodeLayoutPose> {
+        const out = new Map<string, DagNodeLayoutPose>();
+        forEachPaintedToken(mode, (key, el, node) => {
+            if (node) {
+                out.set(
+                    key,
+                    parsePoseFromTransform(el.getAttribute('transform'), {
+                        id: node.id,
+                        nodeW: node.nodeW,
+                        nodeH: node.nodeH,
+                    }),
+                );
+                return;
+            }
+            const id = el.getAttribute('data-node-id') ?? key;
+            const fill = el.querySelector('rect.gen-attr-dag-node-fill');
+            const nodeW = fill instanceof SVGRectElement ? fill.width.baseVal.value : 4;
+            const nodeH = fill instanceof SVGRectElement ? fill.height.baseVal.value : 4;
+            out.set(key, parsePoseFromTransform(el.getAttribute('transform'), { id, nodeW, nodeH }));
+        });
+        return out;
+    }
+
+    /** 元素 key → fill opacity（与稳态 `resolveNodeFillOpacity` / matrix token visual 一致）。 */
+    function captureTokenFillOpacityFromDom(mode: DagLayoutMode): Map<string, number> {
+        const out = new Map<string, number>();
+        forEachPaintedToken(mode, (key, el) => {
+            const fill = el.querySelector('rect.gen-attr-dag-node-fill');
+            out.set(key, fill ? paintOpacity(fill, 'token') : 1);
+        });
+        return out;
+    }
+
+    /** 与 scss `--gen-attr-dag-link-stroke-width: calc(2px * compactness)` 一致。 */
+    function linkStrokeWidthPx(): number {
+        const sample =
+            linkG.select<SVGPathElement>('path.gen-attr-dag-link-visible').node() ??
+            linkGFront.select<SVGPathElement>('path.gen-attr-dag-link-visible').node();
+        if (sample) {
+            const w = parseFloat(getComputedStyle(sample).strokeWidth);
+            if (w > 0 && Number.isFinite(w)) return w;
+        }
+        return 2 * displayScale;
+    }
+
+    /**
+     * 图边 path 中点 + 切线 → 细条种子（key = src->tgt）；厚度对齐真实边 stroke-width。
+     * `frontKeys`：稳态在 {@link linkGFront} 的边（焦点蓝/红），转场 DOM 须画在灰边之上。
+     */
+    function captureEdgeSeedPosesFromDom(): {
+        poses: Map<string, DagLayoutFlyPose>;
+        frontKeys: Set<string>;
+    } {
+        const out = new Map<string, DagLayoutFlyPose>();
+        const frontKeys = new Set<string>();
+        const thickPx = linkStrokeWidthPx();
+        const visit = (
+            sel: d3.Selection<SVGGElement, DagLink, SVGGElement, unknown>,
+            front: boolean,
+        ) => {
+            sel.each(function (d) {
+                if (!d || out.has(dagLinkEndpointKey(d.source, d.target))) return;
+                const path = this.querySelector('path.gen-attr-dag-link-visible');
+                if (!(path instanceof SVGPathElement)) return;
+                if (!painted(path, 'stroke')) return;
+                const len = path.getTotalLength();
+                if (!(len > 0) || !Number.isFinite(len)) return;
+                // 条带用端点弦；箭头扭转用末端切线（对齐 marker orient=auto）
+                const p0 = path.getPointAtLength(0);
+                const p1 = path.getPointAtLength(len);
+                const back = Math.min(1, len * 0.02);
+                const pNear = path.getPointAtLength(len - back);
+                const chordX = p1.x - p0.x;
+                const chordY = p1.y - p0.y;
+                const chordAngleDeg = (Math.atan2(chordY, chordX) * 180) / Math.PI;
+                const endAngleDeg = (Math.atan2(p1.y - pNear.y, p1.x - pNear.x) * 180) / Math.PI;
+                const key = dagLinkEndpointKey(d.source, d.target);
+                const strokeOp = paintOpacity(path, 'stroke');
+                const stroke =
+                    path.getAttribute('stroke')?.trim() ||
+                    getComputedStyle(path).stroke ||
+                    DAG_LAYOUT_FLY_DEFAULT_COLOR;
+                const synthetic = d.synthetic === true;
+                const dash = synthetic ? flySyntheticDashPair(displayScale) : null;
+                if (front) frontKeys.add(key);
+                out.set(
+                    key,
+                    edgeFlyPoseFromPathTangent({
+                        id: key,
+                        midX: (p0.x + p1.x) / 2,
+                        midY: (p0.y + p1.y) / 2,
+                        tanX: chordX,
+                        tanY: chordY,
+                        pathLength: Math.hypot(chordX, chordY),
+                        thickPx,
+                        opacity: strokeOp,
+                        color: stroke,
+                        dashed: synthetic,
+                        dashOn: dash?.dashOn,
+                        dashOff: dash?.dashOff,
+                        arrowTwistDeg: flyArrowTwistFromAngles(chordAngleDeg, endAngleDeg),
+                    }),
+                );
+            });
+        };
+        visit(linkG.selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link'), false);
+        visit(linkGFront.selectAll<SVGGElement, DagLink>('g.gen-attr-dag-link'), true);
+        return { poses: out, frontKeys };
+    }
+
+    /** 矩阵有边格子 → 中心制无转角方块（key = src->tgt）。 */
+    function captureMatrixEdgeCellPosesFromDom(): Map<string, DagLayoutFlyPose> {
+        const out = new Map<string, DagLayoutFlyPose>();
+        matrixG
+            .selectAll<SVGRectElement, { key: string; hasEdge?: boolean; synthetic?: boolean }>(
+                'rect.gen-attr-dag-matrix-cell:not(.gen-attr-dag-matrix-self-cell)',
+            )
+            .each(function (d) {
+                if (!d?.hasEdge || !d.key) return;
+                if (!painted(this, 'fill')) return;
+                const w = this.width.baseVal.value || MATRIX_CELL_SIZE;
+                const h = this.height.baseVal.value || MATRIX_CELL_SIZE;
+                const cellOp = paintOpacity(this, 'fill');
+                const fill =
+                    this.getAttribute('fill')?.trim() ||
+                    getComputedStyle(this).fill ||
+                    DAG_LAYOUT_FLY_DEFAULT_COLOR;
+                const synthetic = d.synthetic === true;
+                const dash = synthetic ? flySyntheticDashPair(displayScale) : null;
+                out.set(
+                    d.key,
+                    cellFlyPoseFromRect({
+                        id: d.key,
+                        x: this.x.baseVal.value,
+                        y: this.y.baseVal.value,
+                        w,
+                        h,
+                        opacity: cellOp,
+                        color: fill,
+                        dashed: synthetic,
+                        dashOn: dash?.dashOn,
+                        dashOff: dash?.dashOff,
+                    }),
+                );
+            });
+        return out;
+    }
+
+    /** 节点焦点框 class（转场中焦点不变，fly 直接沿用）。 */
+    type TokenFrameFlags = { selected: boolean; hover: boolean; layoutSelected: boolean };
+
+    function captureTokenFrameFromDom(mode: DagLayoutMode): Map<string, TokenFrameFlags> {
+        const out = new Map<string, TokenFrameFlags>();
+        forEachPaintedToken(mode, (key, el) => {
+            out.set(key, {
+                selected: el.classList.contains('gen-attr-dag-node--selected'),
+                hover: el.classList.contains('gen-attr-dag-node--hover'),
+                layoutSelected: el.classList.contains('gen-attr-dag-node--layout-selected'),
+            });
+        });
+        return out;
+    }
+
+    function applyZoomPose(z: { x: number; y: number; k: number }): void {
+        svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(z.x, z.y).scale(z.k));
+    }
+
+    function setTransitionContentHidden(hidden: boolean): void {
+        const op = hidden ? '0' : null;
+        nodeG.style('opacity', op);
+        nodeGHit.style('opacity', op);
+        matrixG.selectAll('g.gen-attr-dag-matrix-token').style('opacity', op);
+    }
+
+    /**
+     * 真实边/矩阵装饰层透明度。
+     * 转场期间保持 0（fly 由飞位层表达；crossfade 过程中不显示边格）；
+     * 空格/框线/轴角/Self 等同层，稳态再显。
+     */
+    function setNewOverlayOpacity(opacity: number): void {
+        const v = String(opacity);
+        linkG.style('opacity', v);
+        linkGFront.style('opacity', v);
+        matrixG.select('g.gen-attr-dag-matrix-grid').style('opacity', v);
+        matrixG.select('g.gen-attr-dag-matrix-axis-corner').style('opacity', v);
+        matrixG.selectAll('.gen-attr-dag-matrix-self-label').style('opacity', v);
+    }
+
+    /**
+     * 转场 fly 字号（与 capsule 同坐标系）：图节点对齐 scss calc；矩阵 chip 对齐固定 11px。
+     * `zoomSizeScale`：起点位姿已 remap 到终态 zoom 时，字号同步乘 sk/ek。
+     */
+    /** 转场内字号度量只读一次：热路径勿对每个 fly 反复 getComputedStyle。 */
+    function layoutTransitionFlyFontMetrics(): { parentEm: number; fontScale: number } {
+        const parentEm = parseFloat(getComputedStyle(svg.node()!).fontSize);
+        const fontScale =
+            parseFloat(
+                getComputedStyle(stackEl).getPropertyValue('--gen-attr-dag-node-text-font-scale').trim(),
+            ) || 0.9;
+        if (!(parentEm > 0) || !Number.isFinite(parentEm)) {
+            throw new Error(
+                'layoutTransitionFlyFontMetrics: svg font-size must be a finite positive length',
+            );
+        }
+        return { parentEm, fontScale };
+    }
+
+    function layoutTransitionFlyFontPx(
+        elementKey: string,
+        node: Pick<DagNode, 'ciVisualScale'>,
+        metrics: { parentEm: number; fontScale: number },
+        zoomSizeScale = 1,
+    ): number {
+        if (elementKey.startsWith('matrix-')) {
+            return 11 * zoomSizeScale;
+        }
+        return (
+            metrics.parentEm * displayScale * metrics.fontScale * node.ciVisualScale * zoomSizeScale
+        );
+    }
+
+    function clearLayoutTransitionArtifacts(): void {
+        cancelLayoutTransition?.();
+        cancelLayoutTransition = null;
+        rootG.select('g.gen-attr-dag-layout-transition-fly').remove();
+        setTransitionContentHidden(false);
+        setNewOverlayOpacity(1);
+        syncMatrixLayoutBgClass(layoutMode === 'attribution-matrix');
+        layoutTransitionLocked = false;
+    }
+
+    function commitLayoutModeInstant(mode: DagLayoutMode): void {
         layoutMode = mode;
         matrixPinSteady = null;
         matrixPinFollowActive = false;
         syncStackLayoutDragUi();
+        syncMatrixLayoutBgClass(mode === 'attribution-matrix');
         if (batchDepth > 0) return;
         syncGraphToSvg();
         fitViewportToContent(true);
+    }
+
+    function setLayoutMode(mode: DagLayoutMode): void {
+        if (layoutMode === mode) return;
+        // 转场中再切：中断当前动画，瞬切到新 layout（避免 select 与 mode 脱节）
+        if (layoutTransitionLocked) {
+            clearLayoutTransitionArtifacts();
+            commitLayoutModeInstant(mode);
+            return;
+        }
+        if (
+            !layoutTransitionEnabled ||
+            layoutTransitionDurationMs <= 0 ||
+            batchDepth > 0 ||
+            nodes.length === 0 ||
+            prefersReducedMotion()
+        ) {
+            clearLayoutTransitionArtifacts();
+            commitLayoutModeInstant(mode);
+            return;
+        }
+
+        const fromMode = layoutMode;
+        const fromKind = layoutElementKind(fromMode);
+        const toKind = layoutElementKind(mode);
+        // 边/格三策略：fly-edge-cell | fly-edge-edge | crossfade（见 dagLayoutEdgeTransitionKind）
+        const edgeTransition = dagLayoutEdgeTransitionKind(fromMode, mode);
+        const startZoom = d3.zoomTransform(svg.node()!);
+        const startPoses = captureTokenPosesFromDom(fromMode);
+        const startFillOpacity = captureTokenFillOpacityFromDom(fromMode);
+        const startFrames = captureTokenFrameFromDom(fromMode);
+        const startEdgeFly =
+            edgeTransition === 'crossfade'
+                ? { poses: new Map<string, DagLayoutFlyPose>(), frontKeys: new Set<string>() }
+                : edgeTransition === 'fly-edge-cell' && fromKind === 'matrix'
+                  ? { poses: captureMatrixEdgeCellPosesFromDom(), frontKeys: new Set<string>() }
+                  : captureEdgeSeedPosesFromDom();
+        const startFlyPoses = startEdgeFly.poses;
+
+        layoutTransitionLocked = true;
+        // 只转场节点 + 边/格；crossfade：过程中不显示边格（结束瞬显）；其余用 fly；其它元素稳态再显
+        const flyLayerG = rootG
+            .append('g')
+            .attr('class', 'gen-attr-dag-layout-transition-fly')
+            .style('pointer-events', 'none');
+        // fly 边/格层在 token fly 之下，避免盖住飞位标签；front 对齐稳态 linkGFront
+        const flyEdgeG = flyLayerG.append('g').attr('class', 'gen-attr-dag-layout-transition-fly-edges');
+        const flyEdgeGBack = flyEdgeG.append('g').attr('class', 'gen-attr-dag-layout-transition-fly-edges-back');
+        const flyEdgeGFront = flyEdgeG
+            .append('g')
+            .attr('class', 'gen-attr-dag-layout-transition-fly-edges-front');
+
+        // 在 syncGraphToSvg（可能挂上数万矩阵格）之前读 viewport，避免强制大 DOM layout
+        const { w, h } = stackLayoutViewportPx(stackEl);
+        const flyFontMetrics = layoutTransitionFlyFontMetrics();
+
+        layoutMode = mode;
+        matrixPinSteady = null;
+        matrixPinFollowActive = false;
+        syncStackLayoutDragUi();
+        syncMatrixLayoutBgClass(false);
+        syncGraphToSvg();
+
+        // 末态仍保持稳态可见：先捕获「此刻画出来的」，再压层（同帧内无中间绘制）
+        flyLayerG.style('display', 'none');
+        const endZoom = computeFitZoomTransform({
+            mode,
+            contentBBox: contentBBoxForFit(mode),
+            viewportW: w,
+            viewportH: h,
+            k0: defaultDagZoomK(),
+        });
+        flyLayerG.style('display', null);
+
+        const endPoses = captureTokenPosesFromDom(mode);
+        const endFillOpacity = captureTokenFillOpacityFromDom(mode);
+        const endFrames = captureTokenFrameFromDom(mode);
+        const endEdgeFly =
+            edgeTransition === 'crossfade'
+                ? { poses: new Map<string, DagLayoutFlyPose>(), frontKeys: new Set<string>() }
+                : edgeTransition === 'fly-edge-cell' && toKind === 'matrix'
+                  ? { poses: captureMatrixEdgeCellPosesFromDom(), frontKeys: new Set<string>() }
+                  : captureEdgeSeedPosesFromDom();
+        const endFlyPoses = endEdgeFly.poses;
+        // 起/终任一端在 linkGFront 的边，fly 时仍压在灰边之上
+        const flyFrontKeys = new Set<string>([...startEdgeFly.frontKeys, ...endEdgeFly.frontKeys]);
+        setTransitionContentHidden(true);
+        // 转场中压住真实边/格（fly 由飞位层表达；crossfade 过程中不显示，结束瞬显）
+        setNewOverlayOpacity(0);
+        // 先钉终态视口：把起点改写到终态 zoom 下「屏幕同位同尺寸」，再只插值节点。
+        const startZoomPose = { x: startZoom.x, y: startZoom.y, k: startZoom.k };
+        const fromPosesInEndView = remapPosesAcrossZoom(startPoses, startZoomPose, endZoom);
+        const fromFlyInEndView = remapFlyPosesAcrossZoom(startFlyPoses, startZoomPose, endZoom);
+        const pairs = buildLayoutTransitionPairs({
+            fromKind,
+            toKind,
+            fromPoses: fromPosesInEndView,
+            toPoses: endPoses,
+        });
+        const flyRoles = annotateLayoutTransitionFlyRoles(pairs);
+        const flyRankByKey = new Map<string, number>();
+        for (const d of links) {
+            flyRankByKey.set(
+                dagLinkEndpointKey(String(d.source), String(d.target)),
+                edgeAttributionShare(d),
+            );
+        }
+        // 按三策略建 fly；crossfade 无 fly 边/格
+        const flyPairs =
+            edgeTransition === 'fly-edge-cell'
+                ? buildEdgeCellFlyPairs({
+                      fromKind,
+                      toKind,
+                      edgePoses: fromKind === 'graph' ? fromFlyInEndView : endFlyPoses,
+                      cellPoses: fromKind === 'matrix' ? fromFlyInEndView : endFlyPoses,
+                      maxPairs: DAG_LAYOUT_TRANSITION_FLY_MAX,
+                      rankByKey: flyRankByKey,
+                  })
+                : edgeTransition === 'fly-edge-edge'
+                  ? buildEdgeEdgeFlyPairs({
+                        fromEdgePoses: fromFlyInEndView,
+                        toEdgePoses: endFlyPoses,
+                        maxPairs: DAG_LAYOUT_TRANSITION_FLY_MAX,
+                        rankByKey: flyRankByKey,
+                    })
+                  : [];
+
+        const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
+        const zoomSizeScale = startZoom.k / endZoom.k;
+        /**
+         * 焦点/多选蓝框：外扩 pad + stroke-width（及虚线周期）。
+         * 与稳态对齐——图：`syncNodeStrokeRects` / scss `2×displayScale`；矩阵 chip：pad=1、sw=2。
+         * 起点须再乘 {@link zoomSizeScale}（位姿已 remap 到终态 zoom，否则屏上线宽会跳）。
+         */
+        type FlyFrameChrome = {
+            strokePad: number;
+            strokeWidth: number;
+            layoutSelPad: number;
+            layoutSelStrokeWidth: number;
+            layoutSelDashOn: number;
+            layoutSelDashOff: number;
+        };
+        const layoutTransitionFrameChrome = (elementKey: string): FlyFrameChrome => {
+            if (elementKey.startsWith('matrix-')) {
+                return {
+                    strokePad: 1,
+                    strokeWidth: 2,
+                    layoutSelPad: 2,
+                    layoutSelStrokeWidth: 1.5,
+                    layoutSelDashOn: 4,
+                    layoutSelDashOff: 3,
+                };
+            }
+            const ds = displayScale;
+            return {
+                strokePad: ds,
+                strokeWidth: 2 * ds,
+                layoutSelPad: 2 * ds,
+                layoutSelStrokeWidth: 1.5 * ds,
+                layoutSelDashOn: 4 * ds,
+                layoutSelDashOff: 3 * ds,
+            };
+        };
+        const scaleFlyFrameChrome = (c: FlyFrameChrome, s: number): FlyFrameChrome => ({
+            strokePad: c.strokePad * s,
+            strokeWidth: c.strokeWidth * s,
+            layoutSelPad: c.layoutSelPad * s,
+            layoutSelStrokeWidth: c.layoutSelStrokeWidth * s,
+            layoutSelDashOn: c.layoutSelDashOn * s,
+            layoutSelDashOff: c.layoutSelDashOff * s,
+        });
+        type FlyNodeItem = {
+            el: SVGGElement;
+            selRect: SVGRectElement;
+            strokeRect: SVGRectElement;
+            fillRect: SVGRectElement;
+            textEl: SVGTextElement;
+            from: DagNodeLayoutPose;
+            to: DagNodeLayoutPose;
+            fromFontPx: number;
+            toFontPx: number;
+            fromFillOp: number;
+            toFillOp: number;
+            fromChrome: FlyFrameChrome;
+            toChrome: FlyFrameChrome;
+            cardinality: DagLayoutTransitionCardinality;
+            isPrimary: boolean;
+        };
+        type FlyEdgeItem = {
+            g: SVGGElement;
+            /** 实心条带 rect，或合成边虚线 line */
+            body: SVGRectElement | SVGLineElement;
+            bodyIsLine: boolean;
+            /**
+             * 虚线 stroke-width：边↔边跟 h；边↔格锁图侧边粗。
+             * 避免矩阵→图时用格高(~18)当线宽，与图→矩阵（边粗）虚线观感不一致。
+             */
+            bodyStrokeTracksH: boolean;
+            bodyStrokeLockPx: number;
+            arrow: SVGGElement;
+            from: DagLayoutFlyPose;
+            to: DagLayoutFlyPose;
+            /** 嵌套箭头 svg 的设计厚度；边↔边热路径按当前 h 再缩放 */
+            arrowLayoutThickPx: number;
+            arrowTracksH: boolean;
+        };
+        const flyNodes: FlyNodeItem[] = [];
+        const flyEdges: FlyEdgeItem[] = [];
+        for (const pair of flyPairs) {
+            const color =
+                pair.from.arrowScale >= pair.to.arrowScale ? pair.from.color : pair.to.color;
+            const dashed = pair.from.dashed || pair.to.dashed;
+            // 合成虚线：边↔格锁图侧线宽；dash 周期在 pose 里随 zoom remap（见 flySyntheticDashPair）
+            const bodyStrokeTracksH = !dashed || flyArrowTracksPoseHeight(pair.from, pair.to);
+            const bodyStrokeLockPx = bodyStrokeTracksH
+                ? 0
+                : pair.from.arrowScale >= pair.to.arrowScale
+                  ? pair.from.h
+                  : pair.to.h;
+            const bodyStroke0 = bodyStrokeTracksH ? pair.from.h : bodyStrokeLockPx;
+            const edgeParent = flyFrontKeys.has(pair.fromKey) ? flyEdgeGFront : flyEdgeGBack;
+            const g = edgeParent
+                .append('g')
+                .attr('class', 'gen-attr-dag-layout-fly-edge')
+                .classed('gen-attr-dag-layout-fly-edge--synthetic', dashed)
+                .attr('transform', flyPoseTransform(pair.from));
+            const body = dashed
+                ? g
+                      .append('line')
+                      .attr('class', 'gen-attr-dag-layout-fly-edge-body')
+                      .attr('x1', 0)
+                      .attr('y1', pair.from.h / 2)
+                      .attr('x2', pair.from.w)
+                      .attr('y2', pair.from.h / 2)
+                      .attr('stroke', color)
+                      .attr('stroke-width', bodyStroke0)
+                      .attr('stroke-dasharray', `${pair.from.dashOn} ${pair.from.dashOff}`)
+                      .attr('stroke-linecap', 'butt')
+                      .attr('opacity', pair.from.opacity)
+                : g
+                      .append('rect')
+                      .attr('class', 'gen-attr-dag-layout-fly-edge-body')
+                      .attr('width', pair.from.w)
+                      .attr('height', pair.from.h)
+                      .attr('rx', 0)
+                      .attr('ry', 0)
+                      .attr('fill', color)
+                      .attr('opacity', pair.from.opacity);
+            // 嵌套 svg = 稳态 marker 同 viewBox/path/裁切；厚度取图侧（边↔边为 from，随后跟 h 缩放）
+            const thickSide = pair.from.arrowScale >= pair.to.arrowScale ? pair.from : pair.to;
+            const arrowLayoutThickPx = thickSide.h;
+            const arrowTracksH = flyArrowTracksPoseHeight(pair.from, pair.to);
+            const mk = flyArrowMarkerLayout(arrowLayoutThickPx);
+            const arrow = g
+                .append('g')
+                .attr('class', 'gen-attr-dag-layout-fly-edge-arrow')
+                .attr(
+                    'transform',
+                    flyArrowTransform(
+                        pair.from,
+                        arrowTracksH ? arrowLayoutThickPx : undefined,
+                    ),
+                )
+                .attr('opacity', pair.from.opacity * pair.from.arrowScale);
+            const arrowSvg = arrow
+                .append('svg')
+                .attr('x', mk.x)
+                .attr('y', mk.y)
+                .attr('width', mk.size)
+                .attr('height', mk.size)
+                .attr('viewBox', mk.viewBox)
+                .attr('overflow', 'hidden');
+            arrowSvg
+                .append('path')
+                .attr('d', mk.pathD)
+                .attr('fill', 'none')
+                .attr('stroke', color)
+                .attr('stroke-width', mk.strokeWidth)
+                .attr('stroke-linecap', 'round')
+                .attr('stroke-linejoin', 'round');
+            flyEdges.push({
+                g: g.node()!,
+                body: body.node()!,
+                bodyIsLine: dashed,
+                bodyStrokeTracksH,
+                bodyStrokeLockPx,
+                arrow: arrow.node()!,
+                from: pair.from,
+                to: pair.to,
+                arrowLayoutThickPx,
+                arrowTracksH,
+            });
+        }
+        for (const role of flyRoles) {
+            const { pair } = role;
+            const srcNode = nodeById.get(pair.from.id) ?? nodeById.get(pair.to.id);
+            if (!srcNode) continue;
+            const fromFontPx = layoutTransitionFlyFontPx(
+                pair.fromKey,
+                srcNode,
+                flyFontMetrics,
+                zoomSizeScale,
+            );
+            const toFontPx = layoutTransitionFlyFontPx(pair.toKey, srcNode, flyFontMetrics);
+            const fromChrome = scaleFlyFrameChrome(
+                layoutTransitionFrameChrome(pair.fromKey),
+                zoomSizeScale,
+            );
+            const toChrome = layoutTransitionFrameChrome(pair.toKey);
+            const fr = startFrames.get(pair.fromKey);
+            const toFr = endFrames.get(pair.toKey);
+            const g = flyLayerG.append('g').attr('class', 'gen-attr-dag-node gen-attr-dag-layout-fly-node');
+            g.classed('gen-attr-dag-node--prompt', srcNode.step === -1);
+            // 焦点框不变：起终点 OR（1↔N 时任一侧有框即保留）
+            g.classed('gen-attr-dag-node--selected', !!(fr?.selected || toFr?.selected));
+            g.classed('gen-attr-dag-node--hover', !!(fr?.hover || toFr?.hover));
+            g.classed(
+                'gen-attr-dag-node--layout-selected',
+                !!(fr?.layoutSelected || toFr?.layoutSelected),
+            );
+            const w0 = pair.from.nodeW;
+            const h0 = pair.from.nodeH;
+            const rx = Math.min(w0, h0) / 2;
+            const { strokePad: sp0, layoutSelPad: lp0 } = fromChrome;
+            const selRect = g
+                .append('rect')
+                .attr('class', 'gen-attr-dag-node-layout-sel')
+                .attr('x', -lp0)
+                .attr('y', -lp0)
+                .attr('width', w0 + 2 * lp0)
+                .attr('height', h0 + 2 * lp0)
+                .attr('rx', rx + lp0)
+                .attr('ry', rx + lp0)
+                // style 覆盖 scss（无单位 = SVG 用户单位，随 rootG zoom 缩放）
+                .style('stroke-width', String(fromChrome.layoutSelStrokeWidth))
+                .style(
+                    'stroke-dasharray',
+                    `${fromChrome.layoutSelDashOn} ${fromChrome.layoutSelDashOff}`,
+                );
+            const strokeRect = g
+                .append('rect')
+                .attr('class', 'gen-attr-dag-node-stroke')
+                .attr('x', -sp0)
+                .attr('y', -sp0)
+                .attr('width', w0 + 2 * sp0)
+                .attr('height', h0 + 2 * sp0)
+                .attr('rx', rx + sp0)
+                .attr('ry', rx + sp0)
+                // 覆盖 scss 固定 displayScale，使屏上线宽随 zoom remap / 图↔矩阵插值
+                .style('stroke-width', String(fromChrome.strokeWidth));
+            const fillRect = g
+                .append('rect')
+                .attr('class', 'gen-attr-dag-node-fill')
+                .attr('width', w0)
+                .attr('height', h0)
+                .attr('rx', rx)
+                .attr('ry', rx);
+            const textEl = g
+                .append('text')
+                .attr('class', 'gen-attr-dag-node-text')
+                .attr('xml:space', 'preserve')
+                .attr('text-anchor', 'middle')
+                .attr('dominant-baseline', 'central')
+                .attr('x', w0 / 2)
+                .attr('y', h0 / 2)
+                .style('font-size', `${fromFontPx}px`)
+                .text(srcNode.displayLabel);
+            const fromFillOp = startFillOpacity.get(pair.fromKey) ?? 1;
+            const toFillOp = endFillOpacity.get(pair.toKey) ?? 1;
+            g.attr('transform', poseToTransform(pair.from));
+            g.style(
+                'opacity',
+                String(layoutTransitionFlyCombinedOpacity(0, role, fromFillOp, toFillOp)),
+            );
+            flyNodes.push({
+                el: g.node()!,
+                selRect: selRect.node()!,
+                strokeRect: strokeRect.node()!,
+                fillRect: fillRect.node()!,
+                textEl: textEl.node()!,
+                from: pair.from,
+                to: pair.to,
+                fromFontPx,
+                toFontPx,
+                fromFillOp,
+                toFillOp,
+                fromChrome,
+                toChrome,
+                cardinality: role.cardinality,
+                isPrimary: role.isPrimary,
+            });
+        }
+
+        applyZoomPose(endZoom);
+
+        const finish = () => {
+            cancelLayoutTransition = null;
+            flyLayerG.remove();
+            setTransitionContentHidden(false);
+            setNewOverlayOpacity(1);
+            syncMatrixLayoutBgClass(toKind === 'matrix');
+            applyZoomPose(endZoom);
+            layoutDirty = false;
+            userDraggedNodes = false;
+            layoutTransitionLocked = false;
+            refreshNodeLinkHighlight();
+        };
+
+        // 热路径直写 DOM：避免每帧 d3.select/attr/querySelector
+        // crossfade：边/格层保持 opacity 0，finish 时再显
+        cancelLayoutTransition = runLayoutTransitionClock({
+            durationMs: layoutTransitionDurationMs,
+            onTick: ({ eased }) => {
+                for (const b of flyEdges) {
+                    const p = lerpFlyPose(b.from, b.to, eased);
+                    b.g.setAttribute('transform', flyPoseTransform(p));
+                    if (b.bodyIsLine) {
+                        const y = p.h / 2;
+                        const sw = b.bodyStrokeTracksH ? p.h : b.bodyStrokeLockPx;
+                        b.body.setAttribute('x2', String(p.w));
+                        b.body.setAttribute('y1', String(y));
+                        b.body.setAttribute('y2', String(y));
+                        b.body.setAttribute('stroke-width', String(sw));
+                        b.body.setAttribute('stroke-dasharray', `${p.dashOn} ${p.dashOff}`);
+                    } else {
+                        b.body.setAttribute('width', String(p.w));
+                        b.body.setAttribute('height', String(p.h));
+                    }
+                    b.body.setAttribute('opacity', String(p.opacity));
+                    b.arrow.setAttribute(
+                        'transform',
+                        flyArrowTransform(
+                            p,
+                            b.arrowTracksH ? b.arrowLayoutThickPx : undefined,
+                        ),
+                    );
+                    b.arrow.setAttribute('opacity', String(p.opacity * p.arrowScale));
+                }
+                for (const g of flyNodes) {
+                    const p = lerpPose(g.from, g.to, eased);
+                    const rx = Math.min(p.nodeW, p.nodeH) / 2;
+                    const sp = lerp(g.fromChrome.strokePad, g.toChrome.strokePad, eased);
+                    const lp = lerp(g.fromChrome.layoutSelPad, g.toChrome.layoutSelPad, eased);
+                    g.el.setAttribute('transform', poseToTransform(p));
+                    g.el.style.opacity = String(
+                        layoutTransitionFlyCombinedOpacity(eased, g, g.fromFillOp, g.toFillOp),
+                    );
+                    g.selRect.setAttribute('x', String(-lp));
+                    g.selRect.setAttribute('y', String(-lp));
+                    g.selRect.setAttribute('width', String(p.nodeW + 2 * lp));
+                    g.selRect.setAttribute('height', String(p.nodeH + 2 * lp));
+                    g.selRect.setAttribute('rx', String(rx + lp));
+                    g.selRect.setAttribute('ry', String(rx + lp));
+                    g.selRect.style.strokeWidth = String(
+                        lerp(
+                            g.fromChrome.layoutSelStrokeWidth,
+                            g.toChrome.layoutSelStrokeWidth,
+                            eased,
+                        ),
+                    );
+                    g.selRect.style.strokeDasharray = `${lerp(g.fromChrome.layoutSelDashOn, g.toChrome.layoutSelDashOn, eased)} ${lerp(g.fromChrome.layoutSelDashOff, g.toChrome.layoutSelDashOff, eased)}`;
+                    g.strokeRect.setAttribute('x', String(-sp));
+                    g.strokeRect.setAttribute('y', String(-sp));
+                    g.strokeRect.setAttribute('width', String(p.nodeW + 2 * sp));
+                    g.strokeRect.setAttribute('height', String(p.nodeH + 2 * sp));
+                    g.strokeRect.setAttribute('rx', String(rx + sp));
+                    g.strokeRect.setAttribute('ry', String(rx + sp));
+                    g.strokeRect.style.strokeWidth = String(
+                        lerp(g.fromChrome.strokeWidth, g.toChrome.strokeWidth, eased),
+                    );
+                    g.fillRect.setAttribute('width', String(p.nodeW));
+                    g.fillRect.setAttribute('height', String(p.nodeH));
+                    g.fillRect.setAttribute('rx', String(rx));
+                    g.fillRect.setAttribute('ry', String(rx));
+                    g.textEl.setAttribute('x', String(p.nodeW / 2));
+                    g.textEl.setAttribute('y', String(p.nodeH / 2));
+                    g.textEl.style.fontSize = `${lerp(g.fromFontPx, g.toFontPx, eased)}px`;
+                }
+            },
+            onDone: finish,
+        });
     }
 
     function setLinearArcAdjacentGapPx(px: number, opts?: { skipRefit?: boolean }): void {
@@ -4496,6 +5333,15 @@ export function initGenAttributeDagView(
         setDagPlaybackPlaying,
         setMeasureWidthPx,
         setLayoutMode,
+        setLayoutTransitionEnabled(enabled: boolean): void {
+            layoutTransitionEnabled = enabled;
+        },
+        setLayoutTransitionDurationMs(ms: number): void {
+            if (!Number.isFinite(ms)) {
+                throw new Error('genAttributeDagView: layoutTransitionDurationMs must be finite');
+            }
+            layoutTransitionDurationMs = Math.max(0, ms);
+        },
         setLinearArcAdjacentGapPx,
         setDagCompactness,
         setEdgeTopPCoverage,

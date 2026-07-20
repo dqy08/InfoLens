@@ -70,6 +70,10 @@ export type GenAttrCachedRunContentFields = {
  */
 export type GenAttrDemoUiOptions = {
     layoutMode: DagLayoutMode;
+    /** 切换 DAG layout 时是否播放转场。 */
+    layoutTransitionEnabled: boolean;
+    /** layout 转场时长（秒）。 */
+    layoutTransitionDurationS: number;
     measureWidthPx: number;
     dagCompactness: number;
     linearArcAdjacentGapPx: number;
@@ -286,6 +290,15 @@ function isValidDemoUiOptionsPayload(v: unknown): v is Partial<GenAttrDemoUiOpti
     if (v == null || typeof v !== 'object') return false;
     const d = v as Record<string, unknown>;
     if (d.layoutMode !== undefined && !isDagLayoutModePayload(d.layoutMode)) return false;
+    if (d.layoutTransitionEnabled !== undefined && typeof d.layoutTransitionEnabled !== 'boolean') {
+        return false;
+    }
+    if (
+        d.layoutTransitionDurationS !== undefined &&
+        (typeof d.layoutTransitionDurationS !== 'number' || !Number.isFinite(d.layoutTransitionDurationS))
+    ) {
+        return false;
+    }
     if (d.measureWidthPx !== undefined && (typeof d.measureWidthPx !== 'number' || !Number.isFinite(d.measureWidthPx))) {
         return false;
     }
