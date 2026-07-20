@@ -1177,8 +1177,6 @@ export function initGenAttributeDagView(
     const focus = createDagFocusSession({
         onUserFocusChange: (focusId) => options?.onUserFocusChange?.(focusId),
     });
-    /** Cmd/Ctrl 是否按下：与多选集一起决定悬停用虚线框而非焦点描边。 */
-    let multiSelectModifierDown = false;
     /** ▶ Simulate attention：attend / FFN 阶段 token 高亮 */
     let attentionHighlight: AttentionPlaybackHighlight = null;
     let lastTokenAppearanceDwellActive = false;
@@ -1320,13 +1318,9 @@ export function initGenAttributeDagView(
         if (result.stopPlayback) recursiveEdgeAnimation.stopPlayback();
     }
 
-    /** 多选交互态：悬停用虚线框，不用焦点描边 / 归因悬停预览 / tooltip。 */
+    /** 多选交互态：已有多选或框选中时，悬停用虚线框，不用焦点描边 / 归因悬停预览 / tooltip。 */
     function layoutSelectHoverActive(): boolean {
-        return (
-            focus.getLayoutSelectedIds().size > 0 ||
-            multiSelectModifierDown ||
-            marqueeSession != null
-        );
+        return focus.getLayoutSelectedIds().size > 0 || marqueeSession != null;
     }
 
     function solidFrameFocusId(): string | null {
@@ -1606,8 +1600,6 @@ export function initGenAttributeDagView(
         sel.on('mouseenter', (event, d) => {
             if (isTextMatrixLayout(layoutMode) && !pointerInTextMatrixTextPane(event)) return;
             if (suppressTextHoverUntilLeave) return;
-            // 若在节点上按下/松开修饰键可能丢 key 事件，用 pointer 状态对齐
-            syncMultiSelectModifierDown(isMultiSelectModifierKey(event));
             // text 悬停只写 hoveredId；matrix 轴投影由 matrixStaticHighlightTarget 推导
             focus.setHovered(d.id);
             refreshNodeLinkHighlight();
@@ -2049,27 +2041,6 @@ export function initGenAttributeDagView(
         refreshNodeLinkHighlight();
     });
 
-    function syncMultiSelectModifierDown(next: boolean): void {
-        if (next === multiSelectModifierDown) return;
-        multiSelectModifierDown = next;
-        refreshNodeLinkHighlight();
-    }
-
-    function onMultiSelectModifierKeyDown(event: KeyboardEvent): void {
-        if (event.key !== 'Meta' && event.key !== 'Control') return;
-        syncMultiSelectModifierDown(true);
-    }
-
-    function onMultiSelectModifierKeyUp(event: KeyboardEvent): void {
-        if (event.key !== 'Meta' && event.key !== 'Control') return;
-        // keyup 时对应修饰键已松开；另一侧若仍按住则保持
-        syncMultiSelectModifierDown(event.metaKey || event.ctrlKey);
-    }
-
-    function onMultiSelectModifierBlur(): void {
-        syncMultiSelectModifierDown(false);
-    }
-
     highlight = createDagHighlightReconciler({
         graph,
         getNodes: () => nodes,
@@ -2116,11 +2087,6 @@ export function initGenAttributeDagView(
         cancelPendingLightningStrike: () => lightningSound.cancelPendingStrike(),
         scheduleLightningStrikeDelay: () => lightningSound.scheduleStrikeDelay(),
     });
-
-    // 须在 highlight 就绪后再挂：修饰键会触发 refreshNodeLinkHighlight。
-    window.addEventListener('keydown', onMultiSelectModifierKeyDown);
-    window.addEventListener('keyup', onMultiSelectModifierKeyUp);
-    window.addEventListener('blur', onMultiSelectModifierBlur);
 
     function cancelLightningEffectPreview(): void {
         highlight!.cancelLightningEffectPreview();
@@ -4022,9 +3988,6 @@ export function initGenAttributeDagView(
             marqueeSession = null;
             marqueePreviewIds = new Set();
         }
-        window.removeEventListener('keydown', onMultiSelectModifierKeyDown);
-        window.removeEventListener('keyup', onMultiSelectModifierKeyUp);
-        window.removeEventListener('blur', onMultiSelectModifierBlur);
         cancelLightningEffectPreview();
         cancelLightningFadeRaf();
         lightningSound.dispose();

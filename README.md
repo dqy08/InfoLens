@@ -23,7 +23,7 @@ license: apache-2.0
 
 <img src="client/src/assets/images/dag-dark.gif" width="460" alt="LLM Causal Flow" />
 
-<img src="client/src/assets/images/dag-cot.gif" width="460" alt="Chain-of-thought" />
+<img src="client/src/assets/images/blog/dallas_3s.gif" width="460" alt="Chain-of-thought" />
 
 ## 📦 Quick Start
 

@@ -76,5 +76,9 @@
     "slug": "text+矩阵 写诗",
     "label": "Text + Matrix | 写诗",
     "featured": "bold"
+  },
+  {
+    "slug": "CoT｜the capital of the state where Dallas is located",
+    "label": "CoT｜The capital ... Dallas"
   }
 ]
