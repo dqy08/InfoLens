@@ -34,13 +34,16 @@ import {
     calculateMergedTokenSurprisals,
     computeAverage,
     computeP90,
-    type TextStats,
-    type DiffStats
+    type TextStats
 } from '../../shared/cross/textStatistics';
 import { updateBasicMetrics, updateTotalSurprisal, updateModel, validateMetricsElements, type DiffModeConfig } from '../../shared/cross/textMetricsUpdater';
 import {GLTR_Text_Box, GLTR_Mode, GLTR_HoverEvent} from '../../shared/vis/GLTR_Text_Box';
 import {ToolTip} from '../../shared/vis/ToolTip';
 import { calculateHighlights } from '../../features/compare/highlightUtils';
+import { toSafeId, parseHistogramSource, findColumnBySafeId } from '../../features/compare/columnIds';
+import type { DemoColumnData } from '../../features/compare/columnTypes';
+import { createColumnHTML } from '../../features/compare/createColumnHTML';
+import { updateEditButtonsState, moveColumnInDom, type ColumnMoveDirection } from '../../features/compare/columnDomOrder';
 // 公共初始化模块
 import {initializeCommonApp} from '../../shared/bootstrap';
 import {
@@ -51,84 +54,6 @@ import {
 } from "../../features/analysis/visualizationConfigs";
 import { tr, initI18n } from '../../shared/lang/i18n-lite';
 import { addDigitsMergeRenderListener, getDigitsMergeEnabled } from '../../shared/cross/digitsMergeManager';
-
-// 使用从 demoManager 导出的验证函数
-
-/**
- * 将路径ID转换为安全的DOM ID（使用哈希避免冲突）
- * 
- * ID 使用策略说明：
- * - `id`（规范化路径）：用于数据存储和逻辑标识
- *   - 存储在 columnsData Map 的 key 中
- *   - 存储在 data-column-id 属性中（用于 DOM 查询，保持可读性）
- *   - 示例: "folder/demo1.json"
- * 
- * - `safeId`（哈希值）：用于 HTML 元素的 id 属性
- *   - 所有 DOM 元素的 id 属性都使用 safeId
- *   - 避免特殊字符导致的 ID 冲突和选择器问题
- *   - 示例: "a1b2c3d4"
- * 
- * 使用 djb2 哈希算法 + base36 编码，确保不同路径生成不同的ID
- * 支持任意字符（包括 Unicode、特殊字符等），哈希算法会自动处理
- * 
- * @param id 规范化路径（如 "folder/demo1.json"）
- * @returns 安全的DOM ID（如 "a1b2c3d4"），长度通常为 6-7 个字符
- */
-const toSafeId = (id: string): string => {
-    // 边界情况处理：空字符串或 null/undefined
-    if (!id || typeof id !== 'string' || id.length === 0) {
-        return 'empty';
-    }
-    
-    // 去除首尾空白字符（虽然规范化路径通常不会有，但作为防御性编程）
-    const trimmedId = id.trim();
-    if (trimmedId.length === 0) {
-        return 'empty';
-    }
-    
-    // 使用 djb2 哈希算法（位运算会自动转换为32位整数）
-    // 该算法对任意字符（包括 Unicode、特殊字符）都能正确处理
-    let hash = 5381;
-    for (let i = 0; i < trimmedId.length; i++) {
-        const charCode = trimmedId.charCodeAt(i);
-        // 处理 Unicode 字符（charCodeAt 返回 UTF-16 码点）
-        hash = ((hash << 5) + hash) + charCode;
-    }
-    
-    // 转换为正数并转为 base36 编码（0-9a-z）
-    // Math.abs 确保结果为正数，即使哈希值为负数
-    const positiveHash = Math.abs(hash);
-    const safeId = positiveHash.toString(36);
-    
-    // 确保结果不为空（理论上不会发生，但作为防御性编程）
-    return safeId || 'empty';
-};
-
-/**
- * Demo 列数据
- * 
- * ID 使用说明：
- * - id: 规范化路径，用于数据存储和逻辑标识（如 "folder/demo1.json"）
- * - DOM 查询：使用 data-column-id 属性（值为 id，保持可读性）
- * - DOM ID：使用 toSafeId(id) 生成的哈希值（避免冲突）
- */
-type DemoColumnData = {
-    id: string;              // 唯一ID（规范化路径，用于数据存储和 data-column-id 属性）
-    demoPath: string;        // 原始路径（用于显示和 URL）
-    demoName: string;        // Demo 名称（用于显示）
-    data: AnalysisData | null;
-    enhancedResult?: FrontendAnalyzeResult | null;  // 缓存合并后的结果，便于高亮
-    stats: TextStats | null;
-    diffStats?: DiffStats | null;  // 差分统计数据（仅Diff列有值）
-    error: string | null;
-    originalText?: string;        // 原文（用于一致性检查和缓存）
-    lmfInstance?: GLTR_Text_Box;  // LMF实例引用（对比模式下使用）
-    histograms: {
-        stats_frac: Histogram | null;
-        stats_byte_frac: Histogram | null;
-        stats_surprisal_progress: ScatterPlot | null;
-    };
-};
 
 window.onload = () => {
     // 初始化公共应用组件
@@ -255,67 +180,6 @@ window.onload = () => {
     };
 
     addDigitsMergeRenderListener(refreshAllColumnsAfterDigitsMerge);
-
-    // 使用统一的路径工具函数（已从 pathUtils 导入）
-
-    // 创建单个 demo 列的 HTML 结构（使用唯一ID）
-    const createColumnHTML = (id: string, demoName: string): string => {
-        // 使用哈希生成安全的DOM ID（避免冲突）
-        // safeId 用于所有 HTML 元素的 id 属性
-        const safeId = toSafeId(id);
-        const columnId = `compare-column-${safeId}`;
-        const statsId = `stats_demo_${safeId}`;
-        const headerId = `compare-header-${safeId}`;
-        const metricsId = `text_metrics_${safeId}`;
-        const errorId = `error_${safeId}`;
-        const statsFracId = `stats_frac_${safeId}`;
-        const statsByteFracId = `stats_byte_frac_${safeId}`;
-        const statsProgressId = `stats_surprisal_progress_${safeId}`;
-        const textRenderId = `text_render_${safeId}`;
-
-        return `
-            <!-- data-column-id 使用原始 id（规范化路径），便于调试和查询，HTML 属性支持特殊字符 -->
-            <div id="${columnId}" class="compare-column" data-column-id="${id}">
-                <div id="${headerId}" class="compare-header">
-                    <div class="column-actions-row">
-                        <button class="move-to-first-btn" title="${tr('Move to leftmost')}">⏮</button>
-                        <button class="move-left-btn" title="${tr('Move left')}">◀</button>
-                        <button class="delete-btn" title="${tr('Delete')}">×</button>
-                        <button class="move-right-btn" title="${tr('Move right')}">▶</button>
-                        <button class="move-to-last-btn" title="${tr('Move to rightmost')}">⏭</button>
-                    </div>
-                    <div class="column-title">${demoName}</div>
-                </div>
-                <div id="${errorId}" class="compare-error" style="display: none; color: var(--error-color, #f44336); padding: 10px; margin-bottom: 10px; background-color: var(--error-bg, rgba(244, 67, 54, 0.1)); border-radius: 4px;"></div>
-                <div id="${metricsId}" class="text-metrics is-hidden">
-                    <div class="text-metrics-primary">
-                        <span id="metric_bytes_${safeId}">0 B</span>
-                        <span class="text-metrics-divider">|</span>
-                        <span id="metric_chars_${safeId}">${tr('0 chars')}</span>
-                        <span class="text-metrics-divider">|</span>
-                        <span id="metric_tokens_${safeId}">0 tokens</span>
-                    </div>
-                    <div id="metric_total_surprisal_${safeId}" class="text-metrics-secondary">${tr('total information = 0 bits')}</div>
-                    <div id="metric_model_${safeId}" class="text-metrics-secondary is-hidden">model: </div>
-                </div>
-                <div id="${statsId}" class="stats" style="text-align:center;">
-                    <div style="display:block;text-align: center;margin-bottom: 20px;">
-                        <div id="token_histogram_title_${safeId}"></div>
-                        <svg id="${statsFracId}"></svg>
-                    </div>
-                    <div style="display:block;text-align: center;margin-bottom: 20px;">
-                        <div id="byte_histogram_title_${safeId}"></div>
-                        <svg id="${statsByteFracId}"></svg>
-                    </div>
-                    <div style="display:block;text-align: center;margin-bottom: 20px;">
-                        <div id="surprisal_progress_title_${safeId}"></div>
-                        <svg id="${statsProgressId}"></svg>
-                    </div>
-                </div>
-                <div id="${textRenderId}" class="compare-text-render is-hidden"></div>
-            </div>
-        `;
-    };
 
     // 处理单个 demo 的数据
     const processDemoData = (data: AnalysisData): FrontendAnalyzeResult => {
@@ -712,43 +576,6 @@ window.onload = () => {
         }
     };
 
-    // 根据 histogram source 解析出列的 safeId 和直方图类型
-    const parseHistogramSource = (source?: string): { safeId: string; histogramType: 'token' | 'byte' } | null => {
-        if (!source) {
-            return null;
-        }
-
-        const bytePrefix = 'stats_byte_frac';
-        const tokenPrefix = 'stats_frac';
-
-        if (source.startsWith(bytePrefix)) {
-            const safeId = source.substring(bytePrefix.length).replace(/^_/, '');
-            return safeId ? { safeId, histogramType: 'byte' } : null;
-        }
-
-        if (source.startsWith(tokenPrefix)) {
-            const safeId = source.substring(tokenPrefix.length).replace(/^_/, '');
-            return safeId ? { safeId, histogramType: 'token' } : null;
-        }
-
-        return null;
-    };
-
-    // 通过 safeId 查找对应的列数据
-    const findColumnBySafeId = (safeId: string): { id: string; columnData: DemoColumnData } | null => {
-        if (!safeId) {
-            return null;
-        }
-
-        for (const [id, columnData] of columnsData.entries()) {
-            if (toSafeId(id) === safeId) {
-                return { id, columnData };
-            }
-        }
-
-        return null;
-    };
-
     // 处理直方图点击，高亮对应文本
     const handleHistogramBinClick = (ev: HistogramBinClickEvent): void => {
         const parsed = parseHistogramSource(ev?.source);
@@ -756,7 +583,7 @@ window.onload = () => {
             return;
         }
 
-        const columnEntry = findColumnBySafeId(parsed.safeId);
+        const columnEntry = findColumnBySafeId(columnsData, parsed.safeId);
         if (!columnEntry) {
             return;
         }
@@ -1512,31 +1339,7 @@ window.onload = () => {
         } else {
             wrapper.classed('edit-mode', false);
         }
-        updateEditButtonsState();
-    };
-
-    // 更新编辑按钮状态（禁用首列左移、移到最左，末列右移、移到最右）
-    const updateEditButtonsState = (): void => {
-        const columns = container.selectAll<HTMLElement, any>('.compare-column');
-        const columnNodes = columns.nodes();
-        
-        columns.each(function(d, i) {
-            const columnElement = d3.select(this);
-            const moveToFirstBtn = columnElement.select('.move-to-first-btn');
-            const moveLeftBtn = columnElement.select('.move-left-btn');
-            const moveRightBtn = columnElement.select('.move-right-btn');
-            const moveToLastBtn = columnElement.select('.move-to-last-btn');
-            
-            // 首列禁用左移和移到最左
-            const isFirst = i === 0;
-            moveToFirstBtn.property('disabled', isFirst);
-            moveLeftBtn.property('disabled', isFirst);
-            
-            // 末列禁用右移和移到最右
-            const isLast = i === columnNodes.length - 1;
-            moveRightBtn.property('disabled', isLast);
-            moveToLastBtn.property('disabled', isLast);
-        });
+        updateEditButtonsState(container);
     };
 
     // 同步 DOM 顺序到 columnsData 和 URL（公共逻辑）
@@ -1565,7 +1368,7 @@ window.onload = () => {
         syncStateToURL();
 
         // 更新按钮状态
-        updateEditButtonsState();
+        updateEditButtonsState(container);
         
         // 如果在模型差分模式下，重新计算差分数据（因为Base可能变了）
         if (modelDiffMode) {
@@ -1592,102 +1395,11 @@ window.onload = () => {
         }
     };
 
-    // 移动列（支持 left/right/first/last 四个方向）
-    const moveColumn = (columnId: string, direction: 'left' | 'right' | 'first' | 'last'): void => {
-        const columnElement = container.select(`[data-column-id="${columnId}"]`);
-        if (columnElement.empty()) {
-            return;
-        }
-
-        const columnNode = columnElement.node() as HTMLElement | null;
-        if (!columnNode) {
-            return;
-        }
-
-        // 获取所有 .compare-column 元素（按 DOM 顺序）
-        const allColumns = Array.from(container.selectAll('.compare-column').nodes()) as HTMLElement[];
-        const currentIndex = allColumns.indexOf(columnNode);
-        
-        if (currentIndex === -1) {
-            return; // 找不到当前列
-        }
-
-        // 获取容器节点（#compare-container）
+    const moveColumn = (columnId: string, direction: ColumnMoveDirection): void => {
         const containerNode = container.node() as HTMLElement | null;
-        if (!containerNode) {
+        if (!containerNode || !moveColumnInDom(containerNode, columnId, direction)) {
             return;
         }
-
-        // 获取要移动的元素的父节点（外层 div）
-        const columnParent = columnNode.parentElement;
-        if (!columnParent) {
-            return;
-        }
-
-        // 根据方向执行移动
-        if (direction === 'first') {
-            // 移到最左：移到容器最前面
-            if (currentIndex === 0) {
-                return; // 已经在最左
-            }
-            const firstColumnParent = allColumns[0].parentElement;
-            if (firstColumnParent) {
-                containerNode.insertBefore(columnParent, firstColumnParent);
-            }
-        } else if (direction === 'last') {
-            // 移到最右：移到容器最后面
-            if (currentIndex === allColumns.length - 1) {
-                return; // 已经在最右
-            }
-            containerNode.appendChild(columnParent);
-        } else if (direction === 'left') {
-            // 向左移动：移到前一列之前
-            if (currentIndex === 0) {
-                return; // 已经是第一列
-            }
-            const targetIndex = currentIndex - 1;
-            const targetColumn = allColumns[targetIndex];
-            if (!targetColumn) {
-                return;
-            }
-            const targetParent = targetColumn.parentElement;
-            if (!targetParent) {
-                return;
-            }
-            // 如果两个元素的父节点相同，说明 DOM 结构有问题
-            if (columnParent === targetParent) {
-                console.error('DOM 结构异常：两个列在同一个父容器中');
-                return;
-            }
-            containerNode.insertBefore(columnParent, targetParent);
-        } else { // direction === 'right'
-            // 向右移动：移到后一列之后
-            if (currentIndex === allColumns.length - 1) {
-                return; // 已经是最后一列
-            }
-            const targetIndex = currentIndex + 1;
-            const targetColumn = allColumns[targetIndex];
-            if (!targetColumn) {
-                return;
-            }
-            const targetParent = targetColumn.parentElement;
-            if (!targetParent) {
-                return;
-            }
-            // 如果两个元素的父节点相同，说明 DOM 结构有问题
-            if (columnParent === targetParent) {
-                console.error('DOM 结构异常：两个列在同一个父容器中');
-                return;
-            }
-            // 如果目标列的外层 div 有下一个兄弟节点，插入到它之前；否则追加到末尾
-            if (targetParent.nextSibling) {
-                containerNode.insertBefore(columnParent, targetParent.nextSibling);
-            } else {
-                containerNode.appendChild(columnParent);
-            }
-        }
-
-        // 同步 DOM 顺序到 columnsData 和 URL
         syncColumnOrder();
     };
 
@@ -1719,7 +1431,7 @@ window.onload = () => {
         syncStateToURL();
 
         // 更新按钮状态
-        updateEditButtonsState();
+        updateEditButtonsState(container);
         
         // 更新模型差分模式可用性
         updateModelDiffModeAvailability();
@@ -1853,7 +1565,7 @@ window.onload = () => {
     // 包装 addSingleColumn，添加列后更新按钮状态
     const wrappedAddSingleColumn = async (demoPath: string): Promise<void> => {
         await addSingleColumn(demoPath);
-        updateEditButtonsState();
+        updateEditButtonsState(container);
         // addSingleColumn 内部的 loadDemoForColumn 会调用 updateModelDiffModeAvailability
         // 这里不需要重复调用
     };
@@ -1864,7 +1576,7 @@ window.onload = () => {
 
     // 启动
     initializeColumns().then(() => {
-        updateEditButtonsState();
+        updateEditButtonsState(container);
         updateShowTextRenderCheckbox(); // 初始化"显示文本渲染"checkbox状态
         // initializeColumns 内部会调用 updateModelDiffModeAvailability
         
