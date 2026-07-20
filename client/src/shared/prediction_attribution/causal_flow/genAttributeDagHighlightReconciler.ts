@@ -51,7 +51,8 @@ export type DagHighlightLayoutMode =
     | 'linear-arc'
     | 'linear-arc-step-down'
     | 'spiral'
-    | 'attribution-matrix';
+    | 'attribution-matrix'
+    | 'text-matrix';
 
 /** 与 genAttributeDagView 同源：节点 fill/text opacity 档位。 */
 const DagNodeOpacityLevel = {
@@ -311,7 +312,8 @@ export function createDagHighlightReconciler<
     function refreshMatrixHighlight(
         propagationShared: MatrixPropagationHighlightShared | null,
     ): void {
-        if (deps.getLayoutMode() !== 'attribution-matrix') return;
+        const mode = deps.getLayoutMode();
+        if (mode !== 'attribution-matrix' && mode !== 'text-matrix') return;
         grayRenderCache ??= buildGrayRenderStrengthByEdgeKey(
             graph,
             incomingLinksByTarget,
@@ -396,6 +398,75 @@ export function createDagHighlightReconciler<
         refreshNodeLinkHighlight();
     }
 
+    /**
+     * text 图画什么：
+     * - **native**：左侧自有交互（焦点/悬停）= 经典 text-flow：`effectiveFocusId` + Show downstream toggle
+     * - 仅当无左侧 committed 焦点、且 matrix 指针/lock 占有时，才用轴语义覆盖：
+     *   cell→单边；col→仅下游；row→仅上游
+     */
+    type TextGraphHighlightIntent =
+        | { kind: 'cell'; srcId: string; tgtId: string }
+        | { kind: 'downstreamOnly'; id: string }
+        | { kind: 'upstreamOnly'; id: string }
+        | { kind: 'native'; id: string; withDownstream: boolean };
+
+    function resolveTextGraphHighlightIntent(
+        recursiveAttributionEnabled: boolean,
+        showDownstreamInfluence: boolean,
+        propagationPlaybackPhase: DagPropagationPlaybackPhase,
+    ): TextGraphHighlightIntent | null {
+        if (deps.layoutSelectHoverActive()) return null;
+        const committedId = focus.getUserFocusId() ?? focus.getSelectedId();
+        const downstreamBlocked =
+            recursiveAttributionEnabled &&
+            (recursiveEdgeAnimation.getDirection() === 'backward' ||
+                propagationPlaybackPhase === 'playing' ||
+                propagationPlaybackPhase === 'paused');
+        const withDownstreamToggle = showDownstreamInfluence && !downstreamBlocked;
+
+        // 左侧已有焦点/选中：始终走原生（toggle 决定是否红出边），不被 matrix lock 改语义
+        if (committedId != null) {
+            return { kind: 'native', id: committedId, withDownstream: withDownstreamToggle };
+        }
+
+        // 无 committed：matrix 指针/lock 可覆盖悬停
+        const matrixT = focus.getMatrixHoverTarget() ?? focus.getMatrixLockedTarget();
+        if (matrixT?.type === 'cell') {
+            return { kind: 'cell', srcId: matrixT.srcId, tgtId: matrixT.tgtId };
+        }
+        if (matrixT?.type === 'col') {
+            return { kind: 'downstreamOnly', id: matrixT.id };
+        }
+        if (matrixT?.type === 'row') {
+            return { kind: 'upstreamOnly', id: matrixT.id };
+        }
+
+        // 纯左侧悬停：与 text-flow 相同
+        const focusId = effectiveFocusId();
+        if (focusId == null) return null;
+        return { kind: 'native', id: focusId, withDownstream: withDownstreamToggle };
+    }
+
+    function focusStateForCellEdge(srcId: string, tgtId: string): FocusAttributionState | null {
+        if (!graph.hasNode(srcId) || !graph.hasNode(tgtId)) return null;
+        const edgeKey = dagLinkEndpointKey(srcId, tgtId);
+        const link = (incomingLinksByTarget.get(tgtId) ?? []).find((l) => l.source === srcId);
+        if (link == null) return null;
+        const share =
+            link.attributionShare ?? link.mutualInformationRatio ?? link.normalizedScore ?? 1;
+        const w = share > 0 && Number.isFinite(share) ? share : 1;
+        return {
+            activeNodeIds: new Set([srcId, tgtId]),
+            incomingEdgeShareByKey: new Map([[edgeKey, w]]),
+            downstreamEdgeStrengthByKey: new Map(),
+            downstreamArriveById: new Map(),
+            nodeShareById: new Map([
+                [tgtId, 1],
+                [srcId, w],
+            ]),
+        };
+    }
+
     function refreshNodeLinkHighlight(): void {
             const nodes = deps.getNodes();
             const nodeSel = deps.getNodeSel();
@@ -413,24 +484,45 @@ export function createDagHighlightReconciler<
             const getPropagationPlaybackOptions = deps.getPropagationPlaybackOptions;
             const marqueePreviewIds = getMarqueePreviewIds();
 
-        const focusId = effectiveFocusId();
         const propagationPlaybackPhase = recursiveEdgeAnimation.getPlaybackPhase();
+        const intent = resolveTextGraphHighlightIntent(
+            recursiveAttributionEnabled,
+            showDownstreamInfluence,
+            propagationPlaybackPhase,
+        );
+        const cellEdgeOnly =
+            intent?.kind === 'cell' ? focusStateForCellEdge(intent.srcId, intent.tgtId) : null;
+        const downstreamOnlyId = intent?.kind === 'downstreamOnly' ? intent.id : null;
+        const upstreamOnlyId = intent?.kind === 'upstreamOnly' ? intent.id : null;
+        const nativeIntent = intent?.kind === 'native' ? intent : null;
+
+        const focusId =
+            cellEdgeOnly != null
+                ? null
+                : (downstreamOnlyId ??
+                  upstreamOnlyId ??
+                  nativeIntent?.id ??
+                  null);
         const includeDownstreamInfluence =
-            showDownstreamInfluence &&
-            !(
-                recursiveAttributionEnabled &&
-                (recursiveEdgeAnimation.getDirection() === 'backward' ||
-                    propagationPlaybackPhase === 'playing' ||
-                    propagationPlaybackPhase === 'paused')
-            );
-        const focusState = focusId
-            ? computeFocusAttributionState(graph, incomingLinksByTarget, focusId, {
-                maxIncomingDepth: recursiveAttributionEnabled ? Number.POSITIVE_INFINITY : 1,
-                includeDownstreamInfluence,
-                maxOutgoingDepth: recursiveAttributionEnabled ? Number.POSITIVE_INFINITY : 1,
-                decayAttributionToHighSurprisalTarget: dagDecayAttributionToHighSurprisalTargetEnabled,
-            })
-            : null;
+            downstreamOnlyId != null || (nativeIntent?.withDownstream ?? false);
+        const maxIncomingDepth =
+            downstreamOnlyId != null
+                ? 0
+                : recursiveAttributionEnabled
+                  ? Number.POSITIVE_INFINITY
+                  : 1;
+        const maxOutgoingDepth = recursiveAttributionEnabled ? Number.POSITIVE_INFINITY : 1;
+        const focusState =
+            cellEdgeOnly ??
+            (focusId != null && graph.hasNode(focusId)
+                ? computeFocusAttributionState(graph, incomingLinksByTarget, focusId, {
+                      maxIncomingDepth,
+                      includeDownstreamInfluence,
+                      maxOutgoingDepth,
+                      decayAttributionToHighSurprisalTarget:
+                          dagDecayAttributionToHighSurprisalTargetEnabled,
+                  })
+                : null);
         currentFocusState = focusState;
         const dimEffective = dimInactiveTokensEffective();
         const suppressPropagationNode = (nodeId: string): boolean =>
@@ -532,8 +624,23 @@ export function createDagHighlightReconciler<
         const isBackwardSlide = (d: T): boolean =>
             animOverlay.anim?.direction === 'backward' && isPropagationSlide(d);
         const selectedId = focus.getSelectedId();
+        /** 格/列锁定（无对应悬停）时实线蓝框，与 matrix solid frame 对齐。 */
+        const matrixLock = focus.getMatrixLockedTarget();
+        const matrixHoverNow = focus.getMatrixHoverTarget();
+        const cellLockEndpoints =
+            cellEdgeOnly != null && matrixHoverNow?.type !== 'cell'
+                ? cellEdgeOnly.activeNodeIds
+                : null;
+        const colLockEndpoint =
+            downstreamOnlyId != null &&
+            matrixLock?.type === 'col' &&
+            matrixHoverNow?.type !== 'col'
+                ? matrixLock.id
+                : null;
         const showFocusSelectedStroke = (d: T): boolean =>
-            selectedId === d.id && !(suppressFocusSelectedStroke && d.id === focusId);
+            (cellLockEndpoints?.has(d.id) ?? false) ||
+            d.id === colLockEndpoint ||
+            (selectedId === d.id && !(suppressFocusSelectedStroke && d.id === focusId));
         const nodeOnChainForRender = (d: T): boolean => {
             if (!forwardPromptPreambleFrame) return nodeStrokeShareById?.has(d.id) ?? false;
             return d.step === -1 && (nodeStrokeShareById?.has(d.id) ?? false);
@@ -634,24 +741,31 @@ export function createDagHighlightReconciler<
             ) {
                 base = DagNodeOpacityLevel.almostHidden;
             } else {
-                const nodeFullyHighlighted = recursiveAttributionEnabled
-                    ? forwardPromptPreambleFrame
-                        ? nodeOnChainForRender(d)
-                        : highlightStayNodesFill
-                          ? (d.id === focusId && !deferFocusHighlightDuringAnim) ||
-                            (nodeStrokeShareById?.has(d.id) ?? false) ||
-                            isPropagationSlide(d)
-                          : propagationAnimVisualActive
-                            ? (d.id === focusId && !deferFocusHighlightDuringAnim) ||
-                              isPropagationSlide(d)
-                            : d.id === focusId
-                    : (focusNodeIds?.has(d.id) ?? false);
+                const cellEndpointLit =
+                    cellEdgeOnly != null && cellEdgeOnly.activeNodeIds.has(d.id);
+                const nodeFullyHighlighted =
+                    cellEndpointLit ||
+                    (recursiveAttributionEnabled
+                        ? forwardPromptPreambleFrame
+                            ? nodeOnChainForRender(d)
+                            : highlightStayNodesFill
+                              ? (d.id === focusId && !deferFocusHighlightDuringAnim) ||
+                                (nodeStrokeShareById?.has(d.id) ?? false) ||
+                                isPropagationSlide(d)
+                              : propagationAnimVisualActive
+                                ? (d.id === focusId && !deferFocusHighlightDuringAnim) ||
+                                  isPropagationSlide(d)
+                                : d.id === focusId
+                        : (focusNodeIds?.has(d.id) ?? false));
                 base = DagNodeOpacityLevel.full;
                 if (!nodeFullyHighlighted) {
                     const hasGenTokens = nodes.some((n) => n.step >= 0);
                     const isPromptLeaf =
                         hasGenTokens && d.step === -1 && graph.outDegree(d.id) === 0;
-                    if (focusId || isPromptLeaf) base = DagNodeOpacityLevel.weakened;
+                    // 格边投影：与有焦点时一样压暗非端点
+                    if (focusId || cellEdgeOnly != null || isPromptLeaf) {
+                        base = DagNodeOpacityLevel.weakened;
+                    }
                 }
                 if (lowVis === 'inactive') {
                     base = DagNodeOpacityLevel.almostHidden;
@@ -684,15 +798,28 @@ export function createDagHighlightReconciler<
         const suppressAttributionChainNodeStyle = attentionHighlight != null;
         const layoutHover = layoutSelectHoverActive();
         const hoveredId = focus.getHoveredId();
+        const matrixHover = focus.getMatrixHoverTarget();
         const layoutSelectedIds = focus.getLayoutSelectedIds();
+        /** text 悬停 ∪ matrix 行/列/格悬停投影（格 → 两端；列 → 源节点）。 */
+        const isPointerHoverNode = (d: T): boolean => {
+            if (hoveredId === d.id) return true;
+            if (matrixHover == null) return false;
+            if (matrixHover.type === 'cell') {
+                return d.id === matrixHover.srcId || d.id === matrixHover.tgtId;
+            }
+            if (matrixHover.type === 'rowAndCol') {
+                return d.id === matrixHover.id;
+            }
+            return d.id === matrixHover.id;
+        };
         // 实线悬停框：与 {@link solidFrameFocusId} / tooltip 同源，多选虚线态不下发
         const showFocusHover = (d: T): boolean => {
             if (attentionHighlight != null || layoutHover) return false;
-            return hoveredId === d.id;
+            return isPointerHoverNode(d);
         };
         const showLayoutHover = (d: T): boolean => {
             if (attentionHighlight != null || !layoutHover) return false;
-            return hoveredId === d.id || marqueePreviewIds.has(d.id);
+            return isPointerHoverNode(d) || marqueePreviewIds.has(d.id);
         };
         nodeSel
             .classed('gen-attr-dag-node--hover', showFocusHover)
@@ -830,7 +957,9 @@ export function createDagHighlightReconciler<
         syncLayoutForLowVisibilityMembership(focusId, focusState);
 
         // matrix：唯一上色入口；须在 layout sync（可能 rebuild 几何）之后。
-        if (deps.getLayoutMode() === 'attribution-matrix') {
+        // text-matrix：与 text 并排时两侧同时上色。
+        const layoutMode = deps.getLayoutMode();
+        if (layoutMode === 'attribution-matrix' || layoutMode === 'text-matrix') {
             const propagationShared: MatrixPropagationHighlightShared | null =
                 matrixPropagationHighlightActive() &&
                 focusId != null &&

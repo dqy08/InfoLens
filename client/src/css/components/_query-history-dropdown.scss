@@ -1,4 +1,29 @@
 // 语义搜索 / Chat 共用：查询历史下拉列表视觉
+
+// featured 项：★ 左右各 0.35em；仅 .history-text--bold / --bold 显示星号（下拉与选中展示共用）
+@mixin history-text-featured-mark {
+  position: relative;
+  padding-left: calc(1.15em + 0.35em);
+
+  &::before {
+    content: '★';
+    position: absolute;
+    left: 0;
+    width: 1.15em;
+    text-align: center;
+    visibility: hidden;
+  }
+
+  &.history-text--bold,
+  &--bold {
+    font-weight: 500;
+
+    &::before {
+      visibility: visible;
+    }
+  }
+}
+
 @mixin query-history-dropdown {
   position: absolute;
   left: 0;
@@ -38,10 +63,17 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+  }
 
-      &--bold {
-        font-weight: 500;
-      }
+  // featured 列表：与选中展示同一套 ★ 位宽
+  &.has-featured-marks {
+    li {
+      padding-left: 0.35em;
+    }
+
+    .history-text {
+      @include history-text-featured-mark;
     }
   }
 }

@@ -6,6 +6,7 @@
 @use "tool-calling-pending" as tcp;
 @use "lmf-readout" as lmf;
 @use '../base/narrow-ios-form-font-tail' as ios-form-font;
+@use '../components/query-history-dropdown' as qh;
 
 $gen-attr-option-row-gap: 12px;
 $gen-attr-cached-demos-panel-width: 21em;
@@ -50,7 +51,8 @@ $gen-attr-cached-demos-panel-width: 21em;
   gap: 6px;
   width: 100%;
   max-width: none;
-  padding: 4px 8px;
+  // 左侧与下拉 has-featured-marks 的 li 一致（0.35em）
+  padding: 4px 8px 4px 0.35em;
   font-size: inherit;
   line-height: 1;
   font-family: inherit;
@@ -72,6 +74,8 @@ $gen-attr-cached-demos-panel-width: 21em;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
+  // 与候选项同一套 ★ / 加粗
+  @include qh.history-text-featured-mark;
 }
 
 .gen-attr-cached-demos-chevron {
@@ -147,6 +151,36 @@ $gen-attr-cached-demos-panel-width: 21em;
     overflow: hidden;
     width: 100%;
     box-sizing: border-box;
+
+    // text-matrix：视口正中分割线（不属于 SVG 画布，不随 zoom）
+    > .gen-attr-dag-text-matrix-divider {
+      display: none;
+      position: absolute;
+      background: color-mix(in srgb, var(--text-color) 28%, transparent);
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    // 左右：竖线
+    &.gen-attr-dag-text-matrix-layout > .gen-attr-dag-text-matrix-divider {
+      display: block;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 1px;
+      transform: translateX(-50%);
+    }
+
+    // 上下：横线
+    &.gen-attr-dag-text-matrix-layout--vertical > .gen-attr-dag-text-matrix-divider {
+      top: 50%;
+      bottom: auto;
+      left: 0;
+      right: 0;
+      width: auto;
+      height: 1px;
+      transform: translateY(-50%);
+    }
   }
 
   // DAG Top‑K：贴在 #results 内侧右下（absolute）；固定尺寸 HUD；超出部分裁剪。

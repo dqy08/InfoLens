@@ -4,7 +4,8 @@ export type DagFitLayoutMode =
     | 'linear-arc'
     | 'linear-arc-step-down'
     | 'spiral'
-    | 'attribution-matrix';
+    | 'attribution-matrix'
+    | 'text-matrix';
 
 export type DagZoomPose = { x: number; y: number; k: number };
 
@@ -63,7 +64,8 @@ export function computeFitZoomTransform(params: {
             return { x: pad + halfW, y: pad + halfH, k };
         }
         case 'text-flow':
-        case 'attribution-matrix': {
+        case 'attribution-matrix':
+        case 'text-matrix': {
             const padTf = DAG_TEXT_FLOW_FIT_PAD_PX;
             const innerWTextFlow = Math.max(w - 2 * padTf, 1);
             const innerHTextFlow = Math.max(h - 2 * padTf, 1);

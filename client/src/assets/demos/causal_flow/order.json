@@ -71,5 +71,10 @@
   {
     "slug": "矩阵 写诗",
     "label": "Matrix 矩阵 | 写诗"
+  },
+  {
+    "slug": "text+矩阵 写诗",
+    "label": "Text + Matrix | 写诗",
+    "featured": "bold"
   }
 ]

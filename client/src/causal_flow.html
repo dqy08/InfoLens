@@ -205,13 +205,24 @@
                             <label class="semantic-submode-label" for="gen_attr_dag_layout_mode">DAG layout</label>
                             <select id="gen_attr_dag_layout_mode"
                                 class="semantic-submode-select gen-attr-dag-layout-mode-select"
-                                title="Choose DAG layout. 'text-flow' follows text layout geometry; 'linear-arc' uses fixed-order linear nodes with arc links; 'linear-arc-step-down' is like linear-arc but drops each successive token vertically by CI (baseline = unscaled node height); 'spiral' lays nodes on an Archimedean spiral (for fun); 'matrix' shows a heatmap of attribution strength (attention-matrix style)."
+                                title="Choose DAG layout. 'text-flow' follows text layout geometry; 'linear-arc' uses fixed-order linear nodes with arc links; 'linear-arc-step-down' is like linear-arc but drops each successive token vertically by CI (baseline = unscaled node height); 'spiral' lays nodes on an Archimedean spiral (for fun); 'matrix' shows a heatmap of attribution strength (attention-matrix style); 'text+matrix' shows text and matrix side by side with linked focus (split direction is a separate control)."
                                 data-i18n="title">
                                 <option value="text-flow">text</option>
                                 <option value="spiral">spiral (for fun)</option>
                                 <option value="attribution-matrix">matrix</option>
+                                <option value="text-matrix">text+matrix</option>
                                 <option value="linear-arc">linear-arc</option>
                                 <option value="linear-arc-step-down">step-down(beta)</option>
+                            </select>
+                        </span>
+                        <span class="semantic-submode-group" id="gen_attr_dag_text_matrix_orient_group" hidden>
+                            <label class="semantic-submode-label" for="gen_attr_dag_text_matrix_orient">Split</label>
+                            <select id="gen_attr_dag_text_matrix_orient"
+                                class="semantic-submode-select gen-attr-dag-layout-mode-select"
+                                title="text+matrix split direction: left-right or top-bottom. Saved locally."
+                                data-i18n="title">
+                                <option value="horizontal">left-right</option>
+                                <option value="vertical">top-bottom</option>
                             </select>
                         </span>
                         <span class="semantic-submode-group" id="gen_attr_dag_layout_transition_group">

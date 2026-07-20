@@ -4,9 +4,20 @@
  * 语义分层（勿混写）：
  * - **传播焦点** `userFocusId`：用户确立，驱动 ↯；`update`/步进选中不得覆盖。
  * - **步进选中** `selectedId`：描边 / ▶ 步进；可与传播焦点并存（仅 selected 变）。
- * - **悬停预览** `hoveredId`：无选中时参与归因预览。
- * - **matrix 检查** `matrixLockedTarget`：row 与传播焦点互通；col/cell 为静态检查（清传播焦点）。
+ * - **悬停预览** `hoveredId`：无选中时参与归因预览（行/目标→上游；非行源→下游）。
+ * - **matrix 检查** `matrixLockedTarget` / `matrixHoverTarget`：仅右侧自有交互写入；绘制时原生优先。
  * - **布局多选** `layoutSelectedIds`：与焦点互清，仅多节点拖拽。
+ *
+ * 点击确立/取消（text 与 matrix 统一）：清悬停；指针离开目标再进入才恢复预览。
+ *
+ * 所有权（勿混写）：
+ * - 左侧自有交互 → text 走 native；matrix 仅在「右侧无 lock/hover」时接受左侧投影。
+ * - 右侧自有交互 → matrix 走原生 row/col/cell（不因 Show downstream 升级为 rowAndCol）；
+ *   text 仅在「左侧无 committed 焦点」时接受右侧轴语义覆盖。
+ *
+ * 左侧→右侧投影（Causal Flow 同）：
+ * - 行/目标 ↔ 上游（蓝）；列/源 ↔ 下游（红）；格 ↔ 单边箭头；
+ * - 左侧焦点 + downstream 开 → matrix `rowAndCol`（蓝行+红列）。
  *
  * 副作用（停播放 / 重绘）由调用方执行；本模块在会改 `userFocusId` 的路径上回调 `onUserFocusChange`。
  */
@@ -14,6 +25,8 @@
 export type MatrixInteractionTarget =
     | { type: 'row'; id: string }
     | { type: 'col'; id: string }
+    /** 同一节点：蓝行（上游/归因）+ 红列（下游）同时高亮；对应左侧焦点且开启 downstream。 */
+    | { type: 'rowAndCol'; id: string }
     | { type: 'cell'; srcId: string; tgtId: string };
 
 export type DagFocusApplyResult = {
@@ -62,11 +75,15 @@ export type DagFocusSession = {
     /** ▶ selected 若在行轴上 → row target。 */
     matrixSelectedRowTarget(isMatrixRowId: (id: string) => boolean): MatrixInteractionTarget | null;
     /**
-     * matrix 静态归因目标：▶ 播放中优先 selected 行；否则 userFocus 行 → lock → selected 行；无锁时悬停预览。
+     * matrix 静态归因目标：
+     * 1) 右侧自有 lock/hover（原生）；
+     * 2) 否则左侧焦点/悬停投影（`showDownstreamInfluence` 时可 `rowAndCol`）。
+     * ▶ 播放中优先 selected 行。
      */
     matrixStaticHighlightTarget(
         dagPlaybackPlaying: boolean,
         isMatrixRowId: (id: string) => boolean,
+        showDownstreamInfluence: boolean,
     ): MatrixInteractionTarget | null;
 
     /** 节点图单击：切换传播焦点（与 selected 同步）。 */
@@ -107,7 +124,10 @@ export type DagFocusSession = {
     selectGeneratedToken(id: string): DagFocusApplyResult;
     /** 图清空时重置全部焦点态。 */
     reset(): void;
-    /** 行焦点 ↔ matrix 行 lock；非行焦点时清行 lock（保留 col/cell）。 */
+    /**
+     * 不再把左侧焦点写成 matrix 行 lock（避免右侧被投影语义占用）。
+     * 仅在左侧已无行焦点时清掉残留行 lock。
+     */
     syncMatrixRowLockWithUserFocus(isMatrixRowId: (id: string) => boolean): void;
 };
 
@@ -118,6 +138,22 @@ function matrixTargetsEqual(a: MatrixInteractionTarget, b: MatrixInteractionTarg
     }
     if (a.type !== 'cell' && b.type !== 'cell') return a.id === b.id;
     return false;
+}
+
+/** 左侧焦点/悬停 → matrix 轴投影。 */
+function projectLeftNodeToMatrixTarget(
+    id: string,
+    isMatrixRowId: (id: string) => boolean,
+    showDownstreamInfluence: boolean,
+    /** committed 焦点：无下游且非行 → null；悬停源 token：仍投影为列（下游）。 */
+    role: 'committed' | 'hover',
+): MatrixInteractionTarget | null {
+    const isRow = isMatrixRowId(id);
+    if (showDownstreamInfluence) {
+        return isRow ? { type: 'rowAndCol', id } : { type: 'col', id };
+    }
+    if (isRow) return { type: 'row', id };
+    return role === 'hover' ? { type: 'col', id } : null;
 }
 
 export function createDagFocusSession(options?: CreateDagFocusSessionOptions): DagFocusSession {
@@ -180,6 +216,8 @@ export function createDagFocusSession(options?: CreateDagFocusSessionOptions): D
             );
             if (committed != null) return committed;
             if (matrixHoverTarget?.type === 'row') return matrixHoverTarget.id;
+            // text 悬停行 token：与 matrix 行悬停同等预览（text-matrix 联动）
+            if (hoveredId != null && isMatrixRowId(hoveredId)) return hoveredId;
             return null;
         },
 
@@ -195,16 +233,29 @@ export function createDagFocusSession(options?: CreateDagFocusSessionOptions): D
             return { type: 'row', id: selectedId };
         },
 
-        matrixStaticHighlightTarget(dagPlaybackPlaying, isMatrixRowId) {
+        matrixStaticHighlightTarget(dagPlaybackPlaying, isMatrixRowId, showDownstreamInfluence) {
             const selectedRow = session.matrixSelectedRowTarget(isMatrixRowId);
             if (dagPlaybackPlaying && selectedRow != null) return selectedRow;
-            const userFocusRow: MatrixInteractionTarget | null =
-                userFocusId != null && isMatrixRowId(userFocusId)
-                    ? { type: 'row', id: userFocusId }
-                    : null;
-            const committed = userFocusRow ?? matrixLockedTarget ?? selectedRow;
-            if (committed != null) return committed;
-            return matrixHoverTarget;
+            // 右侧自有：原生 row/col/cell（不因 downstream 升级为 rowAndCol）
+            if (matrixLockedTarget != null) return matrixLockedTarget;
+            if (matrixHoverTarget != null) return matrixHoverTarget;
+            // 仅此时：左侧 → 右侧投影
+            const committedId = userFocusId ?? selectedId;
+            if (committedId != null) {
+                return projectLeftNodeToMatrixTarget(
+                    committedId,
+                    isMatrixRowId,
+                    showDownstreamInfluence,
+                    'committed',
+                );
+            }
+            if (hoveredId == null) return null;
+            return projectLeftNodeToMatrixTarget(
+                hoveredId,
+                isMatrixRowId,
+                showDownstreamInfluence,
+                'hover',
+            );
         },
 
         toggleNodeFocus(id) {
@@ -212,6 +263,11 @@ export function createDagFocusSession(options?: CreateDagFocusSessionOptions): D
             const next = userFocusId === id ? null : id;
             userFocusId = next;
             selectedId = next;
+            // 左侧接管或清空：放下右侧 lock，让 matrix 走投影 / 空闲
+            matrixLockedTarget = null;
+            matrixHoverTarget = null;
+            // 与 matrix 一致：点击确立/取消后清悬停，指针离开再进入才恢复预览
+            hoveredId = null;
             notify();
             return { stopPlayback: true };
         },
@@ -223,6 +279,7 @@ export function createDagFocusSession(options?: CreateDagFocusSessionOptions): D
             selectedId = next;
             matrixLockedTarget = next != null ? { type: 'row', id: next } : null;
             matrixHoverTarget = null;
+            hoveredId = null;
             notify();
             return { stopPlayback: true };
         },
@@ -232,6 +289,7 @@ export function createDagFocusSession(options?: CreateDagFocusSessionOptions): D
             const same = matrixLockedTarget?.type === 'col' && matrixLockedTarget.id === id;
             matrixLockedTarget = same ? null : { type: 'col', id };
             matrixHoverTarget = null;
+            hoveredId = null;
             return { stopPlayback: cleared.stopPlayback };
         },
 
@@ -243,6 +301,7 @@ export function createDagFocusSession(options?: CreateDagFocusSessionOptions): D
                 matrixLockedTarget.tgtId === tgtId;
             matrixLockedTarget = same ? null : { type: 'cell', srcId, tgtId };
             matrixHoverTarget = null;
+            hoveredId = null;
             return { stopPlayback: cleared.stopPlayback };
         },
 
@@ -261,13 +320,15 @@ export function createDagFocusSession(options?: CreateDagFocusSessionOptions): D
             selectedId = id;
         },
 
-        setUserFocus(id, isMatrixRowId) {
+        setUserFocus(id, _isMatrixRowId) {
             if (id == null) return session.clearAll();
             layoutSelectedIds = new Set();
             userFocusId = id;
             selectedId = id;
+            // 左侧写入焦点：不占用 matrix lock，matrix 靠投影显示
+            matrixLockedTarget = null;
             matrixHoverTarget = null;
-            session.syncMatrixRowLockWithUserFocus(isMatrixRowId);
+            hoveredId = null;
             notify();
             return { stopPlayback: true };
         },
@@ -278,6 +339,7 @@ export function createDagFocusSession(options?: CreateDagFocusSessionOptions): D
             userFocusId = null;
             matrixLockedTarget = null;
             matrixHoverTarget = null;
+            hoveredId = null;
             notify();
             return { stopPlayback: true };
         },
@@ -287,6 +349,7 @@ export function createDagFocusSession(options?: CreateDagFocusSessionOptions): D
         clearFocusForLayoutSelection() {
             selectedId = null;
             userFocusId = null;
+            hoveredId = null;
             notify();
             return { stopPlayback: true };
         },
@@ -339,10 +402,8 @@ export function createDagFocusSession(options?: CreateDagFocusSessionOptions): D
         },
 
         syncMatrixRowLockWithUserFocus(isMatrixRowId) {
-            if (userFocusId != null && isMatrixRowId(userFocusId)) {
-                matrixLockedTarget = { type: 'row', id: userFocusId };
-                return;
-            }
+            // 左侧行焦点不再镜像为 matrix 行 lock（否则右侧会丢失原生态、被投影语义占用）。
+            if (userFocusId != null && isMatrixRowId(userFocusId)) return;
             if (matrixLockedTarget?.type === 'row') matrixLockedTarget = null;
         },
     };

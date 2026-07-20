@@ -44,6 +44,8 @@ import {
     setDagDecayAttributionToHighSurprisalTargetEnabled,
     type DagLayoutMode,
     type DagRecursiveEdgeAnimationDirection,
+    type TextMatrixOrientation,
+    isTextMatrixLayout,
     clampDagCompactness,
     clampLinearArcAdjacentGap,
     DAG_COMPACTNESS_DEFAULT,
@@ -123,6 +125,7 @@ import {
     isGenAttrRunPayloadValidForUi,
 } from '../../features/causal_flow/bundledDemos';
 import {
+    GEN_ATTR_DAG_TEXT_MATRIX_ORIENTATION_STORAGE_KEY,
     GEN_ATTR_DAG_MATRIX_TRANSPOSE_STORAGE_KEY,
     GEN_ATTR_DAG_MATRIX_SWITCH_HORIZONTAL_LABEL_STORAGE_KEY,
     GEN_ATTR_DAG_MATRIX_SWITCH_VERTICAL_LABEL_STORAGE_KEY,
@@ -159,6 +162,7 @@ import {
     readStoredDagLightningSlowMo,
     readStoredDagLightningSound,
     readStoredDagLayoutMode,
+    readStoredDagTextMatrixOrientation,
     clampDagLayoutTransitionS,
     formatDagLayoutTransitionS,
     readStoredDagLayoutTransitionEnabled,
@@ -321,6 +325,10 @@ const metricModel = d3.select('#gen_attr_metric_model');
 const genAttrResultsEl = d3.select('#results.gen-attr-results-surface');
 
 const dagLayoutModeSelect = document.getElementById('gen_attr_dag_layout_mode') as HTMLSelectElement | null;
+const dagTextMatrixOrientGroup = document.getElementById('gen_attr_dag_text_matrix_orient_group');
+const dagTextMatrixOrientSelect = document.getElementById(
+    'gen_attr_dag_text_matrix_orient',
+) as HTMLSelectElement | null;
 const dagLayoutTransitionInput = document.getElementById(
     'gen_attr_dag_layout_transition',
 ) as HTMLInputElement | null;
@@ -492,9 +500,9 @@ function readPrefillStyleFromControl(): 'plain' | 'random' {
     return v === 'random' ? 'random' : 'plain';
 }
 
-/** 勾选 Simulate attention 且非 Causal Flow Mode；attribution-matrix 不适用。 */
+/** 勾选 Simulate attention 且非 Causal Flow Mode；含 matrix 的布局不适用。 */
 function isAttentionSimulationConfigured(): boolean {
-    if (isAttributionMatrixLayout()) return false;
+    if (layoutShowsMatrixControls()) return false;
     return (dagSimulateAttentionInput?.checked ?? false) && !isCausalFlowModeEnabled();
 }
 
@@ -503,9 +511,9 @@ function isCausalFlowModeEnabled(): boolean {
 }
 
 function applyAttentionCostUi(): void {
-    const matrix = isAttributionMatrixLayout();
     const causalFlow = isCausalFlowModeEnabled();
-    if (dagAttentionCostRow) dagAttentionCostRow.hidden = matrix || causalFlow;
+    // 纯 matrix / text+matrix：无 Simulate attention
+    if (dagAttentionCostRow) dagAttentionCostRow.hidden = layoutShowsMatrixControls() || causalFlow;
     const sim = isAttentionSimulationConfigured();
     if (dagFfnRatioWrap) dagFfnRatioWrap.hidden = !sim;
     if (dagAttendBurstWrap) dagAttendBurstWrap.hidden = !sim;
@@ -560,15 +568,26 @@ function currentDagLayoutMode(): DagLayoutMode {
         v === 'linear-arc' ||
         v === 'linear-arc-step-down' ||
         v === 'spiral' ||
-        v === 'attribution-matrix'
+        v === 'attribution-matrix' ||
+        v === 'text-matrix'
     ) {
         return v;
     }
     return 'text-flow';
 }
 
+function currentTextMatrixOrientation(): TextMatrixOrientation {
+    return dagTextMatrixOrientSelect?.value === 'vertical' ? 'vertical' : 'horizontal';
+}
+
 function isAttributionMatrixLayout(): boolean {
     return currentDagLayoutMode() === 'attribution-matrix';
+}
+
+/** matrix 控件（转置 / pin 等）：纯 matrix 与 text+matrix 并排均适用。 */
+function layoutShowsMatrixControls(): boolean {
+    const mode = currentDagLayoutMode();
+    return mode === 'attribution-matrix' || isTextMatrixLayout(mode);
 }
 
 function currentDagRecursiveEdgeAnimationDirection(): DagRecursiveEdgeAnimationDirection {
@@ -577,29 +596,33 @@ function currentDagRecursiveEdgeAnimationDirection(): DagRecursiveEdgeAnimationD
 
 function applyDagLayoutModeUi(): void {
     const mode = currentDagLayoutMode();
-    const matrix = mode === 'attribution-matrix';
+    const matrixOnly = mode === 'attribution-matrix';
+    const matrixControls = layoutShowsMatrixControls();
+    if (dagTextMatrixOrientGroup) {
+        dagTextMatrixOrientGroup.hidden = !isTextMatrixLayout(mode);
+    }
     if (dagMatrixTransposeGroup) {
-        dagMatrixTransposeGroup.hidden = !matrix;
+        dagMatrixTransposeGroup.hidden = !matrixControls;
     }
     if (dagMatrixPinSourceGroup) {
-        dagMatrixPinSourceGroup.hidden = !matrix;
+        dagMatrixPinSourceGroup.hidden = !matrixControls;
     }
     if (dagCompactnessGroup) {
-        /** text-flow / spiral 均使用 display-scale 驱动的节点宽高与边回缩；linear-arc / matrix 不适用。 */
+        /** text-flow / spiral / text-matrix 的 text 侧使用 display-scale；linear-arc / 纯 matrix 不适用。 */
         dagCompactnessGroup.hidden =
             mode === 'linear-arc' ||
             mode === 'linear-arc-step-down' ||
-            matrix;
+            matrixOnly;
     }
     if (dagMeasureWidthGroup) {
-        dagMeasureWidthGroup.hidden = mode !== 'text-flow';
+        dagMeasureWidthGroup.hidden = mode !== 'text-flow' && !isTextMatrixLayout(mode);
     }
     if (dagLinearArcIntervalGroup) {
         dagLinearArcIntervalGroup.hidden = mode !== 'linear-arc' && mode !== 'linear-arc-step-down';
     }
     if (dagNodeCiVisualScaleGroup) {
-        // attribution-matrix：轴 token 固定尺寸，不按 CI 放大。
-        dagNodeCiVisualScaleGroup.hidden = matrix;
+        // 纯 matrix：轴 token 固定尺寸；text-matrix 的 text 侧仍可按 CI 放大。
+        dagNodeCiVisualScaleGroup.hidden = matrixOnly;
     }
     syncPropagationPlaybackControlsVisibility();
 }
@@ -735,6 +758,8 @@ function genAttrEffectiveExcludeGeneratedPatternsText(): string {
 
 const initialDagLayoutMode = readStoredDagLayoutMode();
 if (dagLayoutModeSelect) dagLayoutModeSelect.value = initialDagLayoutMode;
+const initialDagTextMatrixOrientation = readStoredDagTextMatrixOrientation();
+if (dagTextMatrixOrientSelect) dagTextMatrixOrientSelect.value = initialDagTextMatrixOrientation;
 const initialDagLayoutTransitionEnabled = readStoredDagLayoutTransitionEnabled();
 const initialDagLayoutTransitionS = readStoredDagLayoutTransitionS();
 if (dagLayoutTransitionInput) dagLayoutTransitionInput.checked = initialDagLayoutTransitionEnabled;
@@ -911,10 +936,9 @@ function syncPropagationPlaybackControlsVisibility(): void {
         return;
     }
     const show = (dagRecursiveAttributionInput?.checked ?? false) && getDagUserFocusId() != null;
-    const matrix = isAttributionMatrixLayout();
     if (dagDisableSmartStepTimeWrap) dagDisableSmartStepTimeWrap.hidden = !show;
-    // attribution-matrix 不接 Lightning（无格上等价效果）。
-    if (dagLightningOptionsRow) dagLightningOptionsRow.hidden = matrix || !show;
+    // 纯 matrix / text+matrix：不接 Lightning
+    if (dagLightningOptionsRow) dagLightningOptionsRow.hidden = layoutShowsMatrixControls() || !show;
     syncLightningSuboptionsVisibility();
 }
 
@@ -1583,7 +1607,7 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
     // Pin 必须在任何 reset 之前捕获：播完再 ▶ 时 nextIndex 已到末尾，原先先 reset 会清空矩阵导致捕获失败。
     if (!resumeFromPause) {
         const pinSource =
-            isAttributionMatrixLayout() && (dagMatrixPinSourceInput?.checked ?? false);
+            layoutShowsMatrixControls() && (dagMatrixPinSourceInput?.checked ?? false);
         if (pinSource) {
             dagHandle.captureMatrixPinSteady();
         } else {
@@ -1638,7 +1662,7 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
     dagHandle.setDagPlaybackPlaying(true);
 
     const pinSourceNow =
-        isAttributionMatrixLayout() && (dagMatrixPinSourceInput?.checked ?? false);
+        layoutShowsMatrixControls() && (dagMatrixPinSourceInput?.checked ?? false);
     const autoZoomNow = dagReplayAutoZoomInput?.checked ?? false;
     // 裁到前缀后立刻钉一次，不等到 afterStepShown（否则 prompt 段 source 已漂走）。
     if (autoZoomNow) {
@@ -1716,7 +1740,7 @@ function handleDagPlaybackToggle(wantPlay: boolean): void {
         afterStepShown: () => {
             const autoZoom = dagReplayAutoZoomInput?.checked ?? false;
             const pinSource =
-                isAttributionMatrixLayout() && (dagMatrixPinSourceInput?.checked ?? false);
+                layoutShowsMatrixControls() && (dagMatrixPinSourceInput?.checked ?? false);
             if (autoZoom) {
                 dagHandle.fitViewportToContent();
             }
@@ -1776,6 +1800,7 @@ const dagHandle = initGenAttributeDagView(d3.select('#results'), {
         replayRunnerStepsIntoDag(h, currentRunPromptSpans.length > 0 ? currentRunPromptSpans : undefined);
     },
     layoutMode: initialDagLayoutMode,
+    textMatrixOrientation: initialDagTextMatrixOrientation,
     layoutTransitionEnabled: initialDagLayoutTransitionEnabled,
     layoutTransitionDurationMs: initialDagLayoutTransitionS * 1000,
     measureWidthPx: initialDagMeasureWidth,
@@ -1859,6 +1884,12 @@ dagLayoutTransitionInput?.addEventListener('change', () => {
 });
 dagLayoutTransitionSInput?.addEventListener('change', () => {
     applyDagLayoutTransitionFromControls();
+});
+
+dagTextMatrixOrientSelect?.addEventListener('change', () => {
+    const orientation = currentTextMatrixOrientation();
+    lsWriteString(GEN_ATTR_DAG_TEXT_MATRIX_ORIENTATION_STORAGE_KEY, orientation);
+    dagHandle.setTextMatrixOrientation(orientation);
 });
 
 dagMatrixTransposeInput?.addEventListener('change', () => {
@@ -2745,8 +2776,18 @@ let genAttrBundledDemoEntries: Array<{ id: string; label: string; featuredStyle?
 
 function syncGenAttrCachedDemosValueDisplay(): void {
     const slug = readDemoUrlParam();
-    const display = slug ? getBundledGenAttributeDemoLabel(slug) : '';
-    if (genAttrCachedDemosValueEl) genAttrCachedDemosValueEl.textContent = display;
+    const entry = slug
+        ? getBundledGenAttributeDemoList().find((e) => e.id === slug)
+        : undefined;
+    const display = slug ? (entry?.label ?? getBundledGenAttributeDemoLabel(slug)) : '';
+    if (genAttrCachedDemosValueEl) {
+        genAttrCachedDemosValueEl.textContent = display;
+        // 与下拉候选项同一套 ★ / 加粗（位宽始终预留，保证对齐）
+        genAttrCachedDemosValueEl.classList.toggle(
+            'history-text--bold',
+            entry?.featuredStyle === 'bold',
+        );
+    }
     if (genAttrCachedDemosValueBtn) genAttrCachedDemosValueBtn.title = display;
 }
 

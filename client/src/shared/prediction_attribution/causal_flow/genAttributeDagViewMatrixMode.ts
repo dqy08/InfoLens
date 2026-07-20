@@ -421,9 +421,11 @@ function bindMatrixPointerHit(params: {
     gridNode: SVGGElement;
     ctx: MatrixHitClassifyCtx;
     handlers: MatrixInteractionHandlers;
+    /** 若提供：仅在返回 true 时接受命中（text-matrix 右半屏等）。 */
+    acceptPointer?: (event: PointerEvent) => boolean;
 }): void {
     disposeMatrixPointerHit();
-    const { svg, gridNode, ctx, handlers } = params;
+    const { svg, gridNode, ctx, handlers, acceptPointer } = params;
     const svgSel = d3.select(svg);
     let prev: MatrixHitTarget | null = null;
 
@@ -448,17 +450,38 @@ function bindMatrixPointerHit(params: {
     };
 
     svgSel.on('pointermove.matrixHit', (event: PointerEvent) => {
+        if (acceptPointer && !acceptPointer(event)) {
+            setHit(null);
+            return;
+        }
         const [x, y] = d3.pointer(event, gridNode);
         setHit(classifyMatrixHit(x, y, ctx));
     });
     svgSel.on('pointerleave.matrixHit', () => setHit(null));
+    // layoutShowsMatrix 时本 handler 是 svg click 的唯一所有者（见 view `click.dagBg`）。
     svgSel.on('click.matrixHit', (event: PointerEvent) => {
+        // text-matrix 左半屏：无 matrix 命中，但仍由本 handler 负责空白 clear（节点 click 已 stopPropagation）。
+        if (acceptPointer != null && !acceptPointer(event)) {
+            event.stopImmediatePropagation();
+            setHit(null);
+            handlers.onBackgroundClick();
+            return;
+        }
+        event.stopImmediatePropagation();
         event.stopPropagation();
         const [x, y] = d3.pointer(event, gridNode);
         const hit = classifyMatrixHit(x, y, ctx);
-        setHit(null);
-        if (hit == null) handlers.onBackgroundClick();
-        else if (hit.type === 'row') handlers.onRowClick(hit.id);
+        if (hit == null) {
+            setHit(null);
+            handlers.onBackgroundClick();
+            return;
+        }
+        // 卸掉悬停，但保留 prev=hit：避免 click 后同位置 pointermove 立刻再 enter，
+        // 把「再次点击取消」盖成悬停高亮。
+        leave(prev);
+        prev = hit;
+        svg.style.cursor = 'pointer';
+        if (hit.type === 'row') handlers.onRowClick(hit.id);
         else if (hit.type === 'col') handlers.onColClick(hit.id);
         else handlers.onCellClick(hit.srcId, hit.tgtId);
     });
@@ -570,6 +593,8 @@ export function paintAttributionMatrixLayout(params: {
     switchHorizontalLabel?: boolean;
     /** 纵轴标签翻到远侧（右）。默认 false = 近侧（左）。 */
     switchVerticalLabel?: boolean;
+    /** 若提供：仅在返回 true 时接受命中（text-matrix 右半屏等）。 */
+    acceptPointer?: (event: PointerEvent) => boolean;
 }): MatrixFirstSourceAnchor | null {
     const {
         matrixG,
@@ -582,6 +607,7 @@ export function paintAttributionMatrixLayout(params: {
         transpose = false,
         switchHorizontalLabel = false,
         switchVerticalLabel = false,
+        acceptPointer,
     } = params;
     const nTgts = rowNodes.length;
     const nSrcs = colNodes.length;
@@ -869,6 +895,7 @@ export function paintAttributionMatrixLayout(params: {
             transpose,
         },
         handlers,
+        acceptPointer,
     });
 
     if (nSrcs === 0) return null;

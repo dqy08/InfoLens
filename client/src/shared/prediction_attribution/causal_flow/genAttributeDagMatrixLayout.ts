@@ -215,17 +215,127 @@ function computeMatrixIncomingChainVisuals<T extends MatrixLayoutNode>(
     return maps;
 }
 
+function mergeMatrixTokenVisual(
+    a: MatrixTokenVisual | undefined,
+    b: MatrixTokenVisual | undefined,
+): MatrixTokenVisual | undefined {
+    if (a == null) return b;
+    if (b == null) return a;
+    return {
+        fillOpacity: Math.max(a.fillOpacity, b.fillOpacity),
+        frame: a.frame === 'solid' || b.frame === 'solid' ? 'solid' : a.frame ?? b.frame,
+    };
+}
+
+function mergeMatrixVisualMaps(a: MatrixVisualMaps, b: MatrixVisualMaps): MatrixVisualMaps {
+    const cellVisualByKey = new Map(a.cellVisualByKey);
+    for (const [k, v] of b.cellVisualByKey) cellVisualByKey.set(k, v);
+    const rowTokenVisualById = new Map(a.rowTokenVisualById);
+    for (const [id, v] of b.rowTokenVisualById) {
+        rowTokenVisualById.set(id, mergeMatrixTokenVisual(rowTokenVisualById.get(id), v)!);
+    }
+    const colTokenVisualById = new Map(a.colTokenVisualById);
+    for (const [id, v] of b.colTokenVisualById) {
+        colTokenVisualById.set(id, mergeMatrixTokenVisual(colTokenVisualById.get(id), v)!);
+    }
+    return { cellVisualByKey, rowTokenVisualById, colTokenVisualById };
+}
+
+type MatrixVisualComputeOptions = {
+    recursiveAttributionEnabled: boolean;
+    decayAttributionToHighSurprisalTarget: boolean;
+    forwardSlideSharedNodes: boolean;
+};
+
+/** 行（目标）：蓝入边 / 上游归因。 */
+function computeMatrixRowUpstreamVisuals<T extends MatrixLayoutNode, L extends MatrixLayoutLink>(
+    graph: DirectedGraph<T>,
+    incomingLinksByTarget: Map<string, L[]>,
+    focusId: string,
+    rowNodes: readonly MatrixLayoutNode[],
+    colNodes: readonly MatrixLayoutNode[],
+    options: MatrixVisualComputeOptions,
+): MatrixVisualMaps {
+    if (!graph.hasNode(focusId)) return emptyMatrixVisualMaps();
+    const focusNode = graph.getNodeAttributes(focusId) as T;
+    const focusState = computeFocusAttributionState(graph, incomingLinksByTarget, focusId, {
+        maxIncomingDepth: options.recursiveAttributionEnabled ? Number.POSITIVE_INFINITY : 1,
+        includeDownstreamInfluence: false,
+        decayAttributionToHighSurprisalTarget: options.decayAttributionToHighSurprisalTarget,
+    });
+    if (focusState == null) return emptyMatrixVisualMaps();
+    const chainNodeIds = options.recursiveAttributionEnabled
+        ? new Set(
+              computeSteadyStateStayShareById(
+                  focusState.nodeShareById,
+                  graph,
+                  incomingLinksByTarget,
+                  focusId,
+                  options.decayAttributionToHighSurprisalTarget,
+              ).keys(),
+          )
+        : focusState.activeNodeIds;
+    return computeMatrixIncomingChainVisuals(
+        graph,
+        focusId,
+        buildMaxNormalizedRenderStrengthByKey(
+            focusState.incomingEdgeShareByKey,
+            nodeTargetMiRatio(focusNode),
+        ),
+        rowNodes,
+        colNodes,
+        {
+            chainNodeIds,
+            highlightStayNodesFill:
+                !options.recursiveAttributionEnabled || !options.forwardSlideSharedNodes,
+        },
+    );
+}
+
+/** 列（源）：红出边 / 下游影响。 */
+function computeMatrixColDownstreamVisuals<T extends MatrixLayoutNode, L extends MatrixLayoutLink>(
+    graph: DirectedGraph<T>,
+    incomingLinksByTarget: Map<string, L[]>,
+    focusId: string,
+    rowNodes: readonly MatrixLayoutNode[],
+    colNodes: readonly MatrixLayoutNode[],
+    options: MatrixVisualComputeOptions,
+): MatrixVisualMaps {
+    const maps = emptyMatrixVisualMaps();
+    if (!graph.hasNode(focusId)) return maps;
+    const focusState = computeFocusAttributionState(graph, incomingLinksByTarget, focusId, {
+        maxIncomingDepth: 0,
+        includeDownstreamInfluence: true,
+        maxOutgoingDepth: options.recursiveAttributionEnabled ? Number.POSITIVE_INFINITY : 1,
+        decayAttributionToHighSurprisalTarget: options.decayAttributionToHighSurprisalTarget,
+    });
+    if (focusState == null) return maps;
+    const downstreamRenderByKey = buildDownstreamArriveScaledRenderStrengthByKey(
+        focusState.downstreamEdgeStrengthByKey,
+        focusState.downstreamArriveById,
+    );
+    for (const [key, opacity] of downstreamRenderByKey) {
+        maps.cellVisualByKey.set(key, { kind: 'red', opacity });
+        const ends = attributionMatrixEdgeEndpoints(key);
+        if (ends) {
+            maps.rowTokenVisualById.set(ends.tgtId, { fillOpacity: MATRIX_TOKEN_OPACITY_FULL });
+        }
+    }
+    maps.colTokenVisualById.set(focusId, {
+        frame: 'solid',
+        fillOpacity: MATRIX_TOKEN_OPACITY_FULL,
+    });
+    weakenUnsetMatrixTokens(maps, rowNodes, colNodes);
+    return maps;
+}
+
 function computeMatrixVisuals<T extends MatrixLayoutNode, L extends MatrixLayoutLink>(
     graph: DirectedGraph<T>,
     incomingLinksByTarget: Map<string, L[]>,
     target: MatrixInteractionTarget | null,
     rowNodes: readonly MatrixLayoutNode[],
     colNodes: readonly MatrixLayoutNode[],
-    options: {
-        recursiveAttributionEnabled: boolean;
-        decayAttributionToHighSurprisalTarget: boolean;
-        forwardSlideSharedNodes: boolean;
-    },
+    options: MatrixVisualComputeOptions,
 ): MatrixVisualMaps {
     const maps = emptyMatrixVisualMaps();
     if (target == null) return maps;
@@ -261,71 +371,46 @@ function computeMatrixVisuals<T extends MatrixLayoutNode, L extends MatrixLayout
         return maps;
     }
 
-    const focusId = target.id;
-    if (!graph.hasNode(focusId)) return maps;
-    const focusNode = graph.getNodeAttributes(focusId) as T;
-
     if (target.type === 'row') {
-        const focusState = computeFocusAttributionState(graph, incomingLinksByTarget, focusId, {
-            maxIncomingDepth: options.recursiveAttributionEnabled
-                ? Number.POSITIVE_INFINITY
-                : 1,
-            includeDownstreamInfluence: false,
-            decayAttributionToHighSurprisalTarget: options.decayAttributionToHighSurprisalTarget,
-        });
-        if (focusState == null) return maps;
-        const chainNodeIds = options.recursiveAttributionEnabled
-            ? new Set(
-                  computeSteadyStateStayShareById(
-                      focusState.nodeShareById,
-                      graph,
-                      incomingLinksByTarget,
-                      focusId,
-                      options.decayAttributionToHighSurprisalTarget,
-                  ).keys(),
-              )
-            : focusState.activeNodeIds;
-        return computeMatrixIncomingChainVisuals(
+        return computeMatrixRowUpstreamVisuals(
             graph,
-            focusId,
-            buildMaxNormalizedRenderStrengthByKey(
-                focusState.incomingEdgeShareByKey,
-                nodeTargetMiRatio(focusNode),
-            ),
+            incomingLinksByTarget,
+            target.id,
             rowNodes,
             colNodes,
-            {
-                chainNodeIds,
-                highlightStayNodesFill:
-                    !options.recursiveAttributionEnabled || !options.forwardSlideSharedNodes,
-            },
+            options,
         );
     }
 
-    const focusState = computeFocusAttributionState(graph, incomingLinksByTarget, focusId, {
-        maxIncomingDepth: 0,
-        includeDownstreamInfluence: true,
-        maxOutgoingDepth: options.recursiveAttributionEnabled ? Number.POSITIVE_INFINITY : 1,
-        decayAttributionToHighSurprisalTarget: options.decayAttributionToHighSurprisalTarget,
-    });
-    if (focusState == null) return maps;
-    const downstreamRenderByKey = buildDownstreamArriveScaledRenderStrengthByKey(
-        focusState.downstreamEdgeStrengthByKey,
-        focusState.downstreamArriveById,
-    );
-    for (const [key, opacity] of downstreamRenderByKey) {
-        maps.cellVisualByKey.set(key, { kind: 'red', opacity });
-        const ends = attributionMatrixEdgeEndpoints(key);
-        if (ends) {
-            maps.rowTokenVisualById.set(ends.tgtId, { fillOpacity: MATRIX_TOKEN_OPACITY_FULL });
-        }
+    if (target.type === 'col') {
+        return computeMatrixColDownstreamVisuals(
+            graph,
+            incomingLinksByTarget,
+            target.id,
+            rowNodes,
+            colNodes,
+            options,
+        );
     }
-    maps.colTokenVisualById.set(focusId, {
-        frame: 'solid',
-        fillOpacity: MATRIX_TOKEN_OPACITY_FULL,
-    });
-    weakenUnsetMatrixTokens(maps, rowNodes, colNodes);
-    return maps;
+
+    // rowAndCol：蓝行上游 ∪ 红列下游
+    const rowMaps = computeMatrixRowUpstreamVisuals(
+        graph,
+        incomingLinksByTarget,
+        target.id,
+        rowNodes,
+        colNodes,
+        options,
+    );
+    const colMaps = computeMatrixColDownstreamVisuals(
+        graph,
+        incomingLinksByTarget,
+        target.id,
+        rowNodes,
+        colNodes,
+        options,
+    );
+    return mergeMatrixVisualMaps(rowMaps, colMaps);
 }
 
 function applyMatrixHoverFrame(
@@ -346,7 +431,10 @@ function applyMatrixHoverFrame(
         };
         if (hover.type === 'row') bump(maps.rowTokenVisualById, hover.id);
         else if (hover.type === 'col') bump(maps.colTokenVisualById, hover.id);
-        else {
+        else if (hover.type === 'rowAndCol') {
+            bump(maps.rowTokenVisualById, hover.id);
+            bump(maps.colTokenVisualById, hover.id);
+        } else {
             bump(maps.colTokenVisualById, hover.srcId);
             bump(maps.rowTokenVisualById, hover.tgtId);
         }
@@ -567,6 +655,8 @@ export type CreateMatrixInteractionHandlersDeps = {
         DagFocusSession,
         | 'setMatrixHover'
         | 'clearMatrixHoverIf'
+        | 'setHovered'
+        | 'getHoveredId'
         | 'toggleMatrixRowFocus'
         | 'toggleMatrixColLock'
         | 'toggleMatrixCellLock'
@@ -592,11 +682,14 @@ export function createMatrixInteractionHandlers(
     return {
         onRowEnter: (id) => {
             if (isInteractionLocked()) return;
+            // 行=上游/归因：同步左侧 hovered（上游预览）
             focus.setMatrixHover({ type: 'row', id });
+            focus.setHovered(id);
             refreshHighlight();
         },
         onRowLeave: (id) => {
             focus.clearMatrixHoverIf({ type: 'row', id });
+            if (focus.getHoveredId() === id) focus.setHovered(null);
             refreshHighlight();
         },
         onRowClick: (id) => {
@@ -607,6 +700,7 @@ export function createMatrixInteractionHandlers(
         },
         onColEnter: (id) => {
             if (isInteractionLocked()) return;
+            // 列=下游：不写 hovered（避免左侧走「节点焦点/上游」）；由 reconciler 投影下游态
             focus.setMatrixHover({ type: 'col', id });
             refreshHighlight();
         },
@@ -622,6 +716,7 @@ export function createMatrixInteractionHandlers(
         },
         onCellEnter: (srcId, tgtId) => {
             if (isInteractionLocked()) return;
+            // 格悬停不写 hoveredId：text 侧只亮对应蓝边（见 highlight reconciler cell-edge-only）
             focus.setMatrixHover({ type: 'cell', srcId, tgtId });
             refreshHighlight();
         },

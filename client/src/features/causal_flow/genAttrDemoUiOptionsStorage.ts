@@ -20,6 +20,7 @@ import {
 import {
     type DagLayoutMode,
     type DagRecursiveEdgeAnimationDirection,
+    type TextMatrixOrientation,
     clampDagCompactness,
     DAG_COMPACTNESS_DEFAULT,
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagView';
@@ -53,6 +54,8 @@ export const GEN_ATTR_DAG_MEASURE_WIDTH_STORAGE_KEY = 'info_radar_gen_attr_dag_m
 export const GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_mode';
 export const GEN_ATTR_DAG_LAYOUT_TRANSITION_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_transition';
 export const GEN_ATTR_DAG_LAYOUT_TRANSITION_S_STORAGE_KEY = 'info_radar_gen_attr_dag_layout_transition_s';
+export const GEN_ATTR_DAG_TEXT_MATRIX_ORIENTATION_STORAGE_KEY =
+    'info_radar_gen_attr_dag_text_matrix_orientation';
 export const GEN_ATTR_DAG_MATRIX_TRANSPOSE_STORAGE_KEY = 'info_radar_gen_attr_dag_matrix_transpose';
 export const GEN_ATTR_DAG_MATRIX_SWITCH_HORIZONTAL_LABEL_STORAGE_KEY =
     'info_radar_gen_attr_dag_matrix_switch_horizontal_label';
@@ -303,10 +306,30 @@ export function readStoredDagLightningSound(): boolean {
     );
 }
 export function readStoredDagLayoutMode(): DagLayoutMode {
+    // 旧版曾把上下并排写成独立 layout；迁到 text-matrix + orientation。
+    if (lsGet(GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY) === 'text-matrix-vertical') {
+        lsWriteString(GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY, 'text-matrix');
+        lsWriteString(GEN_ATTR_DAG_TEXT_MATRIX_ORIENTATION_STORAGE_KEY, 'vertical');
+        return 'text-matrix';
+    }
     return lsReadEnum(
         GEN_ATTR_DAG_LAYOUT_MODE_STORAGE_KEY,
-        ['text-flow', 'linear-arc', 'linear-arc-step-down', 'spiral', 'attribution-matrix'] as const,
+        [
+            'text-flow',
+            'linear-arc',
+            'linear-arc-step-down',
+            'spiral',
+            'attribution-matrix',
+            'text-matrix',
+        ] as const,
         DEFAULT_GEN_ATTR_DEMO_UI_OPTIONS.layoutMode,
+    );
+}
+export function readStoredDagTextMatrixOrientation(): TextMatrixOrientation {
+    return lsReadEnum(
+        GEN_ATTR_DAG_TEXT_MATRIX_ORIENTATION_STORAGE_KEY,
+        ['horizontal', 'vertical'] as const,
+        'horizontal',
     );
 }
 export function clampDagLayoutTransitionS(n: number): number {

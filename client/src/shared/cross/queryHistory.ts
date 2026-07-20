@@ -207,6 +207,11 @@ export function initQueryHistoryDropdown(options: InitQueryHistoryDropdownOption
         }
         dropdown.classList.add('is-visible');
         if (filteredEntries) {
+            // 有 featured 时预留左侧标记位，保证加粗项的 ★ 与其它项对齐
+            dropdown.classList.toggle(
+                'has-featured-marks',
+                entryRows!.some((r) => r.featuredStyle != null),
+            );
             for (const row of filteredEntries) {
                 const q = row.id;
                 const display = row.label;

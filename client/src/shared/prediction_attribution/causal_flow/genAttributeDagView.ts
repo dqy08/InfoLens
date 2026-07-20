@@ -169,15 +169,30 @@ function markDagPlayCoachmarkSeen(kind: DagPlayCoachmarkKind): void {
 /** 再次挂载前执行上一轮 detach（当前为空操作，保留扩展点） */
 const detachGenAttributeDagPanel = new WeakMap<HTMLElement, () => void>();
 
-/** 节点布局模式：`text-flow` 按文字排版层几何；`linear-arc` / `linear-arc-step-down` 为线性序 + 弧线连边（后者按 CI 逐级下移）；`spiral` 螺旋排布；`attribution-matrix` 归因强度热力图（attention-matrix 式）。 */
+/** 节点布局模式：`text-flow` 按文字排版层几何；`linear-arc` / `linear-arc-step-down` 为线性序 + 弧线连边（后者按 CI 逐级下移）；`spiral` 螺旋排布；`attribution-matrix` 归因强度热力图（attention-matrix 式）；`text-matrix` 为 text 与 matrix 并排（状态联动；方向见 {@link TextMatrixOrientation}）。 */
 export type DagLayoutMode =
     | 'text-flow'
     | 'linear-arc'
     | 'linear-arc-step-down'
     | 'spiral'
-    | 'attribution-matrix';
+    | 'attribution-matrix'
+    | 'text-matrix';
+/** text-matrix：并排方向（左右 / 上下）。 */
+export type TextMatrixOrientation = 'horizontal' | 'vertical';
 function isLinearArcFamilyLayout(mode: DagLayoutMode): mode is 'linear-arc' | 'linear-arc-step-down' {
     return mode === 'linear-arc' || mode === 'linear-arc-step-down';
+}
+export function isTextMatrixLayout(mode: DagLayoutMode): boolean {
+    return mode === 'text-matrix';
+}
+function layoutShowsGraph(mode: DagLayoutMode): boolean {
+    return mode !== 'attribution-matrix';
+}
+function layoutShowsMatrix(mode: DagLayoutMode): boolean {
+    return mode === 'attribution-matrix' || isTextMatrixLayout(mode);
+}
+function layoutAllowsNodeDrag(mode: DagLayoutMode): boolean {
+    return mode === 'text-flow' || isTextMatrixLayout(mode);
 }
 
 export const DAG_COMPACTNESS_DEFAULT = 0.5;
@@ -325,6 +340,7 @@ const DAG_INITIAL_ZOOM_BOOST_ATTRIBUTION_MATRIX = 2;
 function dagInitialZoomBoost(mode: DagLayoutMode): number {
     switch (mode) {
         case 'text-flow':
+        case 'text-matrix':
             return DAG_INITIAL_ZOOM_BOOST_TEXT_FLOW;
         case 'linear-arc':
         case 'linear-arc-step-down':
@@ -564,6 +580,8 @@ export type GenAttributeDagHandle = {
     setShowTokenInfoOnSelected(show: boolean): void;
     /** 是否启用传播归因（UI: Propagated attribution mode；`recursiveAttributionEnabled`）。 */
     setRecursiveAttributionEnabled(enabled: boolean): void;
+    /** text-matrix：并排方向（左右 / 上下）。 */
+    setTextMatrixOrientation(orientation: TextMatrixOrientation): void;
     /** attribution-matrix：行列屏幕轴对调（对称布局）。 */
     setMatrixTranspose(transpose: boolean): void;
     /** attribution-matrix：横轴标签翻到远侧（默认近侧：上）。 */
@@ -719,6 +737,8 @@ export type InitGenAttributeDagViewOptions = {
     measureWidthPx?: number;
     /** DAG 节点布局模式；默认 `text-flow`。 */
     layoutMode?: DagLayoutMode;
+    /** text-matrix 并排方向；默认 `horizontal`。 */
+    textMatrixOrientation?: TextMatrixOrientation;
     /** 切换 layout 时是否播放转场；默认 `true`。 */
     layoutTransitionEnabled?: boolean;
     /** layout 转场时长（ms）；默认 {@link DAG_LAYOUT_TRANSITION_MS}。 */
@@ -803,6 +823,8 @@ export function initGenAttributeDagView(
     /** 布局转场进行中：忽略再次切 mode / 拖节点 / 框选 / zoom */
     let layoutTransitionLocked = false;
     let cancelLayoutTransition: (() => void) | null = null;
+    /** text-matrix：并排方向。 */
+    let textMatrixOrientation: TextMatrixOrientation = options?.textMatrixOrientation ?? 'horizontal';
     /** attribution-matrix：true 时横=目标、纵=源；Self 为右列。 */
     let matrixTranspose = false;
     /** attribution-matrix：横轴标签在远侧（下）。 */
@@ -872,6 +894,7 @@ export function initGenAttributeDagView(
             setDimInactiveNotDuringAnimation: noop,
             setShowTokenInfoOnSelected: noop,
             setRecursiveAttributionEnabled: noop,
+            setTextMatrixOrientation: noop,
             setMatrixTranspose: noop,
             setMatrixSwitchHorizontalLabel: noop,
             setMatrixSwitchVerticalLabel: noop,
@@ -931,20 +954,24 @@ export function initGenAttributeDagView(
         dagTopkToolTip.hideAndReset();
     };
 
-    /** 非 text-flow 时节点不可拖；用该类覆盖选中态的 grab 光标（linear-arc / spiral 等）。 */
+    /** 非可拖布局时节点不可拖；用该类覆盖选中态的 grab 光标（linear-arc / spiral / 纯 matrix 等）。 */
     function syncStackLayoutDragUi(): void {
-        stackEl.classList.toggle('gen-attr-dag-no-node-drag-layout', layoutMode !== 'text-flow');
+        stackEl.classList.toggle('gen-attr-dag-no-node-drag-layout', !layoutAllowsNodeDrag(layoutMode));
     }
 
     /**
      * matrix 稳态双色外围（`gen-attr-dag-matrix-layout`）。
      * 转场约定：只动画节点与边/格；背景等其余元素稳态再显现。
+     * @param active 省略时按当前 `layoutMode === 'attribution-matrix'`。
      */
-    function syncMatrixLayoutBgClass(active: boolean): void {
-        stackEl.classList.toggle('gen-attr-dag-matrix-layout', active);
+    function syncMatrixLayoutBgClass(active?: boolean): void {
+        stackEl.classList.toggle(
+            'gen-attr-dag-matrix-layout',
+            active ?? layoutMode === 'attribution-matrix',
+        );
     }
     syncStackLayoutDragUi();
-    syncMatrixLayoutBgClass(layoutMode === 'attribution-matrix');
+    syncMatrixLayoutBgClass();
 
     if (options?.dagCompactness !== undefined && options?.displayScale !== undefined) {
         throw new Error('genAttributeDagView: pass only one of dagCompactness or displayScale');
@@ -1002,6 +1029,8 @@ export function initGenAttributeDagView(
     }
 
     const svg = stack.append('svg').attr('class', 'gen-attr-dag-svg');
+    /** text-matrix：视口正中灰线（DOM，不属于可缩放画布；显隐靠 stack class） */
+    stack.append('div').attr('class', 'gen-attr-dag-text-matrix-divider');
 
     const lightningFlashOverlay = stack
         .append('div')
@@ -1009,10 +1038,26 @@ export function initGenAttributeDagView(
         .style('display', 'none')
         .style('opacity', '0');
 
-    /** 边箭头 marker 放在 svg 根 defs，与 {@link rootG} 平级、不受 zoom 变换，与原先单例 marker 一致，避免嵌套在 zoom 内时箭头相对线段偏细 */
+    /** 边箭头 marker 放在 svg 根 defs，与 zoom 根平级、不受 zoom 变换，与原先单例 marker 一致，避免嵌套在 zoom 内时箭头相对线段偏细 */
     const linkMarkersDefs = svg.append('defs').attr('class', 'gen-attr-dag-link-markers-defs');
+    /** text-matrix：左右半屏 clip（svg 用户坐标，挂在 zoom 之外，视口固定） */
+    const clipUid = `tm${Math.random().toString(36).slice(2, 9)}`;
+    const clipLeftId = `gen-attr-dag-clip-left-${clipUid}`;
+    const clipRightId = `gen-attr-dag-clip-right-${clipUid}`;
+    const paneClipDefs = svg.append('defs').attr('class', 'gen-attr-dag-pane-clip-defs');
+    const leftClipRect = paneClipDefs.append('clipPath').attr('id', clipLeftId).append('rect');
+    const rightClipRect = paneClipDefs.append('clipPath').attr('id', clipRightId).append('rect');
 
-    const rootG = svg.append('g').attr('class', 'gen-attr-dag-zoom-root');
+    /** text-matrix：clip 壳（无 transform）；其内才是各侧独立 zoom 根 */
+    const textPaneG = svg.append('g').attr('class', 'gen-attr-dag-text-pane');
+    const matrixPaneG = svg.append('g').attr('class', 'gen-attr-dag-matrix-pane');
+    const rootG = textPaneG.append('g').attr('class', 'gen-attr-dag-zoom-root');
+    const matrixZoomG = matrixPaneG.append('g').attr('class', 'gen-attr-dag-matrix-zoom-root');
+    /**
+     * zoom 回调在 `applyInitialDagZoom` 时就会同步触发，此时后续 DOM 尚未声明；
+     * 先占位，就绪后再赋真实实现（同 {@link syncGenAttrDagTopkTooltipImpl}）。
+     */
+    let syncTextMatrixPaneClips: () => void = () => {};
 
     /**
      * 基准缩放为 `1 / --gen-attr-dag-display-scale`：节点几何与 SVG 文字已按 display-scale 相对测量层缩放后，
@@ -1026,6 +1071,13 @@ export function initGenAttributeDagView(
         return initialDagZoomK() * dagInitialZoomBoost(layoutMode);
     }
 
+    /** text-matrix：左右独立 zoom 状态（d3-zoom 在 svg 上只存一份，手势前按半屏重播种） */
+    let tmTextZoom: d3.ZoomTransform = d3.zoomIdentity;
+    let tmMatrixZoom: d3.ZoomTransform = d3.zoomIdentity;
+    let tmGesturePane: 'text' | 'matrix' | null = null;
+    /** 程序化 `zoom.transform` 时指定写入哪一侧（text-matrix） */
+    let tmProgrammaticPane: 'text' | 'matrix' | null = null;
+
     const zoomBehavior = d3
         .zoom<SVGSVGElement, unknown>()
         // 与 d3-zoom 默认一致（放行 pinch 的 wheel+ctrlKey），另在转场中锁交互
@@ -1035,8 +1087,32 @@ export function initGenAttributeDagView(
                 (!event.ctrlKey || event.type === 'wheel') &&
                 !event.button,
         )
+        .on('start', (event) => {
+            if (!isTextMatrixLayout(layoutMode) || event.sourceEvent == null) return;
+            tmGesturePane = pointerInTextMatrixTextPane(event.sourceEvent) ? 'text' : 'matrix';
+            // 将 d3 内部状态对齐到当前半屏，后续 delta 只作用这一侧
+            svg.property('__zoom', tmGesturePane === 'text' ? tmTextZoom : tmMatrixZoom);
+        })
         .on('zoom', (event) => {
+            if (isTextMatrixLayout(layoutMode)) {
+                const pane = tmGesturePane ?? tmProgrammaticPane;
+                if (pane === 'matrix') {
+                    tmMatrixZoom = event.transform;
+                    matrixZoomG.attr('transform', tmMatrixZoom.toString());
+                } else if (pane === 'text') {
+                    tmTextZoom = event.transform;
+                    rootG.attr('transform', tmTextZoom.toString());
+                }
+                if (event.sourceEvent) {
+                    layoutDirty = true;
+                    if (pane === 'matrix' && matrixPinSteady != null) matrixPinFollowActive = false;
+                }
+                syncGenAttrDagTopkTooltipImpl();
+                return;
+            }
+            // 单布局：两侧 zoom 根镜像同一 transform（matrix 在 matrixZoomG；转场 fly 在 rootG）
             rootG.attr('transform', event.transform);
+            matrixZoomG.attr('transform', event.transform);
             // 仅用户交互（滚轮/拖平移）计入「改动布局」；程序触发的 transform
             // （init 初始缩放、`fitViewportToContent`、pin 跟随）`sourceEvent === null`，不置 dirty。
             if (event.sourceEvent) {
@@ -1045,6 +1121,9 @@ export function initGenAttributeDagView(
                 if (matrixPinSteady != null) matrixPinFollowActive = false;
             }
             syncGenAttrDagTopkTooltipImpl();
+        })
+        .on('end', () => {
+            tmGesturePane = null;
         });
 
     function applyInitialDagZoom(): void {
@@ -1056,11 +1135,10 @@ export function initGenAttributeDagView(
     svg.on('dblclick.zoom', null);
     applyInitialDagZoom();
 
-    // matrix 命中也挂在 svg 上；同元素上 stopPropagation 挡不住本监听器，
-    // 若此处仍 clear，会先清空再被 matrixHit 重新选中，导致无法 toggle 取消。
-    // matrix 空白点击由 onBackgroundClick → clearNodeSelection。
-    svg.on('click', () => {
-        if (layoutMode === 'attribution-matrix') return;
+    // 空白 clear：仅当无 matrixHit 所有者时生效（text-flow 等）。
+    // layoutShowsMatrix 时由 click.matrixHit 独占整次 svg click（含 text-matrix 左半屏空白）。
+    svg.on('click.dagBg', () => {
+        if (layoutShowsMatrix(layoutMode)) return;
         clearNodeSelection();
     });
     // DAG 无上下文菜单；右键留给框选，并避免 Ctrl+单击（macOS）弹出菜单打断多选。
@@ -1074,13 +1152,13 @@ export function initGenAttributeDagView(
     const linkGFront = rootG.append('g').attr('class', 'gen-attr-dag-links-front');
     /** 与视觉节点同几何的透明命中层，置于 linkGFront 之上，避免蓝线挡住 hover/click */
     const nodeGHit = rootG.append('g').attr('class', 'gen-attr-dag-nodes-hit');
-    /** attribution-matrix 热力图层（与节点/边互斥显示；`pointer-events` 由 {@link syncLayoutLayerVisibility} 随模式开关） */
-    const matrixG = rootG
+    /** attribution-matrix / text-matrix 热力图层（`pointer-events` 由 {@link syncLayoutLayerVisibility} 随模式开关） */
+    const matrixG = matrixZoomG
         .append('g')
         .attr('class', 'gen-attr-dag-matrix')
         .style('display', 'none')
         .style('pointer-events', 'none');
-    /** 右键框选橡胶筋（图坐标系，随 zoom） */
+    /** 右键框选橡胶筋（图坐标系，随 text 侧 zoom） */
     const marqueeG = rootG.append('g').attr('class', 'gen-attr-dag-marquee').style('pointer-events', 'none');
 
     const graph = new DirectedGraph<DagNodeAttrs>();
@@ -1122,10 +1200,10 @@ export function initGenAttributeDagView(
             lightningSlowMo: DAG_LIGHTNING_SLOW_MO_DEFAULT,
             lightningSound: false,
         }));
-    /** matrix 不接 Lightning（图隐藏且无格上等价效果）；强制关掉以免仍播雷声。 */
+    /** 含 matrix 的布局不接 Lightning（纯 matrix 无图侧效果；text+matrix 也不提供该选项）；强制关掉以免仍播雷声。 */
     const getPropagationPlaybackOptions = (): DagPropagationPlaybackOptions => {
         const opts = getPropagationPlaybackOptionsRaw();
-        if (layoutMode !== 'attribution-matrix') return opts;
+        if (!layoutShowsMatrix(layoutMode)) return opts;
         if (!opts.lightningEffect && !opts.lightningSound) return opts;
         return { ...opts, lightningEffect: false, lightningSound: false };
     };
@@ -1268,13 +1346,17 @@ export function initGenAttributeDagView(
         return target.id;
     }
 
+    function matrixTooltipPreferCol(target: MatrixInteractionTarget | null): boolean {
+        return target?.type === 'col' || target?.type === 'rowAndCol';
+    }
+
     /** tooltip 锚点：传播播放 > matrix hover/lock > {@link solidFrameFocusId}。 */
     function tooltipFocusId(): string | null {
         const playbackTip = highlight?.getPropagationPlaybackTooltip() ?? null;
         if (playbackTip != null && graph.hasNode(playbackTip.nodeId)) {
             return playbackTip.nodeId;
         }
-        if (layoutMode === 'attribution-matrix') {
+        if (layoutShowsMatrix(layoutMode)) {
             const matrixId = matrixTooltipTokenId(
                 focus.getMatrixHoverTarget() ?? focus.getMatrixLockedTarget(),
             );
@@ -1285,7 +1367,7 @@ export function initGenAttributeDagView(
 
     /** matrix 可见 chip 的 fill rect（HUD 定位不依赖几何，但 update 路径要求非空锚点）。 */
     function matrixTooltipAnchorRect(nodeId: string, target: MatrixInteractionTarget | null): SVGRectElement | null {
-        const preferCol = target?.type === 'col';
+        const preferCol = matrixTooltipPreferCol(target);
         const tokens = matrixG.selectAll<SVGGElement, unknown>('g.gen-attr-dag-matrix-token');
         const fillOf = (sel: d3.Selection<SVGGElement, unknown, SVGGElement, unknown>) =>
             sel.select<SVGRectElement>('rect.gen-attr-dag-node-fill').node();
@@ -1407,18 +1489,20 @@ export function initGenAttributeDagView(
         );
     }
 
-    /** 矩阵布局时隐藏节点/边层；其它布局隐藏矩阵层。 */
+    /** 按模式显隐 graph / matrix 层；离开 matrix 时拆除矩阵 DOM。 */
     function syncLayoutLayerVisibility(): void {
-        const matrix = layoutMode === 'attribution-matrix';
-        const graphDisplay = matrix ? 'none' : null;
+        const showGraph = layoutShowsGraph(layoutMode);
+        const showMatrix = layoutShowsMatrix(layoutMode);
+        const graphDisplay = showGraph ? null : 'none';
         linkG.style('display', graphDisplay);
         nodeG.style('display', graphDisplay);
         linkGFront.style('display', graphDisplay);
         nodeGHit.style('display', graphDisplay);
-        matrixG.style('display', matrix ? null : 'none').style('pointer-events', matrix ? 'auto' : 'none');
-        if (!matrix) {
+        matrixG.style('display', showMatrix ? null : 'none').style('pointer-events', showMatrix ? 'auto' : 'none');
+        if (!showMatrix) {
             disposeMatrixPointerHit();
             matrixG.selectAll('*').remove();
+            clearTextMatrixPaneLayout();
             matrixFirstSourceAnchor = null;
         }
     }
@@ -1510,22 +1594,34 @@ export function initGenAttributeDagView(
         );
     }
 
+    /**
+     * 点击确立/取消焦点后抑制悬停，直到指针离开节点再进入（与 matrixHit 同产品逻辑）。
+     * mouseenter 在仍停留于节点时不会重触发，但仍挡住偶发重入。
+     */
+    let suppressTextHoverUntilLeave = false;
+
     function bindNodePointerHandlers(
         sel: d3.Selection<SVGGElement, DagNode, SVGGElement | null, unknown>,
     ): void {
         sel.on('mouseenter', (event, d) => {
+            if (isTextMatrixLayout(layoutMode) && !pointerInTextMatrixTextPane(event)) return;
+            if (suppressTextHoverUntilLeave) return;
             // 若在节点上按下/松开修饰键可能丢 key 事件，用 pointer 状态对齐
             syncMultiSelectModifierDown(isMultiSelectModifierKey(event));
+            // text 悬停只写 hoveredId；matrix 轴投影由 matrixStaticHighlightTarget 推导
             focus.setHovered(d.id);
             refreshNodeLinkHighlight();
         })
             .on('mouseleave', () => {
+                suppressTextHoverUntilLeave = false;
                 focus.setHovered(null);
                 refreshNodeLinkHighlight();
             })
             .on('click', (event, d) => {
                 event.stopPropagation();
+                if (isTextMatrixLayout(layoutMode) && !pointerInTextMatrixTextPane(event)) return;
                 if (layoutInteractionLocked()) return;
+                suppressTextHoverUntilLeave = true;
                 if (isMultiSelectModifierKey(event)) {
                     applyFocusPlaybackStop(focus.toggleLayoutSelected(d.id));
                     refreshNodeLinkHighlight();
@@ -1533,6 +1629,7 @@ export function initGenAttributeDagView(
                     return;
                 }
                 applyFocusPlaybackStop(focus.toggleNodeFocus(d.id));
+                focus.syncMatrixRowLockWithUserFocus(isMatrixRowId);
                 refreshNodeLinkHighlight();
                 syncDagPlayButtonImpl();
             });
@@ -1541,6 +1638,67 @@ export function initGenAttributeDagView(
     function syncSvgSize(): void {
         const { w, h } = stackLayoutViewportPx(stackEl);
         svg.attr('width', w).attr('height', h);
+        syncTextMatrixPaneClips();
+    }
+
+    function textMatrixIsVertical(): boolean {
+        return textMatrixOrientation === 'vertical';
+    }
+
+    function pointerInTextMatrixTextPane(event: PointerEvent | MouseEvent): boolean {
+        const [x, y] = d3.pointer(event, svg.node()!);
+        const { w, h } = stackLayoutViewportPx(stackEl);
+        return textMatrixIsVertical() ? y < h / 2 : x < w / 2;
+    }
+
+    function pointerInTextMatrixMatrixPane(event: PointerEvent): boolean {
+        const [x, y] = d3.pointer(event, svg.node()!);
+        const { w, h } = stackLayoutViewportPx(stackEl);
+        return textMatrixIsVertical() ? y >= h / 2 : x >= w / 2;
+    }
+
+    /** 清除 text-matrix 半屏 clip / 分割线 class（离开该模式时）。 */
+    function clearTextMatrixPaneLayout(): void {
+        textPaneG.attr('clip-path', null);
+        matrixPaneG.attr('clip-path', null);
+        stackEl.classList.remove('gen-attr-dag-text-matrix-layout', 'gen-attr-dag-text-matrix-layout--vertical');
+    }
+
+    /** text-matrix：半屏 clip 矩形（svg 用户坐标，不随 zoom）。 */
+    syncTextMatrixPaneClips = (): void => {
+        if (!isTextMatrixLayout(layoutMode)) {
+            textPaneG.attr('clip-path', null);
+            matrixPaneG.attr('clip-path', null);
+            return;
+        }
+        const { w, h } = stackLayoutViewportPx(stackEl);
+        const vertical = textMatrixIsVertical();
+        if (vertical) {
+            const mid = h / 2;
+            leftClipRect.attr('x', 0).attr('y', 0).attr('width', w).attr('height', mid);
+            rightClipRect
+                .attr('x', 0)
+                .attr('y', mid)
+                .attr('width', w)
+                .attr('height', Math.max(h - mid, 0));
+        } else {
+            const mid = w / 2;
+            leftClipRect.attr('x', 0).attr('y', 0).attr('width', mid).attr('height', h);
+            rightClipRect
+                .attr('x', mid)
+                .attr('y', 0)
+                .attr('width', Math.max(w - mid, 0))
+                .attr('height', h);
+        }
+        textPaneG.attr('clip-path', `url(#${clipLeftId})`);
+        matrixPaneG.attr('clip-path', `url(#${clipRightId})`);
+        stackEl.classList.add('gen-attr-dag-text-matrix-layout');
+        stackEl.classList.toggle('gen-attr-dag-text-matrix-layout--vertical', vertical);
+    };
+
+    /** 当前 matrix 视口 zoom（text-matrix 用独立状态；其余用 svg 上的 d3-zoom）。 */
+    function matrixViewZoomTransform(): d3.ZoomTransform {
+        return isTextMatrixLayout(layoutMode) ? tmMatrixZoom : d3.zoomTransform(svg.node()!);
     }
 
     /**
@@ -1593,10 +1751,14 @@ export function initGenAttributeDagView(
     });
 
     /**
-     * matrix 静态归因目标：▶ selected 行 → userFocus 行 → lock → selected 行；无锁时悬停可预览。
+     * matrix 静态归因目标：右侧自有 lock/hover 原生优先；否则左侧投影。
      */
     function matrixStaticHighlightTarget(): MatrixInteractionTarget | null {
-        return focus.matrixStaticHighlightTarget(dagPlaybackPlaying, isMatrixRowId);
+        return focus.matrixStaticHighlightTarget(
+            dagPlaybackPlaying,
+            isMatrixRowId,
+            showDownstreamInfluence,
+        );
     }
 
     /** ↯ 进行中：userFocus 行焦点 + playing/paused。 */
@@ -1620,48 +1782,103 @@ export function initGenAttributeDagView(
         return flipArrows ? { src: tgt, tgt: src } : { src, tgt };
     }
 
+    function paintMatrixLayer(): void {
+        // 左侧焦点不写入 matrix lock；仅清掉「无行焦点时」的残留行 lock。
+        syncMatrixRowLockWithUserFocus();
+        const toMatrixNode = (n: DagNode) => ({
+            id: n.id,
+            displayLabel: n.displayLabel,
+            isPrompt: n.step === -1,
+        });
+        matrixFirstSourceAnchor = paintAttributionMatrixLayout({
+            matrixG,
+            svg: svg.node()!,
+            rowNodes: matrixRowNodes().map(toMatrixNode),
+            colNodes: matrixColNodes().map(toMatrixNode),
+            links: links.map((d) => ({
+                source: endpointNode(d.source, graph).id,
+                target: endpointNode(d.target, graph).id,
+                ...(d.synthetic === true ? { synthetic: true as const } : {}),
+            })),
+            handlers: matrixInteractionHandlers,
+            showSelfRow: recursiveAttributionEnabled,
+            transpose: matrixTranspose,
+            switchHorizontalLabel: matrixSwitchHorizontalLabel,
+            switchVerticalLabel: matrixSwitchVerticalLabel,
+            acceptPointer: isTextMatrixLayout(layoutMode)
+                ? pointerInTextMatrixMatrixPane
+                : undefined,
+        });
+        // 颜色由调用方随后的 refreshNodeLinkHighlight → refreshMatrixHighlight 写入。
+    }
+
+    /**
+     * text-matrix：半屏各按独立视口 fit，写入两侧独立 zoom（互不跟随）。
+     * 分割线为 DOM，不在画布坐标系内。
+     */
+    function fitTextMatrixPanes(): void {
+        rootG.attr('transform', null);
+        matrixZoomG.attr('transform', null);
+        const textBBox = rootG.node()!.getBBox();
+        const matrixBBox = matrixG.node()!.getBBox();
+
+        const { w, h } = stackLayoutViewportPx(stackEl);
+        const vertical = textMatrixIsVertical();
+        const mid = vertical ? h / 2 : w / 2;
+        const textW = vertical ? w : Math.max(mid, 1);
+        const textH = vertical ? Math.max(mid, 1) : h;
+        const matrixW = vertical ? w : Math.max(w - mid, 1);
+        const matrixH = vertical ? Math.max(h - mid, 1) : h;
+        const zText = computeFitZoomTransform({
+            mode: 'text-flow',
+            contentBBox: textBBox,
+            viewportW: textW,
+            viewportH: textH,
+            k0: initialDagZoomK() * dagInitialZoomBoost('text-flow'),
+        });
+        const zMatrix = computeFitZoomTransform({
+            mode: 'attribution-matrix',
+            contentBBox: matrixBBox,
+            viewportW: matrixW,
+            viewportH: matrixH,
+            k0: initialDagZoomK() * dagInitialZoomBoost('attribution-matrix'),
+        });
+        tmTextZoom = d3.zoomIdentity.translate(zText.x, zText.y).scale(zText.k);
+        // matrix 半屏：先平移到分割线另一侧，再套自己的 fit
+        tmMatrixZoom = vertical
+            ? d3.zoomIdentity.translate(zMatrix.x, mid + zMatrix.y).scale(zMatrix.k)
+            : d3.zoomIdentity.translate(mid + zMatrix.x, zMatrix.y).scale(zMatrix.k);
+        rootG.attr('transform', tmTextZoom.toString());
+        matrixZoomG.attr('transform', tmMatrixZoom.toString());
+        // 同步 d3 内部状态到 text 侧（不覆盖 matrixZoomG）
+        tmProgrammaticPane = 'text';
+        svg.call(zoomBehavior.transform, tmTextZoom);
+        tmProgrammaticPane = null;
+        matrixZoomG.attr('transform', tmMatrixZoom.toString());
+        syncTextMatrixPaneClips();
+    }
+
     function paint(): void {
         syncLayoutLayerVisibility();
         if (layoutMode === 'attribution-matrix') {
-            // 从其它布局切回时，用 userFocusId 恢复行 lock（col/cell 静态 lock 保留）。
-            syncMatrixRowLockWithUserFocus();
-            const toMatrixNode = (n: DagNode) => ({
-                id: n.id,
-                displayLabel: n.displayLabel,
-                isPrompt: n.step === -1,
-            });
-            matrixFirstSourceAnchor = paintAttributionMatrixLayout({
-                matrixG,
-                svg: svg.node()!,
-                rowNodes: matrixRowNodes().map(toMatrixNode),
-                colNodes: matrixColNodes().map(toMatrixNode),
-                links: links.map((d) => ({
-                    source: endpointNode(d.source, graph).id,
-                    target: endpointNode(d.target, graph).id,
-                    ...(d.synthetic === true ? { synthetic: true as const } : {}),
-                })),
-                handlers: matrixInteractionHandlers,
-                showSelfRow: recursiveAttributionEnabled,
-                transpose: matrixTranspose,
-                switchHorizontalLabel: matrixSwitchHorizontalLabel,
-                switchVerticalLabel: matrixSwitchVerticalLabel,
-            });
-            // 颜色由调用方随后的 refreshNodeLinkHighlight → refreshMatrixHighlight 写入。
+            clearTextMatrixPaneLayout();
+            paintMatrixLayer();
             return;
         }
         syncNodeStrokeRects(nodeSel, displayScale);
         syncNodeLayoutSelRects(nodeSel, displayScale);
-        if (layoutMode === 'linear-arc' || layoutMode === 'linear-arc-step-down') {
+        const graphMode = isTextMatrixLayout(layoutMode) ? 'text-flow' : layoutMode;
+        if (graphMode === 'linear-arc' || graphMode === 'linear-arc-step-down') {
             const layoutNodes = nodes.filter((n) => nodeIncludedInLayout(n));
             paintLinearArcLayout({
                 linkSel,
                 nodeSel,
                 nodes: layoutNodes,
                 adjacentGapPx: linearArcAdjacentGapPx,
-                variant: layoutMode === 'linear-arc-step-down' ? 'step-down' : 'flat',
+                variant: graphMode === 'linear-arc-step-down' ? 'step-down' : 'flat',
                 getLinkNodes: linkEndpointsForPaint,
             });
-        } else if (layoutMode === 'spiral') {
+        } else if (graphMode === 'spiral') {
             const layoutNodes = nodes.filter((n) => nodeIncludedInLayout(n));
             paintSpiralLayout({
                 linkSel,
@@ -1680,6 +1897,12 @@ export function initGenAttributeDagView(
             });
         }
         syncNodeHitTransforms();
+        if (isTextMatrixLayout(layoutMode)) {
+            paintMatrixLayer();
+            syncTextMatrixPaneClips();
+        } else {
+            clearTextMatrixPaneLayout();
+        }
     }
 
     let dragPointerOffset: { x: number; y: number } | null = null;
@@ -1690,7 +1913,7 @@ export function initGenAttributeDagView(
             (event, d) =>
                 !isMultiSelectModifierKey(event) &&
                 !event.button &&
-                layoutMode === 'text-flow' &&
+                layoutAllowsNodeDrag(layoutMode) &&
                 !layoutInteractionLocked() &&
                 (focus.getLayoutSelectedIds().size > 0
                     ? focus.getLayoutSelectedIds().has(d.id)
@@ -1800,6 +2023,7 @@ export function initGenAttributeDagView(
     svg.on('mousedown.marquee', (event: MouseEvent) => {
         if (event.button !== 2) return;
         if (layoutInteractionLocked()) return;
+        if (isTextMatrixLayout(layoutMode) && !pointerInTextMatrixTextPane(event)) return;
         const target = event.target as Element | null;
         if (target?.closest?.('.gen-attr-dag-node-hit')) return;
         event.preventDefault();
@@ -1925,10 +2149,9 @@ export function initGenAttributeDagView(
         }
 
         // matrix 格 = 边：HUD 展示与 text 边 `<title>` 同源的指标（非节点 Top‑K）。
-        const matrixTarget =
-            layoutMode === 'attribution-matrix'
-                ? (focus.getMatrixHoverTarget() ?? focus.getMatrixLockedTarget())
-                : null;
+        const matrixTarget = layoutShowsMatrix(layoutMode)
+            ? (focus.getMatrixHoverTarget() ?? focus.getMatrixLockedTarget())
+            : null;
         if (matrixTarget?.type === 'cell') {
             const { srcId, tgtId } = matrixTarget;
             if (!graph.hasNode(srcId) || !graph.hasNode(tgtId)) {
@@ -2027,7 +2250,7 @@ export function initGenAttributeDagView(
         const shareSourceId =
             playbackTip?.direction === 'backward'
                 ? focusIdNext
-                : layoutMode === 'attribution-matrix'
+                : layoutShowsMatrix(layoutMode)
                   ? focus.matrixShareSourceId()
                   : hoveredId != null && solidFrameFocusId() === hoveredId
                     ? hoveredId
@@ -2551,6 +2774,7 @@ export function initGenAttributeDagView(
         if (mode === 'attribution-matrix') {
             return matrixG.node()!.getBBox();
         }
+        // text-flow / spiral：rootG；text-matrix 走双侧独立 fit，不经此 bbox
         return rootG.node()!.getBBox();
     }
 
@@ -2559,9 +2783,10 @@ export function initGenAttributeDagView(
         if (layoutDirty && !force) {
             return;
         }
-        const k0 = defaultDagZoomK();
         if (nodes.length === 0) {
             applyInitialDagZoom();
+        } else if (isTextMatrixLayout(layoutMode)) {
+            fitTextMatrixPanes();
         } else {
             const { w, h } = stackLayoutViewportPx(stackEl);
             const contentBBox = contentBBoxForFit(layoutMode);
@@ -2570,7 +2795,7 @@ export function initGenAttributeDagView(
                 contentBBox,
                 viewportW: w,
                 viewportH: h,
-                k0,
+                k0: defaultDagZoomK(),
             });
             svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(z.x, z.y).scale(z.k));
         }
@@ -3043,7 +3268,7 @@ export function initGenAttributeDagView(
         rootG.select('g.gen-attr-dag-layout-transition-fly').remove();
         setTransitionContentHidden(false);
         setNewOverlayOpacity(1);
-        syncMatrixLayoutBgClass(layoutMode === 'attribution-matrix');
+        syncMatrixLayoutBgClass();
         layoutTransitionLocked = false;
     }
 
@@ -3052,7 +3277,7 @@ export function initGenAttributeDagView(
         matrixPinSteady = null;
         matrixPinFollowActive = false;
         syncStackLayoutDragUi();
-        syncMatrixLayoutBgClass(mode === 'attribution-matrix');
+        syncMatrixLayoutBgClass();
         if (batchDepth > 0) return;
         syncGraphToSvg();
         fitViewportToContent(true);
@@ -3066,12 +3291,15 @@ export function initGenAttributeDagView(
             commitLayoutModeInstant(mode);
             return;
         }
+        // text-matrix 并排为复合布局，不做飞位转场。
         if (
             !layoutTransitionEnabled ||
             layoutTransitionDurationMs <= 0 ||
             batchDepth > 0 ||
             nodes.length === 0 ||
-            prefersReducedMotion()
+            prefersReducedMotion() ||
+            isTextMatrixLayout(layoutMode) ||
+            isTextMatrixLayout(mode)
         ) {
             clearLayoutTransitionArtifacts();
             commitLayoutModeInstant(mode);
@@ -3595,13 +3823,24 @@ export function initGenAttributeDagView(
         syncGenAttrDagTopkTooltipImpl();
     }
 
-    /** attribution-matrix 轴/方向选项变更后：清 pin、重绘并 fit。 */
+    /** matrix / text-matrix 轴/方向选项变更后：清 pin、重绘并 fit。 */
     function afterMatrixAxisOptionChange(): void {
         matrixPinSteady = null;
         matrixPinFollowActive = false;
-        if (batchDepth > 0 || layoutMode !== 'attribution-matrix') return;
+        if (batchDepth > 0 || !layoutShowsMatrix(layoutMode)) return;
         paint();
         refreshNodeLinkHighlight();
+        fitViewportToContent(true);
+    }
+
+    /** text-matrix：切换左右/上下并排。 */
+    function setTextMatrixOrientation(orientation: TextMatrixOrientation): void {
+        if (textMatrixOrientation === orientation) return;
+        textMatrixOrientation = orientation;
+        if (batchDepth > 0 || !isTextMatrixLayout(layoutMode)) return;
+        matrixPinSteady = null;
+        matrixPinFollowActive = false;
+        syncTextMatrixPaneClips();
         fitViewportToContent(true);
     }
 
@@ -3636,7 +3875,7 @@ export function initGenAttributeDagView(
 
     /** 从当前视口捕获 pin 稳态（点击 ▶、裁前缀 / `reset` 之前；含用户已拖到的位置）。 */
     function captureMatrixPinSteady(): void {
-        if (layoutMode !== 'attribution-matrix') {
+        if (!layoutShowsMatrix(layoutMode)) {
             matrixPinSteady = null;
             matrixPinFollowActive = false;
             return;
@@ -3650,9 +3889,9 @@ export function initGenAttributeDagView(
             matrixPinFollowActive = false;
             return;
         }
-        const t = d3.zoomTransform(svg.node()!);
+        const t = matrixViewZoomTransform();
         const { x: ax, y: ay } = matrixFirstSourceAnchor;
-        matrixPinSteady = { x: t.x + t.k * ax, y: t.y + t.k * ay };
+        matrixPinSteady = { x: t.applyX(ax), y: t.applyY(ay) };
         matrixPinFollowActive = true;
     }
 
@@ -3667,7 +3906,7 @@ export function initGenAttributeDagView(
      */
     function syncMatrixPinViewport(): void {
         if (
-            layoutMode !== 'attribution-matrix' ||
+            !layoutShowsMatrix(layoutMode) ||
             !matrixPinSourceTokens ||
             !matrixPinFollowActive ||
             matrixPinSteady == null ||
@@ -3676,10 +3915,16 @@ export function initGenAttributeDagView(
             return;
         }
         const { x: ax, y: ay } = matrixFirstSourceAnchor;
-        const k = d3.zoomTransform(svg.node()!).k;
+        const k = matrixViewZoomTransform().k;
         const tx = matrixPinSteady.x - k * ax;
         const ty = matrixPinSteady.y - k * ay;
-        svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+        const next = d3.zoomIdentity.translate(tx, ty).scale(k);
+        if (isTextMatrixLayout(layoutMode)) {
+            tmMatrixZoom = next;
+            matrixZoomG.attr('transform', next.toString());
+            return;
+        }
+        svg.call(zoomBehavior.transform, next);
     }
 
     /** 传播归因（UI: Propagated attribution mode；`recursiveAttributionEnabled`）：向上追到来源；关闭则为直接归因（一跳）。 */
@@ -3835,6 +4080,7 @@ export function initGenAttributeDagView(
         setDimInactiveNotDuringAnimation,
         setShowTokenInfoOnSelected,
         setRecursiveAttributionEnabled,
+        setTextMatrixOrientation,
         setMatrixTranspose,
         setMatrixSwitchHorizontalLabel,
         setMatrixSwitchVerticalLabel,
