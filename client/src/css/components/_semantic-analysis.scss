@@ -199,6 +199,13 @@
       border-radius: 4px;
       background: var(--input-bg);
       color: var(--text-color);
+
+      // 搜索中 readOnly：不显示编辑光标、不可点入
+      &:read-only {
+        caret-color: transparent;
+        cursor: default;
+        pointer-events: none;
+      }
     }
 
     .semantic-search-clear {

@@ -1,0 +1,451 @@
+@charset "UTF-8";
+/* 权威源：改 Find bar 样式只改本文件；同步到 client 时手工对齐 client/src/css/components/_semantic-find-bar.scss（含主题变量若有变更） */
+.semantic-find-bar-host {
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-end;
+  width: fit-content;
+  box-sizing: border-box;
+  overflow: visible;
+  pointer-events: none;
+}
+.semantic-find-bar-host[hidden] {
+  display: none !important;
+}
+
+.semantic-find-bar {
+  pointer-events: auto;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 4px 0 8px;
+  border-radius: 18px;
+  color: #e8eaed;
+  border: 1.5px solid transparent;
+  background-image: linear-gradient(#3c4043, #3c4043), var(--semantic-ai-gradient-muted);
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 4px 12px var(--semantic-ai-glow-muted);
+  box-sizing: border-box;
+  max-width: calc(100vw - 32px);
+  flex-shrink: 0;
+}
+.semantic-match-progress {
+  width: 100%;
+  height: 42px;
+  margin-top: 6px;
+  box-sizing: border-box;
+  overflow: visible;
+  color: #9aa0a6;
+  border: 1.5px solid #5f6368;
+  border-radius: 10px;
+  background: #3c4043;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.28);
+  pointer-events: auto;
+}
+.semantic-match-progress[hidden] {
+  display: none;
+}
+.semantic-match-progress-line {
+  fill: none;
+  stroke: rgba(255, 71, 64, 0.7);
+  stroke-width: 2;
+  stroke-linecap: butt;
+}
+.semantic-match-progress-line.is-below-threshold {
+  stroke: #9aa0a6;
+}
+.semantic-match-progress-line.is-selected {
+  stroke: #1e6fff;
+  stroke-width: 4;
+}
+.semantic-match-progress-line.is-hovered {
+  stroke-width: 4;
+}
+.semantic-match-progress-line.is-fading {
+  animation: semantic-match-progress-fade 1400ms ease-out forwards;
+}
+@keyframes semantic-match-progress-fade {
+  to {
+    opacity: 0;
+  }
+}
+.semantic-match-progress-label {
+  fill: currentColor;
+  font-family: inherit;
+  font-size: 10px;
+  pointer-events: none;
+}
+.semantic-match-progress-label[hidden] {
+  display: none;
+}
+.semantic-match-progress-hit-area {
+  fill: transparent;
+  pointer-events: all;
+  cursor: pointer;
+}
+.semantic-find-bar:has(.semantic-find-input:focus), .semantic-find-bar.is-input-active, .semantic-find-bar.is-searching {
+  background-image: linear-gradient(#3c4043, #3c4043), var(--semantic-ai-gradient);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 4px 14px var(--semantic-ai-glow);
+}
+.semantic-find-bar.is-searching {
+  background-size: 100% 100%, 300% 100%;
+  animation: semantic-find-bar-flow 2.4s linear infinite;
+}
+@keyframes semantic-find-bar-flow {
+  to {
+    background-position: 0 0, -300% 0;
+  }
+}
+.semantic-find-bar .semantic-find-bar-input-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 220px;
+  max-width: 380px;
+  display: flex;
+  align-items: center;
+  height: 28px;
+}
+.semantic-find-bar .semantic-find-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+  height: 28px;
+  padding: 4px 22px 4px 6px;
+  margin: 0;
+  min-width: 0;
+}
+.semantic-find-bar .semantic-find-input::placeholder {
+  color: #9aa0a6;
+}
+.semantic-find-bar .semantic-find-input:read-only {
+  caret-color: transparent;
+  cursor: default;
+  pointer-events: none;
+}
+.semantic-find-bar .semantic-search-clear {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  outline: none;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: #9aa0a6;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.semantic-find-bar .semantic-search-clear.is-visible {
+  display: flex;
+}
+.semantic-find-bar .semantic-search-clear.is-stop {
+  font-size: 0;
+  line-height: 0;
+}
+.semantic-find-bar .semantic-search-clear.is-stop svg {
+  display: block;
+  flex-shrink: 0;
+}
+.semantic-find-bar .semantic-search-clear:hover {
+  color: #e8eaed;
+  background: rgba(255, 255, 255, 0.1);
+}
+.semantic-find-bar .semantic-search-history-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin: 2px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 100;
+  display: none;
+}
+.semantic-find-bar .semantic-search-history-dropdown.is-visible {
+  display: block;
+}
+.semantic-find-bar .semantic-search-history-dropdown li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  cursor: pointer;
+  gap: 8px;
+}
+.semantic-find-bar .semantic-search-history-dropdown li:hover {
+  background: var(--hover-bg, rgba(0, 0, 0, 0.05));
+}
+.semantic-find-bar .semantic-search-history-dropdown li .history-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.semantic-find-bar .semantic-search-history-dropdown.has-featured-marks li {
+  padding-left: 0.35em;
+}
+.semantic-find-bar .semantic-search-history-dropdown.has-featured-marks .history-text {
+  position: relative;
+  padding-left: 1.5em;
+}
+.semantic-find-bar .semantic-search-history-dropdown.has-featured-marks .history-text::before {
+  content: "★";
+  position: absolute;
+  left: 0;
+  width: 1.15em;
+  text-align: center;
+  visibility: hidden;
+}
+.semantic-find-bar .semantic-search-history-dropdown.has-featured-marks .history-text.history-text--bold, .semantic-find-bar .semantic-search-history-dropdown.has-featured-marks .history-text--bold {
+  font-weight: 500;
+}
+.semantic-find-bar .semantic-search-history-dropdown.has-featured-marks .history-text.history-text--bold::before, .semantic-find-bar .semantic-search-history-dropdown.has-featured-marks .history-text--bold::before {
+  visibility: visible;
+}
+.semantic-find-bar .semantic-search-history-dropdown {
+  left: 0;
+  right: 0;
+  width: auto;
+  max-width: none;
+  margin-top: 6px;
+  padding: 6px 0;
+  color: #e8eaed;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  /* 下拉外框：对齐浮条失焦暗淡感，不用聚焦彩虹描边 */
+  border: 1.5px solid #5f6368;
+  border-radius: 14px;
+  background: #3c4043;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.28);
+  scrollbar-width: thin;
+  scrollbar-color: #80868b transparent;
+}
+.semantic-find-bar .semantic-search-history-dropdown::-webkit-scrollbar {
+  width: 8px;
+}
+.semantic-find-bar .semantic-search-history-dropdown::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 8px 0;
+}
+.semantic-find-bar .semantic-search-history-dropdown::-webkit-scrollbar-thumb {
+  background: #80868b;
+  border-radius: 4px;
+  border: 2px solid #3c4043;
+  background-clip: padding-box;
+}
+.semantic-find-bar .semantic-search-history-dropdown::-webkit-scrollbar-thumb:hover {
+  background: #9aa0a6;
+  border: 2px solid #3c4043;
+  background-clip: padding-box;
+}
+.semantic-find-bar .semantic-search-history-dropdown li:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.semantic-find-bar .semantic-search-history-dropdown .demo-delete-btn {
+  background: transparent;
+  border: none;
+  color: #9aa0a6;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 6px;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+.semantic-find-bar .semantic-search-history-dropdown .demo-delete-btn:hover {
+  opacity: 1;
+  color: #e74c3c;
+}
+.semantic-find-bar .semantic-find-bar-sep {
+  align-self: center;
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: rgba(232, 234, 237, 0.28);
+  flex-shrink: 0;
+}
+.semantic-find-bar .semantic-find-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #e8eaed;
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 0;
+  font-size: 0;
+}
+.semantic-find-bar .semantic-find-bar-btn svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.semantic-find-bar .semantic-find-bar-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+.semantic-find-bar .semantic-find-bar-btn:disabled {
+  color: #80868b;
+  cursor: default;
+  opacity: 1;
+}
+.semantic-find-bar .semantic-find-bar-close {
+  margin-left: 1px;
+}
+
+:root[data-theme=light] .semantic-find-bar,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar {
+  color: #202124;
+  background-image: linear-gradient(#fff, #fff), var(--semantic-ai-gradient-muted);
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.22), 0 4px 8px var(--semantic-ai-glow-muted);
+}
+:root[data-theme=light] .semantic-find-bar:has(.semantic-find-input:focus), :root[data-theme=light] .semantic-find-bar.is-input-active, :root[data-theme=light] .semantic-find-bar.is-searching,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar:has(.semantic-find-input:focus),
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar.is-input-active,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar.is-searching {
+  background-image: linear-gradient(#fff, #fff), var(--semantic-ai-gradient);
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.22), 0 4px 12px var(--semantic-ai-glow);
+}
+:root[data-theme=light] .semantic-match-progress,
+.semantic-find-bar-host[data-theme=light] .semantic-match-progress {
+  color: #80868b;
+  border-color: #dadce0;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.22), 0 4px 8px rgba(60, 64, 67, 0.15);
+}
+:root[data-theme=light] .semantic-find-bar .semantic-find-input::placeholder,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-find-input::placeholder {
+  color: #80868b;
+}
+:root[data-theme=light] .semantic-find-bar .semantic-search-clear,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-search-clear {
+  color: #80868b;
+}
+:root[data-theme=light] .semantic-find-bar .semantic-search-clear:hover,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-search-clear:hover {
+  color: #202124;
+  background: rgba(60, 64, 67, 0.08);
+}
+:root[data-theme=light] .semantic-find-bar .semantic-find-bar-sep,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-find-bar-sep {
+  background: #dadce0;
+}
+:root[data-theme=light] .semantic-find-bar .semantic-find-bar-btn,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-find-bar-btn {
+  color: #5f6368;
+}
+:root[data-theme=light] .semantic-find-bar .semantic-find-bar-btn:hover:not(:disabled),
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-find-bar-btn:hover:not(:disabled) {
+  background: rgba(60, 64, 67, 0.08);
+}
+:root[data-theme=light] .semantic-find-bar .semantic-find-bar-btn:disabled,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-find-bar-btn:disabled {
+  color: #bdc1c6;
+}
+:root[data-theme=light] .semantic-find-bar .semantic-search-history-dropdown,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-search-history-dropdown {
+  color: #202124;
+  border-color: #dadce0;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.22), 0 4px 8px rgba(60, 64, 67, 0.15);
+  scrollbar-color: #bdc1c6 transparent;
+}
+:root[data-theme=light] .semantic-find-bar .semantic-search-history-dropdown::-webkit-scrollbar-thumb,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-search-history-dropdown::-webkit-scrollbar-thumb {
+  background: #bdc1c6;
+  border: 2px solid #fff;
+  background-clip: padding-box;
+}
+:root[data-theme=light] .semantic-find-bar .semantic-search-history-dropdown::-webkit-scrollbar-thumb:hover,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-search-history-dropdown::-webkit-scrollbar-thumb:hover {
+  background: #9aa0a6;
+  border: 2px solid #fff;
+  background-clip: padding-box;
+}
+:root[data-theme=light] .semantic-find-bar .semantic-search-history-dropdown .demo-delete-btn,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-search-history-dropdown .demo-delete-btn {
+  color: #80868b;
+}
+:root[data-theme=light] .semantic-find-bar .semantic-search-history-dropdown .demo-delete-btn:hover,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-search-history-dropdown .demo-delete-btn:hover {
+  color: #e74c3c;
+}
+:root[data-theme=light] .semantic-find-bar .semantic-search-history-dropdown li:hover,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-search-history-dropdown li:hover {
+  background: rgba(60, 64, 67, 0.08);
+}
+
+.semantic-find-bar-host {
+  --semantic-ai-gradient: linear-gradient(
+    90deg,
+    #8fb9fd 0%,
+    #da9eff 28%,
+    #ff9a91 52%,
+    #c49e1d 78%,
+    #8fb9fd 100%
+  );
+  --semantic-ai-gradient-muted: linear-gradient(
+    90deg,
+    color-mix(in srgb, #8fb9fd 48%, #9aa0a6) 0%,
+    color-mix(in srgb, #da9eff 48%, #9aa0a6) 28%,
+    color-mix(in srgb, #ff9a91 48%, #9aa0a6) 52%,
+    color-mix(in srgb, #c49e1d 48%, #9aa0a6) 78%,
+    color-mix(in srgb, #8fb9fd 48%, #9aa0a6) 100%
+  );
+  --semantic-ai-glow: color-mix(in srgb, #9b72cb 42%, transparent);
+  --semantic-ai-glow-muted: color-mix(in srgb, #9b72cb 22%, transparent);
+}
+.semantic-find-bar-host[data-theme=dark] {
+  --semantic-ai-gradient: linear-gradient(
+    90deg,
+    #8ab4f8 0%,
+    #c58af9 28%,
+    #f28b82 52%,
+    #fdd663 78%,
+    #8ab4f8 100%
+  );
+  --semantic-ai-gradient-muted: linear-gradient(
+    90deg,
+    color-mix(in srgb, #8ab4f8 45%, #5f6368) 0%,
+    color-mix(in srgb, #c58af9 45%, #5f6368) 28%,
+    color-mix(in srgb, #f28b82 45%, #5f6368) 52%,
+    color-mix(in srgb, #fdd663 45%, #5f6368) 78%,
+    color-mix(in srgb, #8ab4f8 45%, #5f6368) 100%
+  );
+  --semantic-ai-glow: color-mix(in srgb, #c58af9 50%, transparent);
+  --semantic-ai-glow-muted: color-mix(in srgb, #c58af9 24%, transparent);
+}

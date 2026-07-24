@@ -10,11 +10,10 @@ import {TokenPositionCalculator} from "./TokenPositionCalculator";
 import {ResizeHandler} from "./ResizeHandler";
 import {TokenFragmentRect, HighlightStyle} from "./types";
 import { waitForSmoothScrollEnd } from '../core/waitForSmoothScrollEnd';
-import { CHUNK_SEARCH_FOLLOW_VIEWPORT_Y_RATIO, HIGHLIGHT_CONSTANTS } from './constants';
+import { HIGHLIGHT_CONSTANTS } from './constants';
 import {ScrollbarMinimap} from "./ScrollbarMinimap";
-import {isNarrowScreen} from "../core/responsive";
+import {isNarrowScreen, getDesktopTextScrollRoot} from "../core/responsive";
 import {getTokenRenderStyle} from "../cross/tokenRenderStyle";
-import { getInfoDensityRenderDisabled } from "../../features/analysis/infoDensityRenderManager";
 import type { FrontendToken } from "../../shared/api/GLTR_API";
 
 /**
@@ -106,10 +105,8 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
         surprisalColorMax: undefined as number | undefined,
         /** 若设置则仅覆盖 SVG 底色的 density/classic；未设置则与全局 getTokenRenderStyle() 一致 */
         overlayTokenRenderStyle: undefined as 'density' | 'classic' | undefined,
-        /** 为 true 时 SVG 底色不受全局「关闭信息密度」影响（如 Chat 需始终显示 token surprisal 底色） */
-        overlayIgnoreGlobalInfoDensityDisable: false,
         /**
-         * 为 true 时本实例始终不画信息密度/classic 底层（透明），不受全局开关与 overlayIgnoreGlobalInfoDensityDisable 影响。
+         * 为 true 时本实例始终不画信息密度/classic 底层（透明）。
          * 用于仅展示语义叠加层（如归因页）而无需伪造 real_topk。
          */
         overlayForceDisableInfoDensityRender: false,
@@ -122,13 +119,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
 
     /** SVG 信息密度/classic 底色是否应关闭（透明） */
     private getOverlayDisableInfoDensityRender(): boolean {
-        if (this.options.overlayForceDisableInfoDensityRender) {
-            return true;
-        }
-        if (this.options.overlayIgnoreGlobalInfoDensityDisable) {
-            return false;
-        }
-        return getInfoDensityRenderDisabled();
+        return !!this.options.overlayForceDisableInfoDensityRender;
     }
 
     /**
@@ -174,9 +165,6 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
     private highlightManager?: HighlightManager;
     private chunkScrollEndCancel: (() => void) | undefined;
     private chunkHighlightHoldTimer: number | undefined;
-    /** 分块语义搜索：用户已手动滚动，后续不再自动跟随 */
-    private chunkSearchAutoScrollUserCancelled = false;
-    private chunkSearchAutoScrollCleanup: (() => void) | undefined;
     
     // 下划线元素缓存，用于第二个直方图的高亮样式（由HighlightManager管理，但需要在这里初始化）
     private underlineCache: Map<string, SVGLineElement> = new Map();
@@ -202,7 +190,6 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
         }
     };
     private _onTokenRenderStyleChange = (): void => this._refreshBaseRectColorsOrFullRender();
-    private _onInfoDensityRenderChange = (): void => this._refreshBaseRectColorsOrFullRender();
     private _onSurprisalColorWeakenChange = (): void => {
         this._refreshBaseRectColorsOrFullRender();
         if (this.options.enableMinimap && this.cachedPositions && this.currentRenderData) {
@@ -251,7 +238,6 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
         // 监听主题变化
         this.setupThemeListener();
         window.addEventListener('token-render-style-change', this._onTokenRenderStyleChange);
-        window.addEventListener('info-density-render-change', this._onInfoDensityRenderChange);
         window.addEventListener('surprisal-color-weaken-change', this._onSurprisalColorWeakenChange);
 
         // 初始化颜色scale
@@ -369,11 +355,12 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
                 this.cachedPositionsTokenCount = rd.bpe_strings.length;
             }
 
-            // Step 3: 更新本 chunk 范围内的语义颜色
+            // Step 3: 语义颜色。仅「chunk 流式追加」时只刷最新 chunk；同 token 数（如 color source 切换）必须全量刷，否则前文颜色会滞后
             const latestChunk = rdExt.chunkInfos?.[rdExt.chunkInfos.length - 1];
-            const fromTokenIndex = latestChunk
-                ? Math.max(0, rd.bpe_strings.findIndex(t => t.offset[0] >= latestChunk.startOffset))
-                : 0;
+            const fromTokenIndex =
+                chunkAppendOnly && latestChunk
+                    ? Math.max(0, rd.bpe_strings.findIndex(t => t.offset[0] >= latestChunk.startOffset))
+                    : 0;
             this.svgOverlayManager!.updateSemanticColors(colorScores!, fromTokenIndex);
 
             // chunk 增量渲染路径也需要同步刷新 minimap，否则会出现刷新滞后
@@ -659,13 +646,14 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
     }
 
     /**
-     * 仅显示文本内容，不渲染颜色标记
-     * 用于在等待后端返回时立即显示文本，提升用户体验
-     * @param text 要显示的文本内容
+     * 清空可视化 DOM，仅铺纯文本层（不改 loading / currentRenderData）
      */
-    public setTextOnly(text: string): void {
+    private applyPlainTextDom(text: string): void {
         const baseNode = this.base.node();
         if (!baseNode) return;
+
+        // DOM 将重建，先清掉高亮状态，避免后续流式更新误保留旧 chunk 区间
+        this.clearHighlight();
 
         // 文本切换（如 demo 切换）期间先清空 minimap，避免显示旧数据
         if (this.options.enableMinimap && this.minimapManager) {
@@ -705,9 +693,28 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
         } else {
             this.createLoadingOverlay();
         }
+    }
 
-        // 显示加载状态
+    /**
+     * 仅显示文本内容，不渲染颜色标记
+     * 用于在等待后端返回时立即显示文本，提升用户体验
+     * @param text 要显示的文本内容
+     */
+    public setTextOnly(text: string): void {
+        this.applyPlainTextDom(text);
         this.showLoading();
+    }
+
+    /**
+     * 仅显示纯文本（无 loading、无分析结果缓存），用于输入失焦同步等非分析场景。
+     * 负责把分析结果区（#all_result）重新显示：调用方在改字时可能已将其藏起。
+     */
+    public showPlainText(text: string): void {
+        this.currentRenderData = undefined;
+        this.applyPlainTextDom(text);
+        this.hideLoading();
+        // 无节点时（非 analysis 页）为空选，no-op
+        d3.select('#all_result').style('opacity', 1).style('display', null);
     }
 
     /**
@@ -1083,7 +1090,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
 
     /**
      * 计算系统经典滚动条的宽度
-     * 通过 right_panel 和 LMF 的宽度差来判断滚动条是否占用布局空间
+     * 通过正文滚动根与 LMF 的宽度差判断滚动条是否占用布局空间
      * @returns 滚动条宽度（px），如果为0则表示使用覆盖式滚动条或无滚动条
      */
     private calculateTraditionalScrollbarWidth(): number {
@@ -1092,19 +1099,15 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
             return 0;
         }
 
-        const rightPanel = document.querySelector('.right_panel') as HTMLElement;
-        if (!rightPanel) {
+        const scrollRoot = getDesktopTextScrollRoot();
+        if (!scrollRoot) {
             return 0;
         }
 
-        // right_panel 的 offsetWidth（包含滚动条，如果滚动条占用布局空间）
-        const rightPanelWidth = rightPanel.offsetWidth;
-        // LMF 的 offsetWidth（包含 padding 和 border，但不包含滚动条）
+        const scrollRootWidth = scrollRoot.offsetWidth;
         const lmfWidth = baseNode.offsetWidth;
-        // 计算滚动条宽度：right_panel 宽度 - LMF 宽度
-        const scrollbarWidth = rightPanelWidth - lmfWidth;
+        const scrollbarWidth = scrollRootWidth - lmfWidth;
 
-        // 返回滚动条宽度（如果小于等于0，表示使用覆盖式滚动条或无滚动条）
         return scrollbarWidth > 0 ? scrollbarWidth : 0;
     }
 
@@ -1173,7 +1176,6 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
         // 清理SVG引用
         this.currentSvgOverlay = undefined;
         window.removeEventListener('token-render-style-change', this._onTokenRenderStyleChange);
-        window.removeEventListener('info-density-render-change', this._onInfoDensityRenderChange);
         window.removeEventListener('surprisal-color-weaken-change', this._onSurprisalColorWeakenChange);
 
         // 调用父类的destroy方法
@@ -1281,51 +1283,9 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
         this.highlightManager.setCharIntervalUnderlines(segments);
     }
 
-    /** 分块语义搜索开始：wheel / 触摸即视为用户接管滚动 */
-    beginChunkSearchAutoScroll(): void {
-        this.endChunkSearchAutoScroll();
-        this.chunkSearchAutoScrollUserCancelled = false;
-
-        const container = isNarrowScreen()
-            ? window
-            : (document.querySelector('.right_panel') as HTMLElement | null);
-        if (!container) return;
-
-        const opts = { passive: true, capture: true } as const;
-        const onUserScroll = () => {
-            if (this.chunkSearchAutoScrollUserCancelled) return;
-            this.chunkSearchAutoScrollUserCancelled = true;
-            this.chunkScrollEndCancel?.();
-            this.chunkScrollEndCancel = undefined;
-        };
-
-        container.addEventListener('wheel', onUserScroll, opts);
-        container.addEventListener('touchstart', onUserScroll, opts);
-        this.chunkSearchAutoScrollCleanup = () => {
-            container.removeEventListener('wheel', onUserScroll, opts);
-            container.removeEventListener('touchstart', onUserScroll, opts);
-        };
-    }
-
-    endChunkSearchAutoScroll(): void {
-        this.chunkSearchAutoScrollCleanup?.();
-        this.chunkSearchAutoScrollCleanup = undefined;
-        this.chunkSearchAutoScrollUserCancelled = false;
-    }
-
     /** 滚到 chunk 起点（分析结束、直方图 bin 点击，视口 0.2） */
     scrollToChunkStart(charOffset: number, onScrollEnd?: () => void): void {
         this.scrollToUnicodeCharOffset(Math.max(0, Math.floor(charOffset)), onScrollEnd);
-    }
-
-    /** 分块语义搜索进行中：滚动跟随当前 chunk 起点（视口 0.6） */
-    followSearchingChunk(charOffset: number): void {
-        if (this.chunkSearchAutoScrollUserCancelled) return;
-        this.scrollToUnicodeCharOffset(
-            Math.max(0, Math.floor(charOffset)),
-            undefined,
-            CHUNK_SEARCH_FOLLOW_VIEWPORT_Y_RATIO
-        );
     }
 
     /**
@@ -1412,7 +1372,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
     }
 
     /**
-     * 滚动至 Unicode 偏移；桌面滚动 `.right_panel`，窄屏为 `window`
+     * 滚动至 Unicode 偏移；桌面滚正文滚动根（analysis 为 `#results`，其它页多为 `.right_panel`），窄屏为 `window`
      * @param viewportYRatio 目标点在视口中的纵向位置（0=顶部，1=底部），默认 0.2
      */
     scrollToUnicodeCharOffset(charOffset: number, onScrollEnd?: () => void, viewportYRatio = 0.2): void {
@@ -1457,7 +1417,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
                 return;
             }
 
-            const panel = document.querySelector('.right_panel') as HTMLElement | null;
+            const panel = getDesktopTextScrollRoot();
             if (!panel) {
                 onScrollEnd?.();
                 return;
@@ -1497,15 +1457,23 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
     }
 
     /**
-     * 清除所有高亮
+     * 清除高亮。
+     * @param options.preserveChunkInterval 为 true 时保留 chunk 区间下划线及其 hold/fade（语义流式更新用）
      */
-    clearHighlight() {
-        this.cancelChunkHighlightFade();
+    clearHighlight(options?: { preserveChunkInterval?: boolean }) {
+        const preserve = options?.preserveChunkInterval === true;
+        if (!preserve) {
+            this.cancelChunkHighlightFade();
+            this._current.chunkCharRange = null;
+        }
         this._current.highlightedIndices.clear();
-        this._current.chunkCharRange = null;
 
         if (this.highlightManager) {
-            this.highlightManager.clearHighlight();
+            if (preserve) {
+                this.highlightManager.clearTokenHighlights();
+            } else {
+                this.highlightManager.clearHighlight();
+            }
         }
     }
 

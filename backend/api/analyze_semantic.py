@@ -19,18 +19,34 @@ from backend.platform.access_log import get_client_ip
 from backend.api.analyze import QueueTimeoutError, ANALYSIS_TIMEOUT, LOCK_WAIT_TIMEOUT
 
 
-def _log_request(query, text, client_ip=None):
+def _log_request(query, text, client_ip=None, privacy_mode=False):
     from backend.platform.access_log import log_analyze_semantic_request
-    return log_analyze_semantic_request(query, text, client_ip)
+    return log_analyze_semantic_request(query, text, client_ip, privacy_mode)
 
 
 def _build_success_response(result, debug_info: bool = False):
-    """构建成功响应。debug_info=True 时包含 debug_info 对象（abbrev、topk_tokens、topk_probs）"""
+    """构建成功响应。debug_info=True 时包含 debug_info 对象（abbrev、topk_tokens、topk_probs）。
+    result 为 List 时（批量 full_match_degree_only），返回 {"success", "results": [...]}。
+    带 input_token_count：full_match_degree_only 时 token_attention 为空，门户 response 日志靠它打 tokens。
+    分析器必须产出该字段；缺则 KeyError，不静默填默认值。"""
+    if isinstance(result, list):
+        return {
+            "success": True,
+            "results": [
+                {
+                    "model": r["model"],
+                    "full_match_degree": r["full_match_degree"],
+                    "input_token_count": r["input_token_count"],
+                }
+                for r in result
+            ],
+        }
     resp = {
         "success": True,
         "model": result["model"],
         "token_attention": result["token_attention"],
         "full_match_degree": result["full_match_degree"],
+        "input_token_count": result["input_token_count"],
     }
     if debug_info and "debug_info" in result:
         resp["debug_info"] = result["debug_info"]
@@ -126,13 +142,19 @@ def _generate_semantic_events(
         from backend.platform.inference_response_log import log_analyze_semantic_response
         from backend.platform.model_routing import is_worker
 
-        if is_worker():
-            log_analyze_semantic_response(
-                request_id=request_id,
-                result=analysis_result,
-                elapsed=elapsed,
-                for_worker=True,
-            )
+        # 本地执行机打完整日志（含 wait/processing）；远程代理门户走 response_log_fn
+        if isinstance(analysis_result, dict):
+            log_result = analysis_result
+        else:
+            total_tokens = sum(r.get("input_token_count", 0) for r in analysis_result)
+            log_result = {"input_token_count": total_tokens}
+        log_analyze_semantic_response(
+            request_id=request_id,
+            result=log_result,
+            elapsed=elapsed,
+            wait_time=lock_wait_time,
+            for_worker=is_worker(),
+        )
         yield send_result_event(_build_success_response(analysis_result, debug_info))
     except Exception as e:
         import traceback
@@ -202,43 +224,67 @@ def analyze_semantic(semantic_request):
     分析原文 token 对 prompt 的关注度。
 
     Args:
-        semantic_request: 包含 query、text、stream（可选）、submode（可选）的字典
+        semantic_request: 包含 query、text、stream（可选）、submode（可选）的字典。
+            texts（可选，字符串数组）：批量 full_match_degree_only 预判性能测试用，
+            与 text 互斥，且必须搭配 full_match_degree_only=True。
+
+            性能结论（详见 backend/core/semantic_analyzer.py 的
+            _analyze_logits_gradient_batch）：
+            batching 对模型前向计算本身的加速有限（batch=4 约 1.5x，batch=8 约
+            1.6x），线上用客户端总耗时测出的更高加速比主要是摊薄了每次 HTTP
+            请求固定的网络/SSE 开销，并非计算变快；因此若追求性能，合并请求本身
+            比加大 batch 更有效，batch 也不宜设得过大。
 
     Returns:
         stream=True 时返回 SSE 响应；否则返回 (响应字典, 状态码) 元组
     """
     query = (semantic_request.get("query") or "")
     text = semantic_request.get("text") or ""
+    texts = semantic_request.get("texts")
     stream = semantic_request.get("stream", False)
     submode = (semantic_request.get("submode") or "").strip() or None
     debug_info = bool(semantic_request.get("debug_info", False))
     full_match_degree_only = bool(semantic_request.get("full_match_degree_only", False))
+    privacy_mode = bool(semantic_request.get("privacy_mode", False))
 
     if not query:
         return {"success": False, "message": "缺少 query 字段"}, 400
-    if not text:
-        return {"success": False, "message": "缺少 text 字段"}, 400
+
+    if texts is not None:
+        if not isinstance(texts, list) or not texts or not all(isinstance(t, str) and t for t in texts):
+            return {"success": False, "message": "texts 字段需为非空字符串数组"}, 400
+        if not full_match_degree_only:
+            return {"success": False, "message": "texts 数组批量模式仅支持 full_match_degree_only=True"}, 400
+        content = texts
+        log_text = f"[批量 x{len(texts)}] " + texts[0]
+    else:
+        if not text:
+            return {"success": False, "message": "缺少 text 字段"}, 400
+        content = text
+        log_text = text
 
     client_ip = get_client_ip()
     logged: dict = {"request_id": None}
 
     def log_fn():
-        logged["request_id"] = _log_request(query, text, client_ip)
+        logged["request_id"] = _log_request(query, log_text, client_ip, privacy_mode)
 
     def local_fn():
         rid = logged["request_id"]
         if stream:
             return _analyze_semantic_with_stream(
-                query, text, submode, debug_info, full_match_degree_only, client_ip, rid
+                query, content, submode, debug_info, full_match_degree_only, client_ip, rid
             )
         return _analyze_semantic_plain(
-            query, text, submode, debug_info, full_match_degree_only, client_ip, rid
+            query, content, submode, debug_info, full_match_degree_only, client_ip, rid
         )
 
     from backend.models.model_manager import ModelSlot
     from backend.platform.inference_ingress import ingress_inference
     from backend.platform.inference_response_log import make_analyze_semantic_response_logger
+    from backend.platform.model_routing import is_local
 
+    # 本地执行：handler 已打完整日志；仅远程代理时门户用 response_log_fn 打端到端
     return ingress_inference(
         slot=ModelSlot.INSTRUCT,
         api_path="/api/analyze-semantic",
@@ -247,5 +293,9 @@ def analyze_semantic(semantic_request):
         timeout=60.0,
         log_fn=log_fn,
         local_fn=local_fn,
-        response_log_fn=make_analyze_semantic_response_logger(logged),
+        response_log_fn=(
+            None
+            if is_local(ModelSlot.INSTRUCT)
+            else make_analyze_semantic_response_logger(logged)
+        ),
     )

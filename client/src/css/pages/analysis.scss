@@ -1,6 +1,24 @@
 // Analysis 页专有样式（intro / 统计图 / 分析进度）
 @use 'app-pages';
+@use '../base/breakpoints' as *;
 @use '../base/narrow-ios-form-font-tail' as ios-form-font;
+
+@media (min-width: $breakpoint-tablet) {
+  html:not([data-force-narrow]) {
+    .right_panel {
+      overflow: hidden;
+    }
+
+    .right_panel > #results {
+      flex: 1 1 auto;
+      min-height: 0;
+      height: 100%;
+      max-height: 100%;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+  }
+}
 
 // 介绍区域样式
 .intro-section {

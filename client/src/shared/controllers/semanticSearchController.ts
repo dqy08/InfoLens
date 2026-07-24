@@ -18,33 +18,8 @@ import {
     normalizeTokenScores,
     splitTextToChunks,
 } from '../cross/semanticUtils';
+import { codePointLength, utf16IndexToCodePointIndex } from '../cross/mergeTokenSpans';
 import type { signalFitResult } from '../../features/analysis/signalThresholdDetector';
-import { CHUNK_SEARCH_HOLD_MS } from '../vis/constants';
-import * as semanticResultCache from '../cross/semanticResultCache';
-
-function isChunkSemanticallyCached(chunkText: string, query: string, submode?: string): boolean {
-    if (submode === 'hybrid') {
-        return !!semanticResultCache.get(chunkText, query, 'count')
-            && !!semanticResultCache.get(chunkText, query, 'fill_blank');
-    }
-    return !!semanticResultCache.get(chunkText, query, submode);
-}
-
-/** 可中止的短时等待（abort 时提前结束，不抛错） */
-function delayAbortable(ms: number, signal: AbortSignal): Promise<void> {
-    return new Promise((resolve) => {
-        const id = window.setTimeout(resolve, ms);
-        const onAbort = () => {
-            window.clearTimeout(id);
-            resolve();
-        };
-        if (signal.aborted) {
-            onAbort();
-            return;
-        }
-        signal.addEventListener('abort', onAbort, { once: true });
-    });
-}
 
 export interface SemanticSearchControllerDeps {
     getQuery: () => string;
@@ -143,6 +118,10 @@ export class SemanticSearchController {
         }
     }
 
+    /**
+     * 分块搜索（demo）：严格串行——await 分析 → 上色 → 下一块；无预取/hold/follow；结束滚到首个匹配。
+     * 产品决策：站内节奏刻意简化；扩展侧仍保留预取/hold/follow（见 extension/content.js），两边不必对齐。
+     */
     private async runChunked(params: { query: string; text: string; submode: string | undefined; signal: AbortSignal }): Promise<void> {
         const { query, text, submode, signal } = params;
         const chunks = splitTextToChunks(text, SEMANTIC_CHUNK_BYTES);
@@ -163,27 +142,15 @@ export class SemanticSearchController {
         let allFromCache = true;
         let aborted = false;
         let lastChunkFromCache = false;
-        /** 上一块上色后的 hold 期间已预发起的下一块分析 */
-        let pendingNextAnalysis: ReturnType<TextAnalysisAPI['analyzeSemantic']> | null = null;
-        /** hold 结束后已滚到下一块，本轮循环开头无需再滚 */
-        let scrollDoneForIndex: number | null = null;
 
-        const needsAutoScroll = chunks.some((c) => !isChunkSemanticallyCached(c.text, query, submode));
-        if (needsAutoScroll) {
-            this.deps.lmf.beginChunkSearchAutoScroll();
-        }
-        try {
+        const matchThreshold = () => getSemanticMatchThreshold();
+
         for (let i = 0; i < chunks.length; i++) {
             if (signal.aborted) break;
             const chunk = chunks[i];
             d3.select('#semantic_progress').text(`Chunk ${i + 1}/${chunks.length}`).style('display', 'inline-block');
 
-            const res = pendingNextAnalysis
-                ? await pendingNextAnalysis
-                : await this.deps.api.analyzeSemantic(query, chunk.text, { submode, signal });
-            pendingNextAnalysis = null;
-            // 上色/直方图仍以本块返回的 isSemanticFromCache(res) 为准，从首个非缓存块起才刷新 UI。
-            // isChunkSemanticallyCached 仅用于滚动跟随与预取，与 API 读同一套 semanticResultCache。
+            const res = await this.deps.api.analyzeSemantic(query, chunk.text, { submode, signal });
             if (signal.aborted) {
                 aborted = true;
                 break;
@@ -197,7 +164,7 @@ export class SemanticSearchController {
             if (!lastChunkFromCache) allFromCache = false;
             const matchDegree = res.full_match_degree ?? 0;
             maxMatchDegree = Math.max(maxMatchDegree, matchDegree);
-            const matched = matchDegree >= getSemanticMatchThreshold();
+            const matched = matchDegree >= matchThreshold();
             const merged = mergeTokenSpansFullyForRendering(res.token_attention ?? [], chunk.text, {
                 digitMerge: getDigitsMergeEnabled(),
             });
@@ -206,22 +173,22 @@ export class SemanticSearchController {
                 ? normalized
                 : normalized.map((t) => ({ ...t, rawScore: getTokenRawScore(t), score: 0 }));
 
+            // splitTextToChunks.startOffset 为 UTF-16；token/chunkInfos/渲染均为码点
+            const chunkCpStart = utf16IndexToCodePointIndex(text, chunk.startOffset);
+            const chunkCpEnd = chunkCpStart + codePointLength(chunk.text);
             chunkInfos.push({
-                startOffset: chunk.startOffset,
-                endOffset: chunk.startOffset + chunk.text.length,
+                startOffset: chunkCpStart,
+                endOffset: chunkCpEnd,
                 chunkIndex: i,
                 chunkMatchDegree: matchDegree,
             });
             const tokensOffsetAdjusted = tokens.map(t => ({
                 ...t,
-                offset: [t.offset[0] + chunk.startOffset, t.offset[1] + chunk.startOffset] as [number, number],
+                offset: [t.offset[0] + chunkCpStart, t.offset[1] + chunkCpStart] as [number, number],
             }));
             allChunkProcessedTokens.push(...tokensOffsetAdjusted);
+
             if (!lastChunkFromCache) {
-                if (scrollDoneForIndex !== i) {
-                    this.deps.lmf.followSearchingChunk(chunk.startOffset);
-                }
-                scrollDoneForIndex = null;
                 if (!this.deps.visualizationUpdater.handleSemanticResponse(
                     { token_attention: allChunkProcessedTokens, chunkInfos, debug_info: undefined },
                     text,
@@ -230,20 +197,6 @@ export class SemanticSearchController {
                     aborted = true;
                     this.deps.showSemanticError();
                     break;
-                }
-                const nextIndex = i + 1;
-                if (nextIndex < chunks.length) {
-                    const nextChunk = chunks[nextIndex]!;
-                    pendingNextAnalysis = this.deps.api.analyzeSemantic(query, nextChunk.text, { submode, signal });
-                    await delayAbortable(CHUNK_SEARCH_HOLD_MS, signal);
-                    if (signal.aborted) {
-                        aborted = true;
-                        break;
-                    }
-                    if (!isChunkSemanticallyCached(nextChunk.text, query, submode)) {
-                        this.deps.lmf.followSearchingChunk(nextChunk.startOffset);
-                        scrollDoneForIndex = nextIndex;
-                    }
                 }
             }
         }
@@ -256,21 +209,12 @@ export class SemanticSearchController {
                     undefined
                 );
             }
-            if (!allFromCache) {
-                await delayAbortable(CHUNK_SEARCH_HOLD_MS, signal);
-            }
             if (!signal.aborted) {
-                const threshold = getSemanticMatchThreshold();
-                const firstMatch = chunkInfos.find((c) => c.chunkMatchDegree >= threshold);
+                const firstMatch = chunkInfos.find((c) => c.chunkMatchDegree >= matchThreshold());
                 if (firstMatch) {
-                    this.deps.lmf.scrollToChunkStart(firstMatch.startOffset);
+                    this.deps.lmf.jumpToChunkHighlight(firstMatch.startOffset, firstMatch.endOffset);
                 }
                 this.deps.finishSemanticSearch(query, maxMatchDegree, allFromCache);
-            }
-        }
-        } finally {
-            if (needsAutoScroll) {
-                this.deps.lmf.endChunkSearchAutoScroll();
             }
         }
     }

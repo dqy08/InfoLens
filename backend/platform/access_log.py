@@ -160,9 +160,28 @@ def log_analyze_semantic_start(request_id: int, wait_time: float, stream_mode: b
     print(f"\t🔄 API analyze_semantic {mode_str} start: req_id={request_id}, wait_time={wait_time:.2f}s")
 
 
-def log_analyze_semantic_request(query: str, text: str, client_ip: str = None):
+_visitor_seq: dict = {}
+_visitor_seq_lock = threading.Lock()
+
+
+def _visitor_seq_no(ip: Optional[str]) -> int:
     """
-    记录收到 semantic 分析请求
+    进程内递增的访客序号：同一 IP 复用同一序号，日志里只留这个号、不落 IP 本身。
+    映射表只在内存里，随进程重启清空，不写盘。
+    """
+    key = ip or "unknown"
+    with _visitor_seq_lock:
+        seq = _visitor_seq.get(key)
+        if seq is None:
+            seq = len(_visitor_seq) + 1
+            _visitor_seq[key] = seq
+        return seq
+
+
+def log_analyze_semantic_request(query: str, text: str, client_ip: str = None, privacy_mode: bool = False):
+    """
+    记录收到 semantic 分析请求。
+    privacy_mode=True（插件请求固定如此）时不落 query/text 内容与明文 IP，仅记字符数和 IP 摘要。
 
     Returns:
         int: 请求ID
@@ -173,11 +192,16 @@ def log_analyze_semantic_request(query: str, text: str, client_ip: str = None):
         _request_counter += 1
         request_id = _request_counter
 
-    preview = 50
-    q_preview = _log_str_preview(query, preview)
-    t_preview = _log_str_preview(text, preview)
-    details = f"req_id={request_id}, query='{q_preview}', text='{t_preview}', chars={len(text)}"
-    log_request("📥 semantic 分析请求", details, client_ip)
+    if privacy_mode:
+        visitor = f"visitor=#{_visitor_seq_no(client_ip)}"
+        details = f"req_id={request_id}, query_chars={len(query)}, text_chars={len(text)}"
+        log_request("📥 semantic 分析请求（隐私模式）", details, client_ip=visitor)
+    else:
+        preview = 50
+        q_preview = _log_str_preview(query, preview)
+        t_preview = _log_str_preview(text, preview)
+        details = f"req_id={request_id}, query='{q_preview}', text='{t_preview}', chars={len(text)}"
+        log_request("📥 semantic 分析请求", details, client_ip)
 
     _hit_api("analyze_semantic")
     return request_id

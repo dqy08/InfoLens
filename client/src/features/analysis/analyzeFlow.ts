@@ -17,6 +17,7 @@ import { handleServerDemoSave } from '../../shared/controllers/serverDemoControl
 // 国际化
 import { tr } from '../../shared/lang/i18n-lite';
 import { playAnalysisCompleteSound } from '../../shared/cross/soundNotification';
+import { getDesktopTextScrollRoot } from '../../shared/core/responsive';
 
 /**
  * 分析进度回调
@@ -86,10 +87,8 @@ export class AnalyzeFlowManager {
      */
     private scrollToTop(): void {
         requestAnimationFrame(() => {
-            const rightPanel = document.querySelector('.right_panel') as HTMLElement;
-            if (rightPanel) {
-                rightPanel.scrollTop = 0;
-            }
+            const root = getDesktopTextScrollRoot();
+            if (root) root.scrollTop = 0;
         });
     }
 

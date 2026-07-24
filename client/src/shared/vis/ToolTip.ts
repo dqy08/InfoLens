@@ -312,7 +312,7 @@ export class ToolTip {
     
     /**
      * 更新tooltip内容
-     * 统一结构：语义区块（上） + 分隔线 + 信息密度区块（下，含汇总指标 + top-k 表格）
+     * 结构：语义区块（上）与信息密度区块（下）按数据有无拼接；互斥模式下通常只出现一侧
      */
     private _updateContent(ri: GLTR_RenderItem, augment?: ToolTipUpdateAugment): void {
         const { selectedColor, detailColor, valueColor } = this.themeColors;

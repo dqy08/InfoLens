@@ -173,6 +173,7 @@ module.exports = {
                 copyHtmlWithIncludesAndPageMeta('chat.html', 'chat.html', 'chat'),
                 copyHtmlWithIncludesAndPageMeta('attribution.html', 'attribution.html', 'attribution'),
                 copyHtmlWithIncludesAndPageMeta('causal_flow.html', 'causal_flow.html', 'causalFlow'),
+                { from: 'privacy-policy.html', to: 'privacy-policy.html' },
             ]
         }),
         new GenAttributeDemoManifestPlugin(),

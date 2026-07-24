@@ -56,6 +56,25 @@
   --accent-glow: color-mix(in srgb, var(--accent-color) 60%, transparent);
   --accent-shadow: color-mix(in srgb, var(--accent-color) 65%, transparent);
   --accent-stroke: color-mix(in srgb, var(--accent-color) 90%, transparent);
+  // 语义 AI 主题（参考 Gemini 彩虹渐变，区别于交互蓝 --accent-color）
+  --semantic-ai-gradient: linear-gradient(
+    90deg,
+    #4285f4 0%,
+    #9b72cb 28%,
+    #d96570 52%,
+    #fbbc04 78%,
+    #4285f4 100%
+  );
+  --semantic-ai-gradient-muted: linear-gradient(
+    90deg,
+    color-mix(in srgb, #4285f4 48%, #9aa0a6) 0%,
+    color-mix(in srgb, #9b72cb 48%, #9aa0a6) 28%,
+    color-mix(in srgb, #d96570 48%, #9aa0a6) 52%,
+    color-mix(in srgb, #fbbc04 48%, #9aa0a6) 78%,
+    color-mix(in srgb, #4285f4 48%, #9aa0a6) 100%
+  );
+  --semantic-ai-glow: color-mix(in srgb, #9b72cb 42%, transparent);
+  --semantic-ai-glow-muted: color-mix(in srgb, #9b72cb 22%, transparent);
   --text-disabled: #999;
   --text-area-bg: #fff;
   --textarea-actions-button-row-min-height: 3.5rem;
@@ -108,6 +127,24 @@
   --accent-glow: color-mix(in srgb, var(--accent-color) 80%, transparent);
   --accent-shadow: var(--accent-glow);
   --accent-stroke: color-mix(in srgb, var(--accent-color) 90%, transparent);
+  --semantic-ai-gradient: linear-gradient(
+    90deg,
+    #8ab4f8 0%,
+    #c58af9 28%,
+    #f28b82 52%,
+    #fdd663 78%,
+    #8ab4f8 100%
+  );
+  --semantic-ai-gradient-muted: linear-gradient(
+    90deg,
+    color-mix(in srgb, #8ab4f8 45%, #5f6368) 0%,
+    color-mix(in srgb, #c58af9 45%, #5f6368) 28%,
+    color-mix(in srgb, #f28b82 45%, #5f6368) 52%,
+    color-mix(in srgb, #fdd663 45%, #5f6368) 78%,
+    color-mix(in srgb, #8ab4f8 45%, #5f6368) 100%
+  );
+  --semantic-ai-glow: color-mix(in srgb, #c58af9 50%, transparent);
+  --semantic-ai-glow-muted: color-mix(in srgb, #c58af9 24%, transparent);
   --primary-color: var(--accent-color);
   --text-disabled: #666;
   --text-area-bg: #191919;

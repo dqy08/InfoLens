@@ -16,7 +16,6 @@ def configure_logging(app=None):
     # 屏蔽第三方库的日志
     logging.getLogger('werkzeug').setLevel(logging.CRITICAL)
     logging.getLogger('connexion').setLevel(logging.CRITICAL)
-    logging.getLogger('flask_cors').setLevel(logging.CRITICAL)
     logging.getLogger('flask').setLevel(logging.CRITICAL)
     logging.getLogger('urllib3').setLevel(logging.CRITICAL)
     logging.getLogger('transformers').setLevel(logging.CRITICAL)

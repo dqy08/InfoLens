@@ -222,6 +222,16 @@ window.onload = () => {
     initHighlightClearListeners(clearHighlights);
 
     // 创建可视化更新器
+    const syncAnalyzeModeChrome = (semanticEnabled: boolean) => {
+        const isAdmin = adminManager.isInAdminMode();
+        submitBtn.style('display', semanticEnabled ? 'none' : null);
+        loadUrlBtn.style('display', semanticEnabled ? 'none' : null);
+        analyzeSaveBtn.style('display', semanticEnabled || !isAdmin ? 'none' : null);
+        saveBtn.style('display', semanticEnabled || !isAdmin ? 'none' : null);
+        saveLocalBtn.style('display', semanticEnabled ? 'none' : null);
+        // metrics 显隐由 appStateManager（hasValidData ∧ ¬semantic）统一处理
+        appStateManager.updateButtonStates();
+    };
     const visualizationUpdater = new VisualizationUpdater({
         lmf,
         highlightController,
@@ -231,7 +241,8 @@ window.onload = () => {
         stats_surprisal_progress,
         stats_match_score_progress,
         appStateManager,
-        surprisalColorScale: tokenSurprisalColorScale as d3.ScaleSequential<string>
+        surprisalColorScale: tokenSurprisalColorScale as d3.ScaleSequential<string>,
+        syncModeChrome: syncAnalyzeModeChrome,
     });
 
     addDigitsMergeRenderListener(() => {
@@ -311,9 +322,7 @@ window.onload = () => {
         api,
         () => {
             // 根据管理员模式更新写按钮（进/退 admin 会整页 reload，无需在此处理 Compare 链）
-            const isAdmin = adminManager.isInAdminMode();
-            analyzeSaveBtn.style('display', isAdmin ? null : 'none');
-            saveBtn.style('display', isAdmin ? null : 'none');
+            syncAnalyzeModeChrome(getSemanticAnalysisEnabled());
         },
         {
             onMinimapToggle: (enabled: boolean) => {
@@ -323,10 +332,11 @@ window.onload = () => {
                 }, false);
                 lsWriteBool('minimap_enabled', enableMinimap, '1');
             },
-            onSemanticAnalysisToggle: (_enabled: boolean) => {
-                // 打开/关闭时都清除 query，并将 submode/chunked/color/阈值 重置为默认值并写回 localStorage
+            onSemanticAnalysisToggle: (enabled: boolean) => {
+                // submode/chunked/color/阈值重置为默认；不清除另一边分析数据，切回可恢复展示
+                // query：切回语义且仍有 lastSearchedQuery 时回填，避免空输入框配旧高亮
                 const queryEl = document.getElementById('semantic_search_input') as HTMLInputElement | null;
-                if (queryEl) queryEl.value = '';
+                const lastQ = appStateManager.getState().lastSearchedQuery;
                 const submodeEl = document.getElementById('semantic_submode_select') as HTMLSelectElement | null;
                 if (submodeEl) submodeEl.value = 'hybrid';
                 const chunkedEl = document.getElementById('semantic_chunked_mode') as HTMLInputElement | null;
@@ -337,12 +347,28 @@ window.onload = () => {
                 const thresholdEl = document.getElementById('semantic_threshold_input') as HTMLInputElement | null;
                 if (thresholdEl) thresholdEl.value = String(SEMANTIC_MATCH_THRESHOLD);
                 const params = URLHandler.parameters;
-                delete params['semantic_query'];
+                if (enabled && lastQ) {
+                    if (queryEl) queryEl.value = lastQ;
+                    params['semantic_query'] = lastQ;
+                } else {
+                    if (queryEl) queryEl.value = '';
+                    delete params['semantic_query'];
+                    d3.select('#semantic_match_degree').style('display', 'none');
+                }
                 URLHandler.updateUrl(params, false);
                 syncSemanticOptionsToStorage();
-                appStateManager.setLastSearchedQuery(null);
-                visualizationUpdater.clearSemanticState();
                 visualizationUpdater.syncSemanticUiFromConfig();
+                if (enabled && lastQ) {
+                    const md = visualizationUpdater.peekSemanticMatchDegree();
+                    const mdEl = d3.select('#semantic_match_degree');
+                    if (md !== null) {
+                        mdEl.text(tr('Match: {0}%').replace('{0}', (md * 100).toFixed(1)))
+                            .style('display', 'inline-block')
+                            .style('color', md < getSemanticMatchThreshold() ? 'var(--error-color, #e74c3c)' : null);
+                    } else {
+                        mdEl.style('display', 'none');
+                    }
+                }
             },
         },
         themeManager,
@@ -676,6 +702,8 @@ window.onload = () => {
     // 注意：Clear按钮状态和字数统计由TextInputController内部自动管理
     // 使用原生 addEventListener 监听 input 事件，避免覆盖 TextInputController 的监听器
     const textFieldNode = textField.node() as HTMLTextAreaElement | null;
+    /** 用户单方面改过文本，失焦时需把纯文本同步到右侧 */
+    let textDirtyForPlainSync = false;
     if (textFieldNode) {
         textFieldNode.addEventListener('input', (event: Event) => {
             // 检查是否是匹配分析结果的文本填入
@@ -683,6 +711,7 @@ window.onload = () => {
             
             if (!isMatchingAnalysis) {
                 // 单方面的文本修改（用户输入、预填充等），清除数据标记并重置状态（视为新的分析阶段）
+                textDirtyForPlainSync = true;
                 visualizationUpdater.clearDataOnTextChange();
                 appStateManager.updateState({ 
                     hasValidData: false,
@@ -696,6 +725,15 @@ window.onload = () => {
             
             // 注意：文本修改时不清除文件名显示和URL参数（与远程demo行为一致）
             // 只有点击analyze按钮时才会清除这些状态
+        });
+        // 失焦：用户改过字则同步纯文本到右侧（busy 时不消费 dirty，下次失焦再试）
+        textFieldNode.addEventListener('blur', () => {
+            if (!textDirtyForPlainSync) return;
+            const s = appStateManager.getState();
+            if (s.isAnalyzing || s.isSemanticSearching || s.isGlobalLoading) return;
+            textDirtyForPlainSync = false;
+            // dirty 表示已清分析数据；以用户编辑为准同步（showPlainText 会负责显示 #all_result）
+            lmf.showPlainText(textInputController.getTextValue());
         });
     }
     // 初始化时更新业务逻辑相关的按钮状态
@@ -886,6 +924,15 @@ window.onload = () => {
             mdEl.style('display', 'none');
         }
     };
+    /** 搜索框为空时：语义高亮与 query 对齐（清空） */
+    const onSemanticQuerySelect = () => {
+        appStateManager.updateButtonStates();
+        if ((semanticSearchInput?.value ?? '').length > 0) return;
+        appStateManager.setLastSearchedQuery(null);
+        d3.select('#semantic_match_degree').style('display', 'none');
+        syncSemanticQueryToUrl();
+        visualizationUpdater.clearSemanticState();
+    };
     const semanticSearchController = new SemanticSearchController({
         getQuery: () => semanticSearchInput?.value ?? '',
         getText: () => (textField.property('value') ?? visualizationUpdater.getCurrentData()?.request?.text ?? '').toString(),
@@ -918,7 +965,7 @@ window.onload = () => {
     initQueryHistoryDropdown({
         input: semanticSearchInput,
         dropdownId: 'semantic_search_history_dropdown',
-        onSelect: () => appStateManager.updateButtonStates(),
+        onSelect: onSemanticQuerySelect,
         onHistorySelect: runSemanticSearchOrChunked,
         onRemove: removeSemanticCacheByQuery
     });

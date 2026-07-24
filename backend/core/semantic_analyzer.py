@@ -34,13 +34,22 @@ def _get_logits_gradient_submode() -> str:
         return "fill_blank"
 
 
-def _truncate_text_by_tokens(tokenizer, text: str, max_tokens: int) -> str:
-    """将 text 截断至最多 max_tokens 个 token；超长时打印提示。"""
+def _truncate_text_by_tokens(tokenizer, text: str, max_tokens: int) -> tuple[str, int]:
+    """
+    将 text 截断至最多 max_tokens 个 token；超长时打印提示。
+    返回 (截断后文本, 实际 token 数)，token 数供调用方复用（日志等），避免重复分词。
+
+    已知问题：截断是静默的，响应里没有任何字段告知调用方发生过截断。前端按字节数切 chunk
+    （extension/config.js chunkBytes=800），与这里的 token 上限没有联动；数字/标点/代码等
+    token 密度高的内容，800 字节可能远超 max_tokens，导致相关度判断和 fill_blank 高亮只覆盖
+    截断后的前缀。后果是漏检（chunk 被判无关或部分内容不高亮），不是误报。调大 max_tokens
+    只能缓解、不能根治（数字等本就按字符/短片段单独分词，token 密度上限很高）。
+    """
     text_ids = tokenizer.encode(text, add_special_tokens=False)
     if len(text_ids) > max_tokens:
         print(f"⚠️  原文过长，已截断至前 {max_tokens} token")
-        return tokenizer.decode(text_ids[:max_tokens])
-    return text
+        return tokenizer.decode(text_ids[:max_tokens]), max_tokens
+    return text, len(text_ids)
 
 
 def _get_gradient_checkpointing() -> bool:
@@ -56,6 +65,37 @@ def _get_verbose() -> bool:
     """是否输出详细调试信息（由 --verbose 控制）"""
     from backend.platform.app_context import get_verbose
     return get_verbose()
+
+
+def _build_prompt_parts(submode: str, query: str) -> tuple:
+    """
+    按子模式（count / match_score已废弃 / fill_blank）构造 (instruction, generation_guide, neg_token)。
+    单条与批量前向共用，避免同一套子模式分叉在两处重复维护。
+
+    - instruction：拼在原文前的指令；文档前用 \\n\\n 分隔，避免 tokenizer 将首字符与空格合并导致 offset_mapping 计算错误
+    - generation_guide：chat template 只支持完整消息，生成引导词需在 apply_chat_template 之后追加
+    - neg_token：计算 full_match_degree（1 - P(neg_token)）用的「无关」token
+    """
+    if submode == "count":
+        return (
+            f"请问下面文字中有多少个词与查询主题（{query}）相关？文字内容：\n\n",
+            f"原文中与查询主题（{query}）相关的词的数量 = **",
+            "0",
+        )
+    if submode == "match_score":  # 已废弃
+        return (
+            f"请问下面文字与查询主题（{query}）的相关程度是多少？请回答0/1/2（2为最高相关）。文字内容：\n\n",
+            f"文章和查询主题（{query}）的相关程度（0-2）打分为：**",
+            "0",
+        )
+    if submode == "fill_blank":
+        return (
+            f"请问下面文字中哪个词与查询主题（{query}）最相关？如无相关词则回答“无”。文字内容：\n\n",
+            # “引号是特意为了防止模型生成引号
+            f"原文中与查询主题（{query}）最相关的一个词是：**“",
+            "无",
+        )
+    raise ValueError(f"未知子模式: {submode}")
 
 
 def _analyze_logits_gradient(
@@ -81,35 +121,16 @@ def _analyze_logits_gradient(
 
     if progress_callback:
         progress_callback(1, TOTAL_STEPS, "encoding", None)
-    # 根据submodule来决定不同的instruction
-    # 文档前用 \n\n 分隔，避免 tokenizer 将首字符与空格合并，导致 offset_mapping 计算错误
-    if submode == "count":
-        instruction = f"请问下面文字中有多少个词与查询主题（{query}）相关？文字内容：\n\n"
-    elif submode == "match_score":  # 已废弃
-        instruction = f"请问下面文字与查询主题（{query}）的相关程度是多少？请回答0/1/2（2为最高相关）。文字内容：\n\n"
-    elif submode == "fill_blank":
-        instruction = f"请问下面文字中哪个词与查询主题（{query}）最相关？如无相关词则回答“无”。文字内容：\n\n"
-    else:
-        raise ValueError(f"未知子模式: {submode}")
+    instruction, generation_guide, neg_token = _build_prompt_parts(submode, query)
 
     # 截断 text 到 max_length token，再拼
-    truncated_text = _truncate_text_by_tokens(tokenizer, text, max_length)
+    truncated_text, input_token_count = _truncate_text_by_tokens(tokenizer, text, max_length)
     
     messages = [{"role": "user", "content": instruction + truncated_text}]
     formatted = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True,
         enable_thinking=False
     )
-    # 生成引导词：chat template 只支持完整消息，引导词需追加到 formatted
-    if submode == "count":
-        generation_guide = f"原文中与查询主题（{query}）相关的词的数量 = **"
-    elif submode == "match_score":  # 已废弃
-        generation_guide = f"文章和查询主题（{query}）的相关程度（0-2）打分为：**"
-    elif submode == "fill_blank":
-        # “引号是特意为了防止模型生成引号
-        generation_guide = f"原文中与查询主题（{query}）最相关的一个词是：**“"
-    else:
-        raise ValueError(f"未知子模式: {submode}")
     formatted += generation_guide
 
     # logits_gradient count/fill_blank 的 top-k，影响梯度目标覆盖的候选词数量
@@ -170,7 +191,6 @@ def _analyze_logits_gradient(
         if _get_verbose():
             print(f"top{LOGITS_GRADIENT_TOPK}: {[f'{t}({p*100:.1f}%)' for t, p in zip(topk_tokens, topk_probs)]}")
 
-        neg_token = "无" if submode == "fill_blank" else "0"
         neg_id = tokenizer.encode(neg_token, add_special_tokens=False)[0]
         # 全文匹配度：count/match_score(已废弃) 用 1-P("0")，fill_blank 用 1-P("无")
         p_neg = probs[0, neg_id].item()
@@ -181,6 +201,7 @@ def _analyze_logits_gradient(
                 "model": get_instruct_model_display_name(),
                 "token_attention": [],
                 "full_match_degree": full_match_degree,
+                "input_token_count": input_token_count,
             }
 
         if progress_callback:
@@ -239,6 +260,7 @@ def _analyze_logits_gradient(
             "model": get_instruct_model_display_name(),
             "token_attention": token_attention,
             "full_match_degree": full_match_degree,
+            "input_token_count": input_token_count,
         }
         if debug_info:
             out["debug_info"] = {"abbrev": abbrev, "topk_tokens": topk_tokens, "topk_probs": topk_probs}
@@ -250,28 +272,120 @@ def _analyze_logits_gradient(
         DeviceManager.clear_cache(device)
 
 
+def _analyze_logits_gradient_batch(
+    query: str,
+    texts: List[str],
+    tokenizer,
+    model,
+    device,
+    submode_override: Optional[str] = None,
+    progress_callback: Optional[Callable[[int, int, str, Optional[int]], None]] = None,
+) -> List[Dict]:
+    """
+    批量 full_match_degree_only 前向：多条 text 一次 forward，仅用于 count 预判等纯前向场景的性能测试。
+    无反向传播，不产出 token_attention（与单条 full_match_degree_only=True 时一致）。
+
+    性能结论（本地 CPU/线上服务器实测）：
+    batching 对本函数内前向计算的加速有限，batch=4 约 1.3~1.5x，batch=8 约 1.6x，
+    边际递减明显；MPS 上则几乎无收益。线上用客户端总耗时测得的更高"加速比"，
+    大头来自摊薄了每次 HTTP 请求固定的网络/SSE 开销（约 1.2~1.7s，与 batch 无关），
+    并非本函数计算变快。
+    """
+    TOTAL_STEPS = 2  # 批量只有 encoding / inference 两阶段，无 backward/processing
+
+    submode = submode_override if submode_override is not None else _get_logits_gradient_submode()
+    max_length = get_semantic_max_token_length()
+
+    if progress_callback:
+        progress_callback(1, TOTAL_STEPS, "encoding", None)
+    instruction, generation_guide, neg_token = _build_prompt_parts(submode, query)
+
+    formatted_list = []
+    input_token_counts = []
+    for text in texts:
+        truncated_text, input_token_count = _truncate_text_by_tokens(tokenizer, text, max_length)
+        input_token_counts.append(input_token_count)
+        messages = [{"role": "user", "content": instruction + truncated_text}]
+        formatted = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
+        )
+        formatted_list.append(formatted + generation_guide)
+
+    # 左 padding：批内各序列长度不同，取 logits[:, -1, :] 时需保证最后一列都是各自真实末尾 token
+    # pad_token / padding_side 都是共享 tokenizer 上的可变状态，用完必须还原
+    original_pad_token = tokenizer.pad_token
+    original_padding_side = tokenizer.padding_side
+    try:
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = "left"
+        enc = tokenizer(formatted_list, return_tensors="pt", padding=True)
+    finally:
+        tokenizer.padding_side = original_padding_side
+        tokenizer.pad_token = original_pad_token
+
+    input_ids = enc["input_ids"].to(device)
+    attention_mask = enc["attention_mask"].to(device)
+
+    if progress_callback:
+        progress_callback(2, TOTAL_STEPS, "inference", None)
+    model.eval()
+    with torch.no_grad():
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask, output_attentions=False)
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    elif device.type == "mps":
+        torch.mps.synchronize()
+
+    logits = outputs.logits[:, -1, :]
+    probs = torch.softmax(logits, dim=-1)
+    neg_id = tokenizer.encode(neg_token, add_special_tokens=False)[0]
+    full_match_degrees = (1.0 - probs[:, neg_id]).tolist()
+
+    DeviceManager.clear_cache(device)
+    return [
+        {
+            "model": get_instruct_model_display_name(),
+            "token_attention": [],
+            "full_match_degree": round(fmd, 4),
+            "input_token_count": input_token_count,
+        }
+        for fmd, input_token_count in zip(full_match_degrees, input_token_counts)
+    ]
+
+
 def analyze_semantic(
     query: str,
-    text: str,
+    text,
     submode_override: Optional[str] = None,
     progress_callback: Optional[Callable[[int, int, str, Optional[int]], None]] = None,
     debug_info: bool = False,
     full_match_degree_only: bool = False,
-) -> Dict:
+):
     """
     分析原文各 token 与 query 的相关度（使用 logits_gradient 梯度归因）。
 
     Args:
         query: 查询主题
-        text: 原文
+        text: 原文；为 List[str] 时走批量前向（仅支持 full_match_degree_only=True，用于性能测试）
         submode_override: 评估时可选覆盖子模式（count/match_score已废弃/fill_blank）
         progress_callback: 可选进度回调 (step, total_steps, stage, percentage)
         debug_info: 为 True 时返回 debug_abbrev（推理原文缩写）；topk_tokens、topk_probs 始终在结果中
 
     Returns:
-        {"model", "token_attention"（各 token 归因 score；API 历史字段名）, "full_match_degree"}；debug_info=True 时包含 debug_info 对象
+        text 为 str 时：{"model", "token_attention"（各 token 归因 score；API 历史字段名）, "full_match_degree"}；
+        debug_info=True 时包含 debug_info 对象。
+        text 为 List[str] 时：上述字典组成的 List（无 debug_info）。
     """
     tokenizer, model, device = ensure_instruct_slot_ready()
+    if isinstance(text, list):
+        if not full_match_degree_only:
+            raise ValueError("text 为数组（批量）时仅支持 full_match_degree_only=True")
+        return _analyze_logits_gradient_batch(
+            query, text, tokenizer, model, device,
+            submode_override=submode_override,
+            progress_callback=progress_callback,
+        )
     return _analyze_logits_gradient(
         query, text, tokenizer, model, device,
         submode_override=submode_override,

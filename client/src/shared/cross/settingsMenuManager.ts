@@ -15,10 +15,6 @@ import { getDigitsMergeEnabled, setDigitsMergeEnabled } from './digitsMergeManag
 import { getForceNarrowScreen, setForceNarrowScreen, FORCE_NARROW_CHANGE_EVENT } from '../core/responsive';
 import { getSemanticMatchThreshold } from './semanticThresholdManager';
 import {
-    getInfoDensityRenderDisabled,
-    setInfoDensityRenderDisabled,
-} from '../../features/analysis/infoDensityRenderManager';
-import {
     getSurprisalColorWeakened,
     setSurprisalColorWeakened,
 } from '../../features/analysis/surprisalColorWeakenManager';
@@ -48,7 +44,6 @@ export class SettingsMenuManager {
     private semanticThresholdInput: d3.Selection<HTMLInputElement, unknown, HTMLElement, any>;
     private semanticThresholdItem: d3.Selection<HTMLElement, unknown, HTMLElement, any>;
     private semanticSubmodeRow: d3.Selection<HTMLElement, unknown, HTMLElement, any>;
-    private disableInfoDensityToggle: d3.Selection<HTMLInputElement, unknown, HTMLElement, any>;
     private weakenSurprisalColorToggle: d3.Selection<HTMLInputElement, unknown, HTMLElement, any>;
     private themeDropdownContainer: d3.Selection<Element, unknown, HTMLElement, any>;
     private adminManager: AdminManager;
@@ -86,7 +81,6 @@ export class SettingsMenuManager {
         this.semanticThresholdInput = d3.select<HTMLInputElement, any>('#semantic_threshold_input');
         this.semanticThresholdItem = d3.select<HTMLElement, any>('#semantic_threshold_item');
         this.semanticSubmodeRow = d3.select<HTMLElement, any>('#semantic_submode_row');
-        this.disableInfoDensityToggle = d3.select<HTMLInputElement, any>('#disable_info_density_toggle');
         this.weakenSurprisalColorToggle = d3.select<HTMLInputElement, any>('#weaken_surprisal_color_toggle');
         this.themeDropdownContainer = d3.select('#theme_dropdown');
         this.adminManager = adminManager;
@@ -149,20 +143,9 @@ export class SettingsMenuManager {
                 setSemanticAnalysisEnabled(enabled);
                 this.updateSemanticThresholdVisibility();
                 this.updateSemanticSubmodeRowVisibility();
-                setInfoDensityRenderDisabled(enabled);
-                this.setDisableInfoDensity(enabled);
-                window.dispatchEvent(new CustomEvent('info-density-render-change'));
                 if (this.callbacks.onSemanticAnalysisToggle) {
                     this.callbacks.onSemanticAnalysisToggle(enabled);
                 }
-            });
-        }
-
-        if (this.menuContext === 'analysis' && this.disableInfoDensityToggle.node()) {
-            this.disableInfoDensityToggle.on('change', () => {
-                const disabled = (this.disableInfoDensityToggle.node() as HTMLInputElement)?.checked || false;
-                setInfoDensityRenderDisabled(disabled);
-                window.dispatchEvent(new CustomEvent('info-density-render-change'));
             });
         }
 
@@ -209,9 +192,6 @@ export class SettingsMenuManager {
         this.setCheckboxChecked(this.forceNarrowToggle, getForceNarrowScreen());
         if (this.menuContext === 'analysis' && this.semanticThresholdInput.node()) {
             this.setSemanticThresholdValue(getSemanticMatchThreshold());
-        }
-        if (this.menuContext === 'analysis' && this.disableInfoDensityToggle.node()) {
-            this.setDisableInfoDensity(getInfoDensityRenderDisabled());
         }
         if (this.menuContext === 'analysis' && this.weakenSurprisalColorToggle.node()) {
             this.setWeakenSurprisalColor(getSurprisalColorWeakened());
@@ -275,9 +255,6 @@ export class SettingsMenuManager {
             this.setSemanticThresholdValue(getSemanticMatchThreshold());
             this.updateSemanticThresholdVisibility();
         }
-        if (this.menuContext === 'analysis' && this.disableInfoDensityToggle.node()) {
-            this.setDisableInfoDensity(getInfoDensityRenderDisabled());
-        }
         if (this.menuContext === 'analysis' && this.weakenSurprisalColorToggle.node()) {
             this.setWeakenSurprisalColor(getSurprisalColorWeakened());
         }
@@ -337,16 +314,6 @@ export class SettingsMenuManager {
         const input = this.semanticThresholdInput.node() as HTMLInputElement | null;
         if (input) {
             input.value = String(value);
-        }
-    }
-
-    /**
-     * 设置 disable info density 的初始状态
-     */
-    public setDisableInfoDensity(disabled: boolean): void {
-        const checkbox = this.disableInfoDensityToggle.node() as HTMLInputElement | null;
-        if (checkbox) {
-            checkbox.checked = disabled;
         }
     }
 

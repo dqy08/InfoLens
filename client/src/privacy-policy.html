@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Info Lens: Semantic Highlight — Privacy Policy</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+
+<body style="max-width:700px;margin:40px auto;padding:0 20px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;line-height:1.6;color:#222;">
+    <h1>Privacy Policy for Info Lens: Semantic Highlight</h1>
+    <p><em>Last updated: July 2026</em></p>
+
+    <h2>Data We Process</h2>
+    <p>When you use the extension to search a page, it sends two things to our backend server (hosted at dqy08-infolens.hf.space):</p>
+    <ul>
+        <li>The search query you type</li>
+        <li>The visible text of the article/body content of the page you are currently viewing</li>
+    </ul>
+    <p>This data is sent only when you actively invoke the extension (via the toolbar icon or the Ctrl+Shift+F shortcut) on the page you are viewing at that moment. The extension does not run in the background and does not access any other tabs or pages.</p>
+
+    <h2>How We Use It</h2>
+    <p>The query and page text are used solely to compute semantic similarity and return matching results, which the extension then highlights on the page. No other use is made of this data.</p>
+
+    <h2>Data We Do Not Collect</h2>
+    <p>We do not collect or store: names, email addresses, passwords, financial information, health information, personal communications, or any other personally identifiable information. We do not track your browsing history across pages or sessions.</p>
+
+    <h2>Data Storage &amp; Retention</h2>
+    <ul>
+        <li>Query text and page content are processed transiently to generate search results and are not stored on our server after the response is returned.</li>
+        <li>Our server keeps a temporary, in-memory counter to distinguish visitor sessions for basic operational purposes (e.g., diagnosing issues). This counter is not written to disk, is not linked to any other data, and is cleared whenever the server restarts.</li>
+        <li>Your recent search queries are saved locally in your browser (via the extension's local storage) so you can reuse them. This data never leaves your device.</li>
+    </ul>
+
+    <h2>Third-Party Sharing</h2>
+    <p>We do not share, sell, or transfer any data to third parties. We do not use your data for advertising.</p>
+
+    <h2>Security</h2>
+    <p>All data is transmitted over HTTPS.</p>
+
+    <h2>Permissions</h2>
+    <p>The extension requests the minimum permissions needed for its single purpose (semantic search on the active page):</p>
+    <ul>
+        <li><strong>activeTab / scripting</strong>: to read and highlight text on the page you are currently viewing, only when you invoke the extension</li>
+        <li><strong>storage</strong>: to save your recent search queries locally in your browser</li>
+    </ul>
+    <p>The extension does <strong>not</strong> declare host permissions. Query and page text are sent to our backend by the extension’s background service worker via a standard cross-origin HTTPS request; the backend allows this with CORS. The page you are viewing never talks to our server directly.</p>
+
+    <h2>Changes to This Policy</h2>
+    <p>If our data practices change, we will update this policy and the Chrome Web Store listing accordingly.</p>
+
+    <h2>Contact</h2>
+    <p>For questions about this policy, please contact <a href="mailto:xiaoyundqy@qq.com">xiaoyundqy@qq.com</a>.</p>
+</body>
+
+</html>

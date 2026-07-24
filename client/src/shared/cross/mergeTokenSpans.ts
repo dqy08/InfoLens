@@ -16,6 +16,23 @@ export function codePointLength(text: string): number {
 }
 
 /**
+ * UTF-16 码元下标 → Unicode 码点下标（与扩展 content.js `utf16ToCp` 同语义）。
+ * 分块器 `startOffset` 为 UTF-16；API / 渲染 offset 为码点，拼接前须转换。
+ */
+export function utf16IndexToCodePointIndex(text: string, utf16Index: number): number {
+    const s = text || '';
+    const limit = Math.max(0, Math.min(utf16Index, s.length));
+    let i = 0;
+    let cps = 0;
+    while (i < limit) {
+        const cp = s.codePointAt(i)!;
+        i += cp > 0xffff ? 2 : 1;
+        cps += 1;
+    }
+    return cps;
+}
+
+/**
  * 按码点下标 [start, end) 取子串；与校验、合并管线一致。
  */
 export function sliceTextByCodePointOffsets(text: string, start: number, end: number): string {

@@ -10,6 +10,7 @@ import type { AppState } from '../analysis/appStateManager';
 import { LocalDemoCache } from '../../shared/storage/localDemoCache';
 import URLHandler from '../../shared/core/URLHandler';
 import { getDemoName } from '../../shared/core/pathUtils';
+import { getDesktopTextScrollRoot } from '../../shared/core/responsive';
 
 /**
  * Demo 渲染选项
@@ -63,10 +64,8 @@ export class DemoBusinessLogic {
      */
     scrollToTop(): void {
         requestAnimationFrame(() => {
-            const rightPanel = document.querySelector('.right_panel') as HTMLElement;
-            if (rightPanel) {
-                rightPanel.scrollTop = 0;
-            }
+            const root = getDesktopTextScrollRoot();
+            if (root) root.scrollTop = 0;
         });
     }
 

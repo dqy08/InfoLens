@@ -165,7 +165,7 @@ export class SvgOverlayManager {
 
     /**
      * 更新 base rect（信息密度/classic 底色）颜色，不重建 SVG。
-     * 用于 Disable info density / token render style 切换时，增量路径下刷新底色。
+     * 用于 token render style 切换时，增量路径下刷新底色。
      */
     updateBaseRectColors(
         rd: FrontendAnalyzeResult,

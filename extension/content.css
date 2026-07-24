@@ -1,0 +1,94 @@
+/* Extension-only: underline overlay + Custom Highlight.
+ * Find bar lives in Shadow DOM (see content.js).
+ *
+ * token / truncated：CSS Custom Highlight API（不改 DOM、不垫字下）
+ * underline：#il-overlay-host 绝对定位盖层（不必垫字下）
+ */
+
+#il-overlay-host {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 2147483644;
+}
+
+/* SYNC: client/src/shared/vis/constants.ts → HIGHLIGHT_CONSTANTS
+ * UNDERLINE_WIDTH=2, HIGHLIGHT_COLOR fallback #1e6fff */
+.il-chunk-underline {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  height: 2px;
+  background: #1e6fff;
+  border-radius: 2px;
+}
+
+/*
+ * token：16 档 background-color。
+ * SYNC: SurprisalColorConfig → SURPRISAL_RED_RGB / SURPRISAL_MAX_ALPHA(0.7)
+ * alpha = ((level+1)/16) * 0.7
+ */
+::highlight(il-token-0) {
+  background-color: rgba(255, 71, 64, 0.04375);
+}
+::highlight(il-token-1) {
+  background-color: rgba(255, 71, 64, 0.0875);
+}
+::highlight(il-token-2) {
+  background-color: rgba(255, 71, 64, 0.13125);
+}
+::highlight(il-token-3) {
+  background-color: rgba(255, 71, 64, 0.175);
+}
+::highlight(il-token-4) {
+  background-color: rgba(255, 71, 64, 0.21875);
+}
+::highlight(il-token-5) {
+  background-color: rgba(255, 71, 64, 0.2625);
+}
+::highlight(il-token-6) {
+  background-color: rgba(255, 71, 64, 0.30625);
+}
+::highlight(il-token-7) {
+  background-color: rgba(255, 71, 64, 0.35);
+}
+::highlight(il-token-8) {
+  background-color: rgba(255, 71, 64, 0.39375);
+}
+::highlight(il-token-9) {
+  background-color: rgba(255, 71, 64, 0.4375);
+}
+::highlight(il-token-10) {
+  background-color: rgba(255, 71, 64, 0.48125);
+}
+::highlight(il-token-11) {
+  background-color: rgba(255, 71, 64, 0.525);
+}
+::highlight(il-token-12) {
+  background-color: rgba(255, 71, 64, 0.56875);
+}
+::highlight(il-token-13) {
+  background-color: rgba(255, 71, 64, 0.6125);
+}
+::highlight(il-token-14) {
+  background-color: rgba(255, 71, 64, 0.65625);
+}
+::highlight(il-token-15) {
+  background-color: rgba(255, 71, 64, 0.7);
+}
+
+/*
+ * 未分析后缀置灰：统一灰（不跟链接/标题各自字色）。
+ * CanvasText / Canvas 随色彩方案变，深浅色均可读。
+ */
+::highlight(il-truncated) {
+  color: color-mix(in srgb, CanvasText 40%, Canvas 60%);
+}

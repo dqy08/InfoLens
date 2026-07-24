@@ -75,7 +75,7 @@ def ingress_inference(
     顺序：access_log / bump_api（log_fn）→ 分流 → response_log_fn（非 worker）。
 
     Worker 上未启用的槽位直接 404；remote 槽位 HTTP 代理到对应 Space。
-    门户本地与代理共用同一 response 日志回调。
+    response_log_fn：远程代理端到端日志；本地执行若已在 handler 打完整日志可传 None。
     """
     if is_worker() and not slot_enabled(slot):
         return _slot_unavailable(slot)

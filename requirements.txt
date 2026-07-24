@@ -4,7 +4,6 @@ numpy>=1.24.0
 connexion[flask,swagger-ui,uvicorn]>=3.0.0
 flask>=3.0.0
 PyYAML>=6.0
-flask-cors>=4.0.0
 Flask-Compress>=1.14
 accelerate>=0.30.0,<1.0.0
 bitsandbytes>=0.43.0

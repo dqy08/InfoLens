@@ -4,6 +4,7 @@
  */
 
 import * as d3 from 'd3';
+import { getSemanticAnalysisEnabled } from '../../shared/cross/semanticAnalysisManager';
 
 /**
  * 应用状态对象
@@ -128,9 +129,10 @@ export class AppStateManager {
             }
         }
 
-        // TextMetrics显示：有有效数据（hasValidData = true 时，stats 一定不为 null）
+        // TextMetrics：仅信息密度模式且有有效数据时显示（语义模式互斥隐藏）
         if (!this.deps.textMetrics.empty()) {
-            this.deps.textMetrics.classed('is-hidden', !this.state.hasValidData);
+            const showMetrics = this.state.hasValidData && !getSemanticAnalysisEnabled();
+            this.deps.textMetrics.classed('is-hidden', !showMetrics);
         }
     }
 
@@ -155,9 +157,19 @@ export class AppStateManager {
         }
         // 语义搜索 loading：独立 loader
         if (updates.isSemanticSearching !== undefined) {
-            d3.select('#semantic_search_loader').style('visibility', updates.isSemanticSearching ? 'visible' : 'hidden');
-            if (!updates.isSemanticSearching) {
+            const searching = updates.isSemanticSearching;
+            d3.select('#semantic_search_loader').style('visibility', searching ? 'visible' : 'hidden');
+            if (!searching) {
                 d3.select('#semantic_progress').text('').style('display', 'none');
+            }
+            // 搜索中退出编辑态：失焦、只读、藏光标；结束恢复可编
+            const el = document.getElementById('semantic_search_input') as HTMLInputElement | null;
+            if (el) {
+                el.readOnly = searching;
+                if (searching) el.blur();
+            }
+            if (searching) {
+                document.getElementById('semantic_search_history_dropdown')?.classList.remove('is-visible');
             }
         }
     }

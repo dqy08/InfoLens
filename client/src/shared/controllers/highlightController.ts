@@ -28,13 +28,14 @@ export class HighlightController {
     }
 
     /**
-     * 清除所有高亮（文本与直方图）
+     * 清除高亮（直方图选中 + 文本）。
+     * @param options.preserveChunkInterval 为 true 时保留 chunk 区间下划线及其 hold/fade
      */
-    public clearHighlights(): void {
+    public clearHighlights(options?: { preserveChunkInterval?: boolean }): void {
         this.options.stats_frac.clearSelection();
         this.options.stats_raw_score_normed?.clearSelection();
         this.options.stats_match_score_progress?.clearSelection();
-        this.options.lmf.clearHighlight();
+        this.options.lmf.clearHighlight(options);
     }
 
     /**

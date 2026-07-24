@@ -64,3 +64,35 @@ def test_extract_completions_ttft_from_result():
     }
     p, c, ttft = inference_response_log.extract_completions_usage(data)
     assert (p, c, ttft) == (10, 5, 0.25)
+
+
+def test_semantic_response_uses_input_token_count_when_attention_empty(capsys):
+    inference_response_log.log_analyze_semantic_response(
+        request_id=19,
+        result={"token_attention": [], "input_token_count": 142},
+        elapsed=1.564,
+        wait_time=0.012,
+    )
+    out = capsys.readouterr().out
+    assert "tokens=142" in out
+    assert "wait=0.0120s" in out
+    assert "processing=" in out
+
+
+def test_semantic_portal_logger_sums_batch_input_token_count(capsys):
+    logged = {"request_id": 7}
+    log_fn = inference_response_log.make_analyze_semantic_response_logger(logged)
+    log_fn(
+        {
+            "success": True,
+            "results": [
+                {"full_match_degree": 0.5, "input_token_count": 10},
+                {"full_match_degree": 0.2, "input_token_count": 20},
+            ],
+        },
+        0.8,
+        200,
+    )
+    out = capsys.readouterr().out
+    assert "req_id=7" in out
+    assert "tokens=30" in out

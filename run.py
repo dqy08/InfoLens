@@ -118,7 +118,8 @@ def _load_and_run(args):
         sys.exit(2)
 
     from flask_compress import Compress
-    from flask_cors import CORS
+    from connexion.middleware import MiddlewarePosition
+    from starlette.middleware.cors import CORSMiddleware
 
     import server
     from server import app
@@ -132,8 +133,15 @@ def _load_and_run(args):
     data_dir = resolve_data_dir(args.dir)
     ctx = AppContext.init(args, data_dir)
 
+    # Connexion 3：路由中间件会先于 Flask 拒掉未声明的 OPTIONS；CORS 必须挂在 BEFORE_ROUTING。
     if not ctx.args.no_cors:
-        CORS(app.app, headers="Content-Type")
+        app.add_middleware(
+            CORSMiddleware,
+            position=MiddlewarePosition.BEFORE_ROUTING,
+            allow_origins=["*"],
+            allow_methods=["*"],
+            allow_headers=["Content-Type"],
+        )
 
     Compress(app.app)
 

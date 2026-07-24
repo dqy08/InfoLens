@@ -196,7 +196,7 @@ export function mergeTokenSpansFullyForRendering<T extends { offset: [number, nu
     return mergeTokenDigitSpans(overlapped, text);
 }
 
-/** bytesPerChunk：UTF-8 字节数；startOffset：字符索引。 */
+/** bytesPerChunk：UTF-8 字节数；startOffset：UTF-16 码元下标（非码点；拼到 API offset 前须转码点）。扩展侧副本：`extension/splitTextToChunks.js`（改此处请同步）。 */
 export function splitTextToChunks(text: string, bytesPerChunk: number): Array<{ text: string; startOffset: number }> {
     if (bytesPerChunk <= 0) {
         throw new Error("分块字节上限必须大于 0，当前值: " + bytesPerChunk);

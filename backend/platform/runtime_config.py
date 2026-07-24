@@ -86,6 +86,7 @@ RUNTIME_CONFIGS = {
 
 # ============= 语义分析运行时配置（仅 max_token_length） =============
 # 按平台配置，语义分析独立于信息密度模型
+# 已知问题：与前端 chunkBytes 无联动，超限时静默截断导致漏检，见 semantic_analyzer._truncate_text_by_tokens
 
 SEMANTIC_RUNTIME_CONFIGS = {
     "default_cpu_machine": {"max_token_length": 300},

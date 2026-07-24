@@ -188,16 +188,26 @@ export function initQueryHistoryDropdown(options: InitQueryHistoryDropdownOption
             window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 
         // 列表过滤：与输入框一致不 trim；存盘与选中回填均为完整字符串
+        // 完全匹配当前输入的候选不展示（已是当前值，无选择意义）
         const filter =
             filterHistoryByInput && input ? (input.value ?? '').toLowerCase() : '';
+        const currentLower = input ? (input.value ?? '').toLowerCase() : null;
         const useEntries = getHistoryEntries != null;
         const entryRows = useEntries ? getHistoryEntries!() : null;
         const list = !useEntries ? (getHistoryItems ? getHistoryItems() : load(storageKey)) : null;
         const filteredEntries = entryRows
-            ? entryRows.filter((e) => !filter || e.label.toLowerCase().includes(filter))
+            ? entryRows.filter((e) => {
+                const labelLower = e.label.toLowerCase();
+                if (currentLower !== null && labelLower === currentLower) return false;
+                return !filter || labelLower.includes(filter);
+            })
             : null;
         const filteredStrings = list
-            ? list.filter((s) => !filter || s.toLowerCase().includes(filter))
+            ? list.filter((s) => {
+                const sLower = s.toLowerCase();
+                if (currentLower !== null && sLower === currentLower) return false;
+                return !filter || sLower.includes(filter);
+            })
             : null;
         dropdown.innerHTML = '';
         const filtered = filteredEntries ?? filteredStrings ?? [];

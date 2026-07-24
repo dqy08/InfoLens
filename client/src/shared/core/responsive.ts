@@ -84,6 +84,19 @@ export const isNarrowScreen = (): boolean =>
   getMobileMediaQuery().matches || getForceNarrowScreen();
 
 /**
+ * 桌面端正文滚动根。
+ * analysis 页把滚动下放到 `#results`（浮条留在 `.right_panel` 外）；其它页仍滚 `.right_panel`。
+ */
+export const getDesktopTextScrollRoot = (): HTMLElement | null => {
+  const results = document.getElementById('results');
+  if (results) {
+    const oy = getComputedStyle(results).overflowY;
+    if (oy === 'auto' || oy === 'scroll') return results;
+  }
+  return document.querySelector('.right_panel') as HTMLElement | null;
+};
+
+/**
  * 检测是否为移动端设备（基于设备能力）
  * 移动端：有触屏支持，且没有鼠标或没有悬浮支持
  */

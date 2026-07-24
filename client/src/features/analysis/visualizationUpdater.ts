@@ -45,14 +45,6 @@ import { getDigitsMergeEnabled } from '../../shared/cross/digitsMergeManager';
 import { getSemanticMatchThreshold } from '../../shared/cross/semanticThresholdManager';
 import { applySemanticDebugInfoPanel } from '../../shared/prediction_attribution/core/semanticDebugInfo';
 
-/** Token 边界不一致时抛出，用于中断联合展示 */
-export class TokenBoundaryInconsistentError extends Error {
-    constructor() {
-        super('Tokenizer results inconsistent: semantic and info-density token boundaries differ.');
-        this.name = 'TokenBoundaryInconsistentError';
-    }
-}
-
 /**
  * P(signal | raw_score_normed = s) 复用 findSignalThreshold 的 bins
  * 每个样本 s 落入对应 bin，P(signal) = (obsInBin - expInBin) / obsInBin
@@ -81,6 +73,8 @@ export interface VisualizationDependencies {
     stats_match_score_progress: ScatterPlot;
     appStateManager: AppStateManager;
     surprisalColorScale: d3.ScaleSequential<string>;
+    /** 语义/密度模式切换时同步 Analyze·上传·保存·metrics 等 chrome 显隐 */
+    syncModeChrome?: (semanticEnabled: boolean) => void;
 }
 
 /** 语义分析原始数据（独立存储） */
@@ -119,7 +113,7 @@ function hasSemanticData(data: { token_attention?: unknown[]; chunkInfos?: unkno
 
 /**
  * 当前数据状态
- * 信息密度与语义分析独立存储，展示时根据一致性决定单独或联合
+ * 信息密度与语义分析独立存储；展示由当前模式二选一，互不合并
  */
 export interface CurrentDataState {
     /** 信息密度分析结果（独立） */
@@ -168,12 +162,30 @@ export class VisualizationUpdater {
     }
 
     /**
-     * 获取当前展示数据（由 infoDensityData 与 semanticData 按展示逻辑计算）
+     * 获取当前展示数据（按当前模式取 infoDensityData 或 semanticData，互不合并）
      */
     getCurrentData(): AnalyzeResponse | null {
         const display = this.computeDisplayResult();
         if (!display) return null;
         return { request: { text: display.originalText }, result: display };
+    }
+
+    /** 语义分块中达到 Match threshold 的 chunk（供 Find 浮条 ↑↓） */
+    getMatchedChunks(): Array<{ startOffset: number; endOffset: number; chunkIndex: number; chunkMatchDegree: number }> {
+        const chunkInfos = this.currentState.semanticData?.chunkInfos;
+        if (!chunkInfos?.length) return [];
+        const threshold = getSemanticMatchThreshold();
+        return chunkInfos.filter((c) => c.chunkMatchDegree >= threshold);
+    }
+
+    /** 切回语义模式时恢复 Match 文案：分块取 max(chunkMatchDegree)，整段取 full_match_degree */
+    peekSemanticMatchDegree(): number | null {
+        const sem = this.currentState.semanticData;
+        if (!sem || !hasSemanticData(sem)) return null;
+        if (sem.chunkInfos?.length) {
+            return Math.max(...sem.chunkInfos.map((c) => c.chunkMatchDegree));
+        }
+        return typeof sem.full_match_degree === 'number' ? sem.full_match_degree : null;
     }
 
     /**
@@ -193,12 +205,12 @@ export class VisualizationUpdater {
     /**
      * 清除高亮
      */
-    private clearHighlights(): void {
-        this.deps.highlightController.clearHighlights();
+    private clearHighlights(options?: { preserveChunkInterval?: boolean }): void {
+        this.deps.highlightController.clearHighlights(options);
     }
 
     /**
-     * 计算展示结果：仅信息密度 / 仅语义 / 联合（两者一致时）
+     * 计算展示结果：按当前模式二选一（语义 / 信息密度），不合并
      */
     private computeDisplayResult(): (FrontendAnalyzeResult & {
         rawScoresNormed?: number[];
@@ -208,64 +220,26 @@ export class VisualizationUpdater {
         const info = this.currentState.infoDensityData;
         const sem = this.currentState.semanticData;
         const infoResult = info?.result as FrontendAnalyzeResult | undefined;
-        const infoText = info?.request?.text ?? infoResult?.originalText ?? '';
-        const semText = sem?.text ?? '';
 
-        if (infoResult && sem && infoText === semText && hasSemanticData(sem)) {
-            const infoMerged = infoResult.bpeBpeMergedTokens ?? infoResult.bpe_strings;
-            if (infoMerged?.length) {
-                // 有 token_attention 时校验边界；仅 chunkInfos 时跳过（无语义着色）
-                if (sem.token_attention?.length) {
-                    const boundaryError = this.checkSemanticAlignsWithInfo(sem.token_attention, infoMerged, semText);
-                if (boundaryError) {
-                    const { aSample, bSample, aNext, bNext, textBefore, textAt, textAfter } = boundaryError;
-                    console.warn(
-                        '[联合模式] 两种分析的分词token边界不一致：\n' +
-                        '  语义分析：', aSample, '\n' +
-                        '  信息密度：', bSample, '\n' +
-                        '  语义后一个：', aNext, '\n' +
-                        '  信息后一个：', bNext, '\n' +
-                        '  位置附近原文：', JSON.stringify(textBefore), '|', JSON.stringify(textAt), '|', JSON.stringify(textAfter)
-                    );
-                    showAlertDialog(tr('Error'), tr('Tokenizer results inconsistent: semantic and info-density token boundaries differ.'));
-                    this.currentState.semanticData = null;
-                    throw new TokenBoundaryInconsistentError();
-                }
-                }
-                // 联合模式：bpeMerged 与语义 tokens 超出部分合并为并集，使 rect/渲染范围与截断边界一致
-                const semanticTokens = sem.token_attention ?? [];
-                const { unionTokens, scoresForUnion, rawScoresForUnion } = semanticTokens.length
-                    ? this.mergeBpeWithSemanticBeyond(infoMerged, semanticTokens)
-                    : (() => {
-                        const m = this.mapSemanticTokensToMerged(infoMerged, []);
-                        return {
-                            unionTokens: infoMerged,
-                            scoresForUnion: m.scores,
-                            rawScoresForUnion: m.rawScores,
-                        };
-                    })();
-                return {
-                    ...infoResult,
-                    bpeBpeMergedTokens: unionTokens,
-                    bpe_strings: unionTokens,
-                    rawScoresNormed: scoresForUnion,
-                    tokenRawScores: rawScoresForUnion,
-                    chunkInfos: sem.chunkInfos,
-                };
+        if (getSemanticAnalysisEnabled()) {
+            if (sem && hasSemanticData(sem)) {
+                return this.buildSemanticOnlyResult(
+                    { model: sem.model },
+                    sem.token_attention,
+                    sem.text,
+                    sem.chunkInfos
+                );
             }
+            return null;
         }
-        // 有语义数据（token_attention 或 chunkInfos）时用 buildSemanticOnlyResult
-        if (sem && hasSemanticData(sem)) {
-            return this.buildSemanticOnlyResult({ model: sem.model }, sem.token_attention, sem.text, sem.chunkInfos);
-        }
-        if (infoResult) return { ...infoResult, chunkInfos: sem?.chunkInfos ?? undefined };
+        if (infoResult) return { ...infoResult };
         return null;
     }
 
     /**
-     * 分析开始前更新直方图显示/隐藏：基于「已有数据 + 将要得到的数据」判断各统计图是否有意义
+     * 分析开始前更新直方图显示/隐藏：基于当前模式 + 将要得到的数据
      * @param mode 即将进行的分析类型
-     * @param text 即将分析的文本（用于判断与已有数据是否一致、能否联合展示）
+     * @param text 即将分析的文本
      * @param willBeChunked 语义分析时：true 表示将走分块模式，直方图不显示
      */
     public updateHistogramVisibilityForPending(mode: 'infoDensity' | 'semantic', text: string, willBeChunked?: boolean): void {
@@ -274,26 +248,8 @@ export class VisualizationUpdater {
         const rawScoreNormedItem = document.getElementById('raw_score_normed_histogram_item');
         const matchScoreProgressItem = document.getElementById('match_score_progress_item');
 
-        const infoText = this.currentState.infoDensityData?.request?.text ?? '';
-        const semText = this.currentState.semanticData?.text ?? '';
-        const semanticQueryOn = getSemanticAnalysisEnabled();
-
-        let showInfoDensity = false;
-        let showSemantic = false;
-
-        if (mode === 'infoDensity') {
-            /** Semantic Query 勾选时统计区不出现信息密度图占位 */
-            showInfoDensity = !semanticQueryOn;
-            showSemantic =
-                semanticQueryOn &&
-                hasSemanticData(this.currentState.semanticData) &&
-                semText === text;
-        } else {
-            showSemantic = true;
-            showInfoDensity =
-                !semanticQueryOn &&
-                !!(this.currentState.infoDensityData && infoText === text);
-        }
+        const showInfoDensity = mode === 'infoDensity';
+        const showSemantic = mode === 'semantic';
 
         if (tokenHistogramItem) tokenHistogramItem.style.display = showInfoDensity ? '' : 'none';
         if (surprisalProgressItem) surprisalProgressItem.style.display = showInfoDensity ? '' : 'none';
@@ -474,20 +430,21 @@ export class VisualizationUpdater {
                 : colorSource === 'pw_score' ? pwScores
                 : (displayResult!.rawScoresNormed ?? []);
 
-            // 联合模式下 tooltip 需要 pPwValues/pwScores 显示语义匹配信息，即使 fitResult 为 null 也要传递
+            // tooltip / color source 切换需要 pPwValues/pwScores，即使 fitResult 为 null（如 P90 回退）也要传递
             const resultWithExt = hasThreshold
                 ? { ...displayResult, signalProbs, pPwValues, pwScores }
                 : displayResult!;
-            if (fitResult != null) {
-                this.deps.highlightController.updateCurrentData({ result: resultWithExt, signalProbs, pPwValues, pwScores });
-                if (!skipLmfUpdate) {
-                    this.deps.lmf.update({ ...resultWithExt, pwScores, colorScores: scoresForColor } as FrontendAnalyzeResult & { pPwValues?: number[]; pwScores?: number[]; colorScores?: number[] });
-                }
-            } else {
-                this.deps.highlightController.updateCurrentData({ result: resultWithExt });
-                if (!skipLmfUpdate) {
-                    this.deps.lmf.update({ ...resultWithExt, colorScores: scoresForColor } as FrontendAnalyzeResult & { pPwValues?: number[]; pwScores?: number[]; colorScores?: number[] });
-                }
+            this.deps.highlightController.updateCurrentData(
+                hasThreshold
+                    ? { result: resultWithExt, signalProbs, pPwValues, pwScores }
+                    : { result: resultWithExt }
+            );
+            if (!skipLmfUpdate) {
+                this.deps.lmf.update({
+                    ...resultWithExt,
+                    ...(hasThreshold ? { pwScores } : {}),
+                    colorScores: scoresForColor,
+                } as FrontendAnalyzeResult & { pPwValues?: number[]; pwScores?: number[]; colorScores?: number[] });
             }
 
             /** 直方图仅在整段模式显示，chunk 模式下不统计、不显示 */
@@ -594,14 +551,16 @@ export class VisualizationUpdater {
     /** 仅更新语义着色源（color source 切换时调用，不重新拟合） */
     public updateSemanticColorSource(): void {
         const cd = this.deps.highlightController.getCurrentData();
-        const r = cd?.result as (FrontendAnalyzeResult & { rawScoresNormed?: number[] }) | undefined;
+        const r = cd?.result as (FrontendAnalyzeResult & { rawScoresNormed?: number[]; pPwValues?: number[]; pwScores?: number[] }) | undefined;
         if (!r?.rawScoresNormed?.length) return;
         const el = document.getElementById('semantic_color_source_select') as HTMLSelectElement | null;
         const v = el?.value ?? 'pw_score';
-        const scoresForColor = v === 'signal_probability' ? (cd!.pPwValues ?? [])
-            : v === 'pw_score' ? (cd!.pwScores ?? [])
+        const pPwValues = cd!.pPwValues ?? r.pPwValues;
+        const pwScores = cd!.pwScores ?? r.pwScores;
+        const scoresForColor = v === 'signal_probability' ? (pPwValues ?? [])
+            : v === 'pw_score' ? (pwScores ?? [])
             : r.rawScoresNormed;
-        this.deps.lmf.update({ ...r, pPwValues: cd!.pPwValues, pwScores: cd!.pwScores, colorScores: scoresForColor } as FrontendAnalyzeResult & { pPwValues?: number[]; pwScores?: number[]; colorScores?: number[] });
+        this.deps.lmf.update({ ...r, pPwValues, pwScores, colorScores: scoresForColor } as FrontendAnalyzeResult & { pPwValues?: number[]; pwScores?: number[]; colorScores?: number[] });
     }
 
     /** 主题切换时调用：在样式生效后统一重绘直方图与文本（rgba 透出背景，需等新主题生效） */
@@ -628,16 +587,50 @@ export class VisualizationUpdater {
         this.updateSemanticDebugInfo();
     }
 
+    /** 正文重绘回退用原文：语义 → 信息密度 → 左侧输入 */
+    private resolvePlainTextFallback(): string {
+        const infoResult = this.currentState.infoDensityData?.result as FrontendAnalyzeResult | undefined;
+        return (
+            this.currentState.semanticData?.text
+            ?? this.currentState.infoDensityData?.request?.text
+            ?? infoResult?.originalText
+            ?? this.deps.textInputController.getTextValue()
+            ?? ''
+        );
+    }
+
     /**
-     * 清除语义分析相关数据（直方图、debug、semanticData），用于打开模式时初始化
+     * 统一正文刷新：有分析结果走完整着色管线，否则 showPlainText 剥掉语义着色。
+     */
+    private refreshTextAfterDataChange(
+        displayResult: ReturnType<VisualizationUpdater['computeDisplayResult']>,
+        plainTextFallback: string
+    ): void {
+        this.deps.lmf.clearHighlight();
+        if (displayResult) {
+            this.updateVisualizationInternal(false);
+        } else {
+            this.deps.highlightController.updateCurrentData(null);
+            this.deps.lmf.showPlainText(plainTextFallback);
+            this.updateVisualizationInternal(true);
+        }
+    }
+
+    /**
+     * 清除语义分析相关数据并重绘（直方图、debug、正文着色），使界面与「无语义搜索结果」一致
      */
     public clearSemanticState(): void {
+        const plainTextFallback = this.resolvePlainTextFallback();
         this.currentState.semanticData = null;
         const rawScoreNormedItem = document.getElementById('raw_score_normed_histogram_item');
         if (rawScoreNormedItem) rawScoreNormedItem.style.display = 'none';
         const matchScoreProgressItem = document.getElementById('match_score_progress_item');
         if (matchScoreProgressItem) matchScoreProgressItem.style.display = 'none';
         this.updateSemanticDebugInfo();
+        const displayResult = this.computeDisplayResult();
+        this.refreshTextAfterDataChange(displayResult, plainTextFallback);
+        this.deps.appStateManager.updateButtonStates();
+        this.deps.syncModeChrome?.(getSemanticAnalysisEnabled());
     }
 
     /**
@@ -675,52 +668,25 @@ export class VisualizationUpdater {
             this.currentState.currentTokenAvg = computeAverage(mergedSurprisals);
             this.currentState.currentTokenP90 = computeP90(mergedSurprisals);
         }
-        let displayResult: ReturnType<VisualizationUpdater['computeDisplayResult']>;
-        try {
-            displayResult = this.computeDisplayResult();
-        } catch (e) {
-            if (e instanceof TokenBoundaryInconsistentError) {
-                displayResult = this.computeDisplayResult();
-            } else {
-                console.error(e);
-                return;
-            }
-        }
-        this.deps.highlightController.updateCurrentData(displayResult ? { result: displayResult } : null);
-        this.deps.lmf.clearHighlight();
-        if (displayResult) this.deps.lmf.update(displayResult);
-        this.updateVisualizationInternal();
+        const displayResult = this.computeDisplayResult();
+        this.refreshTextAfterDataChange(displayResult, this.resolvePlainTextFallback());
         this.deps.appStateManager.updateButtonStates();
+        this.deps.syncModeChrome?.(getSemanticAnalysisEnabled());
     }
 
     /**
      * 根据语义分析配置同步 UI 状态（查询输入框、文本渲染模式等）
-     * 界面完全由配置决定，不因数据有无而改变
+     * 界面完全由配置决定；切换模式时保留另一边内存数据，仅切换展示
      */
     public syncSemanticUiFromConfig(): void {
         const enabled = getSemanticAnalysisEnabled();
         const el = document.getElementById('semantic_analysis_section');
         if (el) el.style.display = enabled ? '' : 'none';
         this.deps.lmf.updateOptions({ semanticAnalysisMode: enabled }, false);
-        if (!enabled) {
-            // 关闭时清除语义数据；统计图由下方 updateVisualizationInternal 统一刷新
-            this.currentState.semanticData = null;
-            const rawScoreNormedItem = document.getElementById('raw_score_normed_histogram_item');
-            if (rawScoreNormedItem) rawScoreNormedItem.style.display = 'none';
-            const matchScoreProgressItem = document.getElementById('match_score_progress_item');
-            if (matchScoreProgressItem) matchScoreProgressItem.style.display = 'none';
-            this.updateSemanticDebugInfo();
-            const displayResult = this.computeDisplayResult();
-            this.deps.highlightController.updateCurrentData(displayResult ? { result: displayResult } : null);
-            if (!displayResult) {
-                d3.select('#all_result').style('opacity', 0);
-                this.deps.appStateManager.updateState({ hasValidData: false });
-            }
-        }
-        /** 勾选 / 关闭 Semantic Query 后立即刷新统计图显隐（与 getSemanticAnalysisEnabled 一致） */
-        this.updateVisualizationInternal(false);
-        // 语义分析配置影响 Upload/Save 的 dataReadyForSave 条件，需始终更新按钮状态
+        const displayResult = this.computeDisplayResult();
+        this.refreshTextAfterDataChange(displayResult, this.resolvePlainTextFallback());
         this.deps.appStateManager.updateButtonStates();
+        this.deps.syncModeChrome?.(enabled);
     }
 
     /**
@@ -816,16 +782,7 @@ export class VisualizationUpdater {
             this.currentState.infoDensityData = data;
             this.currentState.rawApiResponse = rawSnapshot;
             this.updateSemanticDebugInfo();
-            let displayResult: ReturnType<VisualizationUpdater['computeDisplayResult']>;
-            try {
-                displayResult = this.computeDisplayResult();
-            } catch (e) {
-                if (e instanceof TokenBoundaryInconsistentError) {
-                    displayResult = this.computeDisplayResult();
-                } else {
-                    throw e;
-                }
-            }
+            const displayResult = this.computeDisplayResult();
             this.deps.highlightController.updateCurrentData(displayResult ? { result: displayResult } : null);
 
             this.deps.lmf.clearHighlight();
@@ -963,11 +920,6 @@ export class VisualizationUpdater {
             displayResult = this.computeDisplayResult();
         } catch (e) {
             this.currentState.semanticData = null;
-            if (e instanceof TokenBoundaryInconsistentError) {
-                this.deps.lmf.hideLoading();
-                this.rerenderHistograms();
-                return false;
-            }
             showAlertDialog(tr('Error'), e instanceof Error ? e.message : String(e));
             return false;
         }
@@ -975,8 +927,8 @@ export class VisualizationUpdater {
         d3.select('#all_result').style('opacity', 1).style('display', null);
         this.deps.lmf.hideLoading();
         this.deps.highlightController.updateCurrentData({ result: displayResult });
-        this.deps.lmf.clearHighlight();
-        this.clearHighlights();
+        // 流式 chunk 更新时保留 jumpToChunkHighlight 的区间下划线及其 hold/fade
+        this.clearHighlights({ preserveChunkInterval: true });
         this.updateVisualizationInternal();
 
         this.updateSemanticDebugInfo(res.debug_info);
@@ -1025,142 +977,4 @@ export class VisualizationUpdater {
             chunkInfos
         };
     }
-
-    /**
-     * 检查 semantic token_attention 的边界是否与 info 一致；允许稀疏覆盖（semantic 不必覆盖全文）
-     * @returns 不一致时返回错误描述（含前后文本），一致时返回 null
-     */
-    private checkSemanticAlignsWithInfo(
-        semanticTokens: Array<{ offset: [number, number]; raw?: string }>,
-        infoMerged: Array<{ offset: [number, number] }>,
-        text: string
-    ): { firstBadIdx: number; aSample: string; bSample: string; aNext: string; bNext: string; textBefore: string; textAt: string; textAfter: string } | null {
-        const boundaries = new Set<number>([0]);
-        for (const t of infoMerged) boundaries.add(t.offset[1]);
-        const infoEnd = infoMerged.length > 0 ? infoMerged[infoMerged.length - 1]!.offset[1] : 0;
-        const totalChars = text.length;
-        const ctx = 30;
-        const esc = (s: string) => JSON.stringify(s).slice(1, -1);
-        const fmt = (t: { offset: [number, number]; raw?: string }, idx: number) => {
-            const raw = (t as { raw?: string }).raw ?? text.slice(t.offset[0], t.offset[1]);
-            const s = raw.slice(0, 20) + (raw.length > 20 ? '…' : '');
-            return `第${idx}个token分词 [字符${t.offset[0]}-${t.offset[1]}] "${esc(s)}"`;
-        };
-        for (let i = 0; i < semanticTokens.length; i++) {
-            const [as, ae] = semanticTokens[i].offset;
-            if (as < 0 || ae > totalChars || ae <= as) continue; // 由 validateTokenConsistency 处理
-            if (ae > infoEnd) continue; // 超出双方重叠范围，不参与检查
-            if (!boundaries.has(as) || !boundaries.has(ae)) {
-                const raw = (semanticTokens[i] as { raw?: string }).raw ?? '';
-                const infoIdx = infoMerged.findIndex(t => t.offset[0] <= as && as < t.offset[1]);
-                const infoAt = infoIdx >= 0 ? infoMerged[infoIdx]! : null;
-                const rawShort = (raw || text.slice(as, ae)).slice(0, 20);
-                const infoRaw = infoAt ? (text.slice(infoAt.offset[0], infoAt.offset[1]).slice(0, 20) || '') : '';
-                const nextSem = semanticTokens[i + 1];
-                const nextInfo = infoIdx >= 0 && infoIdx + 1 < infoMerged.length ? infoMerged[infoIdx + 1]! : null;
-                return {
-                    firstBadIdx: i,
-                    aSample: `第${i}个token分词 [字符${as}-${ae}] "${esc(rawShort)}${rawShort.length >= 20 ? '…' : ''}"`,
-                    bSample: infoAt ? `同一位置token分词 [字符${infoAt.offset[0]}-${infoAt.offset[1]}] "${esc(infoRaw)}${infoRaw.length >= 20 ? '…' : ''}"` : '无对应',
-                    aNext: nextSem ? fmt(nextSem, i + 1) : '无',
-                    bNext: nextInfo ? fmt(nextInfo, infoIdx + 1) : '无',
-                    textBefore: text.slice(Math.max(0, as - ctx), as),
-                    textAt: text.slice(as, ae),
-                    textAfter: text.slice(ae, Math.min(totalChars, ae + ctx)),
-                };
-            }
-        }
-        return null;
-    }
-
-    /**
-     * 联合模式：将 bpeMergedTokens 与超出信息密度范围的语义 tokens 合并为并集，用于 rect/渲染范围与截断边界一致。
-     * @returns { unionTokens, scoresForUnion }
-     */
-    private mergeBpeWithSemanticBeyond(
-        bpeMerged: FrontendToken[],
-        semanticTokens: Array<{
-            offset: [number, number];
-            raw: string;
-            score: number;
-            rawScore?: number;
-        }>
-    ): {
-        unionTokens: FrontendToken[];
-        scoresForUnion: (number | undefined)[];
-        rawScoresForUnion: (number | undefined)[];
-    } {
-        const infoEnd = bpeMerged.length > 0 ? bpeMerged[bpeMerged.length - 1]!.offset[1] : 0;
-        const beyond = semanticTokens.filter((t) => t.offset[0] >= infoEnd);
-        if (beyond.length === 0) {
-            const { scores, rawScores } = this.mapSemanticTokensToMerged(bpeMerged, semanticTokens);
-            return {
-                unionTokens: bpeMerged,
-                scoresForUnion: scores,
-                rawScoresForUnion: rawScores,
-            };
-        }
-        /** beyond 已在 handleSemanticResponse 中 overlap+digit 合并；段内用原始 score 重新归一化 */
-        const beyondRenormed = normalizeTokenScores(beyond.map((t) => ({ ...t, score: getTokenRawScore(t) })));
-        const semanticAsFrontend: FrontendToken[] = beyondRenormed.map((t) => ({
-            offset: [t.offset[0], t.offset[1]],
-            raw: t.raw,
-            real_topk: [0, 1] as [number, number],
-            pred_topk: [],
-        }));
-        const unionTokens = [...bpeMerged, ...semanticAsFrontend];
-        const { scores: infoScores, rawScores: infoRawScores } = this.mapSemanticTokensToMerged(
-            bpeMerged,
-            semanticTokens
-        );
-        const beyondScores: (number | undefined)[] = beyondRenormed.map((t) =>
-            Number.isFinite(t.score) ? t.score : undefined
-        );
-        const beyondRawScores: (number | undefined)[] = beyondRenormed.map((t) => {
-            const r = getTokenRawScore(t);
-            return Number.isFinite(r) ? r : undefined;
-        });
-        const scoresForUnion = [...infoScores, ...beyondScores];
-        const rawScoresForUnion = [...infoRawScores, ...beyondRawScores];
-        return { unionTokens, scoresForUnion, rawScoresForUnion };
-    }
-
-    /**
-     * 将语义 API 的 token score 条目（offset 为原文字符偏移）映射到 merged tokens，双指针 O(N+M)。
-     * 前提：两个数组均按 offset 升序排列。
-     */
-    private mapSemanticTokensToMerged(
-        bpeBpeMergedTokens: Array<{ offset: [number, number] }>,
-        semanticTokens: Array<{ offset: [number, number]; score: number; rawScore?: number }>
-    ): {
-        scores: (number | undefined)[];
-        rawScores: (number | undefined)[];
-    } {
-        const n = bpeBpeMergedTokens.length;
-        const scores: number[] = new Array(n).fill(0);
-        const rawScores: number[] = new Array(n).fill(0);
-        const weights: number[] = new Array(n).fill(0);
-
-        let j = 0; // 跳过所有在当前 semantic token 之前结束的 merged token
-        for (const semToken of semanticTokens) {
-            const [as, ae] = semToken.offset;
-            const rawPart = getTokenRawScore(semToken);
-            while (j < n && bpeBpeMergedTokens[j].offset[1] <= as) j++;
-            for (let k = j; k < n && bpeBpeMergedTokens[k].offset[0] < ae; k++) {
-                const [s, e] = bpeBpeMergedTokens[k].offset;
-                // j/k 的推进条件已保证 e > as 且 s < ae，overlap 必然 > 0
-                const overlap = Math.min(e, ae) - Math.max(s, as);
-                scores[k] += semToken.score * overlap;
-                rawScores[k] += rawPart * overlap;
-                weights[k] += overlap;
-            }
-        }
-
-        const norm = (vals: number[]) => vals.map((v, i) => (weights[i] > 0 ? v / weights[i] : undefined));
-        return {
-            scores: norm(scores),
-            rawScores: norm(rawScores),
-        };
-    }
 }
-

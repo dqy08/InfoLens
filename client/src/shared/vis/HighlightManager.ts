@@ -157,6 +157,11 @@ export class HighlightManager {
         this.removeIntervalSvgLines();
     }
 
+    /** 仅清除 token 高亮，保留 chunk 区间下划线及其 fade */
+    clearTokenHighlights(): void {
+        this.clearRectHighlightsOnly();
+    }
+
     /** 仅清除 token 矩形上的高亮样式（保留字符区间线，供内部组合使用） */
     private clearRectHighlightsOnly(): void {
         this.rectCache.forEach(({ rect }, rectKey) => {

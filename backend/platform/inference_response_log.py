@@ -1,4 +1,9 @@
-"""推理 API 响应日志：ingress 统一回调；handler 内仅 worker 本地路径打印。"""
+"""推理 API 响应日志。
+
+- 远程代理：门户 ingress `response_log_fn` 打端到端。
+- 本地执行（门户本地槽位或 worker）：handler 内打完整日志（可含 wait/processing）；
+  用 `for_worker` 区分进程，避免与门户回调重复。
+"""
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
@@ -43,14 +48,17 @@ def log_analyze_semantic_response(
     request_id: int | None,
     result: dict,
     elapsed: float,
+    wait_time: float | None = None,
     for_worker: bool = False,
 ) -> None:
     if not _should_emit(for_worker=for_worker):
         return
-    tokens = len(result.get("token_attention", []))
+    tokens = result.get("input_token_count", len(result.get("token_attention", [])))
     msg = f"\t📤 API analyze_semantic (stream) response:"
     msg += _req_id_part(request_id)
     msg += f" tokens={tokens}, response_time={elapsed:.4f}s"
+    if wait_time is not None:
+        msg += f" (wait={wait_time:.4f}s, processing={elapsed - wait_time:.4f}s)"
     print(msg)
 
 
@@ -171,12 +179,22 @@ def make_analyze_response_logger(
 def make_analyze_semantic_response_logger(
     logged: Mapping[str, int | None],
 ) -> PortalResponseLogger:
+    """远程代理路径：从响应体取 input_token_count（含批量 results 汇总），无 wait。"""
+
     def _log(data: Any, elapsed: float, _status: int) -> None:
         if not isinstance(data, dict):
             return
+        results = data.get("results")
+        if isinstance(results, list):
+            total = sum(
+                r.get("input_token_count", 0) for r in results if isinstance(r, dict)
+            )
+            result = {"input_token_count": total}
+        else:
+            result = data
         log_analyze_semantic_response(
             request_id=logged.get("request_id"),
-            result=data,
+            result=result,
             elapsed=elapsed,
         )
 

@@ -25,7 +25,6 @@ const GLTR_OPTIONS = {
     enableRenderAnimation: false,
     enableMinimap: false,
     overlayTokenRenderStyle: 'classic' as const,
-    overlayIgnoreGlobalInfoDensityDisable: true,
     surprisalColorMax: CHAT_SURPRISAL_COLOR_MAP_MAX,
 };
 

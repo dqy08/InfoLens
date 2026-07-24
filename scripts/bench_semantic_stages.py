@@ -51,7 +51,7 @@ def run_benchmark(
     init_args = Namespace(
         base_model="qwen3-0.6b",
         instruct_model="qwen3-0.6b-instruct",
-        logits_gradient_submode="topk_sum",
+        logits_gradient_submode="fill_blank",
         logits_gradient_prob_weighted=False,
         gradient_checkpointing=gradient_checkpointing,
         address="0.0.0.0",
