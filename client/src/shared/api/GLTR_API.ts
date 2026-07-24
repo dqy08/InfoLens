@@ -216,7 +216,7 @@ export class TextAnalysisAPI {
         }).then((response: any) => {
             // 检查统一的错误格式
             if (response && response.success === false) {
-                throw new Error(response.message || '分析失败');
+                throw new Error(response.message || 'Analysis failed');
             }
             return response as AnalyzeResponse;
         });
@@ -238,7 +238,7 @@ export class TextAnalysisAPI {
         }).then((response: any) => {
             // 检查统一的错误格式
             if (response && response.success === false) {
-                throw new Error(response.message || 'URL 文本提取失败');
+                throw new Error(response.message || 'URL text extraction failed');
             }
             return response;
         });
@@ -400,7 +400,7 @@ export class TextAnalysisAPI {
             '/api/analyze',
             this.buildAnalyzePayload(model, text, null, true),
             onProgress,
-            '分析失败'
+            'Analysis failed'
         );
     }
 
@@ -471,7 +471,7 @@ export class TextAnalysisAPI {
         onProgress: (step: number, totalSteps: number, stage: string, percentage?: number) => void | undefined,
         resolve: (value: any) => void,
         reject: (reason?: any) => void,
-        errorMessage: string = '分析失败'
+        errorMessage: string = 'Analysis failed'
     ): void {
         try {
             const parsed = JSON.parse(data);
@@ -491,8 +491,8 @@ export class TextAnalysisAPI {
             }
         } catch (e) {
             const msg = e instanceof SyntaxError
-                ? `SSE 数据解析失败：${e.message}（可能是后端返回了无效 JSON，如 NaN）`
-                : `SSE 消息处理失败：${e instanceof Error ? e.message : String(e)}`;
+                ? `Failed to parse SSE data: ${e.message} (backend may have returned invalid JSON, e.g. NaN)`
+                : `Failed to process SSE message: ${e instanceof Error ? e.message : String(e)}`;
             reject(new Error(msg));
         }
     }

@@ -199,10 +199,10 @@ export function mergeTokenSpansFullyForRendering<T extends { offset: [number, nu
 /** bytesPerChunk：UTF-8 字节数；startOffset：UTF-16 码元下标（非码点；拼到 API offset 前须转码点）。扩展侧副本：`extension/splitTextToChunks.js`（改此处请同步）。 */
 export function splitTextToChunks(text: string, bytesPerChunk: number): Array<{ text: string; startOffset: number }> {
     if (bytesPerChunk <= 0) {
-        throw new Error("分块字节上限必须大于 0，当前值: " + bytesPerChunk);
+        throw new Error("bytesPerChunk must be > 0, got: " + bytesPerChunk);
     }
     if (text.includes("\r")) {
-        throw new Error("文本包含 \\r (CR) 换行符，当前仅支持 \\n (LF)。");
+        throw new Error("Text contains \\r (CR); only \\n (LF) is supported.");
     }
     const chunks: Array<{ text: string; startOffset: number }> = [];
     let pos = 0; // 字符索引

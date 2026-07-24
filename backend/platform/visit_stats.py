@@ -6,6 +6,7 @@ import signal
 import tempfile
 import threading
 import time
+import uuid
 from collections import defaultdict
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -77,6 +78,7 @@ _HF_RESET_BASE_FILE = "stats_reset_base.json"
 _HF_DELTA_DIR = "stats_delta"
 _HF_TIMELINE_CACHE_DIR = "stats_timeline_cache"
 _HF_TIMELINE_CACHE_FILE = f"{_HF_TIMELINE_CACHE_DIR}/bins.json"
+_HF_FEEDBACK_DIR = "extension_feedback"
 _TIMELINE_CACHE_SCHEMA = 4  # v4：仅 active_visits / active_sec 小时桶
 _TIMELINE_CACHE_SCHEMA_LEGACY = frozenset({2, 3, 4})  # Hub 上可能存在的旧 bins.json
 _DELTA_DL_WORKERS = 32
@@ -1040,6 +1042,35 @@ def _try_persist_on_shutdown():
         _persist_tick()
     except Exception as e:  # noqa: BLE001
         print(f"[访问统计] 退出持久化失败: {e}", flush=True)
+
+
+def record_extension_feedback(payload: dict) -> dict:
+    """
+    扩展状态条反馈：一反馈一 JSON，写入与访问统计同一 HF Dataset。
+    无 HF_TOKEN_stats_write 或 worker 禁用统计时：只打日志，仍视为成功。
+    """
+    saved_at = datetime.now(timezone.utc).strftime(_STATS_UTC_HOUR_FMT)
+    path_in_repo = f"{_HF_FEEDBACK_DIR}/{_delta_time_slug(saved_at)}_{uuid.uuid4().hex[:8]}.json"
+    record = {"saved_at": saved_at, **payload}
+
+    if not _HF_TOKEN or _stats_disabled:
+        print(
+            f"[extension feedback] skip upload (token missing or stats disabled); "
+            f"path={path_in_repo} record={json.dumps(record, ensure_ascii=False)}",
+            flush=True,
+        )
+        return {"success": True, "stored": False, "path": path_in_repo}
+
+    if not _upload_dataset_record(path_in_repo, record):
+        print(
+            f"[extension feedback] upload failed; "
+            f"path={path_in_repo} record={json.dumps(record, ensure_ascii=False)}",
+            flush=True,
+        )
+        return {"success": True, "stored": False, "path": path_in_repo}
+
+    print(f"[extension feedback] uploaded {path_in_repo}", flush=True)
+    return {"success": True, "stored": True, "path": path_in_repo}
 
 
 def _chain_shutdown_signal(signum: int) -> None:

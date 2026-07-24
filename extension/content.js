@@ -66,6 +66,12 @@
   let semanticMatchProgress = [];
   /** 进度条分母（码点数）：maxChunks 截断时用实际搜索覆盖长度，而非全文长度；0 = 未搜索，回退全文 */
   let progressTextLength = 0;
+  /** @type {{ tone: string, label: string, detail: string } | null} */
+  let lastStatusMeta = null;
+  let statusFeedbackSent = false;
+  let statusFeedbackHideTimer = 0;
+  /** @type {{ query: string, contentChunkCount: number, truncated: boolean } | null} */
+  let lastSearchMeta = null;
   let selectedProgressChunkStart = null;
   let hoveredProgressChunkStart = null;
   let progressSelectionFading = false;
@@ -395,7 +401,7 @@
     const normalize = globalThis.IL_normalizeTokenScores;
     if (typeof merge !== 'function' || typeof normalize !== 'function') {
       throw new Error(
-        'IL_mergeTokenSpansFullyForRendering missing — 请在 chrome://extensions 重新加载本扩展后再点图标'
+        'IL_mergeTokenSpansFullyForRendering missing — reload this extension in chrome://extensions, then click the icon again'
       );
     }
     const normalized = normalize(merge(tokenAttention || [], chunkText));
@@ -615,15 +621,140 @@
     extractRoot = null;
   }
 
+  const STATUS_FEEDBACK_ICON =
+    '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5 L9.5 2.5 L5.5 10 L5 7 Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+  const STATUS_HEART_ICON =
+    '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 10.2 C6 10.2 1.8 7.4 1.8 4.6 C1.8 3.2 2.9 2.2 4.2 2.2 C5.1 2.2 5.7 2.7 6 3.3 C6.3 2.7 6.9 2.2 7.8 2.2 C9.1 2.2 10.2 3.2 10.2 4.6 C10.2 7.4 6 10.2 6 10.2 Z" fill="currentColor"/></svg>';
+
+  function resetStatusFeedbackButton() {
+    const btn = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'));
+    if (!btn) return;
+    btn.disabled = false;
+    btn.classList.remove('is-thanks');
+    btn.innerHTML = STATUS_FEEDBACK_ICON;
+    btn.title = 'Report this error to the author';
+    btn.setAttribute('aria-label', 'Report this error to the author');
+  }
+
+  function clearFindStatus() {
+    const el = ui$('semantic_find_status');
+    const textEl = ui$('semantic_find_status_text');
+    if (statusFeedbackHideTimer) {
+      clearTimeout(statusFeedbackHideTimer);
+      statusFeedbackHideTimer = 0;
+    }
+    if (!el) return;
+    el.hidden = true;
+    if (textEl) {
+      textEl.replaceChildren();
+      textEl.removeAttribute('title');
+    }
+    lastStatusMeta = null;
+    statusFeedbackSent = false;
+    resetStatusFeedbackButton();
+  }
+
+  /**
+   * Status strip under bar / progress.
+   * @param {string} label short prefix (Failed / Note)
+   * @param {string} detail reason or explanation
+   * @param {{ tone?: 'error' | 'info' }} [opts]
+   */
+  function showFindStatus(label, detail, opts) {
+    const el = ui$('semantic_find_status');
+    const textEl = ui$('semantic_find_status_text');
+    if (!el || !textEl) return;
+    if (statusFeedbackHideTimer) {
+      clearTimeout(statusFeedbackHideTimer);
+      statusFeedbackHideTimer = 0;
+    }
+    const tone = opts?.tone === 'error' ? 'error' : 'info';
+    const head = String(label || '').trim() || (tone === 'error' ? 'Failed' : 'Note');
+    const body = String(detail || '').trim();
+    const text = body ? `${head} · ${body}` : head;
+    const labelEl = document.createElement('span');
+    labelEl.className =
+      tone === 'error' ? 'semantic-find-status-label is-error' : 'semantic-find-status-label';
+    labelEl.textContent = head;
+    textEl.replaceChildren(labelEl, ...(body ? [document.createTextNode(` · ${body}`)] : []));
+    textEl.title = text;
+    lastStatusMeta = { tone, label: head, detail: body };
+    statusFeedbackSent = false;
+    resetStatusFeedbackButton();
+    el.hidden = false;
+  }
+
+  /** Task failure; reason from backend message or local error text */
+  function showFindError(reason) {
+    showFindStatus('Failed', reason || 'Request failed', { tone: 'error' });
+  }
+
+  function buildFeedbackBody() {
+    const status = lastStatusMeta || { tone: 'info', label: 'Note', detail: '' };
+    return {
+      status,
+      page_url: location.href,
+      query: lastSearchMeta?.query
+        || /** @type {HTMLInputElement | null} */ (ui$('semantic_find_input'))?.value?.trim()
+        || '',
+      config: {
+        apiBase: CFG.apiBase,
+        chunkBytes: CFG.chunkBytes,
+        maxChunks: CFG.maxChunks,
+        matchThreshold: CFG.matchThreshold,
+        submode: CFG.submode,
+        pwScorePercentile: CFG.pwScorePercentile,
+        followSearching: !!CFG.followSearching,
+      },
+      progress: {
+        content_chunks: lastSearchMeta?.contentChunkCount ?? 0,
+        analyzed_chunks: semanticMatchProgress.length,
+        matched_chunks: matchedChunks.length,
+        truncated: !!lastSearchMeta?.truncated,
+      },
+      user_agent: navigator.userAgent,
+    };
+  }
+
+  function sendStatusFeedback() {
+    if (!lastStatusMeta || statusFeedbackSent) return;
+    statusFeedbackSent = true;
+    chrome.runtime.sendMessage(
+      {
+        type: 'il-extension-feedback',
+        apiBase: CFG.apiBase,
+        body: buildFeedbackBody(),
+      },
+      () => {
+        void chrome.runtime.lastError; // fire-and-forget
+      }
+    );
+    const btn = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'));
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('is-thanks');
+      btn.innerHTML = STATUS_HEART_ICON;
+      btn.removeAttribute('title');
+      btn.setAttribute('aria-label', 'Thanks');
+    }
+    if (statusFeedbackHideTimer) clearTimeout(statusFeedbackHideTimer);
+    statusFeedbackHideTimer = window.setTimeout(() => {
+      statusFeedbackHideTimer = 0;
+      clearFindStatus();
+    }, 3000);
+  }
+
   /**
    * 清当前会话的渲染与搜索进度。
    * @param {{ clearCache?: boolean }} [options] clearCache=true 时连 lastResult 一并丢弃（改 query / giveUp）
    */
   function resetSearchSession({ clearCache = false } = {}) {
     clearOverlays();
+    clearFindStatus();
     matchedChunks = [];
     semanticMatchProgress = [];
     progressTextLength = 0;
+    lastSearchMeta = null;
     selectedProgressChunkStart = null;
     hoveredProgressChunkStart = null;
     progressSelectionFading = false;
@@ -1283,6 +1414,14 @@
       jumpToMatch(matchIndex < 0 ? 0 : matchIndex + 1)
     );
     ui$('semantic_find_close')?.addEventListener('click', () => close());
+    ui$('semantic_find_status_close')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearFindStatus();
+    });
+    ui$('semantic_find_status_feedback')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sendStatusFeedback();
+    });
     ui$('semantic_find_clear')?.addEventListener('click', (e) => {
       e.stopPropagation();
       if (searching) {
@@ -1572,20 +1711,32 @@
       refreshExtract();
     } catch (err) {
       console.error('[InfoLens] extract aborted:', err?.message || err);
+      showFindError(err?.message || err);
       setSearching(false);
       return;
     }
     if (!extractedText.trim()) {
       console.error('[InfoLens] no article text found');
+      showFindError('No article text found');
       setSearching(false);
       return;
     }
 
     try {
       // 全空白 chunk 不送 API；先滤再截断，避免 maxChunks 被空白占满
-      const allChunks = splitChunks(extractedText, CFG.chunkBytes)
-        .filter(chunkHasContent)
-        .slice(0, CFG.maxChunks);
+      const contentChunks = splitChunks(extractedText, CFG.chunkBytes).filter(chunkHasContent);
+      const allChunks = contentChunks.slice(0, CFG.maxChunks);
+      lastSearchMeta = {
+        query,
+        contentChunkCount: contentChunks.length,
+        truncated: contentChunks.length > allChunks.length,
+      };
+      if (contentChunks.length > allChunks.length) {
+        showFindStatus(
+          'Note',
+          `Text too long; analyzing first ${allChunks.length} of ${contentChunks.length} chunks`
+        );
+      }
       progressTextLength = allChunks.length
         ? utf16ToCp(extractedText, allChunks[allChunks.length - 1].end)
         : 0;
@@ -1723,6 +1874,7 @@
       snapshotLastResult(query);
     } catch (err) {
       console.error('[InfoLens]', err?.message || err);
+      showFindError(err?.message || err);
       snapshotLastResult(query);
     } finally {
       setSearching(false);

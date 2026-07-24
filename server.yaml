@@ -974,6 +974,53 @@ paths:
               error:
                 type: string
 
+  /extension-feedback:
+    post:
+      tags:
+        - all
+      summary: extension status feedback (one JSON file in stats dataset)
+      operationId: server.post_extension_feedback
+      parameters:
+        - in: body
+          name: feedback_body
+          required: false
+          schema:
+            type: object
+            properties:
+              status:
+                type: object
+                properties:
+                  tone:
+                    type: string
+                  label:
+                    type: string
+                  detail:
+                    type: string
+              page_url:
+                type: string
+              query:
+                type: string
+              config:
+                type: object
+              progress:
+                type: object
+              extension_version:
+                type: string
+              user_agent:
+                type: string
+      responses:
+        200:
+          description: accepted (stored on Hub when token present; otherwise logged only)
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              stored:
+                type: boolean
+              path:
+                type: string
+
 definitions:
   # 与 client generatedSchemas TokenWithOffset 一致；信息密度 analyze 与 completions info_radar 共用
   TokenWithOffset:

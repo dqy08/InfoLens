@@ -95,7 +95,7 @@ def _build_prompt_parts(submode: str, query: str) -> tuple:
             f"原文中与查询主题（{query}）最相关的一个词是：**“",
             "无",
         )
-    raise ValueError(f"未知子模式: {submode}")
+    raise ValueError(f"Unknown submode: {submode}")
 
 
 def _analyze_logits_gradient(
@@ -218,14 +218,16 @@ def _analyze_logits_gradient(
         elif submode == "match_score":  # 已废弃
             target_ids = tokenizer.encode("2", add_special_tokens=False)
             if not target_ids:
-                raise ValueError("tokenizer 无法编码 '2'")
+                raise ValueError("tokenizer cannot encode '2'")
             target_logit = logits[0, target_ids[0]]
         else:
-            raise ValueError(f"未知 submode: {submode}")
+            raise ValueError(f"Unknown submode: {submode}")
         target_logit.backward()
         grad = embeds.grad
         if grad is None:
-            raise RuntimeError("logits_gradient: 梯度未回传，可能模型不支持（如 int8 量化）")
+            raise RuntimeError(
+                "logits_gradient: gradients not available (model may not support this, e.g. int8)"
+            )
 
         # 显式同步，确保已完成，progress_callback 时机准确
         if device.type == "cuda":
@@ -380,7 +382,7 @@ def analyze_semantic(
     tokenizer, model, device = ensure_instruct_slot_ready()
     if isinstance(text, list):
         if not full_match_degree_only:
-            raise ValueError("text 为数组（批量）时仅支持 full_match_degree_only=True")
+            raise ValueError("text as array (batch) requires full_match_degree_only=True")
         return _analyze_logits_gradient_batch(
             query, text, tokenizer, model, device,
             submode_override=submode_override,

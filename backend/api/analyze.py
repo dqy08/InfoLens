@@ -81,7 +81,7 @@ def _validate_and_prepare_request(analyze_request):
     text = analyze_request.get('text')
     
     if not text:
-        return None, None, "缺少分析文本，请提供 text 字段", 400
+        return None, None, "Missing text", 400
     
     # 获取默认模型（使用模块级上下文以获取持久化的当前活动模型）
     from backend.platform.app_context import get_app_context
@@ -94,7 +94,7 @@ def _validate_and_prepare_request(analyze_request):
     else:
         # 只允许使用默认模型，其他模型请求将被拒绝
         if model != default_model:
-            return None, None, f"当前仅支持默认模型 '{default_model}'，不允许使用其他模型", 400
+            return None, None, f"Only default model '{default_model}' is allowed", 400
     
     return model, text, None, None
 
@@ -111,7 +111,7 @@ def _load_project_with_error_handling(model):
     # 检查模型是否在注册表中
     if not project_registry.is_available(model):
         available_models = list(project_registry.available_model_names())
-        error_msg = f"❌ 模型 '{model}' 未注册。可用模型: {available_models}"
+        error_msg = f"Model '{model}' is not registered. Available: {available_models}"
         print(error_msg)
         return None, error_msg, 404
     
@@ -123,7 +123,7 @@ def _load_project_with_error_handling(model):
 
         context = get_app_context(prefer_module_context=True)
         if context.model_loading:
-            error_msg = f"模型 '{model}' 正在后台加载中，请稍后重试"
+            error_msg = f"Model '{model}' is still loading; try again later"
             print(f"⚠️ {error_msg}")
             return None, error_msg, 503
         # 懒加载模式 (--no_auto_load)：首次请求仅初始化主槽位（权重 + QwenLM 项目）
@@ -135,9 +135,9 @@ def _load_project_with_error_handling(model):
                 import traceback
                 print(f"⚠️ 模型懒加载失败: {e}")
                 traceback.print_exc()
-                return None, f"模型加载失败: {str(e)}", 500
+                return None, f"Model load failed: {str(e)}", 500
         if p is None:
-            error_msg = f"模型 '{model}' 未加载，请联系管理员"
+            error_msg = f"Model '{model}' is not loaded; contact the administrator"
             print(f"⚠️ {error_msg}")
             return None, error_msg, 503
     return p, None, None
@@ -199,7 +199,7 @@ def analyze(analyze_request):
     stream = analyze_request.get("stream", False)
     text = analyze_request.get("text")
     if not text:
-        return _error_response("", "", "缺少分析文本，请提供 text 字段", 400)
+        return _error_response("", "", "Missing text", 400)
 
     client_ip = get_client_ip()
     logged: dict = {"request_id": None}
@@ -212,7 +212,7 @@ def analyze(analyze_request):
 
         context = get_app_context(prefer_module_context=True)
         if context.model_loading:
-            return _error_response("", "", "模型正在加载中，请稍后重试", 503)
+            return _error_response("", "", "Model is still loading; try again later", 503)
         if stream:
             return _analyze_with_stream(
                 analyze_request, client_ip, request_id=logged["request_id"]
@@ -270,14 +270,14 @@ def _analyze_plain(analyze_request, client_ip, request_id=None):
             if t == 'result':
                 result = data.get('data')
             elif t == 'error':
-                error_msg = data.get('message', '分析失败')
+                error_msg = data.get('message', 'Analysis failed')
                 status_code = data.get('status_code', 500)
                 break
     except Exception as e:
         import traceback
         traceback.print_exc()
         exit_if_oom(e, defer_seconds=1)
-        error_msg = f"分析失败: {str(e)}"
+        error_msg = f"Analysis failed: {str(e)}"
     finally:
         gc.collect()
 
@@ -286,7 +286,7 @@ def _analyze_plain(analyze_request, client_ip, request_id=None):
         text = analyze_request.get('text') or ''
         return _error_response(model, text, error_msg, status_code)
     if result is None:
-        return _error_response('', '', '分析失败：未获取到结果', 500)
+        return _error_response('', '', 'Analysis failed: no result', 500)
     return result, 200
 
 
@@ -300,7 +300,7 @@ def _generate_analyze_events(analyze_request, client_ip, request_id=None):
     from backend.platform.app_context import get_app_context
     context = get_app_context(prefer_module_context=True)
     if context.model_loading:
-        yield send_error_event('模型正在加载中，请稍后重试', 503)
+        yield send_error_event('Model is still loading; try again later', 503)
         return
 
     start_time = time.perf_counter()
@@ -345,7 +345,7 @@ def _generate_analyze_events(analyze_request, client_ip, request_id=None):
                 if not lock_acquired:
                     # 获取锁超时，说明前面有任务在执行且耗时较长
                     analysis_error = QueueTimeoutError(
-                        f"排队等待超过 {LOCK_WAIT_TIMEOUT} 秒，服务繁忙，请稍后重试"
+                        f"Queue wait exceeded {LOCK_WAIT_TIMEOUT} seconds; server busy, try again later"
                     )
                     return
 
@@ -408,7 +408,7 @@ def _generate_analyze_events(analyze_request, client_ip, request_id=None):
         # 检查结果是否为空（理论上不应该发生，因为要么有结果，要么有错误）
         if analysis_result is None:
             print("⚠️ 分析结果为空，但没有错误信息")
-            yield send_error_event("分析失败：未获取到结果", 500)
+            yield send_error_event("Analysis failed: no result", 500)
             gc.collect()
             return
 

@@ -145,7 +145,7 @@ def consume_progress_queue(
         if elapsed >= timeout_seconds:
             progress_str = f" | {last_progress_info}" if last_progress_info else ""
             print(f"⏱️ {timeout_label}超时: 处理时长 {elapsed:.2f}s 超过限制 {timeout_seconds}s，已放弃{progress_str}")
-            yield ('timeout', send_error_event(f"分析超时：处理时长超过 {timeout_seconds} 秒限制，已放弃"))
+            yield ('timeout', send_error_event(f"Analysis timed out after {timeout_seconds} seconds"))
             return
 
         try:

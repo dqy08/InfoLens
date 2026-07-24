@@ -80,7 +80,7 @@ globalThis.IL_mergeTokenSpansFullyForRendering = (function () {
         if (spanTag[ti] !== null) {
           const t = tokens[ti];
           throw new Error(
-            `digitMerge: token 下标 ${ti} 重复落入两段数字区间（offset=[${t.offset[0]},${t.offset[1]})，先前段 id=${spanTag[ti]}）`
+            `digitMerge: token index ${ti} falls in two digit spans (offset=[${t.offset[0]},${t.offset[1]}), prior span id=${spanTag[ti]})`
           );
         }
         spanTag[ti] = sid;

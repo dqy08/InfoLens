@@ -17,6 +17,7 @@ _BLOCKED_PREFIXES = (
     "/api/switch_model",
     "/api/client-activity",
     "/api/visit_stats",
+    "/api/extension-feedback",
 )
 
 

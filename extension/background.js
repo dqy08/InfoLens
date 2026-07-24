@@ -163,24 +163,51 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg?.type !== 'il-analyze-semantic') return;
-  (async () => {
-    try {
-      const apiBase = msg.apiBase || IL_CONFIG.apiBase;
-      const res = await fetch(`${String(apiBase).replace(/\/$/, '')}/api/analyze-semantic`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(msg.body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data?.success === false) {
-        const detail = data?.message || data?.detail || `HTTP ${res.status}`;
-        throw new Error(detail);
+  if (msg?.type === 'il-analyze-semantic') {
+    (async () => {
+      try {
+        const apiBase = msg.apiBase || IL_CONFIG.apiBase;
+        const res = await fetch(`${String(apiBase).replace(/\/$/, '')}/api/analyze-semantic`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(msg.body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.success === false) {
+          const detail = data?.message || data?.detail || `HTTP ${res.status}`;
+          throw new Error(detail);
+        }
+        sendResponse({ ok: true, data });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err?.message || err) });
       }
-      sendResponse({ ok: true, data });
-    } catch (err) {
-      sendResponse({ ok: false, error: String(err?.message || err) });
-    }
-  })();
-  return true;
+    })();
+    return true;
+  }
+
+  if (msg?.type === 'il-extension-feedback') {
+    (async () => {
+      try {
+        const apiBase = msg.apiBase || IL_CONFIG.apiBase;
+        const body = {
+          ...(msg.body && typeof msg.body === 'object' ? msg.body : {}),
+          extension_version: chrome.runtime.getManifest().version,
+        };
+        const res = await fetch(`${String(apiBase).replace(/\/$/, '')}/api/extension-feedback`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.success === false) {
+          const detail = data?.message || data?.detail || `HTTP ${res.status}`;
+          throw new Error(detail);
+        }
+        sendResponse({ ok: true, data });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
 });

@@ -162,7 +162,7 @@ def _generate_completion_events(
             lock_acquired = inference_lock.acquire(timeout=LOCK_WAIT_TIMEOUT)
             if not lock_acquired:
                 q.put(("error", QueueTimeoutError(
-                    f"排队等待超过 {LOCK_WAIT_TIMEOUT} 秒，服务繁忙，请稍后重试"
+                    f"Queue wait exceeded {LOCK_WAIT_TIMEOUT} seconds; server busy, try again later"
                 )))
                 return
             lock_wait_time = time.perf_counter() - lock_wait_start

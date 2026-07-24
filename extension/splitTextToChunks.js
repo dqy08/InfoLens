@@ -65,10 +65,10 @@ globalThis.IL_splitTextToChunks = (function () {
   /** @returns {{ text: string, startOffset: number }[]} */
   function splitTextToChunks(text, bytesPerChunk) {
     if (bytesPerChunk <= 0) {
-      throw new Error('分块字节上限必须大于 0，当前值: ' + bytesPerChunk);
+      throw new Error('bytesPerChunk must be > 0, got: ' + bytesPerChunk);
     }
     if (text.includes('\r')) {
-      throw new Error('文本包含 \\r (CR) 换行符，当前仅支持 \\n (LF)。');
+      throw new Error('Text contains \\r (CR); only \\n (LF) is supported.');
     }
     const chunks = [];
     let pos = 0;

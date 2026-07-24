@@ -85,7 +85,7 @@ def _generate_semantic_events(
             lock_acquired = inference_lock.acquire(timeout=LOCK_WAIT_TIMEOUT)
             if not lock_acquired:
                 analysis_error = QueueTimeoutError(
-                    f"排队等待超过 {LOCK_WAIT_TIMEOUT} 秒，服务繁忙，请稍后重试"
+                    f"Queue wait exceeded {LOCK_WAIT_TIMEOUT} seconds; server busy, try again later"
                 )
                 return
             lock_wait_time = time.perf_counter() - lock_wait_start
@@ -134,7 +134,7 @@ def _generate_semantic_events(
 
         if analysis_result is None:
             print("⚠️ 语义分析结果为空，但没有错误信息")
-            yield send_error_event("分析失败：未获取到结果", 500)
+            yield send_error_event("Analysis failed: no result", 500)
             gc.collect()
             return
 
@@ -201,7 +201,7 @@ def _analyze_semantic_plain(
             if t == 'result':
                 result = data.get('data')
             elif t == 'error':
-                error_msg = data.get('message', '分析失败')
+                error_msg = data.get('message', 'Analysis failed')
                 status_code = data.get('status_code', 500)
                 break
     except Exception as e:
@@ -215,7 +215,7 @@ def _analyze_semantic_plain(
     if error_msg:
         return {"success": False, "message": error_msg}, status_code
     if result is None:
-        return {"success": False, "message": "分析失败：未获取到结果"}, 500
+        return {"success": False, "message": "Analysis failed: no result"}, 500
     return result, 200
 
 
@@ -248,18 +248,18 @@ def analyze_semantic(semantic_request):
     privacy_mode = bool(semantic_request.get("privacy_mode", False))
 
     if not query:
-        return {"success": False, "message": "缺少 query 字段"}, 400
+        return {"success": False, "message": "Missing query"}, 400
 
     if texts is not None:
         if not isinstance(texts, list) or not texts or not all(isinstance(t, str) and t for t in texts):
-            return {"success": False, "message": "texts 字段需为非空字符串数组"}, 400
+            return {"success": False, "message": "texts must be a non-empty string array"}, 400
         if not full_match_degree_only:
-            return {"success": False, "message": "texts 数组批量模式仅支持 full_match_degree_only=True"}, 400
+            return {"success": False, "message": "texts batch mode requires full_match_degree_only=True"}, 400
         content = texts
         log_text = f"[批量 x{len(texts)}] " + texts[0]
     else:
         if not text:
-            return {"success": False, "message": "缺少 text 字段"}, 400
+            return {"success": False, "message": "Missing text"}, 400
         content = text
         log_text = text
 

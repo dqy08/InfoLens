@@ -57,6 +57,7 @@ from backend.api.visit_stats_api import (  # noqa: F401
     get_visit_stats_active_visits_timeline,
     post_visit_stats_reset,
 )
+from backend.api.extension_feedback import post_extension_feedback  # noqa: F401
 from backend.api.openai_completions import (  # noqa: F401
     completions,
     completions_prompt,
