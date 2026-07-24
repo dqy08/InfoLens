@@ -4,6 +4,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -285,6 +291,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -574,6 +586,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -871,6 +889,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -1176,6 +1200,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's h",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -1489,6 +1519,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -1810,6 +1846,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -2139,6 +2181,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -2476,6 +2524,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -2821,6 +2875,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -3174,6 +3234,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -3535,6 +3601,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -3904,6 +3976,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -4281,6 +4359,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -4666,6 +4750,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -5059,6 +5149,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -5460,6 +5556,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -5869,6 +5971,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -6286,6 +6394,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -6711,6 +6825,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -7144,6 +7264,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -7585,6 +7711,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -8034,6 +8166,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -8491,6 +8629,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -8956,6 +9100,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -9429,6 +9579,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -9910,6 +10066,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -10399,6 +10561,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -10896,6 +11064,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -11401,6 +11575,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -11914,6 +12094,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -12435,6 +12621,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -12964,6 +13156,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -13501,6 +13699,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -14046,6 +14250,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -14599,6 +14809,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -15160,6 +15376,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -15729,6 +15951,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -16306,6 +16534,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -16891,6 +17125,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -17484,6 +17724,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -18085,6 +18331,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -18694,6 +18946,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -19311,6 +19569,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -19936,6 +20200,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -20569,6 +20839,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -21210,6 +21486,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -21859,6 +22141,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -22516,6 +22804,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -23181,6 +23475,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -23854,6 +24154,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -24535,6 +24841,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -25224,6 +25536,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -25921,6 +26239,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -26626,6 +26950,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -27339,6 +27669,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -28060,6 +28396,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -28789,6 +29131,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -29526,6 +29874,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -30271,6 +30625,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -31024,6 +31384,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -31785,6 +32151,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -32554,6 +32926,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -33331,6 +33709,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -34116,6 +34500,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -34909,6 +35299,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -35710,6 +36106,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -36519,6 +36921,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -37336,6 +37744,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -38161,6 +38575,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -38994,6 +39414,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -39835,6 +40261,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -40684,6 +41116,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -41541,6 +41979,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -42406,6 +42850,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -43279,6 +43729,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -44160,6 +44616,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -45049,6 +45511,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -45946,6 +46414,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -46851,6 +47325,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -47764,6 +48244,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -48685,6 +49171,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -49614,6 +50106,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -50551,6 +51049,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -51496,6 +52000,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -52449,6 +52959,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -53410,6 +53926,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -54379,6 +54901,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -55356,6 +55884,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -56341,6 +56875,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -57334,6 +57874,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -58335,6 +58881,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -59344,6 +59896,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -60361,6 +60919,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -61386,6 +61950,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -62419,6 +62989,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -63460,6 +64036,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -64509,6 +65091,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -65566,6 +66154,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -66631,6 +67225,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -67704,6 +68304,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -68785,6 +69391,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -69874,6 +70486,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -70971,6 +71589,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -72076,6 +72700,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -73189,6 +73819,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -74310,6 +74946,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -75439,6 +76081,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -76576,6 +77224,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -77721,6 +78375,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -78874,6 +79534,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -80035,6 +80701,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -81204,6 +81876,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -82381,6 +83059,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise et",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -83566,6 +84250,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -84759,6 +85449,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -85960,6 +86656,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -87169,6 +87871,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -88386,6 +89094,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -89611,6 +90325,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -90844,6 +91564,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -92085,6 +92811,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -93334,6 +94066,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -94591,6 +95329,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -95856,6 +96600,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -97129,6 +97879,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -98410,6 +99166,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -99699,6 +100461,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -100996,6 +101764,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,  \n",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -102301,6 +103075,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,  \nBut",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -103614,6 +104394,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,  \nBut in",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -104935,6 +105721,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,  \nBut in the",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -106264,6 +107056,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,  \nBut in the heart",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -107601,6 +108399,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,  \nBut in the heart,",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -108946,6 +109750,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,  \nBut in the heart, love",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -110299,6 +111109,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,  \nBut in the heart, love's",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -111660,6 +112476,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,  \nBut in the heart, love's true",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -113029,6 +113851,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,  \nBut in the heart, love's truest",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -114406,6 +115234,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,  \nBut in the heart, love's truest light",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -115791,6 +116625,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nWrite a sonnet about love.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nIn twilight's hush, where shadows play,  \nLove whispers soft, a gentle ray.  \nIt blooms in hearts, a fleeting flame,  \nThat lights the darkest, darkest lane.  \n\nIt seeks the soul, with tender grace,  \nTo mend the wounds, to heal the face.  \nThrough joy and sorrow, it remains,  \nA constant flame in life's vast sea.  \n\nYet love is not a rose that fades,  \nBut seeds that grow in time and space.  \nIt bends, it breaks, it grows again,  \nA promise etched in every pain.  \n\nSo let the world proclaim its might,  \nBut in the heart, love's truest light.",
       "promptRegionEnd": 153,
+      "inputRanges": [
+        [
+          0,
+          153
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -117188,233 +118028,300 @@
         0,
         12
       ],
-      "raw": "<|im_start|>"
+      "raw": "<|im_start|>",
+      "token_id": 151644
     },
     {
       "offset": [
         12,
         18
       ],
-      "raw": "system"
+      "raw": "system",
+      "token_id": 8948
     },
     {
       "offset": [
         18,
         19
       ],
-      "raw": "\n"
+      "raw": "\n",
+      "token_id": 198
     },
     {
       "offset": [
         19,
         22
       ],
-      "raw": "You"
+      "raw": "You",
+      "token_id": 2610
     },
     {
       "offset": [
         22,
         26
       ],
-      "raw": " are"
+      "raw": " are",
+      "token_id": 525
     },
     {
       "offset": [
         26,
         28
       ],
-      "raw": " a"
+      "raw": " a",
+      "token_id": 264
     },
     {
       "offset": [
         28,
         36
       ],
-      "raw": " helpful"
+      "raw": " helpful",
+      "token_id": 10950
     },
     {
       "offset": [
         36,
         46
       ],
-      "raw": " assistant"
+      "raw": " assistant",
+      "token_id": 17847
     },
     {
       "offset": [
         46,
         47
       ],
-      "raw": "."
+      "raw": ".",
+      "token_id": 13
     },
     {
       "offset": [
         47,
         57
       ],
-      "raw": "<|im_end|>"
+      "raw": "<|im_end|>",
+      "token_id": 151645
     },
     {
       "offset": [
         57,
         58
       ],
-      "raw": "\n"
+      "raw": "\n",
+      "token_id": 198
     },
     {
       "offset": [
         58,
         70
       ],
-      "raw": "<|im_start|>"
+      "raw": "<|im_start|>",
+      "token_id": 151644
     },
     {
       "offset": [
         70,
         74
       ],
-      "raw": "user"
+      "raw": "user",
+      "token_id": 872
     },
     {
       "offset": [
         74,
         75
       ],
-      "raw": "\n"
+      "raw": "\n",
+      "token_id": 198
     },
     {
       "offset": [
         75,
         80
       ],
-      "raw": "Write"
+      "raw": "Write",
+      "token_id": 7985
     },
     {
       "offset": [
         80,
         82
       ],
-      "raw": " a"
+      "raw": " a",
+      "token_id": 264
     },
     {
       "offset": [
         82,
         86
       ],
-      "raw": " son"
+      "raw": " son",
+      "token_id": 4438
     },
     {
       "offset": [
         86,
         89
       ],
-      "raw": "net"
+      "raw": "net",
+      "token_id": 4711
     },
     {
       "offset": [
         89,
         95
       ],
-      "raw": " about"
+      "raw": " about",
+      "token_id": 911
     },
     {
       "offset": [
         95,
         100
       ],
-      "raw": " love"
+      "raw": " love",
+      "token_id": 2948
     },
     {
       "offset": [
         100,
         101
       ],
-      "raw": "."
+      "raw": ".",
+      "token_id": 13
     },
     {
       "offset": [
         101,
         111
       ],
-      "raw": "<|im_end|>"
+      "raw": "<|im_end|>",
+      "token_id": 151645
     },
     {
       "offset": [
         111,
         112
       ],
-      "raw": "\n"
+      "raw": "\n",
+      "token_id": 198
     },
     {
       "offset": [
         112,
         124
       ],
-      "raw": "<|im_start|>"
+      "raw": "<|im_start|>",
+      "token_id": 151644
     },
     {
       "offset": [
         124,
         133
       ],
-      "raw": "assistant"
+      "raw": "assistant",
+      "token_id": 77091
     },
     {
       "offset": [
         133,
         134
       ],
-      "raw": "\n"
+      "raw": "\n",
+      "token_id": 198
     },
     {
       "offset": [
         134,
         141
       ],
-      "raw": "<think>"
+      "raw": "<think>",
+      "token_id": 151667
     },
     {
       "offset": [
         141,
         143
       ],
-      "raw": "\n\n"
+      "raw": "\n\n",
+      "token_id": 271
     },
     {
       "offset": [
         143,
         151
       ],
-      "raw": "</think>"
+      "raw": "</think>",
+      "token_id": 151668
     },
     {
       "offset": [
         151,
         153
       ],
-      "raw": "\n\n"
+      "raw": "\n\n",
+      "token_id": 271
     }
   ],
+  "completionReason": "stop",
   "draft": {
-    "mode": "raw",
+    "mode": "chat",
     "model": "instruct",
-    "maxTokens": 200
+    "maxTokens": 200,
+    "system": "You are a helpful assistant.",
+    "user": "Write a sonnet about love.",
+    "useSystem": true,
+    "enableThinking": false,
+    "toolCallingEnabled": false,
+    "multiTurnEnabled": true,
+    "toolConfig": {
+      "entries": []
+    }
   },
   "demoUiOptions": {
     "layoutMode": "text-flow",
+    "layoutTransitionEnabled": true,
+    "layoutTransitionDurationS": 1,
     "measureWidthPx": 400,
     "dagCompactness": 0.6,
     "linearArcAdjacentGapPx": 0,
     "hideExcludedTokens": false,
+    "dimInactiveTokens": false,
+    "dimInactiveTokensThreshold": 0.01,
+    "dimInactiveNotDuringAnimation": false,
     "edgeTopPCoverage": 0.7,
     "nodeCiVisualScaleEnabled": false,
     "decayAttributionToHighSurprisalTargetEnabled": false,
     "hideInactiveEdges": false,
+    "showDownstreamInfluence": false,
+    "recursiveAttributionEnabled": false,
+    "recursiveEdgeBatchAnimationDirection": "forward",
+    "forwardSlideSharedNodes": false,
+    "showTokenInfoOnSelected": false,
     "replayPacingMode": "step",
+    "replayAutoZoom": false,
+    "disableSmartStepTime": false,
+    "lightningEffect": false,
+    "lightningThresholdTau": 0.35,
+    "lightningSlowMo": 1,
+    "lightningSound": false,
     "playbackTotalS": 7,
     "playbackStepMs": 100,
+    "simulateAttentionCost": false,
+    "skipPrefillAttention": false,
+    "prefillStyle": "random",
+    "attendMs": 33,
+    "ffnRatioAttend": 3,
+    "attendBurst": 1,
+    "queryBurst": 3,
+    "hideArrowsDuringAttention": false,
     "excludePromptPatternsEnabled": true,
     "excludePromptPatternsText": "#comment# use '#comment#' to comment lines; support regex\n<\\|im_start\\|>system\\n\n<\\|im_start\\|>user\\n\n<\\|im_start\\|>assistant\\n\n<\\|im_start\\|>assistant\\n\\n\n<\\|im_end\\|>\\n\n<think>\\n\\n\n</think>\\n\\n\n<\\|im_start\\|>system\\n[\\s\\S]*?<\\|im_end\\|>#comment# all system prompt",
     "excludeGeneratedPatternsEnabled": true,
-    "excludeGeneratedPatternsText": "<think>\\n\n</think>\\n\\n"
+    "excludeGeneratedPatternsText": "<think>\\n\n</think>\\n\\n",
+    "deletePromptPatternsEnabled": false,
+    "deletePromptPatternsText": "",
+    "selectedNodeId": null
   }
 }

@@ -4,6 +4,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -301,6 +307,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -606,6 +618,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -919,6 +937,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -1240,6 +1264,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -1569,6 +1599,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -1906,6 +1942,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -2251,6 +2293,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -2604,6 +2652,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -2965,6 +3019,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -3334,6 +3394,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -3711,6 +3777,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -4096,6 +4168,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -4489,6 +4567,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -4890,6 +4974,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -5299,6 +5389,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -5716,6 +5812,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -6141,6 +6243,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -6574,6 +6682,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -7015,6 +7129,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -7464,6 +7584,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -7921,6 +8047,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -8386,6 +8518,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -8859,6 +8997,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -9340,6 +9484,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新晴",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -9829,6 +9979,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新晴日",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -10326,6 +10482,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新晴日，",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -10831,6 +10993,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新晴日，  \n",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -11344,6 +11512,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新晴日，  \n一",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -11865,6 +12039,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新晴日，  \n一缕",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -12394,6 +12574,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新晴日，  \n一缕芬",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -12931,6 +13117,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新晴日，  \n一缕芬芳",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -13476,6 +13668,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新晴日，  \n一缕芬芳入",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -14029,6 +14227,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新晴日，  \n一缕芬芳入梦",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -14590,6 +14794,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新晴日，  \n一缕芬芳入梦时",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -15159,6 +15369,12 @@
     {
       "context": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n写一首绝句，主题是春天。<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n春色满园花满枝，  \n轻风拂面柳依依。  \n桃红柳绿新晴日，  \n一缕芬芳入梦时。",
       "promptRegionEnd": 139,
+      "inputRanges": [
+        [
+          0,
+          139
+        ]
+      ],
       "response": {
         "debug_info": {
           "topk_probs": [
@@ -15740,247 +15956,316 @@
         0,
         12
       ],
-      "raw": "<|im_start|>"
+      "raw": "<|im_start|>",
+      "token_id": 151644
     },
     {
       "offset": [
         12,
         18
       ],
-      "raw": "system"
+      "raw": "system",
+      "token_id": 8948
     },
     {
       "offset": [
         18,
         19
       ],
-      "raw": "\n"
+      "raw": "\n",
+      "token_id": 198
     },
     {
       "offset": [
         19,
         22
       ],
-      "raw": "You"
+      "raw": "You",
+      "token_id": 2610
     },
     {
       "offset": [
         22,
         26
       ],
-      "raw": " are"
+      "raw": " are",
+      "token_id": 525
     },
     {
       "offset": [
         26,
         28
       ],
-      "raw": " a"
+      "raw": " a",
+      "token_id": 264
     },
     {
       "offset": [
         28,
         36
       ],
-      "raw": " helpful"
+      "raw": " helpful",
+      "token_id": 10950
     },
     {
       "offset": [
         36,
         46
       ],
-      "raw": " assistant"
+      "raw": " assistant",
+      "token_id": 17847
     },
     {
       "offset": [
         46,
         47
       ],
-      "raw": "."
+      "raw": ".",
+      "token_id": 13
     },
     {
       "offset": [
         47,
         57
       ],
-      "raw": "<|im_end|>"
+      "raw": "<|im_end|>",
+      "token_id": 151645
     },
     {
       "offset": [
         57,
         58
       ],
-      "raw": "\n"
+      "raw": "\n",
+      "token_id": 198
     },
     {
       "offset": [
         58,
         70
       ],
-      "raw": "<|im_start|>"
+      "raw": "<|im_start|>",
+      "token_id": 151644
     },
     {
       "offset": [
         70,
         74
       ],
-      "raw": "user"
+      "raw": "user",
+      "token_id": 872
     },
     {
       "offset": [
         74,
         75
       ],
-      "raw": "\n"
+      "raw": "\n",
+      "token_id": 198
     },
     {
       "offset": [
         75,
         76
       ],
-      "raw": "写"
+      "raw": "写",
+      "token_id": 61443
     },
     {
       "offset": [
         76,
         78
       ],
-      "raw": "一首"
+      "raw": "一首",
+      "token_id": 108462
     },
     {
       "offset": [
         78,
         79
       ],
-      "raw": "绝"
+      "raw": "绝",
+      "token_id": 99631
     },
     {
       "offset": [
         79,
         80
       ],
-      "raw": "句"
+      "raw": "句",
+      "token_id": 99700
     },
     {
       "offset": [
         80,
         81
       ],
-      "raw": "，"
+      "raw": "，",
+      "token_id": 3837
     },
     {
       "offset": [
         81,
         83
       ],
-      "raw": "主题"
+      "raw": "主题",
+      "token_id": 100220
     },
     {
       "offset": [
         83,
         84
       ],
-      "raw": "是"
+      "raw": "是",
+      "token_id": 20412
     },
     {
       "offset": [
         84,
         86
       ],
-      "raw": "春天"
+      "raw": "春天",
+      "token_id": 105303
     },
     {
       "offset": [
         86,
         87
       ],
-      "raw": "。"
+      "raw": "。",
+      "token_id": 1773
     },
     {
       "offset": [
         87,
         97
       ],
-      "raw": "<|im_end|>"
+      "raw": "<|im_end|>",
+      "token_id": 151645
     },
     {
       "offset": [
         97,
         98
       ],
-      "raw": "\n"
+      "raw": "\n",
+      "token_id": 198
     },
     {
       "offset": [
         98,
         110
       ],
-      "raw": "<|im_start|>"
+      "raw": "<|im_start|>",
+      "token_id": 151644
     },
     {
       "offset": [
         110,
         119
       ],
-      "raw": "assistant"
+      "raw": "assistant",
+      "token_id": 77091
     },
     {
       "offset": [
         119,
         120
       ],
-      "raw": "\n"
+      "raw": "\n",
+      "token_id": 198
     },
     {
       "offset": [
         120,
         127
       ],
-      "raw": "<think>"
+      "raw": "<think>",
+      "token_id": 151667
     },
     {
       "offset": [
         127,
         129
       ],
-      "raw": "\n\n"
+      "raw": "\n\n",
+      "token_id": 271
     },
     {
       "offset": [
         129,
         137
       ],
-      "raw": "</think>"
+      "raw": "</think>",
+      "token_id": 151668
     },
     {
       "offset": [
         137,
         139
       ],
-      "raw": "\n\n"
+      "raw": "\n\n",
+      "token_id": 271
     }
   ],
+  "completionReason": "stop",
   "draft": {
-    "mode": "raw",
+    "mode": "chat",
     "model": "instruct",
-    "maxTokens": 200
+    "maxTokens": 200,
+    "system": "You are a helpful assistant.",
+    "user": "写一首绝句，主题是春天。",
+    "useSystem": true,
+    "enableThinking": false,
+    "toolCallingEnabled": false,
+    "multiTurnEnabled": true,
+    "toolConfig": {
+      "entries": []
+    }
   },
   "demoUiOptions": {
     "layoutMode": "text-flow",
+    "layoutTransitionEnabled": true,
+    "layoutTransitionDurationS": 1,
     "measureWidthPx": 400,
     "dagCompactness": 0.5,
     "linearArcAdjacentGapPx": 0,
     "hideExcludedTokens": false,
+    "dimInactiveTokens": false,
+    "dimInactiveTokensThreshold": 0.01,
+    "dimInactiveNotDuringAnimation": false,
     "edgeTopPCoverage": 0.7,
     "nodeCiVisualScaleEnabled": false,
     "decayAttributionToHighSurprisalTargetEnabled": false,
     "hideInactiveEdges": false,
+    "showDownstreamInfluence": false,
+    "recursiveAttributionEnabled": false,
+    "recursiveEdgeBatchAnimationDirection": "forward",
+    "forwardSlideSharedNodes": false,
+    "showTokenInfoOnSelected": false,
     "replayPacingMode": "step",
+    "replayAutoZoom": false,
+    "disableSmartStepTime": false,
+    "lightningEffect": false,
+    "lightningThresholdTau": 0.35,
+    "lightningSlowMo": 1,
+    "lightningSound": false,
     "playbackTotalS": 7,
     "playbackStepMs": 200,
+    "simulateAttentionCost": false,
+    "skipPrefillAttention": false,
+    "prefillStyle": "random",
+    "attendMs": 33,
+    "ffnRatioAttend": 3,
+    "attendBurst": 1,
+    "queryBurst": 3,
+    "hideArrowsDuringAttention": false,
     "excludePromptPatternsEnabled": true,
     "excludePromptPatternsText": "#comment# use '#comment#' to comment lines; support regex\n<\\|im_start\\|>system\\n\n<\\|im_start\\|>user\\n\n<\\|im_start\\|>assistant\\n\n<\\|im_start\\|>assistant\\n\\n\n<\\|im_end\\|>\\n\n<think>\\n\\n\n</think>\\n\\n\n<\\|im_start\\|>system\\n[\\s\\S]*?<\\|im_end\\|>#comment# all system prompt",
     "excludeGeneratedPatternsEnabled": true,
-    "excludeGeneratedPatternsText": "<think>\\n\n</think>\\n\\n"
+    "excludeGeneratedPatternsText": "<think>\\n\n</think>\\n\\n",
+    "deletePromptPatternsEnabled": false,
+    "deletePromptPatternsText": "",
+    "selectedNodeId": null
   }
 }
