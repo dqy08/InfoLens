@@ -3,7 +3,8 @@
  * Validates: article extract ↔ DOM map, API call, token paint, chunk underline.
  *
  * token / truncated：CSS Custom Highlight API（不改 DOM；truncated 为 CanvasText×Canvas 统一灰）。
- * underline：#il-overlay-host 绝对定位盖层（不垫字下）。
+ * underline（导航）/ pending-underline：#il-overlay-host 盖层，可叠画；统一蓝。
+ * pending：fill 前是「等待染色」；fill 后若无红色 token，则留下作为 chunk 级匹配标记（有 token 才拆）。
  *
  * IL_CONFIG.domDebug：点击后只抽正文并下划线，便于目测提取范围（不唤起 Find bar）。
  */
@@ -47,7 +48,7 @@
   // SYNC: client/src/shared/vis/GLTR_Text_Box.ts → scrollToUnicodeCharOffset 默认 viewportYRatio
   const CHUNK_JUMP_VIEWPORT_Y_RATIO = 0.2;
   // 分块语义搜索：最快节奏下限——两次渲染之间至少间隔这么久（无论是否有滚动）
-  const CHUNK_SEARCH_MIN_CYCLE_MS = 900;
+  const CHUNK_SEARCH_MIN_CYCLE_MS = 500;
   // 有后续滚动时：染色后先停留一半，另一半留给滚动 settle；无滚动（已 park）时整段都算这里，见下方用法
   const CHUNK_SEARCH_HOLD_MS = CHUNK_SEARCH_MIN_CYCLE_MS / 2;
   const CHUNK_SEARCH_FOLLOW_VIEWPORT_Y_RATIO = 0.6;
@@ -70,19 +71,18 @@
   let lastStatusMeta = null;
   let statusFeedbackSent = false;
   let statusFeedbackHideTimer = 0;
-  /** @type {{ query: string, contentChunkCount: number, truncated: boolean } | null} */
+  /** @type {{ query: string, contentChunkCount: number, truncated: boolean, windowEnd: number } | null} */
   let lastSearchMeta = null;
   let selectedProgressChunkStart = null;
   let hoveredProgressChunkStart = null;
-  let progressSelectionFading = false;
   let matchIndex = -1;
   /**
    * 逻辑区间（去重键）；与 DOM 节点分离。
-   * token：CSS Highlight；underline：overlay rect（reflow 时按 spec 重绘，勿按 rect 条数累积）。
-   * @type {{ kind: 'token' | 'underline', cp0: number, cp1: number, level?: number }[]}
+   * token：CSS Highlight；underline / pending-underline：overlay rect（reflow 时按 spec 重绘）。
+   * @type {{ kind: 'token' | 'underline' | 'pending-underline', cp0: number, cp1: number, level?: number }[]}
    */
   let paintSpecs = [];
-  /** @type {HTMLElement[]} 仅 underline DOM */
+  /** @type {HTMLElement[]} underline / pending-underline DOM */
   let overlayEls = [];
   /** 未分析后缀置灰：已分析码点终点；null = 无置灰 */
   let truncatedAnalyzedCpEnd = null;
@@ -98,6 +98,9 @@
    *   progressTextLength: number,
    *   matchIndex: number,
    *   truncatedAnalyzedCpEnd: number | null,
+   *   selectedProgressChunkStart: number | null,
+   *   status: typeof lastStatusMeta,
+   *   searchMeta: typeof lastSearchMeta,
    * }}
    */
   let lastResult = null;
@@ -114,9 +117,13 @@
   /** 监听正文子树的文字改写（如翻译插件原地换字），弥补 ResizeObserver 只对尺寸变化敏感的盲区 */
   /** @type {MutationObserver | null} */
   let contentMutationObserver = null;
+  /** 正文可能变了（mutation）；为 true 才值得全量 collectTextMap */
+  let contentDirty = false;
   let scrollSyncTimer = 0;
   let searching = false;
   let abortWanted = false;
+  /** 每次成功进入搜索 +1；finally 仅当仍是本轮 epoch 时清 searching，防并发误关 */
+  let searchEpoch = 0;
   let reflowQueued = false;
   let underlineHoldTimer = 0;
   let underlineFadeTimer = 0;
@@ -126,6 +133,77 @@
   let chunkSearchAutoScrollUserCancelled = false;
   /** @type {(() => void) | undefined} */
   let chunkSearchAutoScrollCleanup;
+
+  /**
+   * fill_blank 串行（在途最多 1）+ 匹配差背压：
+   * pending = 排队 + 在飞；count 可超前至多 FILL_MATCH_LAG 个未完成 fill，再多则等。
+   * 相对旧 hybrid（单块内 count→await fill 串行），异步 fill 会与 count 预取叠跑，
+   * 增加额外并发（FETCH_AHEAD=1 时最坏约 2×count + 1×fill）。
+   */
+  const FILL_MATCH_LAG = 2;
+  /** @type {(() => Promise<void>)[]} */
+  const fillBlankQueue = [];
+  let fillBlankBusy = false;
+  /** @type {(() => void)[]} */
+  let fillLagWaiters = [];
+  /** 与 searchEpoch 分离：Continue 抬 epoch 不该作废上一批未完成的 fill */
+  let fillGen = 0;
+
+  function fillPendingCount() {
+    return fillBlankQueue.length + (fillBlankBusy ? 1 : 0);
+  }
+
+  function wakeFillLagWaiters() {
+    const waiters = fillLagWaiters.splice(0);
+    for (const w of waiters) w();
+  }
+
+  function notifyFillLagWaiters() {
+    if (fillPendingCount() >= FILL_MATCH_LAG) return;
+    wakeFillLagWaiters();
+  }
+
+  function clearFillBlankQueue() {
+    fillBlankQueue.length = 0;
+    fillGen += 1;
+    // 停止/重置须无条件唤醒，不可等在途 fill 降 pending
+    wakeFillLagWaiters();
+  }
+
+  /** pending 降到 < FILL_MATCH_LAG 后再继续（允许再入队一个） */
+  function waitUntilFillLagOk() {
+    if (fillPendingCount() < FILL_MATCH_LAG) return Promise.resolve();
+    return new Promise((resolve) => {
+      fillLagWaiters.push(resolve);
+    });
+  }
+
+  /** @param {(gen: number) => Promise<void>} job */
+  function enqueueFillBlank(job) {
+    const gen = fillGen;
+    fillBlankQueue.push(() => job(gen));
+    pumpFillBlankQueue();
+  }
+
+  function pumpFillBlankQueue() {
+    if (fillBlankBusy) return;
+    const job = fillBlankQueue.shift();
+    if (!job) {
+      notifyFillLagWaiters();
+      return;
+    }
+    fillBlankBusy = true;
+    Promise.resolve()
+      .then(() => job())
+      .catch((err) => {
+        console.error('[InfoLens] fill_blank queue', err?.message || err);
+      })
+      .finally(() => {
+        fillBlankBusy = false;
+        notifyFillLagWaiters();
+        pumpFillBlankQueue();
+      });
+  }
 
   // ---------- extract（纯文本查看器 / Readability 定根；后者失败不回退） ----------
 
@@ -149,7 +227,7 @@
         if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'TEXTAREA' || tag === 'SVG') {
           return NodeFilter.FILTER_REJECT;
         }
-        if (p.closest('#il-find-root, #il-overlay-host, .il-chunk-underline')) {
+        if (p.closest('#il-find-root, #il-overlay-host, [data-il-underline]')) {
           return NodeFilter.FILTER_REJECT;
         }
         return NodeFilter.FILTER_ACCEPT;
@@ -178,6 +256,7 @@
     const mapped = collectTextMap(root);
     extractedText = mapped.text;
     setPieces(mapped.pieces);
+    contentDirty = false;
     matchedChunks = [];
     semanticMatchProgress = [];
     matchIndex = -1;
@@ -579,25 +658,9 @@
     addCpRangeToHighlight(h, cp0, fullCp);
   }
 
-  function clearOverlayEls(options) {
-    const preserveUnderline = options?.preserveUnderline === true;
-    if (!preserveUnderline) {
-      for (const el of overlayEls) el.remove();
-      overlayEls = [];
-      return;
-    }
-    // SYNC: GLTR_Text_Box.clearHighlight({ preserveChunkInterval: true }) — 留下划线 DOM（含 fade）
-    overlayEls = overlayEls.filter((el) => {
-      if (el.classList.contains('il-chunk-underline')) return true;
-      el.remove();
-      return false;
-    });
-  }
-
   /** SYNC: client/src/shared/vis/GLTR_Text_Box.ts → cancelChunkHighlightFade */
   function cancelUnderlineFade() {
     underlineFadeGen += 1;
-    progressSelectionFading = false;
     if (underlineHoldTimer) {
       clearTimeout(underlineHoldTimer);
       underlineHoldTimer = 0;
@@ -629,6 +692,7 @@
   function resetStatusFeedbackButton() {
     const btn = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'));
     if (!btn) return;
+    btn.hidden = false;
     btn.disabled = false;
     btn.classList.remove('is-thanks');
     btn.innerHTML = STATUS_FEEDBACK_ICON;
@@ -643,20 +707,40 @@
       clearTimeout(statusFeedbackHideTimer);
       statusFeedbackHideTimer = 0;
     }
+    lastStatusMeta = null;
+    statusFeedbackSent = false;
+    resetStatusFeedbackButton();
+    setStatusContinueVisible(false);
     if (!el) return;
     el.hidden = true;
     if (textEl) {
       textEl.replaceChildren();
       textEl.removeAttribute('title');
     }
-    lastStatusMeta = null;
-    statusFeedbackSent = false;
-    resetStatusFeedbackButton();
+  }
+
+  /**
+   * 有未分析 chunk 时可续跑：Failed / Stopped 半截，或 maxChunks 截断后的下一批。
+   * 需已有进度（n>0）；首块即失败用 Enter 重开即可，不必 Continue。
+   */
+  function canResumeSearch() {
+    const query =
+      /** @type {HTMLInputElement | null} */ (ui$('semantic_find_input'))?.value?.trim() || '';
+    if (!query || !lastSearchMeta || lastSearchMeta.query !== query) return false;
+    if (!extractRoot?.isConnected) return false;
+    const n = semanticMatchProgress.length;
+    if (n <= 0) return false;
+    return n < (lastSearchMeta.contentChunkCount ?? 0);
+  }
+
+  function setStatusContinueVisible(on) {
+    const btn = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_continue'));
+    if (btn) btn.hidden = !on;
   }
 
   /**
    * Status strip under bar / progress.
-   * @param {string} label short prefix (Failed / Note)
+   * @param {string} label short prefix (Failed / Note / Stopped)
    * @param {string} detail reason or explanation
    * @param {{ tone?: 'error' | 'info' }} [opts]
    */
@@ -680,8 +764,14 @@
     textEl.title = text;
     lastStatusMeta = { tone, label: head, detail: body };
     statusFeedbackSent = false;
-    resetStatusFeedbackButton();
+    // 仅 Failed 可上报；Stopped / 截断 Note 不需要反馈按钮
+    if (tone === 'error') resetStatusFeedbackButton();
+    else {
+      const btn = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'));
+      if (btn) btn.hidden = true;
+    }
     el.hidden = false;
+    setStatusContinueVisible(canResumeSearch());
   }
 
   /** Task failure; reason from backend message or local error text */
@@ -738,9 +828,14 @@
       btn.setAttribute('aria-label', 'Thanks');
     }
     if (statusFeedbackHideTimer) clearTimeout(statusFeedbackHideTimer);
+    // 红心稍后收起；状态条保留，由用户手动 ×
     statusFeedbackHideTimer = window.setTimeout(() => {
       statusFeedbackHideTimer = 0;
-      clearFindStatus();
+      const b = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'));
+      if (!b || !statusFeedbackSent) return;
+      b.hidden = true;
+      b.classList.remove('is-thanks');
+      b.innerHTML = STATUS_FEEDBACK_ICON;
     }, 3000);
   }
 
@@ -749,6 +844,7 @@
    * @param {{ clearCache?: boolean }} [options] clearCache=true 时连 lastResult 一并丢弃（改 query / giveUp）
    */
   function resetSearchSession({ clearCache = false } = {}) {
+    clearFillBlankQueue();
     clearOverlays();
     clearFindStatus();
     matchedChunks = [];
@@ -757,7 +853,6 @@
     lastSearchMeta = null;
     selectedProgressChunkStart = null;
     hoveredProgressChunkStart = null;
-    progressSelectionFading = false;
     matchIndex = -1;
     if (clearCache) lastResult = null;
     updateNav();
@@ -775,12 +870,23 @@
     setSearching(false);
   }
 
-  /** 覆盖写入长度 1 结果缓存（specs 浅拷贝，避免后续 clear 连带清空） */
+  /** 覆盖写入长度 1 结果缓存（含状态条；specs 浅拷贝，避免后续 clear 连带清空） */
   function snapshotLastResult(query) {
-    if (!query || extractRoot == null) return;
+    if (!query) return;
+    // 无结果（含「只有错误」）：不更新缓存。注意搜索开头会 setTruncatedHighlight(0)，
+    // 0 不是 null，不能当「已有分析进度」。
+    if (
+      paintSpecs.length === 0 &&
+      matchedChunks.length === 0 &&
+      semanticMatchProgress.length === 0 &&
+      !(truncatedAnalyzedCpEnd > 0)
+    ) {
+      return;
+    }
     lastResult = {
       query,
       text: extractedText,
+      // pending 可兼作 chunk 级匹配标记（无红色 token 时保留），须随快照
       paintSpecs: paintSpecs.map((s) => ({ ...s })),
       matchedChunks: matchedChunks.map((c) => ({ ...c })),
       semanticMatchProgress: semanticMatchProgress.map((c) => ({ ...c })),
@@ -788,6 +894,8 @@
       matchIndex,
       truncatedAnalyzedCpEnd,
       selectedProgressChunkStart,
+      status: lastStatusMeta ? { ...lastStatusMeta } : null,
+      searchMeta: lastSearchMeta ? { ...lastSearchMeta } : null,
     };
   }
 
@@ -801,6 +909,7 @@
     progressTextLength = lastResult.progressTextLength;
     matchIndex = lastResult.matchIndex;
     selectedProgressChunkStart = lastResult.selectedProgressChunkStart ?? null;
+    lastSearchMeta = lastResult.searchMeta ? { ...lastResult.searchMeta } : null;
     if (lastResult.truncatedAnalyzedCpEnd != null) {
       setTruncatedHighlight(lastResult.truncatedAnalyzedCpEnd);
     }
@@ -809,11 +918,17 @@
     });
     updateNav();
     renderSemanticMatchProgress();
+    if (lastResult.status) {
+      showFindStatus(lastResult.status.label, lastResult.status.detail, {
+        tone: lastResult.status.tone === 'error' ? 'error' : 'info',
+      });
+    }
     return true;
   }
 
   /**
-   * ChatGPT 等会在滚动时改布局/换节点；滚动停稳或尺寸变化后重绑 Range / 重测 underline。
+   * ChatGPT 等会在滚动时改布局/换节点；滚动停稳或尺寸变化后按需重绑 Range / 重测 underline。
+   * 无 mutation 且 pieces 仍 connected 时跳过全量 collectTextMap（滚动热路径）。
    */
   function syncPaintAfterLayout() {
     if (!extractRoot?.isConnected) {
@@ -830,8 +945,17 @@
     }
     if (paintSpecs.length === 0 && truncatedAnalyzedCpEnd == null) return;
 
-    const mapped = collectTextMap(extractRoot);
     const stale = pieces.some((p) => !p.node.isConnected);
+    // 无 mutation 且节点仍在：跳过全页 collectTextMap，但仍重测 underline（resize/reflow）
+    if (!contentDirty && !stale) {
+      renderAllSpecs({
+        preserveUnderline: paintSpecs.some((s) => s.kind === 'underline'),
+      });
+      return;
+    }
+
+    const mapped = collectTextMap(extractRoot);
+    contentDirty = false;
     if (mapped.text !== extractedText) {
       // DOM_DEBUG 只是目测提取范围的调试预览，永远反映"当前"文本，文本变了就重新按当前内容分块展示
       if (DOM_DEBUG) {
@@ -881,9 +1005,11 @@
     if (scrollRoot && scrollRoot !== document.documentElement && scrollRoot !== document.body) {
       paintResizeObserver.observe(scrollRoot);
     }
-    // 尺寸不变的原地换字（翻译插件常见）不会触发 ResizeObserver，靠这个兜底触发同一套 sync 判断
+    // 尺寸不变的原地换字（翻译插件常见）不会触发 ResizeObserver，靠这个置脏再走同一套 sync
     contentMutationObserver = new MutationObserver((records) => {
-      if (records.some(mutationTouchesPieces)) scheduleSyncPaintAfterLayout();
+      if (!records.some(mutationTouchesPieces)) return;
+      contentDirty = true;
+      scheduleSyncPaintAfterLayout();
     });
     contentMutationObserver.observe(articleRoot, { childList: true, characterData: true, subtree: true });
   }
@@ -899,11 +1025,13 @@
     else paintSpecs.push(spec);
   }
 
-  /** underline：挂 #il-overlay-host，盖在内容上 */
-  function appendUnderlineRect(rect) {
+  /** underline 盖层：data-il-underline=nav|pending，供 preserve/fade 识别（不依赖 className 全等） */
+  function appendUnderlineRect(rect, kind) {
     if (!paintMount) throw new Error('paint mount missing');
     const el = document.createElement('div');
-    el.className = 'il-chunk-underline';
+    const pending = kind === 'pending-underline';
+    el.className = pending ? 'il-chunk-underline-pending' : 'il-chunk-underline';
+    el.dataset.ilUnderline = pending ? 'pending' : 'nav';
     const { x, y } = clientRectToMountPos(rect);
     el.style.left = `${x}px`;
     el.style.top = `${y}px`;
@@ -912,32 +1040,66 @@
     overlayEls.push(el);
   }
 
+  /** @param {'nav' | 'pending'} role */
+  function clearOverlayRole(role) {
+    overlayEls = overlayEls.filter((el) => {
+      if (el.dataset.ilUnderline !== role) return true;
+      el.remove();
+      return false;
+    });
+  }
+
+  function clearOverlayEls(options) {
+    const preserveUnderline = options?.preserveUnderline === true;
+    if (!preserveUnderline) {
+      for (const el of overlayEls) el.remove();
+      overlayEls = [];
+      return;
+    }
+    // SYNC: GLTR_Text_Box.clearHighlight({ preserveChunkInterval: true }) — 留蓝导航线 DOM（含 fade）
+    clearOverlayRole('pending');
+  }
+
+  function paintUnderlineSpec(spec) {
+    for (const range of rangesFromCpOffsets(spec.cp0, spec.cp1)) {
+      if (!/\S/.test(range.toString())) continue;
+      for (const r of range.getClientRects()) {
+        if (r.width < 1 || r.height < 1) continue;
+        appendUnderlineRect(r, spec.kind);
+      }
+    }
+  }
+
   /**
-   * 按 paintSpecs 重绑 Highlight + 重画 underline。
+   * 只重画一类下划线（不动 token / truncated / 另一类线）。
+   * @param {'underline' | 'pending-underline'} kind
+   */
+  function renderUnderlinesOfKind(kind) {
+    const role = kind === 'pending-underline' ? 'pending' : 'nav';
+    if (!extractRoot?.isConnected) {
+      clearOverlayRole(role);
+      return;
+    }
+    ensurePaintMount(extractRoot);
+    clearOverlayRole(role);
+    for (const s of paintSpecs) {
+      if (s.kind === kind) paintUnderlineSpec(s);
+    }
+  }
+
+  /**
+   * 全量：token + truncated + 下划线。仅用于重绑/还原/reflow 等必须整表一致的场景。
    * @param {{ preserveUnderline?: boolean }} [options]
-   *   preserveUnderline：对齐站内 preserveChunkInterval — 不拆下划线 DOM（hold/fade 不被流式 token 更新打断）
+   *   preserveUnderline：不拆蓝导航线 DOM（hold/fade 不被流式更新打断）
    */
   function renderAllSpecs(options) {
-    const preserveUnderline = options?.preserveUnderline === true;
-    clearOverlayEls({ preserveUnderline });
     if (!extractRoot?.isConnected) return 0;
     ensurePaintMount(extractRoot);
     renderTokenHighlights();
     applyTruncatedHighlight();
-    let rectCount = overlayEls.length;
-    for (const s of paintSpecs) {
-      if (s.kind !== 'underline') continue;
-      if (preserveUnderline) continue;
-      for (const range of rangesFromCpOffsets(s.cp0, s.cp1)) {
-        if (!/\S/.test(range.toString())) continue;
-        for (const r of range.getClientRects()) {
-          if (r.width < 1 || r.height < 1) continue;
-          appendUnderlineRect(r);
-          rectCount += 1;
-        }
-      }
-    }
-    return rectCount;
+    if (options?.preserveUnderline !== true) renderUnderlinesOfKind('underline');
+    renderUnderlinesOfKind('pending-underline');
+    return overlayEls.length;
   }
 
   function paintSpec(kind, cp0, cp1, level) {
@@ -979,7 +1141,7 @@
     matchedChunks.forEach((c) => {
       upsertSpec({ kind: 'underline', cp0: c.start, cp1: c.end });
     });
-    renderAllSpecs();
+    renderUnderlinesOfKind('underline');
   }
 
   /**
@@ -992,7 +1154,7 @@
     if (chunk) {
       upsertSpec({ kind: 'underline', cp0: chunk.start, cp1: chunk.end });
     }
-    renderAllSpecs();
+    renderUnderlinesOfKind('underline');
   }
 
   /**
@@ -1002,19 +1164,15 @@
   function fadeCurrentUnderline() {
     const gen = ++underlineFadeGen;
     const fadingProgressChunkStart = selectedProgressChunkStart;
-    const lines = overlayEls.filter((el) => el.classList.contains('il-chunk-underline'));
+    // 只 fade 导航线；等待线独立，不在此列。进度线保持选中蓝，等 fade 结束再变红。
+    const lines = overlayEls.filter((el) => el.dataset.ilUnderline === 'nav');
     if (!lines.length) {
       paintSpecs = paintSpecs.filter((s) => s.kind !== 'underline');
       if (fadingProgressChunkStart != null) {
         selectedProgressChunkStart = null;
-        progressSelectionFading = false;
         renderSemanticMatchProgress();
       }
       return;
-    }
-    if (fadingProgressChunkStart != null) {
-      progressSelectionFading = true;
-      renderSemanticMatchProgress();
     }
     for (const el of lines) {
       el.style.transition = '';
@@ -1030,10 +1188,9 @@
         underlineFadeTimer = 0;
         if (gen !== underlineFadeGen) return;
         paintSpecs = paintSpecs.filter((s) => s.kind !== 'underline');
-        renderAllSpecs();
+        clearOverlayRole('nav');
         if (selectedProgressChunkStart === fadingProgressChunkStart) {
           selectedProgressChunkStart = null;
-          progressSelectionFading = false;
           renderSemanticMatchProgress();
         }
       }, CHUNK_HIGHLIGHT_FADE_MS);
@@ -1183,14 +1340,14 @@
   }
 
   /**
-   * 选中并展示一个 chunk：进度图线变蓝 + 下划线 → 滚到起点 → hold → fade。
+   * 选中并展示一个 chunk：进度图线变蓝 + 下划线 → 滚到起点 → hold → 下划线 fade；
+   * 进度线保持蓝至 fade 结束再恢复红。
    * 由「点击进度线」（selectProgressChunk）和「上下按钮跳转」（jumpToMatch）共用，
    * 保证两者对进度图选中态的表现始终一致。
    */
   function revealChunk(chunk) {
     setCurrentUnderline(chunk);
     selectedProgressChunkStart = chunk.start;
-    progressSelectionFading = false;
     renderSemanticMatchProgress();
     // 导航态需要跟着刷新快照，否则关闭再打开搜索栏时，下划线（回退到旧快照）
     // 会和进度图选中线（读实时变量）错位
@@ -1236,7 +1393,8 @@
 
   /**
    * SYNC: client GLTR_API.analyzeSemantic — hybrid 为前端组合：
-   * count(full_match_degree_only) → 未达阈值则空 token；达则再 fill_blank，保留 count 的 matchDegree。
+   * count(full_match_degree_only) 即返回；达阈值时由调用方异步 fill_blank 染色（等待线）。
+   * 注意：异步 fill 相对「count 后 await fill」会增加与后续 count 的额外并发。
    */
   async function analyzeSemantic(query, text) {
     const submode = CFG.submode || 'hybrid';
@@ -1246,13 +1404,41 @@
         fullMatchDegreeOnly: true,
       });
       if (r1?.success === false) return r1;
-      if ((r1.full_match_degree ?? 0) < CFG.matchThreshold) {
-        return { ...r1, token_attention: [] };
-      }
-      const r2 = await analyzeSemanticRaw(query, text, { submode: 'fill_blank' });
-      return { ...r2, full_match_degree: r1.full_match_degree };
+      return { ...r1, token_attention: [] };
     }
     return analyzeSemanticRaw(query, text, { submode });
+  }
+
+  /** hybrid：拆掉某 chunk 的等待线（只动 pending overlay） */
+  function clearPendingUnderline(cp0, cp1) {
+    paintSpecs = paintSpecs.filter(
+      (s) => !(s.kind === 'pending-underline' && s.cp0 === cp0 && s.cp1 === cp1)
+    );
+    renderUnderlinesOfKind('pending-underline');
+  }
+
+  /**
+   * 把 token_attention 写入 paintSpecs（仅 score>0），并直接挂上 Highlight（不碰下划线）。
+   * @returns {number} 实际上色的 token 段数；0 表示没有染色
+   */
+  function paintChunkTokens(tokenAttention, chunkText, chunkCpStart, degree) {
+    const tokens = prepareChunkTokens(tokenAttention || [], chunkText, degree);
+    ensureHighlightRegistry();
+    let n = 0;
+    for (const t of tokens) {
+      if (!t.offset || !(t.score > 0)) continue;
+      const [a, b] = t.offset;
+      const level = scoreToLevel(t.score);
+      if (level < 0) continue;
+      const cp0 = chunkCpStart + a;
+      const cp1 = chunkCpStart + b;
+      paintSpec('token', cp0, cp1, level);
+      const h = CSS.highlights.get(HL_TOKEN_PREFIX + level);
+      if (!h) throw new Error(`highlight missing: ${HL_TOKEN_PREFIX}${level}`);
+      addCpRangeToHighlight(h, cp0, cp1);
+      n += 1;
+    }
+    return n;
   }
 
   // ---------- UI（同源 HTML/CSS，Shadow DOM 隔离宿主页样式） ----------
@@ -1422,12 +1608,22 @@
       e.stopPropagation();
       sendStatusFeedback();
     });
+    ui$('semantic_find_status_continue')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      void runSearch({ resume: true });
+    });
     ui$('semantic_find_clear')?.addEventListener('click', (e) => {
       e.stopPropagation();
       if (searching) {
+        // 立刻空闲 UI；旧轮靠 abortWanted 退出主循环。不清 fill：已匹配块继续染色，Continue 可接上
         abortWanted = true;
-        // 按钮立即回退，不等最后一个 chunk 的请求返回
-        syncClearButton(false);
+        wakeFillLagWaiters();
+        setSearching(false);
+        // 不等主循环退出：可续跑时立刻给出 Stopped + Continue（与循环尾部分支同条件）
+        if (canResumeSearch()) {
+          updateNav();
+          showFindStatus('Stopped', 'Search paused');
+        }
         return;
       }
       findInput.value = '';
@@ -1624,10 +1820,6 @@
       line.classList.toggle('is-below-threshold', degree < CFG.matchThreshold);
       line.classList.toggle('is-selected', selectedProgressChunkStart === chunk.start);
       line.classList.toggle('is-hovered', hoveredProgressChunkStart === chunk.start);
-      line.classList.toggle(
-        'is-fading',
-        progressSelectionFading && selectedProgressChunkStart === chunk.start
-      );
       const lineStart = start;
       const lineEnd = end;
       line.setAttribute('d', `M${lineStart} ${y}H${lineEnd}`);
@@ -1687,68 +1879,116 @@
     ui$('semantic_find_history_dropdown')?.classList.remove('is-visible');
     chromeBar?.classList.remove('is-input-active');
     syncClearButton(on);
+    // 搜索结束时若正文仍脏（例如 debounce 未到期），补一次 sync
+    if (!on && contentDirty) scheduleSyncPaintAfterLayout();
   }
 
-  async function runSearch() {
-    if (searching) {
-      abortWanted = true;
-      syncClearButton(false);
-      return;
-    }
+  /**
+   * @param {{ resume?: boolean }} [opts] resume=true：保留已有进度，从下一未分析 chunk 继续（Enter 仍重开）
+   */
+  async function runSearch(opts) {
+    if (searching) return;
+    const resume = !!opts?.resume;
     const query = /** @type {HTMLInputElement} */ (ui$('semantic_find_input'))?.value?.trim() || '';
     if (!query) {
       return;
     }
+    if (resume && !canResumeSearch()) return;
 
-    await ensureHistory();
-    saveHistory(query);
-
+    // 必须在任何 await 之前占住 searching + epoch，否则连按会 concurrent 多轮：
+    // 旧轮 finally 清掉 searching，新轮仍在跑 → 有报错、像在搜、却没有停止按钮。
+    const epoch = ++searchEpoch;
     abortWanted = false;
+    if (!resume) clearFillBlankQueue();
     setSearching(true);
-    resetSearchSession();
+    setStatusContinueVisible(false);
 
     try {
-      refreshExtract();
-    } catch (err) {
-      console.error('[InfoLens] extract aborted:', err?.message || err);
-      showFindError(err?.message || err);
-      setSearching(false);
-      return;
-    }
-    if (!extractedText.trim()) {
-      console.error('[InfoLens] no article text found');
-      showFindError('No article text found');
-      setSearching(false);
-      return;
-    }
-
-    try {
-      // 全空白 chunk 不送 API；先滤再截断，避免 maxChunks 被空白占满
-      const contentChunks = splitChunks(extractedText, CFG.chunkBytes).filter(chunkHasContent);
-      const allChunks = contentChunks.slice(0, CFG.maxChunks);
-      lastSearchMeta = {
-        query,
-        contentChunkCount: contentChunks.length,
-        truncated: contentChunks.length > allChunks.length,
-      };
-      if (contentChunks.length > allChunks.length) {
-        showFindStatus(
-          'Note',
-          `Text too long; analyzing first ${allChunks.length} of ${contentChunks.length} chunks`
-        );
-      }
-      progressTextLength = allChunks.length
-        ? utf16ToCp(extractedText, allChunks[allChunks.length - 1].end)
-        : 0;
-
-      // SYNC：站内 truncated-text — 搜索开始全文置灰，随已分析边界后移恢复原色
-      setTruncatedHighlight(0);
+      await ensureHistory();
+      if (epoch !== searchEpoch) return;
+      saveHistory(query);
 
       // 产品决策：扩展保留预取/hold/follow；站内 demo 刻意简化为「上色 → 结束跳首个匹配」（见 semanticSearchController），两边不必对齐。
       // followSearching=true 全程跟随；false=无 match 前跟随、首个 match 停靠划线
       const followAll = !!CFG.followSearching;
-      let parkedOnFirstMatch = false;
+      /** @type {{ start: number, end: number, text: string }[]} */
+      let allChunks;
+      let resumeFrom = 0;
       let analyzedCpEnd = 0;
+      let parkedOnFirstMatch = false;
+
+      if (resume) {
+        clearFindStatus();
+        if (!extractRoot?.isConnected) {
+          resetSearchSession({ clearCache: true });
+          if (epoch === searchEpoch) showFindError('Page content changed; start a new search');
+          return;
+        }
+        // 不可走 refreshExtract：它会清 overlays/进度。只复测正文是否仍一致并重绑节点。
+        const mapped = collectTextMap(extractRoot);
+        contentDirty = false;
+        if (mapped.text !== extractedText) {
+          resetSearchSession({ clearCache: true });
+          if (epoch === searchEpoch) showFindError('Page content changed; start a new search');
+          return;
+        }
+        setPieces(mapped.pieces);
+        const contentChunks = splitChunks(extractedText, CFG.chunkBytes).filter(chunkHasContent);
+        resumeFrom = semanticMatchProgress.length;
+        if (resumeFrom >= contentChunks.length) return;
+        // 中断续跑沿用旧窗口；截断后续跑再开一批
+        const prevEnd = lastSearchMeta.windowEnd ?? 0;
+        const windowEnd =
+          resumeFrom < prevEnd ? prevEnd : resumeFrom + CFG.maxChunks;
+        allChunks = contentChunks.slice(0, windowEnd);
+        analyzedCpEnd =
+          truncatedAnalyzedCpEnd ??
+          (resumeFrom > 0 ? semanticMatchProgress[resumeFrom - 1].end : 0);
+        parkedOnFirstMatch = !followAll && matchedChunks.length > 0;
+        lastSearchMeta = {
+          query,
+          contentChunkCount: contentChunks.length,
+          truncated: contentChunks.length > allChunks.length,
+          windowEnd: allChunks.length,
+        };
+        progressTextLength = allChunks.length
+          ? utf16ToCp(extractedText, allChunks[allChunks.length - 1].end)
+          : 0;
+        // 分母变大：已完成竖线重标定到新窗口（仍全部绘制）
+        renderSemanticMatchProgress();
+      } else {
+        resetSearchSession();
+
+        try {
+          refreshExtract();
+        } catch (err) {
+          console.error('[InfoLens] extract aborted:', err?.message || err);
+          if (epoch === searchEpoch) showFindError(err?.message || err);
+          return;
+        }
+        if (!extractedText.trim()) {
+          console.error('[InfoLens] no article text found');
+          if (epoch === searchEpoch) showFindError('No article text found');
+          return;
+        }
+
+        // 全空白 chunk 不送 API；先滤再截断，避免 maxChunks 被空白占满
+        const contentChunks = splitChunks(extractedText, CFG.chunkBytes).filter(chunkHasContent);
+        allChunks = contentChunks.slice(0, CFG.maxChunks);
+        lastSearchMeta = {
+          query,
+          contentChunkCount: contentChunks.length,
+          truncated: contentChunks.length > allChunks.length,
+          windowEnd: allChunks.length,
+        };
+        progressTextLength = allChunks.length
+          ? utf16ToCp(extractedText, allChunks[allChunks.length - 1].end)
+          : 0;
+
+        // SYNC：站内 truncated-text — 搜索开始全文置灰，随已分析边界后移恢复原色
+        setTruncatedHighlight(0);
+      }
+
       beginChunkSearchAutoScroll();
 
       // 双循环流水线：抓取循环只管领先渲染 FETCH_AHEAD 步尽早发请求，不含任何延迟；
@@ -1756,29 +1996,28 @@
       // 停留只影响「多久展示下一块」，不再卡住下一次请求的发出时机
       const FETCH_AHEAD = 1;
       const pendingChunkResults = new Map();
-      let fetchCursor = 0;
+      let fetchCursor = resumeFrom;
+      const stillThisSearch = () => epoch === searchEpoch && !abortWanted;
       const prefetchChunk = (idx) => {
         const p = analyzeSemantic(query, allChunks[idx].text);
         p.catch(() => {}); // 真正的错误仍会在被 await 时抛出，这里只是防止预取阶段的悬空 rejection 噪音
         pendingChunkResults.set(idx, p);
       };
       const advanceFetch = (renderIndex) => {
-        while (!abortWanted && fetchCursor < allChunks.length && fetchCursor <= renderIndex + FETCH_AHEAD) {
+        while (stillThisSearch() && fetchCursor < allChunks.length && fetchCursor <= renderIndex + FETCH_AHEAD) {
           prefetchChunk(fetchCursor);
           fetchCursor++;
         }
       };
-      advanceFetch(0); // 预热：抓取 [0, FETCH_AHEAD]
+      advanceFetch(resumeFrom); // 预热：从续跑点起抓取 [resumeFrom, resumeFrom+FETCH_AHEAD]
 
       try {
-        for (let i = 0; i < allChunks.length; i++) {
-          if (abortWanted) {
-            break;
-          }
+        for (let i = resumeFrom; i < allChunks.length; i++) {
+          if (!stillThisSearch()) break;
           const chunk = allChunks[i];
           const res = await pendingChunkResults.get(i);
           pendingChunkResults.delete(i);
-          if (abortWanted) break;
+          if (!stillThisSearch()) break;
 
           const degree = res.full_match_degree ?? 0;
           // SYNC: semanticSearchController — matched = degree >= threshold；未匹配块不上色
@@ -1806,20 +2045,17 @@
             });
           }
 
-          // SYNC: semanticSearchController — 仅匹配块上色（未匹配等价 score:0）
-          const tokens = matched ? prepareChunkTokens(res.token_attention || [], chunk.text, degree) : [];
-          for (const t of tokens) {
-            if (!t.offset || !(t.score > 0)) continue;
-            const [a, b] = t.offset;
-            const level = scoreToLevel(t.score);
-            if (level < 0) continue;
-            paintSpec('token', chunkCpStart + a, chunkCpStart + b, level);
+          const isHybrid = (CFG.submode || 'hybrid') === 'hybrid';
+          // hybrid：count 后即推进主流程；fill_blank 异步染色（相对整包 await，增加与 count 的额外并发）
+          // 非 hybrid：token 随本次结果同步上色
+          if (matched && isHybrid) {
+            upsertSpec({ kind: 'pending-underline', cp0: chunkCpStart, cp1: chunkCpEnd });
+            renderUnderlinesOfKind('pending-underline');
+          } else if (matched) {
+            paintChunkTokens(res.token_attention, chunk.text, chunkCpStart, degree);
           }
+          // count 完即恢复灰字/画等待线；fill 背压只推迟入队与下一块，不挡本块 hold/jump
           setTruncatedHighlight(analyzedCpEnd);
-          // SYNC: visualizationUpdater 流式更新 → clearHighlights({ preserveChunkInterval: true })
-          renderAllSpecs({
-            preserveUnderline: paintSpecs.some((s) => s.kind === 'underline'),
-          });
 
           // followThis = followAll || !hadMatchBefore；willJump 块滚动延后到 hold 后（扩展节奏，非站内）
           if ((followAll || !hadMatchBefore) && !willJump) {
@@ -1837,48 +2073,91 @@
           // shouldFollow = followAll || !hasMatch；park 后不再滚动/settle，hold 撑满 MIN_CYCLE（扩展节奏）
           const willSettleAfterHold =
             willJump || (nextIndex < allChunks.length && (followAll || !parkedOnFirstMatch));
+          const holdMs = willSettleAfterHold ? CHUNK_SEARCH_HOLD_MS : CHUNK_SEARCH_MIN_CYCLE_MS;
           if (willJump || nextIndex < allChunks.length) {
-            await delayMs(willSettleAfterHold ? CHUNK_SEARCH_HOLD_MS : CHUNK_SEARCH_MIN_CYCLE_MS);
-            if (abortWanted) break;
+            await delayMs(holdMs);
+            if (!stillThisSearch()) break;
           }
           if (willJump) {
             jumpToMatch(0);
             parkedOnFirstMatch = true;
             // 跳转落点同样要停留够 CHUNK_SEARCH_SCROLL_SETTLE_MS，避免划线刚定位就被下一块的渲染打断
             await delayMs(CHUNK_SEARCH_SCROLL_SETTLE_MS);
-            if (abortWanted) break;
+            if (!stillThisSearch()) break;
           }
+
+          // hold/jump 已完成后再等 fill 空位，避免首个匹配等待线出现后被背压卡住才开始滚
+          if (matched && isHybrid) {
+            await waitUntilFillLagOk();
+            if (!stillThisSearch()) break;
+            enqueueFillBlank(async (gen) => {
+              if (gen !== fillGen) return;
+              try {
+                const r2 = await analyzeSemanticRaw(query, chunk.text, { submode: 'fill_blank' });
+                if (gen !== fillGen) return;
+                if (!extractRoot?.isConnected) return;
+                // 有红色 token → 拆 pending；否则留下 = chunk 级匹配标记（失败/无色同理）
+                const painted = paintChunkTokens(
+                  r2.token_attention,
+                  chunk.text,
+                  chunkCpStart,
+                  degree
+                );
+                if (painted > 0) clearPendingUnderline(chunkCpStart, chunkCpEnd);
+                snapshotLastResult(query);
+              } catch (err) {
+                // 无 token 可画：pending 留下表示本 chunk 已匹配
+                console.error('[InfoLens] fill_blank', err?.message || err);
+              }
+            });
+          }
+
           if (nextIndex < allChunks.length && (followAll || !parkedOnFirstMatch)) {
             const nextChunk = allChunks[nextIndex];
             followSearchingChunk(utf16ToCp(extractedText, nextChunk.start));
             // 滚动后的新位置也要停留够 CHUNK_SEARCH_SCROLL_SETTLE_MS，
             // 否则分析过快时会出现「刚滚过去就立刻变色」的突变感；抓取循环已提前放行，不受影响
             await delayMs(CHUNK_SEARCH_SCROLL_SETTLE_MS);
-            if (abortWanted) break;
+            if (!stillThisSearch()) break;
           }
         }
       } finally {
         endChunkSearchAutoScroll();
       }
 
+      if (epoch !== searchEpoch) return;
+
       if (extractRoot != null) {
         setTruncatedHighlight(analyzedCpEnd);
-        renderAllSpecs({
-          preserveUnderline: paintSpecs.some((s) => s.kind === 'underline'),
-        });
         if (!abortWanted) {
           if (matchedChunks.length && !parkedOnFirstMatch) jumpToMatch(0);
           else updateNav();
+          if (lastSearchMeta?.truncated) {
+            showFindStatus(
+              'Note',
+              `Text too long; analyzing first ${allChunks.length} of ${lastSearchMeta.contentChunkCount} chunks`
+            );
+          }
         }
+        // abort：Stopped/Continue 已在 Stop 点击时展示，此处只收尾 truncated + 下方 snapshot
       }
       snapshotLastResult(query);
     } catch (err) {
+      // 过期轮次 / 用户主动停止：失败不得打到当前 UI（否则会出现「一边报错一边新搜索在跑」）
+      if (epoch !== searchEpoch || abortWanted) {
+        console.error('[InfoLens]', err?.message || err);
+        return;
+      }
       console.error('[InfoLens]', err?.message || err);
+      updateNav();
       showFindError(err?.message || err);
       snapshotLastResult(query);
     } finally {
-      setSearching(false);
-      abortWanted = false;
+      // 仅本轮结束时清 searching；过期轮次不能关掉仍在跑的新一轮
+      if (epoch === searchEpoch) {
+        setSearching(false);
+        abortWanted = false;
+      }
     }
   }
 
@@ -1950,6 +2229,10 @@
 
   function close() {
     abortWanted = true;
+    // 先冻结输入对应的结果+状态条，再清 live；reopen 走 tryRestoreLastResult
+    const query =
+      /** @type {HTMLInputElement | null} */ (ui$('semantic_find_input'))?.value?.trim() || '';
+    if (query) snapshotLastResult(query);
     resetSearchSession();
     hideHistoryDropdown();
     const bar = ui$('semantic_find_bar');

@@ -6,13 +6,24 @@
   flex-direction: column;
   justify-content: flex-end;
   align-items: flex-end;
-  width: fit-content;
+  width: max-content;
+  max-width: calc(100vw - 32px);
   box-sizing: border-box;
   overflow: visible;
   pointer-events: none;
 }
 .semantic-find-bar-host[hidden] {
   display: none !important;
+}
+
+/* bar 定宽；进度图跟 bar；状态条可更宽且不反推二者 */
+.semantic-find-bar-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: fit-content;
+  max-width: 100%;
+  flex-shrink: 0;
 }
 
 .semantic-find-bar {
@@ -31,7 +42,7 @@
   background-clip: padding-box, border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 4px 12px var(--semantic-ai-glow-muted);
   box-sizing: border-box;
-  max-width: calc(100vw - 32px);
+  max-width: 100%;
   flex-shrink: 0;
 }
 .semantic-match-progress {
@@ -51,7 +62,8 @@
   display: none;
 }
 .semantic-find-status {
-  width: 100%;
+  align-self: stretch;
+  width: auto;
   margin-top: 6px;
   box-sizing: border-box;
   display: flex;
@@ -109,13 +121,36 @@
   font-size: 14px;
   line-height: 18px;
 }
+.semantic-find-status .semantic-find-status-continue {
+  flex-shrink: 0;
+  height: 18px;
+  margin: 0;
+  padding: 0 6px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: #8ab4f8;
+  cursor: pointer;
+  user-select: none;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.semantic-find-status .semantic-find-status-continue[hidden] {
+  display: none;
+}
+.semantic-find-status .semantic-find-status-feedback[hidden] {
+  display: none;
+}
 .semantic-find-status .semantic-find-status-feedback svg {
   display: block;
   width: 12px;
   height: 12px;
 }
 .semantic-find-status .semantic-find-status-feedback:hover:not(:disabled),
-.semantic-find-status .semantic-find-status-close:hover {
+.semantic-find-status .semantic-find-status-close:hover,
+.semantic-find-status .semantic-find-status-continue:hover {
   color: #e8eaed;
   background: rgba(255, 255, 255, 0.1);
 }
@@ -142,14 +177,6 @@
 }
 .semantic-match-progress-line.is-hovered {
   stroke-width: 4;
-}
-.semantic-match-progress-line.is-fading {
-  animation: semantic-match-progress-fade 1400ms ease-out forwards;
-}
-@keyframes semantic-match-progress-fade {
-  to {
-    opacity: 0;
-  }
 }
 .semantic-match-progress-label {
   fill: currentColor;
@@ -445,10 +472,16 @@
 .semantic-find-bar-host[data-theme=light] .semantic-find-status .semantic-find-status-close {
   color: #80868b;
 }
+:root[data-theme=light] .semantic-find-status .semantic-find-status-continue,
+.semantic-find-bar-host[data-theme=light] .semantic-find-status .semantic-find-status-continue {
+  color: #1a73e8;
+}
 :root[data-theme=light] .semantic-find-status .semantic-find-status-feedback:hover:not(:disabled),
 :root[data-theme=light] .semantic-find-status .semantic-find-status-close:hover,
+:root[data-theme=light] .semantic-find-status .semantic-find-status-continue:hover,
 .semantic-find-bar-host[data-theme=light] .semantic-find-status .semantic-find-status-feedback:hover:not(:disabled),
-.semantic-find-bar-host[data-theme=light] .semantic-find-status .semantic-find-status-close:hover {
+.semantic-find-bar-host[data-theme=light] .semantic-find-status .semantic-find-status-close:hover,
+.semantic-find-bar-host[data-theme=light] .semantic-find-status .semantic-find-status-continue:hover {
   color: #202124;
   background: rgba(60, 64, 67, 0.08);
 }

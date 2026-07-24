@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Info Lens: Semantic Highlight",
-  "version": "0.2.1",
+  "name": "Semantic Highlight",
+  "version": "0.2.2",
   "description": "Search & highlight by meaning, not keywords",
   "icons": {
     "16": "icons/dev/icon16.png",

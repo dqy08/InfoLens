@@ -27,7 +27,8 @@ class QueueTimeoutError(Exception):
 # 单次分析的总处理时长限制（秒）
 ANALYSIS_TIMEOUT = 60.0
 # 等待获取锁的最大时间（秒）- 如果排队时间过长，直接拒绝请求
-LOCK_WAIT_TIMEOUT = 10.0
+# 扩展 hybrid：最坏约 2×count 预取 + 1×fill 串行自排队；fill≈5s 时 10s 易误杀，放宽到 20s
+LOCK_WAIT_TIMEOUT = 20.0
 
 
 def _analyze_result_model_display(model: Optional[str]) -> Optional[str]:

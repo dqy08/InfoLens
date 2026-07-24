@@ -2,7 +2,8 @@
  * Find bar lives in Shadow DOM (see content.js).
  *
  * token / truncated：CSS Custom Highlight API（不改 DOM、不垫字下）
- * underline：#il-overlay-host 绝对定位盖层（不必垫字下）
+ * underline（导航）/ pending-underline：#il-overlay-host 盖层，可叠画；统一蓝
+ * pending：等待染色；若最终无红色 token，则留下作 chunk 级匹配标记
  */
 
 #il-overlay-host {
@@ -20,15 +21,21 @@
 }
 
 /* SYNC: client/src/shared/vis/constants.ts → HIGHLIGHT_CONSTANTS
- * UNDERLINE_WIDTH=2, HIGHLIGHT_COLOR fallback #1e6fff */
-.il-chunk-underline {
+ * UNDERLINE_WIDTH=2, HIGHLIGHT_COLOR fallback #1e6fff
+ * pending：等待染色 / 无 token 时的 chunk 匹配标记；与导航线同色，下移叠画、生命周期互不干涉 */
+.il-chunk-underline,
+.il-chunk-underline-pending {
   position: absolute;
   left: 0;
   top: 0;
   pointer-events: none;
   height: 2px;
-  background: #1e6fff;
   border-radius: 2px;
+  background: #1e6fff;
+}
+/* 相对导航线下移 2px（=线高），同位叠画时紧贴、不被盖住 */
+.il-chunk-underline-pending {
+  transform: translateY(2px);
 }
 
 /*
