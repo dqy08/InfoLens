@@ -19,6 +19,8 @@ const PAGE_ORDER = [
 const API_ORDER = [
     'analyze',
     'analyze_semantic',
+    'analyze_semantic__relevance',
+    'analyze_semantic__keywords',
     'chat',
     'causal_flow',
     'prediction_attribute',

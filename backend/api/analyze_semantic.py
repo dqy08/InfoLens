@@ -1,14 +1,25 @@
-"""Semantic analysis API：返回原文各 token 对 query 的归因 score（字段名 token_attention 为历史遗留）"""
+"""Semantic analysis API
+
+原生接口：
+- analyze_semantic_relevance：全文相关度（full_match_degree）
+- analyze_semantic_keywords：关键词归因（token_attention）
+
+兼容：analyze_semantic（submode=count|fill_blank）
+"""
 import gc
 import json
 import queue
 import threading
 import time
-from typing import Optional
+from typing import Literal, Optional
 
 from backend.models.model_manager import inference_lock
 from backend.platform.oom import exit_if_oom
-from backend.core.semantic_analyzer import analyze_semantic as _analyze_semantic
+from backend.core.semantic_analyzer import (
+    analyze_relevance,
+    analyze_relevance_batch,
+    analyze_keywords,
+)
 from backend.api.sse_utils import (
     SSEProgressReporter,
     consume_progress_queue,
@@ -18,17 +29,31 @@ from backend.api.sse_utils import (
 from backend.platform.access_log import get_client_ip
 from backend.api.analyze import QueueTimeoutError, ANALYSIS_TIMEOUT, LOCK_WAIT_TIMEOUT
 
+ResponseShape = Literal["legacy", "relevance", "keywords"]
+SemanticKind = Literal["relevance", "keywords"]
 
-def _log_request(query, text, client_ip=None, privacy_mode=False):
+_LEGACY_SUBMODE = {
+    "count": "relevance",
+    "fill_blank": "keywords",
+}
+
+
+def _log_request(query, text, client_ip=None, privacy_mode=False, kind: Optional[SemanticKind] = None):
     from backend.platform.access_log import log_analyze_semantic_request
-    return log_analyze_semantic_request(query, text, client_ip, privacy_mode)
+    return log_analyze_semantic_request(query, text, client_ip, privacy_mode, kind=kind)
 
 
-def _build_success_response(result, debug_info: bool = False):
-    """构建成功响应。debug_info=True 时包含 debug_info 对象（abbrev、topk_tokens、topk_probs）。
-    result 为 List 时（批量 full_match_degree_only），返回 {"success", "results": [...]}。
-    带 input_token_count：full_match_degree_only 时 token_attention 为空，门户 response 日志靠它打 tokens。
-    分析器必须产出该字段；缺则 KeyError，不静默填默认值。"""
+def _build_success_response(
+    result,
+    debug_info: bool = False,
+    shape: ResponseShape = "legacy",
+):
+    """
+    shape:
+    - legacy：两字段都带（relevance 补 attention=[]；keywords 补 degree=1）
+    - relevance：只带 full_match_degree
+    - keywords：只带 token_attention
+    """
     if isinstance(result, list):
         return {
             "success": True,
@@ -44,30 +69,51 @@ def _build_success_response(result, debug_info: bool = False):
     resp = {
         "success": True,
         "model": result["model"],
-        "token_attention": result["token_attention"],
-        "full_match_degree": result["full_match_degree"],
         "input_token_count": result["input_token_count"],
     }
+    if shape == "relevance":
+        resp["full_match_degree"] = result["full_match_degree"]
+    elif shape == "keywords":
+        resp["token_attention"] = result["token_attention"]
+    else:
+        # legacy：原生结果缺哪边补哪边
+        resp["full_match_degree"] = result["full_match_degree"] if "full_match_degree" in result else 1.0
+        resp["token_attention"] = result["token_attention"] if "token_attention" in result else []
     if debug_info and "debug_info" in result:
         resp["debug_info"] = result["debug_info"]
     return resp
 
 
+def _run_core(kind: SemanticKind, query: str, text, progress_callback, debug_info: bool):
+    if kind == "relevance":
+        if isinstance(text, list):
+            return analyze_relevance_batch(query, text, progress_callback=progress_callback)
+        return analyze_relevance(
+            query, text, progress_callback=progress_callback, debug_info=debug_info,
+        )
+    if isinstance(text, list):
+        raise ValueError("keywords does not support batch texts")
+    return analyze_keywords(
+        query, text, progress_callback=progress_callback, debug_info=debug_info,
+    )
+
+
 def _generate_semantic_events(
-    query: str, text: str, submode: Optional[str] = None, debug_info: bool = False,
-    full_match_degree_only: bool = False, client_ip: Optional[str] = None,
+    query: str,
+    text,
+    kind: SemanticKind,
+    debug_info: bool = False,
+    client_ip: Optional[str] = None,
     request_id: Optional[int] = None,
+    shape: ResponseShape = "legacy",
 ):
-    """
-    流式语义分析核心：生成 SSE 事件流（progress + result/error）。
-    供 _analyze_semantic_with_stream 和 _analyze_semantic_plain 复用。
-    client_ip 需在入口处获取并传入，因流式响应时生成器执行时请求上下文已失效。
-    """
+    """流式语义分析核心：生成 SSE 事件流（progress + result/error）。"""
     if client_ip is None:
         client_ip = get_client_ip()
     start_time = time.perf_counter()
+    log_text = text if isinstance(text, str) else f"[批量 x{len(text)}] " + text[0]
     if request_id is None:
-        request_id = _log_request(query, text, client_ip)
+        request_id = _log_request(query, log_text, client_ip, kind=kind)
 
     progress_queue = queue.Queue()
     analysis_done = threading.Event()
@@ -92,9 +138,8 @@ def _generate_semantic_events(
 
             try:
                 from backend.platform.access_log import log_analyze_semantic_start
-                log_analyze_semantic_start(request_id, lock_wait_time, stream_mode=True)
-                result = _analyze_semantic(query, text, submode_override=submode, progress_callback=progress_callback, debug_info=debug_info, full_match_degree_only=full_match_degree_only)
-                analysis_result = result
+                log_analyze_semantic_start(request_id, lock_wait_time, stream_mode=True, kind=kind)
+                analysis_result = _run_core(kind, query, text, progress_callback, debug_info)
             finally:
                 inference_lock.release()
         except Exception as e:
@@ -108,16 +153,16 @@ def _generate_semantic_events(
         analysis_thread.start()
 
         timeout_reached = False
-        for kind, event_str in consume_progress_queue(
+        for kind_ev, event_str in consume_progress_queue(
             progress_queue, analysis_done, start_time, ANALYSIS_TIMEOUT, "语义分析"
         ):
-            if kind == 'timeout':
+            if kind_ev == 'timeout':
                 timeout_reached = True
                 yield event_str
                 break
-            if kind == 'progress':
+            if kind_ev == 'progress':
                 yield event_str
-            elif kind == 'done':
+            elif kind_ev == 'done':
                 break
 
         if timeout_reached:
@@ -142,7 +187,6 @@ def _generate_semantic_events(
         from backend.platform.inference_response_log import log_analyze_semantic_response
         from backend.platform.model_routing import is_worker
 
-        # 本地执行机打完整日志（含 wait/processing）；远程代理门户走 response_log_fn
         if isinstance(analysis_result, dict):
             log_result = analysis_result
         else:
@@ -154,8 +198,9 @@ def _generate_semantic_events(
             elapsed=elapsed,
             wait_time=lock_wait_time,
             for_worker=is_worker(),
+            kind=kind,
         )
-        yield send_result_event(_build_success_response(analysis_result, debug_info))
+        yield send_result_event(_build_success_response(analysis_result, debug_info, shape=shape))
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -166,33 +211,28 @@ def _generate_semantic_events(
 
 
 def _analyze_semantic_with_stream(
-    query: str, text: str, submode: Optional[str] = None, debug_info: bool = False,
-    full_match_degree_only: bool = False, client_ip: Optional[str] = None,
-    request_id: Optional[int] = None,
+    query: str, text, kind: SemanticKind, debug_info: bool = False,
+    client_ip: Optional[str] = None, request_id: Optional[int] = None,
+    shape: ResponseShape = "legacy",
 ):
-    """流式语义分析，通过 SSE 返回阶段级进度"""
     return SSEProgressReporter(
         lambda: _generate_semantic_events(
-            query, text, submode, debug_info, full_match_degree_only, client_ip, request_id
+            query, text, kind, debug_info, client_ip, request_id, shape=shape,
         )
     ).create_response()
 
 
 def _analyze_semantic_plain(
-    query: str, text: str, submode: Optional[str] = None, debug_info: bool = False,
-    full_match_degree_only: bool = False, client_ip: Optional[str] = None,
-    request_id: Optional[int] = None,
+    query: str, text, kind: SemanticKind, debug_info: bool = False,
+    client_ip: Optional[str] = None, request_id: Optional[int] = None,
+    shape: ResponseShape = "legacy",
 ):
-    """
-    非流式语义分析：封装流式实现，消费事件流后返回 JSON。
-    供脚本等简单客户端使用。
-    """
     result = None
     error_msg = None
     status_code = 500
     try:
         for event_str in _generate_semantic_events(
-            query, text, submode, debug_info, full_match_degree_only, client_ip, request_id
+            query, text, kind, debug_info, client_ip, request_id, shape=shape,
         ):
             if not event_str.startswith('data: '):
                 continue
@@ -219,64 +259,33 @@ def _analyze_semantic_plain(
     return result, 200
 
 
-def analyze_semantic(semantic_request):
-    """
-    分析原文 token 对 prompt 的关注度。
-
-    Args:
-        semantic_request: 包含 query、text、stream（可选）、submode（可选）的字典。
-            texts（可选，字符串数组）：批量 full_match_degree_only 预判性能测试用，
-            与 text 互斥，且必须搭配 full_match_degree_only=True。
-
-            性能结论（详见 backend/core/semantic_analyzer.py 的
-            _analyze_logits_gradient_batch）：
-            batching 对模型前向计算本身的加速有限（batch=4 约 1.5x，batch=8 约
-            1.6x），线上用客户端总耗时测出的更高加速比主要是摊薄了每次 HTTP
-            请求固定的网络/SSE 开销，并非计算变快；因此若追求性能，合并请求本身
-            比加大 batch 更有效，batch 也不宜设得过大。
-
-    Returns:
-        stream=True 时返回 SSE 响应；否则返回 (响应字典, 状态码) 元组
-    """
+def _ingress_semantic(
+    semantic_request: dict,
+    *,
+    api_path: str,
+    kind: SemanticKind,
+    content,
+    log_text: str,
+    shape: ResponseShape,
+):
     query = (semantic_request.get("query") or "")
-    text = semantic_request.get("text") or ""
-    texts = semantic_request.get("texts")
     stream = semantic_request.get("stream", False)
-    submode = (semantic_request.get("submode") or "").strip() or None
     debug_info = bool(semantic_request.get("debug_info", False))
-    full_match_degree_only = bool(semantic_request.get("full_match_degree_only", False))
     privacy_mode = bool(semantic_request.get("privacy_mode", False))
-
-    if not query:
-        return {"success": False, "message": "Missing query"}, 400
-
-    if texts is not None:
-        if not isinstance(texts, list) or not texts or not all(isinstance(t, str) and t for t in texts):
-            return {"success": False, "message": "texts must be a non-empty string array"}, 400
-        if not full_match_degree_only:
-            return {"success": False, "message": "texts batch mode requires full_match_degree_only=True"}, 400
-        content = texts
-        log_text = f"[批量 x{len(texts)}] " + texts[0]
-    else:
-        if not text:
-            return {"success": False, "message": "Missing text"}, 400
-        content = text
-        log_text = text
-
     client_ip = get_client_ip()
     logged: dict = {"request_id": None}
 
     def log_fn():
-        logged["request_id"] = _log_request(query, log_text, client_ip, privacy_mode)
+        logged["request_id"] = _log_request(query, log_text, client_ip, privacy_mode, kind=kind)
 
     def local_fn():
         rid = logged["request_id"]
         if stream:
             return _analyze_semantic_with_stream(
-                query, content, submode, debug_info, full_match_degree_only, client_ip, rid
+                query, content, kind, debug_info, client_ip, rid, shape=shape,
             )
         return _analyze_semantic_plain(
-            query, content, submode, debug_info, full_match_degree_only, client_ip, rid
+            query, content, kind, debug_info, client_ip, rid, shape=shape,
         )
 
     from backend.models.model_manager import ModelSlot
@@ -284,10 +293,9 @@ def analyze_semantic(semantic_request):
     from backend.platform.inference_response_log import make_analyze_semantic_response_logger
     from backend.platform.model_routing import is_local
 
-    # 本地执行：handler 已打完整日志；仅远程代理时门户用 response_log_fn 打端到端
     return ingress_inference(
         slot=ModelSlot.INSTRUCT,
-        api_path="/api/analyze-semantic",
+        api_path=api_path,
         json_body=semantic_request,
         stream=bool(stream),
         timeout=60.0,
@@ -296,6 +304,91 @@ def analyze_semantic(semantic_request):
         response_log_fn=(
             None
             if is_local(ModelSlot.INSTRUCT)
-            else make_analyze_semantic_response_logger(logged)
+            else make_analyze_semantic_response_logger(logged, kind=kind)
         ),
+    )
+
+
+def _parse_text_or_texts(semantic_request, *, allow_texts: bool):
+    """返回 (content, log_text) 或 (None, error_response)。"""
+    query = (semantic_request.get("query") or "")
+    if not query:
+        return None, ({"success": False, "message": "Missing query"}, 400)
+
+    texts = semantic_request.get("texts")
+    text = semantic_request.get("text") or ""
+    if texts is not None:
+        if not allow_texts:
+            return None, ({"success": False, "message": "texts is not supported on this endpoint"}, 400)
+        if not isinstance(texts, list) or not texts or not all(isinstance(t, str) and t for t in texts):
+            return None, ({"success": False, "message": "texts must be a non-empty string array"}, 400)
+        return texts, f"[批量 x{len(texts)}] " + texts[0]
+
+    if not text:
+        return None, ({"success": False, "message": "Missing text"}, 400)
+    return text, text
+
+
+def analyze_semantic_relevance(semantic_request):
+    """全文相关度：只返回 full_match_degree（可批量 texts）。"""
+    content, log_or_err = _parse_text_or_texts(semantic_request, allow_texts=True)
+    if content is None:
+        return log_or_err
+    return _ingress_semantic(
+        semantic_request,
+        api_path="/api/analyze-semantic-relevance",
+        kind="relevance",
+        content=content,
+        log_text=log_or_err,
+        shape="relevance",
+    )
+
+
+def analyze_semantic_keywords(semantic_request):
+    """关键词归因：只返回 token_attention（单条 text）。"""
+    content, log_or_err = _parse_text_or_texts(semantic_request, allow_texts=False)
+    if content is None:
+        return log_or_err
+    return _ingress_semantic(
+        semantic_request,
+        api_path="/api/analyze-semantic-keywords",
+        kind="keywords",
+        content=content,
+        log_text=log_or_err,
+        shape="keywords",
+    )
+
+
+def analyze_semantic(semantic_request):
+    """
+    兼容旧接口：submode=count|fill_blank（映射到 relevance|keywords）。
+    texts 批量仅支持 count（未传 submode 时按 count）。
+    """
+    texts = semantic_request.get("texts")
+    submode = (semantic_request.get("submode") or "").strip() or None
+
+    if submode == "match_score":
+        return {"success": False, "message": "submode match_score has been removed"}, 400
+
+    if texts is not None:
+        if submode and submode != "count":
+            return {"success": False, "message": "texts batch mode only supports submode=count"}, 400
+        kind: SemanticKind = "relevance"
+    else:
+        mapped = _LEGACY_SUBMODE.get(submode or "fill_blank")
+        if mapped is None:
+            return {"success": False, "message": f"Unknown submode: {submode}"}, 400
+        kind = mapped  # type: ignore[assignment]
+
+    content, log_or_err = _parse_text_or_texts(semantic_request, allow_texts=True)
+    if content is None:
+        return log_or_err
+
+    return _ingress_semantic(
+        semantic_request,
+        api_path="/api/analyze-semantic",
+        kind=kind,
+        content=content,
+        log_text=log_or_err,
+        shape="legacy",
     )

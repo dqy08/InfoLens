@@ -8,26 +8,26 @@
 
 // Prompt 区选项标签：panel 标题、勾选行同系（9pt + 勾选主次色）
 .input-section {
-  span.semantic-submode-label {
+  span.options-label {
     color: var(--text-muted);
   }
 
-  .semantic-submode-row:not(.attribution-exclude-prompt-patterns-header):not(.attribution-exclude-generated-patterns-header):not(.attribution-delete-prompt-patterns-header) {
-    label.semantic-submode-label {
+  .options-row:not(.attribution-exclude-prompt-patterns-header):not(.attribution-exclude-generated-patterns-header):not(.attribution-delete-prompt-patterns-header) {
+    label.options-label {
       color: var(--text-primary);
     }
 
-    label.semantic-submode-label:has(> input[type='checkbox']:not(:checked)) {
+    label.options-label:has(> input[type='checkbox']:not(:checked)) {
       color: var(--text-muted);
     }
   }
 
-  .chat-prompt-panel > .input-header > .semantic-submode-label {
+  .chat-prompt-panel > .input-header > .options-label {
     font-size: 9pt;
   }
 
-  // System 在 input-header 内（非 semantic-submode-row）
-  .chat-prompt-panel > .input-header label.chat-use-system-label.semantic-submode-label {
+  // System 在 input-header 内（非 options-row）
+  .chat-prompt-panel > .input-header label.chat-use-system-label.options-label {
     font-size: 9pt;
 
     input[type='checkbox'] {
@@ -145,8 +145,8 @@
   max-height: 250px;
 }
 
-.teacher-forcing-toggle-row label.semantic-submode-label,
-.teacher-forcing-block.chat-prompt-panel .stop-after-tf-row label.semantic-submode-label {
+.teacher-forcing-toggle-row label.options-label,
+.teacher-forcing-block.chat-prompt-panel .stop-after-tf-row label.options-label {
   display: inline-flex;
   align-items: center;
   gap: 6px;

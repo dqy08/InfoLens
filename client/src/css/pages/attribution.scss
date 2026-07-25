@@ -39,7 +39,7 @@
   height: 60px;
 }
 
-// Analyze 行下方：与 semantic_submode_row 同系样式（见 _semantic-analysis.scss）
+// Analyze 行下方：与 options-row 同系样式（见 _semantic-analysis.scss）
 .attribution-max-score-row {
   margin-top: 10px;
   flex-wrap: wrap;
@@ -67,8 +67,8 @@
 }
 
 // 「Max score」标签与数值：继承字体；未勾选映射时为灰色，勾选后主色
-.attribution-max-score-row.semantic-submode-row {
-  .semantic-submode-label {
+.attribution-max-score-row.options-row {
+  .options-label {
     font-size: inherit;
   }
 
@@ -80,14 +80,14 @@
   }
 
   &:not(:has(#attribution_use_mapping:checked)) {
-    .attribution-max-score-slider-group .semantic-submode-label,
+    .attribution-max-score-slider-group .options-label,
     .attribution-max-score-value {
       color: var(--text-muted);
     }
   }
 
   &:has(#attribution_use_mapping:checked) {
-    .attribution-max-score-slider-group .semantic-submode-label,
+    .attribution-max-score-slider-group .options-label,
     .attribution-max-score-value {
       color: var(--text-primary);
     }
@@ -101,15 +101,15 @@
   gap: 4px;
 }
 
-// 「Exclude prompt patterns」标签：与 Max score 行共用 semantic-submode-row（gap 等）；未勾选使能时为灰色，勾选后主色
+// 「Exclude prompt patterns」标签：与 Max score 行共用 options-row（gap 等）；未勾选使能时为灰色，勾选后主色
 .attribution-exclude-prompt-patterns-header {
   flex-wrap: wrap;
 
-  &:not(:has(#attribution_exclude_prompt_patterns_enable:checked)) .semantic-submode-label {
+  &:not(:has(#attribution_exclude_prompt_patterns_enable:checked)) .options-label {
     color: var(--text-muted);
   }
 
-  &:has(#attribution_exclude_prompt_patterns_enable:checked) .semantic-submode-label {
+  &:has(#attribution_exclude_prompt_patterns_enable:checked) .options-label {
     color: var(--text-primary);
   }
 }

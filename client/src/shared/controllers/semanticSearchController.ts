@@ -1,6 +1,7 @@
 /**
  * 语义搜索控制器
  * 负责执行语义分析（整段 / 分块模式）
+ * 流程固定：相关度门控 → 关键词归因（由 API 层组合两原生接口）
  */
 
 import * as d3 from 'd3';
@@ -24,7 +25,6 @@ import type { signalFitResult } from '../../features/analysis/signalThresholdDet
 export interface SemanticSearchControllerDeps {
     getQuery: () => string;
     getText: () => string;
-    getSubmode: () => string | undefined;
     isChunkedMode: () => boolean;
     api: TextAnalysisAPI;
     appStateManager: AppStateManager;
@@ -51,17 +51,17 @@ export class SemanticSearchController {
     }
 
     run(): void {
-        void this.runSemanticSearchBase(async ({ query, text, submode, signal }) => {
+        void this.runSemanticSearchBase(async ({ query, text, signal }) => {
             if (this.deps.isChunkedMode()) {
-                await this.runChunked({ query, text, submode, signal });
+                await this.runChunked({ query, text, signal });
             } else {
-                await this.runWhole({ query, text, submode, signal });
+                await this.runWhole({ query, text, signal });
             }
         });
     }
 
     private async runSemanticSearchBase(
-        execute: (params: { query: string; text: string; submode: string | undefined; signal: AbortSignal }) => Promise<void>
+        execute: (params: { query: string; text: string; signal: AbortSignal }) => Promise<void>
     ): Promise<void> {
         const query = this.deps.getQuery();
         if (!query) return;
@@ -80,7 +80,7 @@ export class SemanticSearchController {
             d3.select('#all_result').style('opacity', 1).style('display', null);
             this.deps.lmf.setTextOnly(text);
             this.deps.visualizationUpdater.updateHistogramVisibilityForPending('semantic', text, this.deps.isChunkedMode());
-            await execute({ query, text, submode: this.deps.getSubmode(), signal });
+            await execute({ query, text, signal });
         } catch (err) {
             if (err instanceof Error && err.name === 'AbortError') {
                 this.deps.lmf.hideLoading();
@@ -100,15 +100,15 @@ export class SemanticSearchController {
         }
     }
 
-    private async runWhole(params: { query: string; text: string; submode: string | undefined; signal: AbortSignal }): Promise<void> {
-        const { query, text, submode, signal } = params;
+    private async runWhole(params: { query: string; text: string; signal: AbortSignal }): Promise<void> {
+        const { query, text, signal } = params;
         const onProgress = (step: number, totalSteps: number, stage: string, percentage?: number) => {
             const progressText = percentage !== undefined && percentage !== null
                 ? `Step ${step}/${totalSteps}:\t ${stage} ${percentage}%`
                 : `Step ${step}/${totalSteps}:\t ${stage}`;
             d3.select('#semantic_progress').text(progressText).style('display', 'inline-block');
         };
-        const res = await this.deps.api.analyzeSemantic(query, text, { onProgress, submode, debug_info: true, signal });
+        const res = await this.deps.api.analyzeSemantic(query, text, { onProgress, debug_info: true, signal });
         if (res?.success && res?.token_attention) {
             this.deps.visualizationUpdater.handleSemanticResponse(res, text);
             const md = res?.full_match_degree;
@@ -122,8 +122,8 @@ export class SemanticSearchController {
      * 分块搜索（demo）：严格串行——await 分析 → 上色 → 下一块；无预取/hold/follow；结束滚到首个匹配。
      * 产品决策：站内节奏刻意简化；扩展侧仍保留预取/hold/follow（见 extension/content.js），两边不必对齐。
      */
-    private async runChunked(params: { query: string; text: string; submode: string | undefined; signal: AbortSignal }): Promise<void> {
-        const { query, text, submode, signal } = params;
+    private async runChunked(params: { query: string; text: string; signal: AbortSignal }): Promise<void> {
+        const { query, text, signal } = params;
         const chunks = splitTextToChunks(text, SEMANTIC_CHUNK_BYTES);
         if (chunks.length === 0) {
             this.deps.visualizationUpdater.handleSemanticResponse({ token_attention: [] }, text, undefined);
@@ -150,7 +150,7 @@ export class SemanticSearchController {
             const chunk = chunks[i];
             d3.select('#semantic_progress').text(`Chunk ${i + 1}/${chunks.length}`).style('display', 'inline-block');
 
-            const res = await this.deps.api.analyzeSemantic(query, chunk.text, { submode, signal });
+            const res = await this.deps.api.analyzeSemantic(query, chunk.text, { signal });
             if (signal.aborted) {
                 aborted = true;
                 break;

@@ -43,7 +43,7 @@ export class SettingsMenuManager {
     private forceNarrowToggle: d3.Selection<HTMLInputElement, unknown, HTMLElement, any>;
     private semanticThresholdInput: d3.Selection<HTMLInputElement, unknown, HTMLElement, any>;
     private semanticThresholdItem: d3.Selection<HTMLElement, unknown, HTMLElement, any>;
-    private semanticSubmodeRow: d3.Selection<HTMLElement, unknown, HTMLElement, any>;
+    private semanticOptionsRow: d3.Selection<HTMLElement, unknown, HTMLElement, any>;
     private weakenSurprisalColorToggle: d3.Selection<HTMLInputElement, unknown, HTMLElement, any>;
     private themeDropdownContainer: d3.Selection<Element, unknown, HTMLElement, any>;
     private adminManager: AdminManager;
@@ -80,7 +80,7 @@ export class SettingsMenuManager {
         this.forceNarrowToggle = d3.select<HTMLInputElement, any>('#force_narrow_toggle');
         this.semanticThresholdInput = d3.select<HTMLInputElement, any>('#semantic_threshold_input');
         this.semanticThresholdItem = d3.select<HTMLElement, any>('#semantic_threshold_item');
-        this.semanticSubmodeRow = d3.select<HTMLElement, any>('#semantic_submode_row');
+        this.semanticOptionsRow = d3.select<HTMLElement, any>('#semantic_options_row');
         this.weakenSurprisalColorToggle = d3.select<HTMLInputElement, any>('#weaken_surprisal_color_toggle');
         this.themeDropdownContainer = d3.select('#theme_dropdown');
         this.adminManager = adminManager;
@@ -142,7 +142,7 @@ export class SettingsMenuManager {
                 const enabled = (this.semanticAnalysisToggle.node() as HTMLInputElement)?.checked || false;
                 setSemanticAnalysisEnabled(enabled);
                 this.updateSemanticThresholdVisibility();
-                this.updateSemanticSubmodeRowVisibility();
+                this.updateSemanticOptionsRowVisibility();
                 if (this.callbacks.onSemanticAnalysisToggle) {
                     this.callbacks.onSemanticAnalysisToggle(enabled);
                 }
@@ -304,10 +304,10 @@ export class SettingsMenuManager {
         this.semanticThresholdItem.style('display', isAdmin && semanticOn ? null : 'none');
     }
 
-    private updateSemanticSubmodeRowVisibility(): void {
-        if (!this.semanticSubmodeRow.node()) return;
+    private updateSemanticOptionsRowVisibility(): void {
+        if (!this.semanticOptionsRow.node()) return;
         const isAdmin = this.adminManager.isInAdminMode();
-        this.semanticSubmodeRow.style('display', isAdmin ? null : 'none');
+        this.semanticOptionsRow.style('display', isAdmin ? null : 'none');
     }
 
     private setSemanticThresholdValue(value: number): void {

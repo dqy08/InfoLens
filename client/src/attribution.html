@@ -77,10 +77,10 @@
                     </div>
 
                     <div class="textarea-wrapper chat-prompt-actions-row">
-                        <div class="semantic-submode-row chat-completion-options-row attribution-model-variant-row">
-                            <span class="semantic-submode-group">
-                                <label class="semantic-submode-label" for="attribution_model_variant" data-i18n>Model</label>
-                                <select id="attribution_model_variant" class="semantic-submode-select" aria-label="Attribution model slot" data-i18n="aria-label">
+                        <div class="options-row chat-completion-options-row attribution-model-variant-row">
+                            <span class="options-group">
+                                <label class="options-label" for="attribution_model_variant" data-i18n>Model</label>
+                                <select id="attribution_model_variant" class="options-select" aria-label="Attribution model slot" data-i18n="aria-label">
                                     <option value="base">base</option>
                                     <option value="instruct">instruct</option>
                                 </select>
@@ -100,15 +100,15 @@
                         </div>
                     </div>
 
-                    <div class="semantic-submode-row attribution-max-score-row">
-                        <span class="semantic-submode-group">
+                    <div class="options-row attribution-max-score-row">
+                        <span class="options-group">
                             <label class="attribution-use-mapping-label">
                                 <input type="checkbox" id="attribution_use_mapping">
                                 <span></span>
                             </label>
                         </span>
-                        <span class="semantic-submode-group attribution-max-score-slider-group">
-                            <label class="semantic-submode-label" for="attribution_max_score_range" data-i18n>Max score</label>
+                        <span class="options-group attribution-max-score-slider-group">
+                            <label class="options-label" for="attribution_max_score_range" data-i18n>Max score</label>
                             <input type="range" id="attribution_max_score_range" class="attribution-max-score-range"
                                 min="0.01" max="1" step="0.01" value="1"
                                 title="For threshold x∈(0,1]: map normalized scores in [0,x] linearly to display intensities [0,1]; scores above x saturate at maximum intensity. At x=1, equivalent to disabling mapping."
@@ -119,8 +119,8 @@
                     </div>
 
                     <div class="attribution-exclude-prompt-patterns-row">
-                        <div class="semantic-submode-row attribution-exclude-prompt-patterns-header">
-                            <span class="semantic-submode-group">
+                        <div class="options-row attribution-exclude-prompt-patterns-header">
+                            <span class="options-group">
                                 <label class="attribution-use-mapping-label"
                                     title="When enabled, each line below is a regex with the global flag, matched only within the context field below. If a token offset lies fully inside a match, its score is treated as 0."
                                     data-i18n="title">
@@ -128,8 +128,8 @@
                                     <span></span>
                                 </label>
                             </span>
-                            <span class="semantic-submode-group">
-                                <label class="semantic-submode-label" for="attribution_exclude_prompt_patterns" data-i18n>Exclude prompt patterns</label>
+                            <span class="options-group">
+                                <label class="options-label" for="attribution_exclude_prompt_patterns" data-i18n>Exclude prompt patterns</label>
                             </span>
                         </div>
                         <textarea id="attribution_exclude_prompt_patterns" class="attribution-exclude-prompt-patterns-input" rows="1"

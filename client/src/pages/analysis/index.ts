@@ -263,24 +263,19 @@ window.onload = () => {
         }
     }, '#language_dropdown');
 
-    // 语义分析：query 用 URL，submode/chunked/color_source/阈值 用 localStorage 且一致处理
+    // 语义分析：query 用 URL，chunked/color_source/阈值 用 localStorage 且一致处理
     const SEMANTIC_KEYS = {
-        submode: 'info_radar_semantic_submode',
         chunked: 'info_radar_semantic_chunked',
         colorSource: 'info_radar_semantic_color_source',
         threshold: 'info_radar_semantic_match_threshold'
     } as const;
     const initSemanticOptions = () => {
-        const validSubmodes = ['count', 'fill_blank', 'hybrid'];
         const validColorSources = ['raw_score_normed', 'signal_probability', 'pw_score'];
         const query = URLHandler.parameters['semantic_query'] ?? '';
-        const submode = lsGet(SEMANTIC_KEYS.submode) ?? 'hybrid';
         const chunked = lsGet(SEMANTIC_KEYS.chunked) !== '0';
         const colorSource = lsGet(SEMANTIC_KEYS.colorSource) ?? 'pw_score';
         const queryEl = document.getElementById('semantic_search_input') as HTMLInputElement | null;
         if (queryEl) queryEl.value = typeof query === 'string' ? query : '';
-        const submodeEl = document.getElementById('semantic_submode_select') as HTMLSelectElement | null;
-        if (submodeEl && validSubmodes.includes(submode)) submodeEl.value = submode;
         const chunkedEl = document.getElementById('semantic_chunked_mode') as HTMLInputElement | null;
         if (chunkedEl) chunkedEl.checked = chunked;
         const colorEl = document.getElementById('semantic_color_source_select') as HTMLSelectElement | null;
@@ -289,11 +284,9 @@ window.onload = () => {
         if (thresholdEl) thresholdEl.value = String(getSemanticMatchThreshold());
     };
     const syncSemanticOptionsToStorage = () => {
-        const submodeEl = document.getElementById('semantic_submode_select') as HTMLSelectElement | null;
         const chunkedEl = document.getElementById('semantic_chunked_mode') as HTMLInputElement | null;
         const colorEl = document.getElementById('semantic_color_source_select') as HTMLSelectElement | null;
         const thresholdEl = document.getElementById('semantic_threshold_input') as HTMLInputElement | null;
-        lsSet(SEMANTIC_KEYS.submode, submodeEl?.value ?? 'hybrid');
         if (chunkedEl) lsWriteBool(SEMANTIC_KEYS.chunked, chunkedEl.checked, '1');
         if (colorEl) lsSet(SEMANTIC_KEYS.colorSource, colorEl.value);
         if (thresholdEl) {
@@ -333,12 +326,10 @@ window.onload = () => {
                 lsWriteBool('minimap_enabled', enableMinimap, '1');
             },
             onSemanticAnalysisToggle: (enabled: boolean) => {
-                // submode/chunked/color/阈值重置为默认；不清除另一边分析数据，切回可恢复展示
+                // chunked/color/阈值重置为默认；不清除另一边分析数据，切回可恢复展示
                 // query：切回语义且仍有 lastSearchedQuery 时回填，避免空输入框配旧高亮
                 const queryEl = document.getElementById('semantic_search_input') as HTMLInputElement | null;
                 const lastQ = appStateManager.getState().lastSearchedQuery;
-                const submodeEl = document.getElementById('semantic_submode_select') as HTMLSelectElement | null;
-                if (submodeEl) submodeEl.value = 'hybrid';
                 const chunkedEl = document.getElementById('semantic_chunked_mode') as HTMLInputElement | null;
                 if (chunkedEl) chunkedEl.checked = true;
                 const colorEl = document.getElementById('semantic_color_source_select') as HTMLSelectElement | null;
@@ -902,8 +893,6 @@ window.onload = () => {
 
     // Semantic analysis Search 按钮：将 query 和原文发送给 analyze_semantic API
     const semanticSearchInput = document.getElementById('semantic_search_input') as HTMLInputElement | null;
-    const getSubmode = () =>
-        (document.getElementById('semantic_submode_select') as HTMLSelectElement | null)?.value || undefined;
     const showSemanticError = (message?: string) => {
         d3.select('#semantic_match_degree').style('display', 'none');
         showToast(message || tr('Semantic analysis failed'), 'error');
@@ -936,7 +925,6 @@ window.onload = () => {
     const semanticSearchController = new SemanticSearchController({
         getQuery: () => semanticSearchInput?.value ?? '',
         getText: () => (textField.property('value') ?? visualizationUpdater.getCurrentData()?.request?.text ?? '').toString(),
-        getSubmode,
         isChunkedMode: () => (document.getElementById('semantic_chunked_mode') as HTMLInputElement | null)?.checked ?? true,
         api,
         appStateManager,
@@ -970,7 +958,6 @@ window.onload = () => {
         onRemove: removeSemanticCacheByQuery
     });
     semanticSearchInput?.addEventListener('blur', syncSemanticQueryToUrl);
-    document.getElementById('semantic_submode_select')?.addEventListener('change', syncSemanticOptionsToStorage);
     document.getElementById('semantic_chunked_mode')?.addEventListener('change', syncSemanticOptionsToStorage);
     document.getElementById('semantic_threshold_input')?.addEventListener('change', syncSemanticOptionsToStorage);
     document.getElementById('semantic_color_source_select')?.addEventListener('change', () => {

@@ -42,7 +42,6 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 | `chunkBytes` | 分块字节上限 |
 | `maxChunks` | demo 最多请求块数 |
 | `matchThreshold` | 计入 ↑↓ 的 match 阈值 |
-| `submode` | 默认 `hybrid`（前端 count→fill_blank） |
 | `pwScorePercentile` | 简化 pw 分位 τ（默认 0.9） |
 | `domDebug` | `true` 只划正文范围 |
 | `followSearching` | `true` 全程跟随最新 chunk |

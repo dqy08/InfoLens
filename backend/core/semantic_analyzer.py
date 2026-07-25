@@ -1,19 +1,16 @@
 """
 Semantic analysis：基于 instruct 模型提取原文 token 与 query 的相关度
 
-使用 logits_gradient 梯度归因策略（与预测更一致），子策略由 --logits_gradient_submode 指定：
-- count：top-10 logits 梯度（排除 0），prompt 引导「数量」。0.6b下只适合用于判断文章整体是否有关联，1.7b下全能
-- match_score：目标 token logit 梯度，prompt 引导「相关度打分」。0.6b/1.7b下都不太有竞争力。【已废弃】
-- fill_blank：填空式，top-10 logits 梯度（排除 无），prompt 引导「最相关的一个词」。0.6b下只适合用于给token打分，1.7b下全能
+- analyze_relevance：全文相关度 full_match_degree（仅前向）。hybrid 门控用。
+- analyze_keywords：填空式关键词归因 token_attention（前向+反向）。hybrid 染色用。
 
-count/fill_blank 按概率加权（Σ pᵢ·zᵢ）。
+关键词归因按概率加权（Σ pᵢ·zᵢ）。提示词语言见模块常量（不经 API）。
 
 模型由 --instruct_model 参数指定，默认 qwen3-0.6b-instruct
 """
 
-import gc
 import math
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
 
@@ -23,15 +20,12 @@ from backend.models.model_manager import ensure_instruct_slot_ready, get_instruc
 from .next_token_topk import decode_topk_ids_to_strings_and_rounded_probs, DEFAULT_NEXT_TOKEN_TOPK
 from backend.platform.runtime_config import get_semantic_max_token_length
 
+# 提示词语言：en | zh（改这里即可；不经 API）
+RELEVANCE_PROMPT_LANG = "en"
+KEYWORDS_PROMPT_LANG = "en"
+# relevance 用「相关词个数」问法（neg=0）。曾对比 yes/no、0/1：count 明显最优；0/1 拒识更稳但易漏检；yes/no 假阳多（neg=No 易被 no/not 分流）
 
-
-def _get_logits_gradient_submode() -> str:
-    """logits_gradient 子策略：count / match_score(已废弃) / fill_blank"""
-    try:
-        from backend.platform.app_context import get_args
-        return getattr(get_args(), "logits_gradient_submode", "fill_blank")
-    except RuntimeError:
-        return "fill_blank"
+ProgressCallback = Optional[Callable[[int, int, str, Optional[int]], None]]
 
 
 def _truncate_text_by_tokens(tokenizer, text: str, max_tokens: int) -> tuple[str, int]:
@@ -41,7 +35,7 @@ def _truncate_text_by_tokens(tokenizer, text: str, max_tokens: int) -> tuple[str
 
     已知问题：截断是静默的，响应里没有任何字段告知调用方发生过截断。前端按字节数切 chunk
     （extension/config.js chunkBytes=800），与这里的 token 上限没有联动；数字/标点/代码等
-    token 密度高的内容，800 字节可能远超 max_tokens，导致相关度判断和 fill_blank 高亮只覆盖
+    token 密度高的内容，800 字节可能远超 max_tokens，导致相关度判断和 keywords 高亮只覆盖
     截断后的前缀。后果是漏检（chunk 被判无关或部分内容不高亮），不是误报。调大 max_tokens
     只能缓解、不能根治（数字等本就按字符/短片段单独分词，token 密度上限很高）。
     """
@@ -67,74 +61,75 @@ def _get_verbose() -> bool:
     return get_verbose()
 
 
-def _build_prompt_parts(submode: str, query: str) -> tuple:
-    """
-    按子模式（count / match_score已废弃 / fill_blank）构造 (instruction, generation_guide, neg_token)。
-    单条与批量前向共用，避免同一套子模式分叉在两处重复维护。
+def _sync_device(device) -> None:
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    elif device.type == "mps":
+        torch.mps.synchronize()
 
-    - instruction：拼在原文前的指令；文档前用 \\n\\n 分隔，避免 tokenizer 将首字符与空格合并导致 offset_mapping 计算错误
-    - generation_guide：chat template 只支持完整消息，生成引导词需在 apply_chat_template 之后追加
-    - neg_token：计算 full_match_degree（1 - P(neg_token)）用的「无关」token
-    """
-    if submode == "count":
+
+def _relevance_prompt_parts(query: str, prompt_lang: str) -> Tuple[str, str, str]:
+    """(instruction, generation_guide, neg_token)。neg_token 用于 full_match_degree=1-P(neg)。"""
+    if prompt_lang == "en":
+        return (
+            f"How many words in the text below are related to the query topic ({query})? Text:\n\n",
+            f"The number of words in the text related to the query topic ({query}) = **",
+            "0",
+        )
+    if prompt_lang == "zh":
         return (
             f"请问下面文字中有多少个词与查询主题（{query}）相关？文字内容：\n\n",
             f"原文中与查询主题（{query}）相关的词的数量 = **",
             "0",
         )
-    if submode == "match_score":  # 已废弃
+    raise ValueError(f"Unknown prompt_lang: {prompt_lang}")
+
+
+def _keywords_prompt_parts(query: str, prompt_lang: str) -> Tuple[str, str]:
+    """(instruction, generation_guide)。"""
+    if prompt_lang == "en":
         return (
-            f"请问下面文字与查询主题（{query}）的相关程度是多少？请回答0/1/2（2为最高相关）。文字内容：\n\n",
-            f"文章和查询主题（{query}）的相关程度（0-2）打分为：**",
-            "0",
+            f"Which word in the text below is most related to the query topic ({query})? Text:\n\n",
+            # Leading quote prevents the model from emitting a quote as the answer
+            f"The word in the text most related to the query topic ({query}) is: **\"",
         )
-    if submode == "fill_blank":
+    if prompt_lang == "zh":
         return (
-            f"请问下面文字中哪个词与查询主题（{query}）最相关？如无相关词则回答“无”。文字内容：\n\n",
+            f"请问下面文字中哪个词与查询主题（{query}）最相关？文字内容：\n\n",
             # “引号是特意为了防止模型生成引号
             f"原文中与查询主题（{query}）最相关的一个词是：**“",
-            "无",
         )
-    raise ValueError(f"Unknown submode: {submode}")
+    raise ValueError(f"Unknown prompt_lang: {prompt_lang}")
 
 
-def _analyze_logits_gradient(
-    query: str,
-    text: str,
+def _format_user_prompt(tokenizer, instruction: str, truncated_text: str, generation_guide: str) -> str:
+    messages = [{"role": "user", "content": instruction + truncated_text}]
+    formatted = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True, enable_thinking=False,
+    )
+    return formatted + generation_guide
+
+
+def _make_embeds(model, input_ids, *, requires_grad: bool):
+    embeds = model.get_input_embeddings()(input_ids).detach().clone()
+    if requires_grad:
+        embeds.requires_grad_(True)
+    return embeds
+
+
+def _encode_for_analysis(
     tokenizer,
     model,
     device,
-    submode_override: Optional[str] = None,
-    progress_callback: Optional[Callable[[int, int, str, Optional[int]], None]] = None,
-    debug_info: bool = False,
-    full_match_degree_only: bool = False,
-) -> Dict:
-    """
-    梯度归因：logits 对输入 embedding 的梯度。
-    子策略：count / match_score(已废弃) / fill_blank，由 --logits_gradient_submode 指定。
-    submode_override: 评估时可选覆盖，用于同一进程内测试不同子模式。
-    """
-    TOTAL_STEPS = 4
-
-    submode = submode_override if submode_override is not None else _get_logits_gradient_submode()
-    max_length = get_semantic_max_token_length()
-
-    if progress_callback:
-        progress_callback(1, TOTAL_STEPS, "encoding", None)
-    instruction, generation_guide, neg_token = _build_prompt_parts(submode, query)
-
-    # 截断 text 到 max_length token，再拼
+    instruction: str,
+    generation_guide: str,
+    text: str,
+    max_length: int,
+    *,
+    requires_grad: bool,
+) -> dict:
     truncated_text, input_token_count = _truncate_text_by_tokens(tokenizer, text, max_length)
-    
-    messages = [{"role": "user", "content": instruction + truncated_text}]
-    formatted = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True,
-        enable_thinking=False
-    )
-    formatted += generation_guide
-
-    # logits_gradient count/fill_blank 的 top-k，影响梯度目标覆盖的候选词数量
-    LOGITS_GRADIENT_TOPK = DEFAULT_NEXT_TOKEN_TOPK
+    formatted = _format_user_prompt(tokenizer, instruction, truncated_text, generation_guide)
 
     idx = formatted.find(instruction)
     instruction_start_char = idx if idx >= 0 else 0
@@ -144,12 +139,7 @@ def _analyze_logits_gradient(
     abbrev_text = truncated_text if len(lines) <= 2 else f"{lines[0]}\n...\n{lines[-1]}"
     abbrev = formatted[:text_start_char] + abbrev_text + formatted[text_end_char:]
 
-    enc = tokenizer(
-        formatted,
-        return_tensors="pt",
-        return_offsets_mapping=True,
-    )
-
+    enc = tokenizer(formatted, return_tensors="pt", return_offsets_mapping=True)
     input_ids = enc["input_ids"].to(device)
     offset_mapping = enc["offset_mapping"][0].tolist()
 
@@ -159,133 +149,97 @@ def _analyze_logits_gradient(
             prompt_end = i
             break
 
-    embed_layer = model.get_input_embeddings()
-    embeds = embed_layer(input_ids).detach().clone().requires_grad_(True)
+    embeds = _make_embeds(model, input_ids, requires_grad=requires_grad)
+    return {
+        "truncated_text": truncated_text,
+        "input_token_count": input_token_count,
+        "embeds": embeds,
+        "offset_mapping": offset_mapping,
+        "prompt_end": prompt_end,
+        "text_start_char": text_start_char,
+        "text_end_char": text_end_char,
+        "abbrev": abbrev,
+    }
 
-    use_gc = _get_gradient_checkpointing()
+
+def _forward_logits(
+    model,
+    embeds,
+    device,
+    tokenizer,
+    *,
+    with_grad: bool,
+    topk: int = DEFAULT_NEXT_TOKEN_TOPK,
+):
+    """前向：返回 logits, probs, topk_vals, topk_ids, topk_tokens, topk_probs。"""
+    with torch.set_grad_enabled(with_grad):
+        outputs = model(inputs_embeds=embeds, output_attentions=False)
+    _sync_device(device)
+
+    logits = outputs.logits[:, -1, :]
+    topk_vals, topk_ids = torch.topk(logits, topk, dim=-1)
+    probs = torch.softmax(logits, dim=-1)
+    topk_tokens, topk_probs = decode_topk_ids_to_strings_and_rounded_probs(
+        probs[0], tokenizer, topk_ids[0]
+    )
     if _get_verbose():
-        print(f"📌 logits_gradient: 推理原文 (tokens={len(offset_mapping)}):\n{abbrev}")
+        print(f"top{topk}: {[f'{t}({p*100:.1f}%)' for t, p in zip(topk_tokens, topk_probs)]}")
+    return logits, probs, topk_vals, topk_ids, topk_tokens, topk_probs
+
+
+def _debug_payload(abbrev, topk_tokens, topk_probs) -> dict:
+    return {"abbrev": abbrev, "topk_tokens": topk_tokens, "topk_probs": topk_probs}
+
+
+def analyze_relevance(
+    query: str,
+    text: str,
+    progress_callback: ProgressCallback = None,
+    debug_info: bool = False,
+) -> Dict:
+    """全文相关度：仅前向，返回 full_match_degree（无 token_attention）。"""
+    TOTAL_STEPS = 2
+    tokenizer, model, device = ensure_instruct_slot_ready()
+    max_length = get_semantic_max_token_length()
+
+    if progress_callback:
+        progress_callback(1, TOTAL_STEPS, "encoding", None)
+    instruction, generation_guide, neg_token = _relevance_prompt_parts(query, RELEVANCE_PROMPT_LANG)
+    enc = _encode_for_analysis(
+        tokenizer, model, device, instruction, generation_guide, text, max_length,
+        requires_grad=False,
+    )
+    if _get_verbose():
+        print(f"📌 relevance: 推理原文 (tokens={len(enc['offset_mapping'])}):\n{enc['abbrev']}")
+
     if progress_callback:
         progress_callback(2, TOTAL_STEPS, "inference", None)
     model.eval()
-    if use_gc:
-        model.gradient_checkpointing_enable()
     try:
-        with torch.set_grad_enabled(not full_match_degree_only):
-            outputs = model(
-                inputs_embeds=embeds,
-                output_attentions=False,
-            )
-        # 显式同步，确保已完成，progress_callback 时机准确
-        if device.type == "cuda":
-            torch.cuda.synchronize(device)
-        elif device.type == "mps":
-            torch.mps.synchronize()
-
-        logits = outputs.logits[:, -1, :]
-        topk_vals, topk_ids = torch.topk(logits, LOGITS_GRADIENT_TOPK, dim=-1)
-        probs = torch.softmax(logits, dim=-1)
-        topk_tokens, topk_probs = decode_topk_ids_to_strings_and_rounded_probs(
-            probs[0], tokenizer, topk_ids[0]
+        _, probs, _, _, topk_tokens, topk_probs = _forward_logits(
+            model, enc["embeds"], device, tokenizer, with_grad=False,
         )
-        if _get_verbose():
-            print(f"top{LOGITS_GRADIENT_TOPK}: {[f'{t}({p*100:.1f}%)' for t, p in zip(topk_tokens, topk_probs)]}")
-
         neg_id = tokenizer.encode(neg_token, add_special_tokens=False)[0]
-        # 全文匹配度：count/match_score(已废弃) 用 1-P("0")，fill_blank 用 1-P("无")
-        p_neg = probs[0, neg_id].item()
-        full_match_degree = round(1.0 - p_neg, 4)
-
-        if full_match_degree_only:
-            return {
-                "model": get_instruct_model_display_name(),
-                "token_attention": [],
-                "full_match_degree": full_match_degree,
-                "input_token_count": input_token_count,
-            }
-
-        if progress_callback:
-            progress_callback(3, TOTAL_STEPS, "backward", None)
-        # 归因目标：raw logits（不经过 softmax backward），避免饱和与竞争污染。
-        if submode == "count" or submode == "fill_blank":
-            # count/fill_blank 均用 top-10、按概率加权 Σ pᵢ·zᵢ，并排除 neg_token（0/无）以保持梯度方向与「相关」一致。
-            vals = topk_vals[0]
-            w = probs[0, topk_ids[0]].detach().clone()
-            # 排除 neg_token
-            w[topk_ids[0] == neg_id] = 0  
-
-            target_logit = (w * vals).sum()
-        elif submode == "match_score":  # 已废弃
-            target_ids = tokenizer.encode("2", add_special_tokens=False)
-            if not target_ids:
-                raise ValueError("tokenizer cannot encode '2'")
-            target_logit = logits[0, target_ids[0]]
-        else:
-            raise ValueError(f"Unknown submode: {submode}")
-        target_logit.backward()
-        grad = embeds.grad
-        if grad is None:
-            raise RuntimeError(
-                "logits_gradient: gradients not available (model may not support this, e.g. int8)"
-            )
-
-        # 显式同步，确保已完成，progress_callback 时机准确
-        if device.type == "cuda":
-            torch.cuda.synchronize(device)
-        elif device.type == "mps":
-            torch.mps.synchronize()
-        if progress_callback:
-            progress_callback(4, TOTAL_STEPS, "processing", None)
-            
-        text_token_end = len(offset_mapping)
-        # 在 GPU 上一次性计算所有 token 的 ‖∇f‖，避免循环内 .item() 导致 500 次 GPU→CPU 同步
-        grad_slice = grad[0, prompt_end:text_token_end].float()
-        norms = grad_slice.norm(dim=-1).cpu().tolist()
-        # 响应字段名 token_attention 为历史遗留；值为各 token 归因 score，非 attention 权重
-        token_attention: List[Dict] = []
-        nan_count = 0
-        for i in range(prompt_end, text_token_end):
-            s, e = offset_mapping[i]
-            if s >= text_start_char and e <= text_end_char:
-                s_rel, e_rel = s - text_start_char, e - text_start_char
-                score = norms[i - prompt_end]
-                if not math.isfinite(score):
-                    score = 0.0
-                    nan_count += 1
-                else:
-                    score = round_to_sig_figs(score)
-                token_attention.append({"offset": [s_rel, e_rel], "raw": truncated_text[s_rel:e_rel], "score": score})
-        if nan_count > 0:
-            print(f"⚠️ token_attention 中有 {nan_count} 个 score 为 NaN/Inf，已替换为 0。")
-
+        full_match_degree = round(1.0 - probs[0, neg_id].item(), 4)
         out = {
             "model": get_instruct_model_display_name(),
-            "token_attention": token_attention,
             "full_match_degree": full_match_degree,
-            "input_token_count": input_token_count,
+            "input_token_count": enc["input_token_count"],
         }
         if debug_info:
-            out["debug_info"] = {"abbrev": abbrev, "topk_tokens": topk_tokens, "topk_probs": topk_probs}
+            out["debug_info"] = _debug_payload(enc["abbrev"], topk_tokens, topk_probs)
         return out
     finally:
-        if use_gc:
-            model.gradient_checkpointing_disable()
-        # 每次推理后清理：避免连续多次调用时 MPS/CUDA 内存累积导致卡死
         DeviceManager.clear_cache(device)
 
 
-def _analyze_logits_gradient_batch(
+def analyze_relevance_batch(
     query: str,
     texts: List[str],
-    tokenizer,
-    model,
-    device,
-    submode_override: Optional[str] = None,
-    progress_callback: Optional[Callable[[int, int, str, Optional[int]], None]] = None,
+    progress_callback: ProgressCallback = None,
 ) -> List[Dict]:
     """
-    批量 full_match_degree_only 前向：多条 text 一次 forward，仅用于 count 预判等纯前向场景的性能测试。
-    无反向传播，不产出 token_attention（与单条 full_match_degree_only=True 时一致）。
+    批量相关度前向：多条 text 一次 forward，仅 full_match_degree。
 
     性能结论（本地 CPU/线上服务器实测）：
     batching 对本函数内前向计算的加速有限，batch=4 约 1.3~1.5x，batch=8 约 1.6x，
@@ -293,25 +247,20 @@ def _analyze_logits_gradient_batch(
     大头来自摊薄了每次 HTTP 请求固定的网络/SSE 开销（约 1.2~1.7s，与 batch 无关），
     并非本函数计算变快。
     """
-    TOTAL_STEPS = 2  # 批量只有 encoding / inference 两阶段，无 backward/processing
-
-    submode = submode_override if submode_override is not None else _get_logits_gradient_submode()
+    TOTAL_STEPS = 2
+    tokenizer, model, device = ensure_instruct_slot_ready()
     max_length = get_semantic_max_token_length()
 
     if progress_callback:
         progress_callback(1, TOTAL_STEPS, "encoding", None)
-    instruction, generation_guide, neg_token = _build_prompt_parts(submode, query)
+    instruction, generation_guide, neg_token = _relevance_prompt_parts(query, RELEVANCE_PROMPT_LANG)
 
     formatted_list = []
     input_token_counts = []
     for text in texts:
         truncated_text, input_token_count = _truncate_text_by_tokens(tokenizer, text, max_length)
         input_token_counts.append(input_token_count)
-        messages = [{"role": "user", "content": instruction + truncated_text}]
-        formatted = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
-        )
-        formatted_list.append(formatted + generation_guide)
+        formatted_list.append(_format_user_prompt(tokenizer, instruction, truncated_text, generation_guide))
 
     # 左 padding：批内各序列长度不同，取 logits[:, -1, :] 时需保证最后一列都是各自真实末尾 token
     # pad_token / padding_side 都是共享 tokenizer 上的可变状态，用完必须还原
@@ -334,13 +283,9 @@ def _analyze_logits_gradient_batch(
     model.eval()
     with torch.no_grad():
         outputs = model(input_ids=input_ids, attention_mask=attention_mask, output_attentions=False)
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
-    elif device.type == "mps":
-        torch.mps.synchronize()
+    _sync_device(device)
 
-    logits = outputs.logits[:, -1, :]
-    probs = torch.softmax(logits, dim=-1)
+    probs = torch.softmax(outputs.logits[:, -1, :], dim=-1)
     neg_id = tokenizer.encode(neg_token, add_special_tokens=False)[0]
     full_match_degrees = (1.0 - probs[:, neg_id]).tolist()
 
@@ -348,7 +293,6 @@ def _analyze_logits_gradient_batch(
     return [
         {
             "model": get_instruct_model_display_name(),
-            "token_attention": [],
             "full_match_degree": round(fmd, 4),
             "input_token_count": input_token_count,
         }
@@ -356,42 +300,93 @@ def _analyze_logits_gradient_batch(
     ]
 
 
-def analyze_semantic(
+def analyze_keywords(
     query: str,
-    text,
-    submode_override: Optional[str] = None,
-    progress_callback: Optional[Callable[[int, int, str, Optional[int]], None]] = None,
+    text: str,
+    progress_callback: ProgressCallback = None,
     debug_info: bool = False,
-    full_match_degree_only: bool = False,
-):
-    """
-    分析原文各 token 与 query 的相关度（使用 logits_gradient 梯度归因）。
-
-    Args:
-        query: 查询主题
-        text: 原文；为 List[str] 时走批量前向（仅支持 full_match_degree_only=True，用于性能测试）
-        submode_override: 评估时可选覆盖子模式（count/match_score已废弃/fill_blank）
-        progress_callback: 可选进度回调 (step, total_steps, stage, percentage)
-        debug_info: 为 True 时返回 debug_abbrev（推理原文缩写）；topk_tokens、topk_probs 始终在结果中
-
-    Returns:
-        text 为 str 时：{"model", "token_attention"（各 token 归因 score；API 历史字段名）, "full_match_degree"}；
-        debug_info=True 时包含 debug_info 对象。
-        text 为 List[str] 时：上述字典组成的 List（无 debug_info）。
-    """
+) -> Dict:
+    """关键词归因：前向+反向，返回 token_attention（无 full_match_degree）。"""
+    TOTAL_STEPS = 4
     tokenizer, model, device = ensure_instruct_slot_ready()
-    if isinstance(text, list):
-        if not full_match_degree_only:
-            raise ValueError("text as array (batch) requires full_match_degree_only=True")
-        return _analyze_logits_gradient_batch(
-            query, text, tokenizer, model, device,
-            submode_override=submode_override,
-            progress_callback=progress_callback,
-        )
-    return _analyze_logits_gradient(
-        query, text, tokenizer, model, device,
-        submode_override=submode_override,
-        progress_callback=progress_callback,
-        debug_info=debug_info,
-        full_match_degree_only=full_match_degree_only,
+    max_length = get_semantic_max_token_length()
+
+    if progress_callback:
+        progress_callback(1, TOTAL_STEPS, "encoding", None)
+    instruction, generation_guide = _keywords_prompt_parts(query, KEYWORDS_PROMPT_LANG)
+    enc = _encode_for_analysis(
+        tokenizer, model, device, instruction, generation_guide, text, max_length,
+        requires_grad=True,
     )
+    if _get_verbose():
+        print(f"📌 keywords: 推理原文 (tokens={len(enc['offset_mapping'])}):\n{enc['abbrev']}")
+
+    if progress_callback:
+        progress_callback(2, TOTAL_STEPS, "inference", None)
+    model.eval()
+    use_gc = _get_gradient_checkpointing()
+    if use_gc:
+        model.gradient_checkpointing_enable()
+    try:
+        _, probs, topk_vals, topk_ids, topk_tokens, topk_probs = _forward_logits(
+            model, enc["embeds"], device, tokenizer, with_grad=True,
+        )
+
+        if progress_callback:
+            progress_callback(3, TOTAL_STEPS, "backward", None)
+        # 归因目标：raw logits（不经过 softmax backward），top-k 按概率加权 Σ pᵢ·zᵢ
+        vals = topk_vals[0]
+        w = probs[0, topk_ids[0]].detach().clone()
+        target_logit = (w * vals).sum()
+        target_logit.backward()
+        grad = enc["embeds"].grad
+        if grad is None:
+            raise RuntimeError(
+                "keywords: gradients not available (model may not support this, e.g. int8)"
+            )
+        _sync_device(device)
+
+        if progress_callback:
+            progress_callback(4, TOTAL_STEPS, "processing", None)
+
+        offset_mapping = enc["offset_mapping"]
+        prompt_end = enc["prompt_end"]
+        text_start_char = enc["text_start_char"]
+        text_end_char = enc["text_end_char"]
+        truncated_text = enc["truncated_text"]
+        # 在 GPU 上一次性计算所有 token 的 ‖∇f‖，避免循环内 .item() 导致多次 GPU→CPU 同步
+        grad_slice = grad[0, prompt_end:len(offset_mapping)].float()
+        norms = grad_slice.norm(dim=-1).cpu().tolist()
+        # 响应字段名 token_attention 为历史遗留；值为各 token 归因 score，非 attention 权重
+        token_attention: List[Dict] = []
+        nan_count = 0
+        for i in range(prompt_end, len(offset_mapping)):
+            s, e = offset_mapping[i]
+            if s >= text_start_char and e <= text_end_char:
+                s_rel, e_rel = s - text_start_char, e - text_start_char
+                score = norms[i - prompt_end]
+                if not math.isfinite(score):
+                    score = 0.0
+                    nan_count += 1
+                else:
+                    score = round_to_sig_figs(score)
+                token_attention.append({
+                    "offset": [s_rel, e_rel],
+                    "raw": truncated_text[s_rel:e_rel],
+                    "score": score,
+                })
+        if nan_count > 0:
+            print(f"⚠️ token_attention 中有 {nan_count} 个 score 为 NaN/Inf，已替换为 0。")
+
+        out = {
+            "model": get_instruct_model_display_name(),
+            "token_attention": token_attention,
+            "input_token_count": enc["input_token_count"],
+        }
+        if debug_info:
+            out["debug_info"] = _debug_payload(enc["abbrev"], topk_tokens, topk_probs)
+        return out
+    finally:
+        if use_gc:
+            model.gradient_checkpointing_disable()
+        DeviceManager.clear_cache(device)

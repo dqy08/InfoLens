@@ -36,9 +36,9 @@
                 </div>
 
                 <section class="input-section">
-                    <div class="semantic-submode-row chat-raw-prompt-mode-row">
-                        <span class="semantic-submode-group">
-                            <label class="semantic-submode-label" for="chat_skip_chat_template">
+                    <div class="options-row chat-raw-prompt-mode-row">
+                        <span class="options-group">
+                            <label class="options-label" for="chat_skip_chat_template">
                                 <input type="checkbox" id="chat_skip_chat_template" />
                                 <span data-i18n>Raw prompt mode</span>
                             </label>
@@ -46,7 +46,7 @@
                     </div>
                     <div id="raw_input_panel" class="chat-prompt-panel">
                         <div class="input-header">
-                            <span class="semantic-submode-label" data-i18n>Raw prompt</span>
+                            <span class="options-label" data-i18n>Raw prompt</span>
                             <div class="text-action-buttons-top">
                                 <div class="textarea-counter" id="text_count_display">
                                     <span id="text_count_value">0</span> <span data-i18n>chars</span>
@@ -66,7 +66,7 @@
                     <div id="chat_input_panel" hidden>
                         <div class="chat-prompt-panel" id="chat_system_prompt_panel">
                             <div class="input-header">
-                                <label class="chat-use-system-label semantic-submode-label" for="chat_use_system_prompt">
+                                <label class="chat-use-system-label options-label" for="chat_use_system_prompt">
                                     <input type="checkbox" id="chat_use_system_prompt" checked />
                                     <span data-i18n>System</span>
                                 </label>
@@ -89,7 +89,7 @@
                         <div id="tool_calling_options_mount"></div>
                         <div class="chat-prompt-panel">
                             <div class="input-header">
-                                <span class="semantic-submode-label" data-i18n>User</span>
+                                <span class="options-label" data-i18n>User</span>
                                 <div class="text-action-buttons-top">
                                     <div class="textarea-counter" id="chat_user_text_count_display">
                                         <span id="chat_user_text_count_value">0</span> <span data-i18n>chars</span>
@@ -106,9 +106,9 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="semantic-submode-row chat-enable-thinking-row">
-                            <span class="semantic-submode-group">
-                                <label class="semantic-submode-label" for="chat_enable_thinking">
+                        <div class="options-row chat-enable-thinking-row">
+                            <span class="options-group">
+                                <label class="options-label" for="chat_enable_thinking">
                                     <input type="checkbox" id="chat_enable_thinking" />
                                     <span data-i18n>Enable thinking</span>
                                 </label>
@@ -116,9 +116,9 @@
                         </div>
                     </div>
                     <div class="teacher-forcing-row">
-                        <div class="semantic-submode-row teacher-forcing-toggle-row">
-                            <span class="semantic-submode-group">
-                                <label class="semantic-submode-label"
+                        <div class="options-row teacher-forcing-toggle-row">
+                            <span class="options-group">
+                                <label class="options-label"
                                     title="When enabled, this text is appended to the assembled prompt (raw or chat template) before completion. GLTR colors apply only to newly generated tokens, not the appended suffix."
                                     data-i18n="title">
                                     <input type="checkbox" id="chat_teacher_forcing_enable">
@@ -128,7 +128,7 @@
                         </div>
                         <div id="chat_teacher_forcing_block" class="chat-prompt-panel teacher-forcing-block" hidden>
                             <div class="input-header">
-                                <span class="semantic-submode-label" data-i18n>Forced continuation</span>
+                                <span class="options-label" data-i18n>Forced continuation</span>
                                 <div class="text-action-buttons-top">
                                     <div class="textarea-counter" id="chat_teacher_forcing_text_count_display">
                                         <span id="chat_teacher_forcing_text_count_value">0</span> <span data-i18n>chars</span>

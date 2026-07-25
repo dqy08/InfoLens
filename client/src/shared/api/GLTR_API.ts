@@ -39,24 +39,47 @@ export function isSemanticFromCache(res: unknown): boolean {
 /** 语义分析 options：onProgress 传入时启用 stream，否则普通 JSON */
 export interface AnalyzeSemanticOptions {
     onProgress?: (step: number, totalSteps: number, stage: string, percentage?: number) => void;
-    submode?: string;
-    fullMatchDegreeOnly?: boolean;
     /** 整段模式需要展示时传 true；不传则不请求，默认关 */
     debug_info?: boolean;
     signal?: AbortSignal;
 }
 
-export type SemanticResult = {
+export type SemanticDebugInfo = {
+    abbrev?: string;
+    topk_tokens?: string[];
+    topk_probs?: number[];
+};
+
+/** 各 token 的归因 score；API 字段名 `token_attention` 为历史遗留，非 attention 权重 */
+export type SemanticTokenScore = {
+    offset: [number, number];
+    raw: string;
+    score: number;
+};
+
+type SemanticApiBase = {
     success: boolean;
     model?: string;
-    /**
-     * 各 token 的归因 score（offset / raw / score）。
-     * API 历史字段名 `token_attention`；**非** transformer attention 权重。
-     */
-    token_attention?: Array<{ offset: [number, number]; raw: string; score: number }>;
-    debug_info?: { abbrev?: string; topk_tokens?: string[]; topk_probs?: number[] };
-    full_match_degree?: number;
+    debug_info?: SemanticDebugInfo;
     message?: string;
+    /** 客户端缓存命中标记，非 API 字段 */
+    __fromCache?: boolean;
+};
+
+/** /api/analyze-semantic-relevance */
+export type SemanticRelevanceResult = SemanticApiBase & {
+    full_match_degree: number;
+};
+
+/** /api/analyze-semantic-keywords */
+export type SemanticKeywordsResult = SemanticApiBase & {
+    token_attention: SemanticTokenScore[];
+};
+
+/** hybrid 组合：相关度门控 + 关键词归因（未过阈值时 token_attention 为空数组） */
+export type SemanticResult = SemanticApiBase & {
+    full_match_degree: number;
+    token_attention: SemanticTokenScore[];
 };
 
 export class TextAnalysisAPI {
@@ -340,41 +363,92 @@ export class TextAnalysisAPI {
     }
 
     /**
-     * Semantic analysis：分析原文各 token 对 prompt 的关注度
-     * 统一 API：onProgress 传入时 stream=true，否则普通 JSON；返回格式一致
+     * Semantic analysis：先相关度门控，再关键词归因（原生两接口组合）。
+     * onProgress 传入时 stream=true，否则普通 JSON；返回格式与旧 hybrid 一致。
      */
     public async analyzeSemantic(
         query: string,
         text: string,
         options?: AnalyzeSemanticOptions
     ): Promise<SemanticResult> {
-        const { onProgress, submode, fullMatchDegreeOnly, debug_info: wantDebugInfo } = options ?? {};
-        if (submode === 'hybrid') {
-            const r1 = await this.analyzeSemantic(query, text, { onProgress, submode: 'count', fullMatchDegreeOnly: true, debug_info: wantDebugInfo, signal: options?.signal });
-            if (!r1?.success) return r1;
-            if ((r1.full_match_degree ?? 0) < getSemanticMatchThreshold()) {
-                return { ...r1, token_attention: [] } as SemanticResult;
-            }
-            const r2 = await this.analyzeSemantic(query, text, { onProgress, submode: 'fill_blank', debug_info: wantDebugInfo, signal: options?.signal });
-            const fromCache = isSemanticFromCache(r1) && isSemanticFromCache(r2);
-            return { ...r2, full_match_degree: r1.full_match_degree, __fromCache: fromCache } as SemanticResult & { __fromCache?: boolean };
+        const { onProgress, debug_info: wantDebugInfo, signal } = options ?? {};
+        const r1 = await this.analyzeSemanticRelevance(query, text, { onProgress, debug_info: wantDebugInfo, signal });
+        if (!r1.success) {
+            return { success: false, message: r1.message, full_match_degree: 0, token_attention: [] };
         }
-        const cacheSubmode = submode;
-        const cached = semanticResultCache.get(text, query, cacheSubmode);
-        if (cached && (fullMatchDegreeOnly || cached.token_attention)) return { ...cached, __fromCache: true } as SemanticResult & { __fromCache?: boolean };
+        if (typeof r1.full_match_degree !== 'number') {
+            throw new Error('Semantic relevance response missing full_match_degree');
+        }
+        if (r1.full_match_degree < getSemanticMatchThreshold()) {
+            return { ...r1, token_attention: [] };
+        }
+        const r2 = await this.analyzeSemanticKeywords(query, text, { onProgress, debug_info: wantDebugInfo, signal });
+        if (!r2.success) {
+            return { success: false, message: r2.message, full_match_degree: r1.full_match_degree, token_attention: [] };
+        }
+        return {
+            ...r2,
+            full_match_degree: r1.full_match_degree,
+            __fromCache: isSemanticFromCache(r1) && isSemanticFromCache(r2),
+        };
+    }
+
+    /** 全文相关度：/api/analyze-semantic-relevance */
+    public async analyzeSemanticRelevance(
+        query: string,
+        text: string,
+        options?: AnalyzeSemanticOptions
+    ): Promise<SemanticRelevanceResult> {
+        return this.fetchSemanticEndpoint(
+            '/api/analyze-semantic-relevance',
+            'relevance',
+            query,
+            text,
+            options,
+            (cached): cached is SemanticRelevanceResult => typeof cached.full_match_degree === 'number',
+        );
+    }
+
+    /** 关键词归因：/api/analyze-semantic-keywords */
+    public async analyzeSemanticKeywords(
+        query: string,
+        text: string,
+        options?: AnalyzeSemanticOptions
+    ): Promise<SemanticKeywordsResult> {
+        return this.fetchSemanticEndpoint(
+            '/api/analyze-semantic-keywords',
+            'keywords',
+            query,
+            text,
+            options,
+            (cached): cached is SemanticKeywordsResult => Array.isArray(cached.token_attention),
+        );
+    }
+
+    private async fetchSemanticEndpoint<T extends SemanticApiBase>(
+        path: string,
+        cacheKey: string,
+        query: string,
+        text: string,
+        options: AnalyzeSemanticOptions | undefined,
+        cacheOk: (cached: semanticResultCache.SemanticCacheResult) => cached is T,
+    ): Promise<T> {
+        const { onProgress, debug_info: wantDebugInfo, signal } = options ?? {};
+        const cached = semanticResultCache.get(text, query, cacheKey);
+        if (cached && cacheOk(cached)) {
+            return { ...cached, __fromCache: true };
+        }
         const stream = !!onProgress;
         const payload: Record<string, unknown> = { query, text, stream };
-        if (submode) payload.submode = submode;
-        if (fullMatchDegreeOnly) payload.full_match_degree_only = true;
         if (wantDebugInfo) payload.debug_info = true;
-        const res: SemanticResult = stream
-            ? await this.fetchSSEStream<SemanticResult>('/api/analyze-semantic', payload, onProgress, 'Semantic analysis failed', options?.signal)
-            : await this.fetchSemanticJson('/api/analyze-semantic', payload, options?.signal);
-        if (res?.success) semanticResultCache.set(text, query, res, cacheSubmode);
+        const res = stream
+            ? await this.fetchSSEStream<T>(path, payload, onProgress, 'Semantic analysis failed', signal)
+            : await this.fetchSemanticJson<T>(path, payload, signal);
+        if (res?.success) semanticResultCache.set(text, query, res, cacheKey);
         return res;
     }
 
-    private async fetchSemanticJson(path: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<SemanticResult> {
+    private async fetchSemanticJson<T>(path: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
         const res = await fetch(this.url(path), {
             method: 'POST',
             headers: this.getHeaders(),

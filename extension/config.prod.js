@@ -15,8 +15,6 @@ var IL_CONFIG = {
   maxChunks: 32,
   /** SYNC: client/src/shared/core/constants.ts → SEMANTIC_MATCH_THRESHOLD */
   matchThreshold: 0.1,
-  /** SYNC: analysis 默认 hybrid（前端组合 count→fill_blank，非后端枚举值） */
-  submode: 'hybrid',
   /**
    * SYNC 近似：
    * - 站内 τ：signalThresholdDetector（失败回退 P90，见 textStatistics.computeP90）

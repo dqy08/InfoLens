@@ -72,8 +72,10 @@ def test_semantic_response_uses_input_token_count_when_attention_empty(capsys):
         result={"token_attention": [], "input_token_count": 142},
         elapsed=1.564,
         wait_time=0.012,
+        kind="relevance",
     )
     out = capsys.readouterr().out
+    assert "analyze_semantic(relevance)" in out
     assert "tokens=142" in out
     assert "wait=0.0120s" in out
     assert "processing=" in out
@@ -81,7 +83,9 @@ def test_semantic_response_uses_input_token_count_when_attention_empty(capsys):
 
 def test_semantic_portal_logger_sums_batch_input_token_count(capsys):
     logged = {"request_id": 7}
-    log_fn = inference_response_log.make_analyze_semantic_response_logger(logged)
+    log_fn = inference_response_log.make_analyze_semantic_response_logger(
+        logged, kind="keywords",
+    )
     log_fn(
         {
             "success": True,
@@ -94,5 +98,6 @@ def test_semantic_portal_logger_sums_batch_input_token_count(capsys):
         200,
     )
     out = capsys.readouterr().out
+    assert "analyze_semantic(keywords)" in out
     assert "req_id=7" in out
     assert "tokens=30" in out

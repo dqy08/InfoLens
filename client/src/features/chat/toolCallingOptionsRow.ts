@@ -48,13 +48,13 @@ type ToolCallingRowElements = {
 
 function mountToolCallingOptionsRow(mount: HTMLElement): ToolCallingRowElements {
     const row = document.createElement('div');
-    row.className = 'semantic-submode-row chat-enable-tool-calling-row';
+    row.className = 'options-row chat-enable-tool-calling-row';
 
     const group = document.createElement('span');
-    group.className = 'semantic-submode-group';
+    group.className = 'options-group';
 
     const enableLabel = document.createElement('label');
-    enableLabel.className = 'semantic-submode-label';
+    enableLabel.className = 'options-label';
 
     const enableInput = document.createElement('input');
     enableInput.type = 'checkbox';
@@ -67,7 +67,7 @@ function mountToolCallingOptionsRow(mount: HTMLElement): ToolCallingRowElements 
     enableLabel.append(enableInput, enableText);
 
     const multiTurnRow = document.createElement('label');
-    multiTurnRow.className = 'semantic-submode-label';
+    multiTurnRow.className = 'options-label';
     multiTurnRow.id = 'tool_calling_multi_turn_row';
     multiTurnRow.hidden = true;
 

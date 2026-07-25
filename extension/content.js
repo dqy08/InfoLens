@@ -28,7 +28,6 @@
     chunkBytes: 800,
     maxChunks: 3,
     matchThreshold: 0.1,
-    submode: 'hybrid',
     // SYNC 默认：站内 signal-fit 失败回退 P90；扩展用分位近似（见 prepareChunkTokens）
     pwScorePercentile: 0.9,
     domDebug: true,
@@ -792,7 +791,6 @@
         chunkBytes: CFG.chunkBytes,
         maxChunks: CFG.maxChunks,
         matchThreshold: CFG.matchThreshold,
-        submode: CFG.submode,
         pwScorePercentile: CFG.pwScorePercentile,
         followSearching: !!CFG.followSearching,
       },
@@ -1362,21 +1360,20 @@
 
   // ---------- API ----------
 
-  /** 底层 JSON 请求（submode 须为后端合法值，不可传 hybrid） */
-  function analyzeSemanticRaw(query, text, opts) {
+  /** 底层 JSON 请求：path 为原生接口路径 */
+  function analyzeSemanticRaw(query, text, path) {
     const body = {
       query,
       text,
       stream: false,
       privacy_mode: true,
-      ...(opts?.submode ? { submode: opts.submode } : {}),
-      ...(opts?.fullMatchDegreeOnly ? { full_match_degree_only: true } : {}),
     };
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(
         {
           type: 'il-analyze-semantic',
           apiBase: CFG.apiBase,
+          path,
           body,
         },
         (resp) => {
@@ -1392,21 +1389,13 @@
   }
 
   /**
-   * SYNC: client GLTR_API.analyzeSemantic — hybrid 为前端组合：
-   * count(full_match_degree_only) 即返回；达阈值时由调用方异步 fill_blank 染色（等待线）。
-   * 注意：异步 fill 相对「count 后 await fill」会增加与后续 count 的额外并发。
+   * SYNC: client GLTR_API.analyzeSemantic — 相关度门控；达阈值时由调用方异步 keywords 染色（等待线）。
+   * 注意：异步 fill 相对「relevance 后 await keywords」会增加与后续 relevance 的额外并发。
    */
   async function analyzeSemantic(query, text) {
-    const submode = CFG.submode || 'hybrid';
-    if (submode === 'hybrid') {
-      const r1 = await analyzeSemanticRaw(query, text, {
-        submode: 'count',
-        fullMatchDegreeOnly: true,
-      });
-      if (r1?.success === false) return r1;
-      return { ...r1, token_attention: [] };
-    }
-    return analyzeSemanticRaw(query, text, { submode });
+    const r1 = await analyzeSemanticRaw(query, text, '/api/analyze-semantic-relevance');
+    if (r1?.success === false) return r1;
+    return { ...r1, token_attention: [] };
   }
 
   /** hybrid：拆掉某 chunk 的等待线（只动 pending overlay） */
@@ -1825,7 +1814,7 @@
       line.setAttribute('d', `M${lineStart} ${y}H${lineEnd}`);
       label.setAttribute('x', String((start + end) / 2));
       label.setAttribute('y', String(Math.max(y1 + 10, y - 4)));
-      label.textContent = `${Math.round(degree * 100)}%`;
+      label.textContent = `Match: ${Math.round(degree * 100)}%`;
       label.toggleAttribute('hidden', hoveredProgressChunkStart !== chunk.start);
       hitArea.setAttribute('x', String(start));
       hitArea.setAttribute('y', String(y1));
@@ -2045,14 +2034,10 @@
             });
           }
 
-          const isHybrid = (CFG.submode || 'hybrid') === 'hybrid';
-          // hybrid：count 后即推进主流程；fill_blank 异步染色（相对整包 await，增加与 count 的额外并发）
-          // 非 hybrid：token 随本次结果同步上色
-          if (matched && isHybrid) {
+          // 相关度通过后：异步 keywords 染色（相对整包 await，增加与 relevance 的额外并发）
+          if (matched) {
             upsertSpec({ kind: 'pending-underline', cp0: chunkCpStart, cp1: chunkCpEnd });
             renderUnderlinesOfKind('pending-underline');
-          } else if (matched) {
-            paintChunkTokens(res.token_attention, chunk.text, chunkCpStart, degree);
           }
           // count 完即恢复灰字/画等待线；fill 背压只推迟入队与下一块，不挡本块 hold/jump
           setTruncatedHighlight(analyzedCpEnd);
@@ -2087,13 +2072,13 @@
           }
 
           // hold/jump 已完成后再等 fill 空位，避免首个匹配等待线出现后被背压卡住才开始滚
-          if (matched && isHybrid) {
+          if (matched) {
             await waitUntilFillLagOk();
             if (!stillThisSearch()) break;
             enqueueFillBlank(async (gen) => {
               if (gen !== fillGen) return;
               try {
-                const r2 = await analyzeSemanticRaw(query, chunk.text, { submode: 'fill_blank' });
+                const r2 = await analyzeSemanticRaw(query, chunk.text, '/api/analyze-semantic-keywords');
                 if (gen !== fillGen) return;
                 if (!extractRoot?.isConnected) return;
                 // 有红色 token → 拆 pending；否则留下 = chunk 级匹配标记（失败/无色同理）
@@ -2107,7 +2092,7 @@
                 snapshotLastResult(query);
               } catch (err) {
                 // 无 token 可画：pending 留下表示本 chunk 已匹配
-                console.error('[InfoLens] fill_blank', err?.message || err);
+                console.error('[InfoLens] keywords', err?.message || err);
               }
             });
           }

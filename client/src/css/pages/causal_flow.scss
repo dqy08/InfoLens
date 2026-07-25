@@ -629,7 +629,7 @@ $gen-attr-cached-demos-panel-width: 21em;
   box-sizing: border-box;
   flex: 0 0 auto;
   min-width: 0;
-  block-size: var(--semantic-submode-control-block-size, auto);
+  block-size: var(--options-control-block-size, auto);
   padding: 3px 6px;
   line-height: 1.2;
   font-size: inherit;
@@ -653,7 +653,7 @@ $gen-attr-cached-demos-panel-width: 21em;
   max-height: 250px;
 }
 
-body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row > .chat-completion-options-row.semantic-submode-row {
+body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row > .chat-completion-options-row.options-row {
   gap: $gen-attr-option-row-gap;
 }
 
@@ -688,31 +688,31 @@ body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row
 }
 
 .attribution-exclude-prompt-patterns-header {
-  &:not(:has(#gen_attr_exclude_prompt_patterns_enable:checked)) .semantic-submode-label {
+  &:not(:has(#gen_attr_exclude_prompt_patterns_enable:checked)) .options-label {
     color: var(--text-muted);
   }
 
-  &:has(#gen_attr_exclude_prompt_patterns_enable:checked) .semantic-submode-label {
+  &:has(#gen_attr_exclude_prompt_patterns_enable:checked) .options-label {
     color: var(--text-primary);
   }
 }
 
 .attribution-exclude-generated-patterns-header {
-  &:not(:has(#gen_attr_exclude_generated_patterns_enable:checked)) .semantic-submode-label {
+  &:not(:has(#gen_attr_exclude_generated_patterns_enable:checked)) .options-label {
     color: var(--text-muted);
   }
 
-  &:has(#gen_attr_exclude_generated_patterns_enable:checked) .semantic-submode-label {
+  &:has(#gen_attr_exclude_generated_patterns_enable:checked) .options-label {
     color: var(--text-primary);
   }
 }
 
 .attribution-delete-prompt-patterns-header {
-  &:not(:has(#gen_attr_delete_prompt_patterns_enable:checked)) .semantic-submode-label {
+  &:not(:has(#gen_attr_delete_prompt_patterns_enable:checked)) .options-label {
     color: var(--text-muted);
   }
 
-  &:has(#gen_attr_delete_prompt_patterns_enable:checked) .semantic-submode-label {
+  &:has(#gen_attr_delete_prompt_patterns_enable:checked) .options-label {
     color: var(--text-primary);
   }
 }
@@ -722,7 +722,7 @@ body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row
   margin-top: 8px;
   flex-wrap: wrap;
 
-  &.semantic-submode-row {
+  &.options-row {
     gap: $gen-attr-option-row-gap;
   }
 }
@@ -760,8 +760,8 @@ body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row
 }
 
 // DAG 两行下拉：仅按英文选项收合宽度（不专门为译文留宽）。
-.semantic-submode-row select.gen-attr-dag-layout-mode-select,
-.semantic-submode-row select.gen-attr-dag-replay-mode-select {
+.options-row select.gen-attr-dag-layout-mode-select,
+.options-row select.gen-attr-dag-replay-mode-select {
   width: fit-content;
   min-width: unset;
   max-width: none;

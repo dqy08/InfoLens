@@ -1,5 +1,5 @@
 /**
- * 语义分析结果缓存：以 text + query + submode 的 hash 为索引。
+ * 语义分析结果缓存：以 text + query + kind（relevance|keywords）的 hash 为索引。
  * 持久化到 localStorage，刷新后保留。删除查询历史时需调用 removeByQuery 清理对应缓存。
  */
 
@@ -8,10 +8,10 @@ import { lsGet, lsSetCatch } from '../storage/localStorageHelpers';
 const MAX_SIZE = 100;
 const STORAGE_KEY = 'info_radar_semantic_result_cache';
 
+/** 缓存条目：relevance / keywords / hybrid 任一形态（字段按 kind 选用） */
 export type SemanticCacheResult = {
     success: boolean;
     model?: string;
-    /** 归因 score 条目；API 字段名 `token_attention` 为历史遗留，非 attention 权重。 */
     token_attention?: Array<{ offset: [number, number]; raw: string; score: number }>;
     debug_info?: { abbrev?: string; topk_tokens?: string[]; topk_probs?: number[] };
     full_match_degree?: number;
@@ -28,8 +28,8 @@ function simpleHash(s: string): string {
     return (h >>> 0).toString(36);
 }
 
-function buildKey(text: string, query: string, submode?: string): string {
-    const parts = [text, query, submode ?? ''];
+function buildKey(text: string, query: string, kind?: string): string {
+    const parts = [text, query, kind ?? ''];
     return simpleHash(parts.join('\0'));
 }
 
@@ -75,16 +75,16 @@ function evictOne(): void {
     cache.delete(oldest);
 }
 
-export function get(text: string, query: string, submode?: string): SemanticCacheResult | undefined {
-    const key = buildKey(text, query, submode);
+export function get(text: string, query: string, kind?: string): SemanticCacheResult | undefined {
+    const key = buildKey(text, query, kind);
     const entry = cache.get(key);
     if (!entry) return undefined;
     const { _query, ...rest } = entry as SemanticCacheResult & { _query?: string };
     return rest;
 }
 
-export function set(text: string, query: string, result: SemanticCacheResult, submode?: string): void {
-    const key = buildKey(text, query, submode);
+export function set(text: string, query: string, result: SemanticCacheResult, kind?: string): void {
+    const key = buildKey(text, query, kind);
     if (cache.has(key)) {
         const idx = keyOrder.indexOf(key);
         if (idx >= 0) keyOrder.splice(idx, 1);

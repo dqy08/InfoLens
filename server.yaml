@@ -632,7 +632,7 @@ paths:
     post:
       tags:
         - all
-      summary: analyze semantic (token-level relevance to query)
+      summary: analyze semantic (legacy; prefer relevance / keywords endpoints)
       operationId: server.analyze_semantic
       parameters:
         - in: body
@@ -651,21 +651,20 @@ paths:
                 items:
                   type: string
                 description: >-
-                  原文数组，批量 full_match_degree_only 预判性能测试用，与 text 互斥，
-                  且必须搭配 full_match_degree_only=true
+                  原文数组，批量相关度预判性能测试用，与 text 互斥；
+                  批量时固定走 relevance（等价 submode=count）
               stream:
                 type: boolean
                 description: 是否使用 SSE 流式响应（带阶段级进度）
               submode:
                 type: string
-                enum: [count, match_score, fill_blank]
-                description: 可选子模式，不传则用服务端默认。match_score 已废弃
+                enum: [count, fill_blank]
+                description: >-
+                  兼容字段。count→relevance；fill_blank→keywords。
+                  新客户端请改用 /analyze-semantic-relevance 与 /analyze-semantic-keywords。
               debug_info:
                 type: boolean
                 description: 为 true 时响应包含 debug_info（abbrev、topk_tokens、topk_probs），默认关，不传则不返回
-              full_match_degree_only:
-                type: boolean
-                description: 为 true 时仅返回 full_match_degree，不做反向传播/token 归因；texts 批量模式必须为 true
             required:
               - query
       responses:
@@ -726,6 +725,133 @@ paths:
                 type: string
         400:
           description: 缺少 query 或 text 参数
+        500:
+          description: 分析失败
+
+  /analyze-semantic-relevance:
+    post:
+      tags:
+        - all
+      summary: semantic relevance (full_match_degree only)
+      operationId: server.analyze_semantic_relevance
+      parameters:
+        - in: body
+          name: semantic_request
+          schema:
+            type: object
+            properties:
+              query:
+                type: string
+                description: 查询主题
+              text:
+                type: string
+                description: 原文。与 texts 二选一
+              texts:
+                type: array
+                items:
+                  type: string
+                description: 原文数组，批量相关度预判用，与 text 互斥
+              stream:
+                type: boolean
+                description: 是否使用 SSE 流式响应
+              debug_info:
+                type: boolean
+                description: 为 true 时响应包含 debug_info
+            required:
+              - query
+      responses:
+        200:
+          description: 返回 full_match_degree（无 token_attention）
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              model:
+                type: string
+              full_match_degree:
+                type: number
+              input_token_count:
+                type: integer
+              results:
+                type: array
+                description: 请求带 texts 时返回
+                items:
+                  type: object
+                  properties:
+                    model:
+                      type: string
+                    full_match_degree:
+                      type: number
+                    input_token_count:
+                      type: integer
+              debug_info:
+                type: object
+              message:
+                type: string
+        400:
+          description: 缺少 query 或 text/texts
+        500:
+          description: 分析失败
+
+  /analyze-semantic-keywords:
+    post:
+      tags:
+        - all
+      summary: semantic keyword attribution (token_attention only)
+      operationId: server.analyze_semantic_keywords
+      parameters:
+        - in: body
+          name: semantic_request
+          schema:
+            type: object
+            properties:
+              query:
+                type: string
+                description: 查询主题
+              text:
+                type: string
+                description: 原文
+              stream:
+                type: boolean
+                description: 是否使用 SSE 流式响应
+              debug_info:
+                type: boolean
+                description: 为 true 时响应包含 debug_info
+            required:
+              - query
+              - text
+      responses:
+        200:
+          description: 返回 token_attention（无 full_match_degree）
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              model:
+                type: string
+              token_attention:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    offset:
+                      type: array
+                      items:
+                        type: integer
+                    raw:
+                      type: string
+                    score:
+                      type: number
+              input_token_count:
+                type: integer
+              debug_info:
+                type: object
+              message:
+                type: string
+        400:
+          description: 缺少 query 或 text
         500:
           description: 分析失败
 

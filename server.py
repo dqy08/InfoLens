@@ -44,7 +44,11 @@ from backend.api.folder import (  # noqa: F401
 )
 from backend.api.fetch_url import fetch_url  # noqa: F401
 from backend.api.client_activity import client_activity_report  # noqa: F401
-from backend.api.analyze_semantic import analyze_semantic  # noqa: F401
+from backend.api.analyze_semantic import (  # noqa: F401
+    analyze_semantic,
+    analyze_semantic_relevance,
+    analyze_semantic_keywords,
+)
 from backend.api.prediction_attribute import prediction_attribute  # noqa: F401
 from backend.api.tokenize import tokenize  # noqa: F401
 from backend.api.model_switch import (  # noqa: F401

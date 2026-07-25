@@ -50,11 +50,14 @@ def log_analyze_semantic_response(
     elapsed: float,
     wait_time: float | None = None,
     for_worker: bool = False,
+    kind: str | None = None,
 ) -> None:
     if not _should_emit(for_worker=for_worker):
         return
     tokens = result.get("input_token_count", len(result.get("token_attention", [])))
-    msg = f"\t📤 API analyze_semantic (stream) response:"
+    # 命名：analyze_semantic(relevance|keywords)；其后仍固定 "(stream) response:"（历史如此）
+    api = f"analyze_semantic({kind})" if kind else "analyze_semantic"
+    msg = f"\t📤 API {api} (stream) response:"
     msg += _req_id_part(request_id)
     msg += f" tokens={tokens}, response_time={elapsed:.4f}s"
     if wait_time is not None:
@@ -178,6 +181,8 @@ def make_analyze_response_logger(
 
 def make_analyze_semantic_response_logger(
     logged: Mapping[str, int | None],
+    *,
+    kind: str | None = None,
 ) -> PortalResponseLogger:
     """远程代理路径：从响应体取 input_token_count（含批量 results 汇总），无 wait。"""
 
@@ -196,6 +201,7 @@ def make_analyze_semantic_response_logger(
             request_id=logged.get("request_id"),
             result=result,
             elapsed=elapsed,
+            kind=kind,
         )
 
     return _log

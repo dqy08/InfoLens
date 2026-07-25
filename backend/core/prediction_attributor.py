@@ -197,5 +197,5 @@ def analyze_prediction_attribution(
     finally:
         if use_gc:
             hf_model.gradient_checkpointing_disable()
-        # 与 semantic_analyzer._analyze_logits_gradient 一致：每次推理后清理，避免 MPS/CUDA 累积
+        # 与 semantic_analyzer.analyze_keywords 一致：每次推理后清理，避免 MPS/CUDA 累积
         DeviceManager.clear_cache(device)

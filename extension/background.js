@@ -167,7 +167,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     (async () => {
       try {
         const apiBase = msg.apiBase || IL_CONFIG.apiBase;
-        const res = await fetch(`${String(apiBase).replace(/\/$/, '')}/api/analyze-semantic`, {
+        const path = msg.path || '/api/analyze-semantic';
+        const res = await fetch(`${String(apiBase).replace(/\/$/, '')}${path}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(msg.body),

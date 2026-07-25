@@ -4,19 +4,19 @@
 @use "query-history-dropdown" as qh;
 @use "lmf-readout" as lmf;
 
-// 子模式行：首页语义区、Chat 等复用（与 Ask 按钮分离时单独成行）
-.semantic-submode-row {
+// 选项行：语义区、Chat、归因等复用
+.options-row {
   // 1lh（控件 line-height）+ 上下 padding(3px×2) + 边框(1px×2)
-  --semantic-submode-control-block-size: calc(1lh + 6px + 2px);
+  --options-control-block-size: calc(1lh + 6px + 2px);
 
-  // 仅非 hidden 时设 flex，否则会覆盖浏览器对 [hidden] 的 display:none（同 .semantic-submode-group）
+  // 仅非 hidden 时设 flex，否则会覆盖浏览器对 [hidden] 的 display:none（同 .options-group）
   &:not([hidden]) {
     display: flex;
     align-items: center;
     gap: 6px;
   }
 
-  .semantic-submode-group {
+  .options-group {
     // 仅非 hidden 时设 flex，否则会覆盖浏览器对 [hidden] 的 display:none（同 gen-attr-dag-replay-value-wrap）
     &:not([hidden]) {
       display: flex;
@@ -24,30 +24,30 @@
       gap: 6px;
     }
 
-    &.semantic-submode-group-right {
+    &.options-group-right {
       margin-left: auto;
     }
 
-    // 组内「主控」标签/下拉：比默认 submode 更醒目（仅直接子级，避免加粗单位后缀等嵌套 label）
-    &.semantic-submode-group--emphasis {
-      > .semantic-submode-label,
-      > .semantic-submode-select {
+    // 组内「主控」标签/下拉：比默认更醒目（仅直接子级，避免加粗单位后缀等嵌套 label）
+    &.options-group--emphasis {
+      > .options-label,
+      > .options-select {
         font-weight: 700;
       }
     }
   }
 
-  .semantic-submode-label {
+  .options-label {
     font-size: 9pt;
     color: var(--text-muted);
   }
 
-  label.semantic-submode-label:has(> input[type='checkbox']):not([hidden]) {
+  label.options-label:has(> input[type='checkbox']):not([hidden]) {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     box-sizing: border-box;
-    min-block-size: var(--semantic-submode-control-block-size);
+    min-block-size: var(--options-control-block-size);
     cursor: pointer;
     user-select: none;
   }
@@ -58,9 +58,9 @@
     cursor: pointer;
   }
 
-  .semantic-submode-select {
+  .options-select {
     box-sizing: border-box;
-    block-size: var(--semantic-submode-control-block-size);
+    block-size: var(--options-control-block-size);
     padding: 3px 6px;
     font-size: inherit;
     font-weight: inherit;
@@ -79,7 +79,7 @@
     box-sizing: border-box;
     flex: 0 0 auto;
     min-width: 0;
-    block-size: var(--semantic-submode-control-block-size);
+    block-size: var(--options-control-block-size);
     padding: 3px 6px;
     font-size: inherit;
     line-height: 1.2;
@@ -100,8 +100,8 @@
 }
 
 // Analyze 下方 Semantic Query 总开关：与 gen_attribute「Raw prompt mode」同款（未勾选整行灰色，勾选正文色）
-.textarea-wrapper .semantic-submode-row.semantic-analysis-enable-row {
-  label.semantic-submode-label {
+.textarea-wrapper .options-row.semantic-analysis-enable-row {
+  label.options-label {
     display: inline-flex;
     align-items: center;
     gap: 6px;

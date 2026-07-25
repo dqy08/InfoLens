@@ -61,12 +61,6 @@ def _parse_args():
         ),
     )
     parser.add_argument(
-        "--logits_gradient_submode",
-        default="fill_blank",
-        choices=["count", "match_score", "fill_blank"],
-        help="logits_gradient 子策略：count=数量；match_score=相关度打分(已废弃)；fill_blank=填空式",
-    )
-    parser.add_argument(
         "--no-gradient-checkpointing",
         dest="gradient_checkpointing",
         action="store_false",

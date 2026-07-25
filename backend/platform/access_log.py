@@ -151,13 +151,17 @@ def log_check_admin(success: bool, token: str = None):
     log_request("🔐 管理员权限检查", details)
 
 
-def log_analyze_semantic_start(request_id: int, wait_time: float, stream_mode: bool = False):
+def log_analyze_semantic_start(
+    request_id: int, wait_time: float, stream_mode: bool = False, kind: Optional[str] = None,
+):
     """记录开始处理 semantic 分析请求（内部事件）"""
     from backend.platform.app_context import get_verbose
     if not get_verbose():
         return
     mode_str = "(stream)" if stream_mode else ""
-    print(f"\t🔄 API analyze_semantic {mode_str} start: req_id={request_id}, wait_time={wait_time:.2f}s")
+    # 命名：analyze_semantic(relevance|keywords)，其余格式与原先一致
+    api = f"analyze_semantic({kind})" if kind else "analyze_semantic"
+    print(f"\t🔄 API {api} {mode_str} start: req_id={request_id}, wait_time={wait_time:.2f}s")
 
 
 _visitor_seq: dict = {}
@@ -178,10 +182,14 @@ def _visitor_seq_no(ip: Optional[str]) -> int:
         return seq
 
 
-def log_analyze_semantic_request(query: str, text: str, client_ip: str = None, privacy_mode: bool = False):
+def log_analyze_semantic_request(
+    query: str, text: str, client_ip: str = None, privacy_mode: bool = False,
+    kind: Optional[str] = None,
+):
     """
     记录收到 semantic 分析请求。
     privacy_mode=True（插件请求固定如此）时不落 query/text 内容与明文 IP，仅记字符数和 IP 摘要。
+    kind（relevance/keywords）：额外计入 analyze_semantic__{kind} 细分项，analyze_semantic 总项不受影响。
 
     Returns:
         int: 请求ID
@@ -192,18 +200,22 @@ def log_analyze_semantic_request(query: str, text: str, client_ip: str = None, p
         _request_counter += 1
         request_id = _request_counter
 
+    # 与「收到请求(stream)」同型：标题后紧跟 (kind)，无前导空格
+    kind_tag = f"({kind})" if kind else ""
     if privacy_mode:
         visitor = f"visitor=#{_visitor_seq_no(client_ip)}"
         details = f"req_id={request_id}, query_chars={len(query)}, text_chars={len(text)}"
-        log_request("📥 semantic 分析请求（隐私模式）", details, client_ip=visitor)
+        log_request(f"📥 semantic 分析请求{kind_tag}（隐私模式）", details, client_ip=visitor)
     else:
         preview = 50
         q_preview = _log_str_preview(query, preview)
         t_preview = _log_str_preview(text, preview)
         details = f"req_id={request_id}, query='{q_preview}', text='{t_preview}', chars={len(text)}"
-        log_request("📥 semantic 分析请求", details, client_ip)
+        log_request(f"📥 semantic 分析请求{kind_tag}", details, client_ip)
 
     _hit_api("analyze_semantic")
+    if kind:
+        _hit_api(f"analyze_semantic__{kind}")
     return request_id
 
 

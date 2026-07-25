@@ -38,6 +38,8 @@ _STATS_PAGE_ORDER = (
 _STATS_API_ORDER = (
     "analyze",
     "analyze_semantic",
+    "analyze_semantic__relevance",
+    "analyze_semantic__keywords",
     "chat",
     "causal_flow",
     "prediction_attribute",

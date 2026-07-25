@@ -77,9 +77,9 @@
                                         <div class="loadersmall loader-small-container"></div>
                                         <span id="analyze_progress" class="analyze-progress"></span>
                                     </div>
-                                    <div class="semantic-submode-row semantic-analysis-enable-row">
-                                        <span class="semantic-submode-group">
-                                            <label class="semantic-submode-label" for="semantic_analysis_toggle">
+                                    <div class="options-row semantic-analysis-enable-row">
+                                        <span class="options-group">
+                                            <label class="options-label" for="semantic_analysis_toggle">
                                                 <input type="checkbox" id="semantic_analysis_toggle" />
                                                 <span data-i18n>Semantic Find(Beta)</span>
                                             </label>
@@ -123,25 +123,17 @@
                                 <span id="semantic_progress" class="semantic-progress"></span>
                             </div>
                         </div>
-                        <div id="semantic_submode_row" class="semantic-submode-row" data-admin-only style="display: none;">
-                            <span class="semantic-submode-group">
+                        <div id="semantic_options_row" class="options-row" data-admin-only style="display: none;">
+                            <span class="options-group">
                                 <label><input type="checkbox" id="semantic_chunked_mode" title="analyse in chunks" checked> chunked</label>
                             </span>
-                            <span class="semantic-submode-group">
-                                <label class="semantic-submode-label" for="semantic_submode_select">submode: </label>
-                                <select id="semantic_submode_select" class="semantic-submode-select">
-                                    <option value="count">count</option>
-                                    <option value="fill_blank">fill_blank</option>
-                                    <option value="hybrid" selected>hybrid</option>
-                                </select>
-                            </span>
-                            <span id="semantic_threshold_item" class="semantic-submode-group" data-admin-only style="display: none;">
-                                <label class="semantic-submode-label" for="semantic_threshold_input">Match threshold:</label>
+                            <span id="semantic_threshold_item" class="options-group" data-admin-only style="display: none;">
+                                <label class="options-label" for="semantic_threshold_input">Match threshold:</label>
                                 <input type="number" id="semantic_threshold_input" class="semantic-threshold-input" min="0" max="1">
                             </span>
-                            <span class="semantic-submode-group semantic-submode-group-right">
-                                <label class="semantic-submode-label" for="semantic_color_source_select">color source: </label>
-                                <select id="semantic_color_source_select" class="semantic-submode-select">
+                            <span class="options-group options-group-right">
+                                <label class="options-label" for="semantic_color_source_select">color source: </label>
+                                <select id="semantic_color_source_select" class="options-select">
                                     <option value="raw_score_normed">raw score normed</option>
                                     <option value="signal_probability">signal probability</option>
                                     <option value="pw_score" selected>pw score</option>
