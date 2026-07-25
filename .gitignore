@@ -18,6 +18,7 @@ client/dist/
 client/dist-github_pages/
 extension/dist/
 extension/config.js
+extension/config.secrets.js
 build/
 dist/
 *.egg-info/

@@ -162,22 +162,36 @@ chrome.commands.onCommand.addListener(async (command) => {
   await activateTab(tab);
 });
 
+/** POST JSON；要求 HTTP ok 且 body.success === true（避免 2xx HTML/空对象被当成成功）。 */
+async function postJsonApi(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error(`HTTP ${res.status}: invalid JSON`);
+  }
+  if (!res.ok || data?.success !== true) {
+    const detail = data?.message || data?.detail || `HTTP ${res.status}`;
+    throw new Error(detail);
+  }
+  return data;
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'il-analyze-semantic') {
     (async () => {
       try {
         const apiBase = msg.apiBase || IL_CONFIG.apiBase;
         const path = msg.path || '/api/analyze-semantic';
-        const res = await fetch(`${String(apiBase).replace(/\/$/, '')}${path}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(msg.body),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data?.success === false) {
-          const detail = data?.message || data?.detail || `HTTP ${res.status}`;
-          throw new Error(detail);
-        }
+        const data = await postJsonApi(
+          `${String(apiBase).replace(/\/$/, '')}${path}`,
+          msg.body
+        );
         sendResponse({ ok: true, data });
       } catch (err) {
         sendResponse({ ok: false, error: String(err?.message || err) });
@@ -194,16 +208,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           ...(msg.body && typeof msg.body === 'object' ? msg.body : {}),
           extension_version: chrome.runtime.getManifest().version,
         };
-        const res = await fetch(`${String(apiBase).replace(/\/$/, '')}/api/extension-feedback`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data?.success === false) {
-          const detail = data?.message || data?.detail || `HTTP ${res.status}`;
-          throw new Error(detail);
-        }
+        const data = await postJsonApi(
+          `${String(apiBase).replace(/\/$/, '')}/api/extension-feedback`,
+          body
+        );
         sendResponse({ ok: true, data });
       } catch (err) {
         sendResponse({ ok: false, error: String(err?.message || err) });

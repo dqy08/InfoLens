@@ -1394,7 +1394,9 @@
    */
   async function analyzeSemantic(query, text) {
     const r1 = await analyzeSemanticRaw(query, text, '/api/analyze-semantic-relevance');
-    if (r1?.success === false) return r1;
+    if (typeof r1?.full_match_degree !== 'number') {
+      throw new Error(r1?.message || r1?.detail || 'Invalid response: missing full_match_degree');
+    }
     return { ...r1, token_attention: [] };
   }
 
