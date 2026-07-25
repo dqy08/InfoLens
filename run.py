@@ -29,9 +29,13 @@ ENV_HELP = """
   FORCE_CPU=1           强制使用 CPU，忽略 CUDA/MPS
   FORCE_INT8=1          启用 INT8 量化（CPU/CUDA 支持，MPS 不支持）
   CPU_FORCE_BFLOAT16=1  CPU 使用 bfloat16
-  INFORADAR_REMOTE_HF_TOKEN  master 代理 Private Worker 时必填（无 fallback）
+  INFORADAR_REMOTE_HF_TOKEN  master 代理 Private Worker / 本机加速时必填（无 fallback）
   INFORADAR_ROLE            Docker 部署：default（或不设）、master、worker（见 docker_entrypoint.sh）
-  INFORADAR_REMOTE_BASE     master 时 base Worker 根 URL（无尾斜杠）
+  INFORADAR_REMOTE_BASE_ORIGIN  master 时 base Worker 根 URL（无尾斜杠；兼容旧名 INFORADAR_REMOTE_BASE）
+  INFORADAR_ACCELERATE_INSTRUCT_MAX_RTT_MS  加速 RTT 上限，默认 1000
+  INFORADAR_ACCELERATE_INSTRUCT_MAX_INFLIGHT  打向本机的最大 in-flight，默认 5
+  INFORADAR_ACCELERATE_INSTRUCT_PROVIDER_PORT  本机加速监听口（仅 127.0.0.1，需 token）
+  （加速 origin 仅运行时 PUT /api/accelerate_instruct_origin，不经环境变量）
   INFORADAR_PORT            Docker 监听端口（默认 7860）
   INFORADAR_BASE_MODEL      Docker 覆盖 base 模型 id（可选）
   INFORADAR_INSTRUCT_MODEL  Docker 覆盖 instruct 模型 id（可选，master/default）
@@ -98,15 +102,23 @@ def _parse_args():
         action="store_true",
         help="Worker 形态：关 stats/demo 写/admin；保留静态页",
     )
+    parser.add_argument(
+        "--accelerate_instruct_provider_port",
+        default=None,
+        metavar="PORT",
+        help="本机加速提供口（仅绑 127.0.0.1，需 INFORADAR_REMOTE_HF_TOKEN）",
+    )
     return parser.parse_args()
 
 
 def _load_and_run(args):
     """加载 server、backend 等依赖并启动服务（parse_args 遇 -h 已退出，不会执行到此）"""
     from backend.platform.model_routing import configure_from_args, is_worker
+    from backend.platform import instruct_accelerate
 
     try:
         configure_from_args(args)
+        instruct_accelerate.configure_from_args(args)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(2)
@@ -118,8 +130,16 @@ def _load_and_run(args):
     import server
     from server import app
     from backend.platform.worker_guards import register_worker_guards
+    from backend.platform.accelerate_provider import (
+        register_provider_bearer_guard,
+        start_provider_listener,
+    )
 
     register_worker_guards(app)
+    provider_port = instruct_accelerate.provider_port()
+    if provider_port is not None:
+        register_provider_bearer_guard(app, provider_port)
+
     from backend.platform.app_context import AppContext
     from backend.demo.data_utils import resolve_data_dir
     from backend.models.model_manager import preload_all_slots
@@ -145,6 +165,7 @@ def _load_and_run(args):
     from backend.platform.remote_keepalive import start_remote_keepalive
 
     start_remote_keepalive()
+    instruct_accelerate.start_probe_loop()
 
     if not getattr(ctx.args, "no_auto_load", False):
         def load_model_in_background():
@@ -158,6 +179,9 @@ def _load_and_run(args):
         threading.Thread(target=load_model_in_background, daemon=True, name="ModelLoader").start()
     else:
         AppContext.get().set_model_loading(False)
+
+    if provider_port is not None:
+        start_provider_listener(app.middleware, provider_port)
 
     app.run(port=int(ctx.args.port), host=ctx.args.address, access_log=False)
 

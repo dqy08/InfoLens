@@ -32,7 +32,7 @@ def _parse_slots(raw: str | None) -> tuple[ModelSlot, ...]:
     return tuple(out)
 
 
-def _normalize_origin(origin: str) -> str:
+def normalize_origin(origin: str) -> str:
     origin = origin.strip().rstrip("/")
     if not origin.startswith(("http://", "https://")):
         origin = f"https://{origin}"
@@ -44,7 +44,7 @@ def _parse_remote_spec(spec: str) -> tuple[ModelSlot, str]:
         raise ValueError(f"--remote must be slot=origin, got {spec!r}")
     key, origin = spec.split("=", 1)
     key = key.strip().lower()
-    origin = _normalize_origin(origin)
+    origin = normalize_origin(origin)
     try:
         slot = ModelSlot(key)
     except ValueError as exc:

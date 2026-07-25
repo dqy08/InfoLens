@@ -13,13 +13,15 @@ from flask import Response, stream_with_context
 from backend.platform.model_routing import remote_hf_token
 
 _active_remote_completion_slot: Any = None
+_active_remote_completion_origin: str | None = None
 _active_remote_lock = threading.Lock()
 
 
-def set_active_remote_completion_slot(slot) -> None:
+def set_active_remote_completion_slot(slot, *, origin: str | None = None) -> None:
     with _active_remote_lock:
-        global _active_remote_completion_slot
+        global _active_remote_completion_slot, _active_remote_completion_origin
         _active_remote_completion_slot = slot
+        _active_remote_completion_origin = origin
 
 
 def get_active_remote_completion_slot():
@@ -27,10 +29,16 @@ def get_active_remote_completion_slot():
         return _active_remote_completion_slot
 
 
+def get_active_remote_completion_origin() -> str | None:
+    with _active_remote_lock:
+        return _active_remote_completion_origin
+
+
 def clear_active_remote_completion_slot() -> None:
     with _active_remote_lock:
-        global _active_remote_completion_slot
+        global _active_remote_completion_slot, _active_remote_completion_origin
         _active_remote_completion_slot = None
+        _active_remote_completion_origin = None
 
 
 def _notify_sse_block(
@@ -133,6 +141,7 @@ def proxy_request(
     timeout: float = 60.0,
     on_stream_close: Callable[[], None] | None = None,
     on_response: Callable[[Any, float, int], None] | None = None,
+    on_stream_error: Callable[[BaseException], None] | None = None,
 ):
     url = f"{origin.rstrip('/')}{path}"
     try:
@@ -146,7 +155,15 @@ def proxy_request(
 
     if stream:
         return _proxy_streaming(
-            url, method, headers, json_body, timeout, on_stream_close, on_response, started
+            url,
+            method,
+            headers,
+            json_body,
+            timeout,
+            on_stream_close,
+            on_response,
+            started,
+            on_stream_error,
         )
     try:
         resp = requests.request(
@@ -179,6 +196,7 @@ def _proxy_streaming(
     on_stream_close: Callable[[], None] | None,
     on_response: Callable[[Any, float, int], None] | None,
     started: float,
+    on_stream_error: Callable[[BaseException], None] | None = None,
 ):
     try:
         upstream = requests.request(
@@ -210,6 +228,10 @@ def _proxy_streaming(
                 while b"\n\n" in pending:
                     block, pending = pending.split(b"\n\n", 1)
                     _handle_sse_block(block)
+        except Exception as exc:
+            if on_stream_error is not None:
+                on_stream_error(exc)
+            raise
         finally:
             upstream.close()
             if on_stream_close is not None:

@@ -62,11 +62,16 @@ from backend.api.visit_stats_api import (  # noqa: F401
     post_visit_stats_reset,
 )
 from backend.api.extension_feedback import post_extension_feedback  # noqa: F401
+from backend.api.health import health  # noqa: F401
 from backend.api.openai_completions import (  # noqa: F401
     completions,
     completions_prompt,
     completions_prompt_incremental,
     completions_stop,
+)
+from backend.api.accelerate_instruct_origin import (  # noqa: F401
+    get_accelerate_instruct_origin,
+    put_accelerate_instruct_origin,
 )
 from backend.core.completion_generator import register_inference_shutdown_handlers
 

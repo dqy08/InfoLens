@@ -1,4 +1,4 @@
-"""推理 API 统一入口：统计记账 → local / remote 分流。"""
+"""推理 API 统一入口：统计记账 → local / remote / instruct 加速 分流。"""
 from __future__ import annotations
 
 import time
@@ -8,6 +8,7 @@ from typing import Any
 from flask import Response
 
 from backend.models.model_manager import ModelSlot
+from backend.platform import instruct_accelerate
 from backend.platform.inference_proxy import (
     clear_active_remote_completion_slot,
     proxy_request,
@@ -58,6 +59,74 @@ def _run_local(
     return out
 
 
+def _is_unwritten_failure(result: Any) -> bool:
+    """代理尚未向客户端承诺成功响应体：error tuple 或非流式上游 5xx。"""
+    if isinstance(result, tuple) and len(result) >= 2 and isinstance(result[1], int):
+        status = result[1]
+        return status >= 500
+    return False
+
+
+def _proxy_accelerate(
+    *,
+    origin: str,
+    slot: ModelSlot,
+    api_path: str,
+    method: str,
+    json_body: dict | None,
+    stream: bool,
+    timeout: float,
+    response_log_fn: Callable[[Any, float, int], None] | None,
+    track_remote_completion: bool,
+    local_fn: Callable[[], Any],
+) -> Any:
+    released = False
+
+    def _release() -> None:
+        nonlocal released
+        if released:
+            return
+        released = True
+        instruct_accelerate.release()
+        if track_remote_completion:
+            clear_active_remote_completion_slot()
+
+    def _on_response(data: Any, elapsed: float, status_code: int) -> None:
+        _emit_response_log(response_log_fn, data, elapsed, status_code)
+
+    def _on_stream_error(_exc: BaseException) -> None:
+        instruct_accelerate.trip_circuit()
+
+    if track_remote_completion:
+        set_active_remote_completion_slot(slot, origin=origin)
+
+    try:
+        result = proxy_request(
+            origin,
+            method,
+            api_path,
+            json_body=json_body,
+            stream=stream,
+            timeout=timeout,
+            on_stream_close=_release if stream else None,
+            on_response=_on_response,
+            on_stream_error=_on_stream_error if stream else None,
+        )
+    except Exception:
+        instruct_accelerate.trip_circuit()
+        _release()
+        raise
+
+    if _is_unwritten_failure(result):
+        instruct_accelerate.trip_circuit()
+        _release()
+        return _run_local(local_fn, response_log_fn)
+
+    if not stream:
+        _release()
+    return result
+
+
 def ingress_inference(
     *,
     slot: ModelSlot,
@@ -75,6 +144,7 @@ def ingress_inference(
     顺序：access_log / bump_api（log_fn）→ 分流 → response_log_fn（非 worker）。
 
     Worker 上未启用的槽位直接 404；remote 槽位 HTTP 代理到对应 Space。
+    本地 instruct 在加速合格时可条件代理到本机加速 origin，失败未写出则回退 local。
     response_log_fn：远程代理端到端日志；本地执行若已在 handler 打完整日志可传 None。
     """
     if is_worker() and not slot_enabled(slot):
@@ -84,6 +154,22 @@ def ingress_inference(
         log_fn()
 
     if is_local(slot):
+        if slot == ModelSlot.INSTRUCT and instruct_accelerate.acquire():
+            origin = instruct_accelerate.accelerate_origin()
+            if origin:
+                return _proxy_accelerate(
+                    origin=origin,
+                    slot=slot,
+                    api_path=api_path,
+                    method=method,
+                    json_body=json_body,
+                    stream=stream,
+                    timeout=timeout,
+                    response_log_fn=response_log_fn,
+                    track_remote_completion=track_remote_completion,
+                    local_fn=local_fn,
+                )
+            instruct_accelerate.release()
         return _run_local(local_fn, response_log_fn)
 
     origin = remote_origin(slot)
@@ -95,7 +181,7 @@ def ingress_inference(
 
     on_close = clear_active_remote_completion_slot if track_remote_completion else None
     if track_remote_completion:
-        set_active_remote_completion_slot(slot)
+        set_active_remote_completion_slot(slot, origin=origin)
 
     def _on_response(data: Any, elapsed: float, status_code: int) -> None:
         _emit_response_log(response_log_fn, data, elapsed, status_code)

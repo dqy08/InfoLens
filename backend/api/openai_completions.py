@@ -317,9 +317,10 @@ def _completions_sse_response(
 def completions_stop():
     """
     单用户串行：置位全局停止标志，使当前续写在 generate 与 SSE 回调中尽快结束。
-    若当前续写槽位为 remote，同步转发 Worker。
+    若当前续写走 remote / 加速 origin，同步转发 stop。
     """
     from backend.platform.inference_proxy import (
+        get_active_remote_completion_origin,
         get_active_remote_completion_slot,
         proxy_request,
     )
@@ -327,16 +328,18 @@ def completions_stop():
 
     global_completion_stop_event.set()
 
-    slot = get_active_remote_completion_slot()
-    if slot is not None:
-        origin = remote_origin(slot)
-        if origin:
-            return proxy_request(
-                origin,
-                "POST",
-                "/api/v1/completions/stop",
-                timeout=10.0,
-            )
+    origin = get_active_remote_completion_origin()
+    if origin is None:
+        slot = get_active_remote_completion_slot()
+        if slot is not None:
+            origin = remote_origin(slot)
+    if origin:
+        return proxy_request(
+            origin,
+            "POST",
+            "/api/v1/completions/stop",
+            timeout=10.0,
+        )
     return {"ok": True}, 200
 
 

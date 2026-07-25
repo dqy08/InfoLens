@@ -20,13 +20,20 @@ case "${ROLE}" in
       --instruct_model "${INSTRUCT_MODEL}"
     ;;
   master)
-    if [ -z "${INFORADAR_REMOTE_BASE:-}" ]; then
-      echo "error: INFORADAR_REMOTE_BASE is required when INFORADAR_ROLE=master" >&2
+    REMOTE_BASE_ORIGIN="${INFORADAR_REMOTE_BASE_ORIGIN:-}"
+    if [ -z "${REMOTE_BASE_ORIGIN}" ]; then
+      REMOTE_BASE_ORIGIN="${INFORADAR_REMOTE_BASE:-}"
+      if [ -n "${REMOTE_BASE_ORIGIN}" ]; then
+        echo "warning: INFORADAR_REMOTE_BASE is deprecated; use INFORADAR_REMOTE_BASE_ORIGIN" >&2
+      fi
+    fi
+    if [ -z "${REMOTE_BASE_ORIGIN}" ]; then
+      echo "error: INFORADAR_REMOTE_BASE_ORIGIN (or legacy INFORADAR_REMOTE_BASE) is required when INFORADAR_ROLE=master" >&2
       exit 2
     fi
     exec python run.py ${COMMON} \
       --slots base,instruct \
-      --remote "base=${INFORADAR_REMOTE_BASE}" \
+      --remote "base=${REMOTE_BASE_ORIGIN}" \
       --base_model "${BASE_MODEL}" \
       --instruct_model "${INSTRUCT_MODEL}"
     ;;

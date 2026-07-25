@@ -11,6 +11,21 @@ basePath: /api
 
 paths:
 
+  /health:
+    get:
+      tags:
+        - all
+      summary: lightweight health check
+      operationId: server.health
+      responses:
+        200:
+          description: ok
+          schema:
+            type: object
+            properties:
+              ok:
+                type: boolean
+
   /analyze:
     post:
       tags:
@@ -1099,6 +1114,69 @@ paths:
                 type: boolean
               error:
                 type: string
+
+  /accelerate_instruct_origin:
+    get:
+      tags:
+        - all
+      summary: get instruct accelerate origin (admin only)
+      operationId: server.get_accelerate_instruct_origin
+      responses:
+        200:
+          description: current accelerate origin and gate status
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              origin:
+                type: string
+                x-nullable: true
+              eligible:
+                type: boolean
+              circuit_open:
+                type: boolean
+              median_rtt_ms:
+                type: number
+                x-nullable: true
+              inflight:
+                type: integer
+        403:
+          description: admin required
+    put:
+      tags:
+        - all
+      summary: set instruct accelerate origin (admin only)
+      description: |
+        运行时设置本机加速 origin（HTTPS 根 URL）；这是配置 origin 的唯一方式。
+        origin 为空字符串或 null 时关闭加速。进程重启后需重新注册。
+      operationId: server.put_accelerate_instruct_origin
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              origin:
+                type: string
+                x-nullable: true
+                description: HTTPS origin，或 null/"" 关闭
+      responses:
+        200:
+          description: updated
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+              origin:
+                type: string
+                x-nullable: true
+        400:
+          description: invalid origin or missing INFORADAR_REMOTE_HF_TOKEN
+        403:
+          description: admin required
 
   /extension-feedback:
     post:
