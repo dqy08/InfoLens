@@ -1,5 +1,5 @@
 #!/bin/bash
-# 仅切换 apiBase（local=本机后端 / prod=HF Spaces）。两者都属于 unpacked 开发版，
+# 仅切换 apiBase（local=本机后端 / prod=CF 门面）。两者都属于 unpacked 开发版，
 # 图标与商店版无关：本目录固定用 icons/dev/（绿角标），见 manifest.json。
 # config.js 由本脚本生成（gitignore），Chrome unpacked 实际加载它；
 # 源头是 config.prod.js / config.local.js。上架包由 pack.sh 直接用 config.prod.js。
@@ -16,7 +16,7 @@ case "${1:-}" in
     ;;
   prod)
     cp config.prod.js config.js
-    echo "已切回 prod：apiBase=HF Spaces。去 chrome://extensions 重新加载生效。"
+    echo "已切回 prod：apiBase=infolens-api.xiaoyundqy.workers.dev。去 chrome://extensions 重新加载生效。"
     ;;
   *)
     echo "用法: $0 local|prod" >&2

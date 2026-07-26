@@ -16,6 +16,7 @@ client/src/.cache-loader/
 # --- 构建产物 ---
 client/dist/
 client/dist-github_pages/
+client/dist-cf/
 extension/dist/
 extension/config.js
 extension/config.secrets.js
@@ -37,7 +38,9 @@ notes/*
 user_dialog_history/*
 .cache_huggingface/
 .env
-
+.dev.vars
+**/.dev.vars
+cf/facade/.wrangler/
 # 音效源文件（仅本地保留，不入库）
 client/src/assets/audio/thunder-strikes-lightning-storm-rumble.mp3
 

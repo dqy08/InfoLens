@@ -102,13 +102,13 @@ def wrap_sse_response(
 
 
 def _auth_headers() -> dict[str, str]:
+    """出站头：有 INFORADAR_REMOTE_HF_TOKEN 则带 Bearer。
+    --remote 在 configure 时仍强制要求该 env；accelerate 打公开提供方时可无 token。"""
+    headers = {"Content-Type": "application/json"}
     token = remote_hf_token()
-    if not token:
-        raise RuntimeError("INFORADAR_REMOTE_HF_TOKEN is not set")
-    return {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def _upstream_error(exc: requests.RequestException) -> tuple[dict, int]:
@@ -144,13 +144,7 @@ def proxy_request(
     on_stream_error: Callable[[BaseException], None] | None = None,
 ):
     url = f"{origin.rstrip('/')}{path}"
-    try:
-        headers = _auth_headers()
-    except RuntimeError as exc:
-        if on_stream_close is not None:
-            on_stream_close()
-        return {"success": False, "message": str(exc)}, 500
-
+    headers = _auth_headers()
     started = time.perf_counter()
 
     if stream:

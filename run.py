@@ -29,16 +29,13 @@ ENV_HELP = """
   FORCE_CPU=1           强制使用 CPU，忽略 CUDA/MPS
   FORCE_INT8=1          启用 INT8 量化（CPU/CUDA 支持，MPS 不支持）
   CPU_FORCE_BFLOAT16=1  CPU 使用 bfloat16
-  INFORADAR_REMOTE_HF_TOKEN  master 代理 Private Worker / 本机加速时必填（无 fallback）
-  INFORADAR_ROLE            Docker 部署：default（或不设）、master、worker（见 docker_entrypoint.sh）
-  INFORADAR_REMOTE_BASE_ORIGIN  master 时 base Worker 根 URL（无尾斜杠；兼容旧名 INFORADAR_REMOTE_BASE）
+  INFORADAR_REMOTE_HF_TOKEN  --remote 时必填；accelerate 出站有则带 Bearer（公开提供方可不设）
   INFORADAR_ACCELERATE_INSTRUCT_MAX_RTT_MS  加速 RTT 上限，默认 1000
-  INFORADAR_ACCELERATE_INSTRUCT_MAX_INFLIGHT  打向本机的最大 in-flight，默认 5
-  INFORADAR_ACCELERATE_INSTRUCT_PROVIDER_PORT  本机加速监听口（仅 127.0.0.1，需 token）
-  （加速 origin 仅运行时 PUT /api/accelerate_instruct_origin，不经环境变量）
+  INFORADAR_ACCELERATE_INSTRUCT_MAX_INFLIGHT  打向加速 origin 的最大 in-flight，默认 5
+  （加速 origin 仅运行时 PUT /api/accelerate_instruct_origin，不经环境变量；指日常 --port）
   INFORADAR_PORT            Docker 监听端口（默认 7860）
   INFORADAR_BASE_MODEL      Docker 覆盖 base 模型 id（可选）
-  INFORADAR_INSTRUCT_MODEL  Docker 覆盖 instruct 模型 id（可选，master/default）
+  INFORADAR_INSTRUCT_MODEL  Docker 覆盖 instruct 模型 id（可选）
 """
 
 
@@ -102,12 +99,6 @@ def _parse_args():
         action="store_true",
         help="Worker 形态：关 stats/demo 写/admin；保留静态页",
     )
-    parser.add_argument(
-        "--accelerate_instruct_provider_port",
-        default=None,
-        metavar="PORT",
-        help="本机加速提供口（仅绑 127.0.0.1，需 INFORADAR_REMOTE_HF_TOKEN）",
-    )
     return parser.parse_args()
 
 
@@ -118,7 +109,7 @@ def _load_and_run(args):
 
     try:
         configure_from_args(args)
-        instruct_accelerate.configure_from_args(args)
+        instruct_accelerate.configure()
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(2)
@@ -130,15 +121,8 @@ def _load_and_run(args):
     import server
     from server import app
     from backend.platform.worker_guards import register_worker_guards
-    from backend.platform.accelerate_provider import (
-        register_provider_bearer_guard,
-        start_provider_listener,
-    )
 
     register_worker_guards(app)
-    provider_port = instruct_accelerate.provider_port()
-    if provider_port is not None:
-        register_provider_bearer_guard(app, provider_port)
 
     from backend.platform.app_context import AppContext
     from backend.demo.data_utils import resolve_data_dir
@@ -179,9 +163,6 @@ def _load_and_run(args):
         threading.Thread(target=load_model_in_background, daemon=True, name="ModelLoader").start()
     else:
         AppContext.get().set_model_loading(False)
-
-    if provider_port is not None:
-        start_provider_listener(app.middleware, provider_port)
 
     app.run(port=int(ctx.args.port), host=ctx.args.address, access_log=False)
 

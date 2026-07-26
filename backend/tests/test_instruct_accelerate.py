@@ -1,4 +1,4 @@
-"""instruct 本机加速：门控、回退、provider Bearer。"""
+"""instruct 加速：门控、回退；提供方与日常口同质、不单独鉴权。"""
 from __future__ import annotations
 
 from argparse import Namespace
@@ -9,7 +9,6 @@ from flask import Flask
 
 from backend.models.model_manager import ModelSlot
 from backend.platform import instruct_accelerate, model_routing
-from backend.platform.accelerate_provider import register_provider_bearer_guard
 from backend.platform.inference_ingress import ingress_inference
 from backend.api.health import health
 
@@ -29,7 +28,6 @@ def _args(**kwargs):
         slots=None,
         remote=None,
         worker=False,
-        accelerate_instruct_provider_port=None,
     )
     base.update(kwargs)
     return Namespace(**base)
@@ -40,34 +38,23 @@ def _enable_origin(origin: str = "https://accel.example") -> None:
 
 
 def test_accelerate_origin_keeps_instruct_local(monkeypatch):
-    monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "tok")
     model_routing.configure_from_args(_args(slots="base,instruct"))
-    instruct_accelerate.configure_from_args(_args())
+    instruct_accelerate.configure()
     _enable_origin()
     assert model_routing.is_local(ModelSlot.INSTRUCT)
     assert instruct_accelerate.accelerate_origin() == "https://accel.example"
 
 
-def test_provider_port_requires_token(monkeypatch):
-    monkeypatch.delenv("INFORADAR_REMOTE_HF_TOKEN", raising=False)
-    with pytest.raises(ValueError, match="INFORADAR_REMOTE_HF_TOKEN"):
-        instruct_accelerate.configure_from_args(
-            _args(accelerate_instruct_provider_port="5002")
-        )
-
-
-def test_cold_start_not_eligible(monkeypatch):
-    monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "tok")
-    instruct_accelerate.configure_from_args(_args())
+def test_cold_start_not_eligible():
+    instruct_accelerate.configure()
     _enable_origin()
     assert not instruct_accelerate.is_accelerate_eligible()
     assert not instruct_accelerate.acquire()
 
 
 def test_rtt_gate_and_inflight(monkeypatch):
-    monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "tok")
     monkeypatch.setenv("INFORADAR_ACCELERATE_INSTRUCT_MAX_INFLIGHT", "2")
-    instruct_accelerate.configure_from_args(_args())
+    instruct_accelerate.configure()
     _enable_origin()
     instruct_accelerate.record_probe_success(100.0)
     assert instruct_accelerate.acquire()
@@ -78,17 +65,15 @@ def test_rtt_gate_and_inflight(monkeypatch):
 
 
 def test_high_rtt_not_eligible(monkeypatch):
-    monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "tok")
     monkeypatch.setenv("INFORADAR_ACCELERATE_INSTRUCT_MAX_RTT_MS", "50")
-    instruct_accelerate.configure_from_args(_args())
+    instruct_accelerate.configure()
     _enable_origin()
     instruct_accelerate.record_probe_success(200.0)
     assert not instruct_accelerate.is_accelerate_eligible()
 
 
-def test_circuit_trips_until_probe_success(monkeypatch):
-    monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "tok")
-    instruct_accelerate.configure_from_args(_args())
+def test_circuit_trips_until_probe_success():
+    instruct_accelerate.configure()
     _enable_origin()
     instruct_accelerate.record_probe_success(10.0)
     assert instruct_accelerate.acquire()
@@ -106,9 +91,8 @@ def test_health():
     assert body == {"ok": True}
 
 
-def test_set_accelerate_origin_runtime(monkeypatch):
-    monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "tok")
-    instruct_accelerate.configure_from_args(_args())
+def test_set_accelerate_origin_runtime():
+    instruct_accelerate.configure()
     assert instruct_accelerate.accelerate_origin() is None
 
     assert (
@@ -127,11 +111,13 @@ def test_set_accelerate_origin_runtime(monkeypatch):
     assert instruct_accelerate.accelerate_origin() is None
 
 
-def test_set_accelerate_origin_requires_token(monkeypatch):
+def test_set_accelerate_origin_without_remote_token(monkeypatch):
     monkeypatch.delenv("INFORADAR_REMOTE_HF_TOKEN", raising=False)
-    instruct_accelerate.configure_from_args(_args())
-    with pytest.raises(ValueError, match="INFORADAR_REMOTE_HF_TOKEN"):
+    instruct_accelerate.configure()
+    assert (
         instruct_accelerate.set_accelerate_origin("https://x.example")
+        == "https://x.example"
+    )
 
 
 def test_put_accelerate_instruct_origin_api(monkeypatch):
@@ -140,9 +126,8 @@ def test_put_accelerate_instruct_origin_api(monkeypatch):
         put_accelerate_instruct_origin,
     )
 
-    monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "tok")
     monkeypatch.setenv("INFORADAR_ADMIN_TOKEN", "admin")
-    instruct_accelerate.configure_from_args(_args())
+    instruct_accelerate.configure()
 
     app = Flask(__name__)
     with app.test_request_context(
@@ -167,10 +152,9 @@ def test_put_accelerate_instruct_origin_api(monkeypatch):
     assert status == 403
 
 
-def test_ingress_fallback_on_unwritten_failure(monkeypatch):
-    monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "tok")
+def test_ingress_fallback_on_unwritten_failure():
     model_routing.configure_from_args(_args())
-    instruct_accelerate.configure_from_args(_args())
+    instruct_accelerate.configure()
     _enable_origin()
     instruct_accelerate.record_probe_success(5.0)
 
@@ -190,10 +174,65 @@ def test_ingress_fallback_on_unwritten_failure(monkeypatch):
     assert instruct_accelerate.inflight_count() == 0
 
 
-def test_ingress_no_fallback_on_stream_response(monkeypatch):
+def test_ingress_accelerate_before_remote(monkeypatch):
     monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "tok")
+    model_routing.configure_from_args(
+        _args(slots="base,instruct", remote=["instruct=https://fixed.hf.space"])
+    )
+    instruct_accelerate.configure()
+    _enable_origin("https://accel.example")
+    instruct_accelerate.record_probe_success(5.0)
+
+    local_fn = MagicMock()
+    with patch(
+        "backend.platform.inference_ingress.proxy_request",
+        return_value=({"ok": "accel"}, 200),
+    ) as proxy:
+        out = ingress_inference(
+            slot=ModelSlot.INSTRUCT,
+            api_path="/api/analyze-semantic",
+            local_fn=local_fn,
+        )
+    assert out == ({"ok": "accel"}, 200)
+    assert proxy.call_args.args[0] == "https://accel.example"
+    local_fn.assert_not_called()
+
+
+def test_ingress_fallback_to_remote_when_not_local(monkeypatch):
+    monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "tok")
+    model_routing.configure_from_args(
+        _args(slots="base,instruct", remote=["instruct=https://fixed.hf.space"])
+    )
+    instruct_accelerate.configure()
+    _enable_origin("https://accel.example")
+    instruct_accelerate.record_probe_success(5.0)
+
+    local_fn = MagicMock()
+    with patch(
+        "backend.platform.inference_ingress.proxy_request",
+        side_effect=[
+            ({"success": False, "message": "up"}, 502),
+            ({"ok": "remote"}, 200),
+        ],
+    ) as proxy:
+        out = ingress_inference(
+            slot=ModelSlot.INSTRUCT,
+            api_path="/api/analyze-semantic",
+            local_fn=local_fn,
+        )
+    assert out == ({"ok": "remote"}, 200)
+    assert [c.args[0] for c in proxy.call_args_list] == [
+        "https://accel.example",
+        "https://fixed.hf.space",
+    ]
+    local_fn.assert_not_called()
+    assert instruct_accelerate.is_circuit_open()
+    assert instruct_accelerate.inflight_count() == 0
+
+
+def test_ingress_no_fallback_on_stream_response():
     model_routing.configure_from_args(_args())
-    instruct_accelerate.configure_from_args(_args())
+    instruct_accelerate.configure()
     _enable_origin()
     instruct_accelerate.record_probe_success(5.0)
 
@@ -220,8 +259,7 @@ def test_ingress_no_fallback_on_stream_response(monkeypatch):
     assert instruct_accelerate.inflight_count() == 0
 
 
-def test_completions_stop_uses_accelerate_origin(monkeypatch):
-    monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "tok")
+def test_completions_stop_uses_accelerate_origin():
     from backend.platform import inference_proxy
     from backend.api.openai_completions import completions_stop
 
@@ -237,36 +275,3 @@ def test_completions_stop_uses_accelerate_origin(monkeypatch):
     assert proxy.call_args.args[0] == "https://accel.example"
     assert proxy.call_args.args[2] == "/api/v1/completions/stop"
     inference_proxy.clear_active_remote_completion_slot()
-
-
-def test_provider_bearer_guard(monkeypatch):
-    monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "secret")
-    app = Flask(__name__)
-
-    class _Conn:
-        def __init__(self, flask_app):
-            self.app = flask_app
-
-    register_provider_bearer_guard(_Conn(app), 5002)
-
-    @app.route("/api/health")
-    def _h():
-        return {"ok": True}
-
-    client = app.test_client()
-    # main port — no bearer
-    with app.test_request_context("/api/health", environ_overrides={"SERVER_PORT": "5001"}):
-        # use test client with environ
-        pass
-    rv = client.get("/api/health", environ_overrides={"SERVER_PORT": "5001"})
-    assert rv.status_code == 200
-
-    rv = client.get("/api/health", environ_overrides={"SERVER_PORT": "5002"})
-    assert rv.status_code == 401
-
-    rv = client.get(
-        "/api/health",
-        headers={"Authorization": "Bearer secret"},
-        environ_overrides={"SERVER_PORT": "5002"},
-    )
-    assert rv.status_code == 200

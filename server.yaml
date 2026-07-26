@@ -1174,7 +1174,7 @@ paths:
                 type: string
                 x-nullable: true
         400:
-          description: invalid origin or missing INFORADAR_REMOTE_HF_TOKEN
+          description: invalid origin
         403:
           description: admin required
 

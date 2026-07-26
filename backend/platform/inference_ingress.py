@@ -1,4 +1,4 @@
-"""推理 API 统一入口：统计记账 → local / remote / instruct 加速 分流。"""
+"""推理 API 统一入口：统计记账 → accelerate / local / remote 分流。"""
 from __future__ import annotations
 
 import time
@@ -67,6 +67,48 @@ def _is_unwritten_failure(result: Any) -> bool:
     return False
 
 
+def _proxy_remote(
+    *,
+    slot: ModelSlot,
+    api_path: str,
+    method: str,
+    json_body: dict | None,
+    stream: bool,
+    timeout: float,
+    response_log_fn: Callable[[Any, float, int], None] | None,
+    track_remote_completion: bool,
+) -> Any:
+    origin = remote_origin(slot)
+    if not origin:
+        return {
+            "success": False,
+            "message": f"slot {slot.value!r} has no remote origin configured",
+        }, 500
+
+    on_close = clear_active_remote_completion_slot if track_remote_completion else None
+    if track_remote_completion:
+        set_active_remote_completion_slot(slot, origin=origin)
+
+    def _on_response(data: Any, elapsed: float, status_code: int) -> None:
+        _emit_response_log(response_log_fn, data, elapsed, status_code)
+
+    try:
+        return proxy_request(
+            origin,
+            method,
+            api_path,
+            json_body=json_body,
+            stream=stream,
+            timeout=timeout,
+            on_stream_close=on_close,
+            on_response=_on_response,
+        )
+    except Exception:
+        if track_remote_completion:
+            clear_active_remote_completion_slot()
+        raise
+
+
 def _proxy_accelerate(
     *,
     origin: str,
@@ -78,7 +120,7 @@ def _proxy_accelerate(
     timeout: float,
     response_log_fn: Callable[[Any, float, int], None] | None,
     track_remote_completion: bool,
-    local_fn: Callable[[], Any],
+    fallback_fn: Callable[[], Any],
 ) -> Any:
     released = False
 
@@ -120,7 +162,7 @@ def _proxy_accelerate(
     if _is_unwritten_failure(result):
         instruct_accelerate.trip_circuit()
         _release()
-        return _run_local(local_fn, response_log_fn)
+        return fallback_fn()
 
     if not stream:
         _release()
@@ -143,8 +185,9 @@ def ingress_inference(
     """
     顺序：access_log / bump_api（log_fn）→ 分流 → response_log_fn（非 worker）。
 
-    Worker 上未启用的槽位直接 404；remote 槽位 HTTP 代理到对应 Space。
-    本地 instruct 在加速合格时可条件代理到本机加速 origin，失败未写出则回退 local。
+    分流：accelerate（instruct 合格）→ local → --remote。
+    加速失败且未写出时回退到 local / remote 基线；流式已写出则不回退。
+    Worker 上未启用的槽位直接 404。
     response_log_fn：远程代理端到端日志；本地执行若已在 handler 打完整日志可传 None。
     """
     if is_worker() and not slot_enabled(slot):
@@ -153,51 +196,35 @@ def ingress_inference(
     if log_fn is not None:
         log_fn()
 
-    if is_local(slot):
-        if slot == ModelSlot.INSTRUCT and instruct_accelerate.acquire():
-            origin = instruct_accelerate.accelerate_origin()
-            if origin:
-                return _proxy_accelerate(
-                    origin=origin,
-                    slot=slot,
-                    api_path=api_path,
-                    method=method,
-                    json_body=json_body,
-                    stream=stream,
-                    timeout=timeout,
-                    response_log_fn=response_log_fn,
-                    track_remote_completion=track_remote_completion,
-                    local_fn=local_fn,
-                )
-            instruct_accelerate.release()
-        return _run_local(local_fn, response_log_fn)
-
-    origin = remote_origin(slot)
-    if not origin:
-        return {
-            "success": False,
-            "message": f"slot {slot.value!r} has no remote origin configured",
-        }, 500
-
-    on_close = clear_active_remote_completion_slot if track_remote_completion else None
-    if track_remote_completion:
-        set_active_remote_completion_slot(slot, origin=origin)
-
-    def _on_response(data: Any, elapsed: float, status_code: int) -> None:
-        _emit_response_log(response_log_fn, data, elapsed, status_code)
-
-    try:
-        return proxy_request(
-            origin,
-            method,
-            api_path,
+    def baseline() -> Any:
+        if is_local(slot):
+            return _run_local(local_fn, response_log_fn)
+        return _proxy_remote(
+            slot=slot,
+            api_path=api_path,
+            method=method,
             json_body=json_body,
             stream=stream,
             timeout=timeout,
-            on_stream_close=on_close,
-            on_response=_on_response,
+            response_log_fn=response_log_fn,
+            track_remote_completion=track_remote_completion,
         )
-    except Exception:
-        if track_remote_completion:
-            clear_active_remote_completion_slot()
-        raise
+
+    if slot == ModelSlot.INSTRUCT and instruct_accelerate.acquire():
+        origin = instruct_accelerate.accelerate_origin()
+        if origin:
+            return _proxy_accelerate(
+                origin=origin,
+                slot=slot,
+                api_path=api_path,
+                method=method,
+                json_body=json_body,
+                stream=stream,
+                timeout=timeout,
+                response_log_fn=response_log_fn,
+                track_remote_completion=track_remote_completion,
+                fallback_fn=baseline,
+            )
+        instruct_accelerate.release()
+
+    return baseline()

@@ -1,0 +1,9 @@
+{
+  "name": "infolens-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-26",
+  "workers_dev": true,
+  "vars": {
+    "HF_ORIGIN": "https://dqy08-infolens-worker1.hf.space"
+  }
+}
