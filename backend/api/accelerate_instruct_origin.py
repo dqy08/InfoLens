@@ -12,14 +12,14 @@ def get_accelerate_instruct_origin():
         "origin": instruct_accelerate.accelerate_origin(),
         "eligible": instruct_accelerate.is_accelerate_eligible(),
         "circuit_open": instruct_accelerate.is_circuit_open(),
-        "median_rtt_ms": instruct_accelerate.median_rtt_ms(),
         "inflight": instruct_accelerate.inflight_count(),
+        "ttl_sec": instruct_accelerate.ttl_sec(),
     }, 200
 
 
 @require_admin
 def put_accelerate_instruct_origin(body):
-    """body.origin: HTTPS origin；空字符串或 null 表示关闭加速。"""
+    """body.origin: HTTPS origin；空字符串或 null 表示关闭加速。成功登记刷新 TTL。"""
     raw = None if body is None else body.get("origin")
     if raw is not None and not isinstance(raw, str):
         return {"success": False, "message": "origin must be a string or null"}, 400
@@ -27,4 +27,8 @@ def put_accelerate_instruct_origin(body):
         origin = instruct_accelerate.set_accelerate_origin(raw)
     except ValueError as exc:
         return {"success": False, "message": str(exc)}, 400
-    return {"success": True, "origin": origin}, 200
+    return {
+        "success": True,
+        "origin": origin,
+        "ttl_sec": instruct_accelerate.ttl_sec(),
+    }, 200

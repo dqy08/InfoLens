@@ -1,4 +1,4 @@
-"""instruct 加速：门控、回退；提供方与日常口同质、不单独鉴权。"""
+"""instruct 加速：TTL 登记、in-flight、熔断、回退；提供方与日常口同质。"""
 from __future__ import annotations
 
 from argparse import Namespace
@@ -45,18 +45,18 @@ def test_accelerate_origin_keeps_instruct_local(monkeypatch):
     assert instruct_accelerate.accelerate_origin() == "https://accel.example"
 
 
-def test_cold_start_not_eligible():
+def test_set_origin_immediately_eligible():
     instruct_accelerate.configure()
     _enable_origin()
-    assert not instruct_accelerate.is_accelerate_eligible()
-    assert not instruct_accelerate.acquire()
+    assert instruct_accelerate.is_accelerate_eligible()
+    assert instruct_accelerate.acquire()
+    instruct_accelerate.release()
 
 
-def test_rtt_gate_and_inflight(monkeypatch):
+def test_inflight_cap(monkeypatch):
     monkeypatch.setenv("INFORADAR_ACCELERATE_INSTRUCT_MAX_INFLIGHT", "2")
     instruct_accelerate.configure()
     _enable_origin()
-    instruct_accelerate.record_probe_success(100.0)
     assert instruct_accelerate.acquire()
     assert instruct_accelerate.acquire()
     assert not instruct_accelerate.acquire()
@@ -64,25 +64,26 @@ def test_rtt_gate_and_inflight(monkeypatch):
     assert instruct_accelerate.acquire()
 
 
-def test_high_rtt_not_eligible(monkeypatch):
-    monkeypatch.setenv("INFORADAR_ACCELERATE_INSTRUCT_MAX_RTT_MS", "50")
+def test_circuit_trips_until_reregister():
     instruct_accelerate.configure()
     _enable_origin()
-    instruct_accelerate.record_probe_success(200.0)
-    assert not instruct_accelerate.is_accelerate_eligible()
-
-
-def test_circuit_trips_until_probe_success():
-    instruct_accelerate.configure()
-    _enable_origin()
-    instruct_accelerate.record_probe_success(10.0)
     assert instruct_accelerate.acquire()
     instruct_accelerate.release()
     instruct_accelerate.trip_circuit()
     assert not instruct_accelerate.acquire()
-    instruct_accelerate.record_probe_success(12.0)
+    _enable_origin()
     assert instruct_accelerate.acquire()
     instruct_accelerate.release()
+
+
+def test_ttl_expiry(monkeypatch):
+    monkeypatch.setenv("INFORADAR_ACCELERATE_INSTRUCT_TTL_SEC", "1")
+    instruct_accelerate.configure()
+    _enable_origin()
+    assert instruct_accelerate.is_accelerate_eligible()
+    with patch("backend.platform.instruct_accelerate.time.monotonic", return_value=1e9):
+        assert instruct_accelerate.accelerate_origin() is None
+        assert not instruct_accelerate.is_accelerate_eligible()
 
 
 def test_health():
@@ -99,12 +100,10 @@ def test_set_accelerate_origin_runtime():
         instruct_accelerate.set_accelerate_origin("https://x.accel.example")
         == "https://x.accel.example"
     )
-    instruct_accelerate.record_probe_success(20.0)
     assert instruct_accelerate.is_accelerate_eligible()
 
     instruct_accelerate.set_accelerate_origin("https://y.accel.example")
     assert instruct_accelerate.accelerate_origin() == "https://y.accel.example"
-    assert instruct_accelerate.median_rtt_ms() is None
     assert not instruct_accelerate.is_circuit_open()
 
     assert instruct_accelerate.set_accelerate_origin("") is None
@@ -141,11 +140,14 @@ def test_put_accelerate_instruct_origin_api(monkeypatch):
         )
     assert status == 200
     assert body["origin"] == "https://z.accel.example"
+    assert body["ttl_sec"] == 90
 
     with app.test_request_context(headers={"X-Admin-Token": "admin"}):
         body, status = get_accelerate_instruct_origin()
     assert status == 200
     assert body["origin"] == "https://z.accel.example"
+    assert body["eligible"] is True
+    assert "median_rtt_ms" not in body
 
     with app.test_request_context(headers={"X-Admin-Token": "nope"}):
         body, status = put_accelerate_instruct_origin({"origin": None})
@@ -156,7 +158,6 @@ def test_ingress_fallback_on_unwritten_failure():
     model_routing.configure_from_args(_args())
     instruct_accelerate.configure()
     _enable_origin()
-    instruct_accelerate.record_probe_success(5.0)
 
     local_fn = MagicMock(return_value=({"ok": "local"}, 200))
     with patch(
@@ -181,7 +182,6 @@ def test_ingress_accelerate_before_remote(monkeypatch):
     )
     instruct_accelerate.configure()
     _enable_origin("https://accel.example")
-    instruct_accelerate.record_probe_success(5.0)
 
     local_fn = MagicMock()
     with patch(
@@ -205,7 +205,6 @@ def test_ingress_fallback_to_remote_when_not_local(monkeypatch):
     )
     instruct_accelerate.configure()
     _enable_origin("https://accel.example")
-    instruct_accelerate.record_probe_success(5.0)
 
     local_fn = MagicMock()
     with patch(
@@ -234,7 +233,6 @@ def test_ingress_no_fallback_on_stream_response():
     model_routing.configure_from_args(_args())
     instruct_accelerate.configure()
     _enable_origin()
-    instruct_accelerate.record_probe_success(5.0)
 
     from flask import Response
 
@@ -252,7 +250,6 @@ def test_ingress_no_fallback_on_stream_response():
         )
     assert out is streamed
     local_fn.assert_not_called()
-    # stream close not invoked by mock; release left to on_stream_close — simulate
     close_cb = proxy.call_args.kwargs.get("on_stream_close")
     assert close_cb is not None
     close_cb()

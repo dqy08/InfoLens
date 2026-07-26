@@ -1136,10 +1136,9 @@ paths:
                 type: boolean
               circuit_open:
                 type: boolean
-              median_rtt_ms:
-                type: number
-                x-nullable: true
               inflight:
+                type: integer
+              ttl_sec:
                 type: integer
         403:
           description: admin required
@@ -1149,7 +1148,7 @@ paths:
       summary: set instruct accelerate origin (admin only)
       description: |
         运行时设置本机加速 origin（HTTPS 根 URL）；这是配置 origin 的唯一方式。
-        origin 为空字符串或 null 时关闭加速。进程重启后需重新注册。
+        origin 为空字符串或 null 时关闭加速。成功登记刷新 TTL（默认 90s）；过期后失效。
       operationId: server.put_accelerate_instruct_origin
       parameters:
         - in: body
@@ -1173,6 +1172,8 @@ paths:
               origin:
                 type: string
                 x-nullable: true
+              ttl_sec:
+                type: integer
         400:
           description: invalid origin
         403:

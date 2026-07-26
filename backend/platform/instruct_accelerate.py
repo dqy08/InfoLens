@@ -1,52 +1,42 @@
-"""Master → 本机 instruct 条件加速：RTT 探针、in-flight、熔断。"""
+"""Master → 本机 instruct 条件加速：TTL 登记、in-flight、熔断。
+
+探活由登记方负责；本模块不主动探 origin。
+"""
 from __future__ import annotations
 
-import logging
 import os
-import statistics
 import threading
 import time
-from collections import deque
 
-import requests
+from backend.platform.model_routing import normalize_origin
 
-from backend.platform.model_routing import normalize_origin, remote_hf_token
-
-_logger = logging.getLogger(__name__)
-
-_MAX_RTT_ENV = "INFORADAR_ACCELERATE_INSTRUCT_MAX_RTT_MS"
 _MAX_INFLIGHT_ENV = "INFORADAR_ACCELERATE_INSTRUCT_MAX_INFLIGHT"
+_TTL_ENV = "INFORADAR_ACCELERATE_INSTRUCT_TTL_SEC"
 
-_DEFAULT_MAX_RTT_MS = 1000
 _DEFAULT_MAX_INFLIGHT = 5
-_PROBE_INTERVAL_SEC = 20.0
-_PROBE_TIMEOUT_SEC = 5.0
-_RTT_SAMPLES = 5
-_HEALTH_PATH = "/api/health"
+_DEFAULT_TTL_SEC = 90
 
 _origin: str | None = None
-_max_rtt_ms: float = _DEFAULT_MAX_RTT_MS
+_expires_at: float = 0.0  # time.monotonic()
 _max_inflight: int = _DEFAULT_MAX_INFLIGHT
+_ttl_sec: int = _DEFAULT_TTL_SEC
 
 _lock = threading.Lock()
 _inflight = 0
 _circuit_open = False
-_rtt_ms: deque[float] = deque(maxlen=_RTT_SAMPLES)
-_probe_started = False
 
 
 def reset_for_tests() -> None:
     """测试用：清空模块状态。"""
-    global _origin, _max_rtt_ms, _max_inflight
-    global _inflight, _circuit_open, _probe_started
+    global _origin, _expires_at, _max_inflight, _ttl_sec
+    global _inflight, _circuit_open
     with _lock:
         _origin = None
-        _max_rtt_ms = _DEFAULT_MAX_RTT_MS
+        _expires_at = 0.0
         _max_inflight = _DEFAULT_MAX_INFLIGHT
+        _ttl_sec = _DEFAULT_TTL_SEC
         _inflight = 0
         _circuit_open = False
-        _rtt_ms.clear()
-        _probe_started = False
 
 
 def _env_int(name: str, default: int) -> int:
@@ -58,48 +48,61 @@ def _env_int(name: str, default: int) -> int:
 
 def configure() -> None:
     """从 env 注入加速门控（origin 仅运行时 set_accelerate_origin）。"""
-    global _max_rtt_ms, _max_inflight, _inflight, _circuit_open
+    global _max_inflight, _ttl_sec, _inflight, _circuit_open
 
-    max_rtt = _env_int(_MAX_RTT_ENV, _DEFAULT_MAX_RTT_MS)
     max_inflight = _env_int(_MAX_INFLIGHT_ENV, _DEFAULT_MAX_INFLIGHT)
+    ttl_sec = max(1, _env_int(_TTL_ENV, _DEFAULT_TTL_SEC))
 
     with _lock:
-        _max_rtt_ms = float(max_rtt)
         _max_inflight = max(1, max_inflight)
+        _ttl_sec = ttl_sec
         _inflight = 0
         _circuit_open = False
-        _rtt_ms.clear()
+
+
+def ttl_sec() -> int:
+    with _lock:
+        return _ttl_sec
+
+
+def _clear_expired_unlocked(now: float) -> None:
+    global _origin, _expires_at
+    if _origin is not None and now >= _expires_at:
+        _origin = None
+        _expires_at = 0.0
 
 
 def accelerate_origin() -> str | None:
-    return _origin
+    with _lock:
+        _clear_expired_unlocked(time.monotonic())
+        return _origin
 
 
 def set_accelerate_origin(origin: str | None) -> str | None:
-    """运行时更新加速 origin（空 / None 表示关闭）。会清空 RTT 样本并解除熔断。"""
-    global _origin, _circuit_open
+    """运行时更新加速 origin（空 / None 表示关闭）。成功登记会刷新 TTL 并解除熔断。"""
+    global _origin, _expires_at, _circuit_open
 
     raw = (origin or "").strip()
     normalized = normalize_origin(raw) if raw else None
 
     with _lock:
-        _origin = normalized
-        _circuit_open = False
-        _rtt_ms.clear()
+        if normalized:
+            _origin = normalized
+            _expires_at = time.monotonic() + float(_ttl_sec)
+            # 同 origin 续期也会解熔断。登记方探活路径≠Master→origin，极端下可能短周期抖动；可接受。
+            _circuit_open = False
+        else:
+            _origin = None
+            _expires_at = 0.0
 
     if normalized:
-        print(f"[inforadar] accelerate origin set: {normalized}", flush=True)
-        start_probe_loop()
+        print(
+            f"[inforadar] accelerate origin set: {normalized} (ttl={_ttl_sec}s)",
+            flush=True,
+        )
     else:
         print("[inforadar] accelerate origin cleared", flush=True)
     return normalized
-
-
-def median_rtt_ms() -> float | None:
-    with _lock:
-        if not _rtt_ms:
-            return None
-        return float(statistics.median(_rtt_ms))
 
 
 def is_circuit_open() -> bool:
@@ -112,23 +115,22 @@ def inflight_count() -> int:
         return _inflight
 
 
-def _eligible_unlocked() -> bool:
-    if not _origin or _circuit_open or not _rtt_ms:
-        return False
-    if statistics.median(_rtt_ms) >= _max_rtt_ms:
+def _eligible_unlocked(now: float) -> bool:
+    _clear_expired_unlocked(now)
+    if not _origin or _circuit_open:
         return False
     return _inflight < _max_inflight
 
 
 def is_accelerate_eligible() -> bool:
     with _lock:
-        return _eligible_unlocked()
+        return _eligible_unlocked(time.monotonic())
 
 
 def acquire() -> bool:
     """尝试占用一条加速 in-flight；成功返回 True 且 +1。"""
     with _lock:
-        if not _eligible_unlocked():
+        if not _eligible_unlocked(time.monotonic()):
             return False
         global _inflight
         _inflight += 1
@@ -146,72 +148,3 @@ def trip_circuit() -> None:
     with _lock:
         global _circuit_open
         _circuit_open = True
-
-
-def record_probe_success(rtt_ms: float) -> None:
-    with _lock:
-        global _circuit_open
-        _rtt_ms.append(rtt_ms)
-        _circuit_open = False
-
-
-def record_probe_failure() -> None:
-    with _lock:
-        global _circuit_open
-        _circuit_open = True
-
-
-def _probe_headers() -> dict[str, str]:
-    headers: dict[str, str] = {}
-    token = remote_hf_token()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    return headers
-
-
-def _probe_once() -> None:
-    origin = accelerate_origin()
-    if not origin:
-        return
-    url = f"{origin.rstrip('/')}{_HEALTH_PATH}"
-    started = time.perf_counter()
-    try:
-        resp = requests.get(
-            url,
-            headers=_probe_headers(),
-            timeout=_PROBE_TIMEOUT_SEC,
-        )
-        rtt_ms = (time.perf_counter() - started) * 1000.0
-        if resp.ok:
-            record_probe_success(rtt_ms)
-            return
-        record_probe_failure()
-        _logger.warning("accelerate probe fail: %s → %s", origin, resp.status_code)
-    except Exception as exc:  # noqa: BLE001
-        record_probe_failure()
-        _logger.warning("accelerate probe fail: %s → %s", origin, exc)
-
-
-def _probe_daemon() -> None:
-    while True:
-        try:
-            _probe_once()
-        except Exception as exc:  # noqa: BLE001
-            _logger.warning("accelerate probe loop error: %s", exc)
-        time.sleep(_PROBE_INTERVAL_SEC)
-
-
-def start_probe_loop() -> None:
-    global _probe_started
-    if not accelerate_origin():
-        return
-    with _lock:
-        if _probe_started:
-            return
-        _probe_started = True
-    threading.Thread(target=_probe_daemon, daemon=True, name="InstructAccelerateProbe").start()
-    print(
-        f"[inforadar] instruct accelerate probe every {_PROBE_INTERVAL_SEC:.0f}s: "
-        f"{accelerate_origin()}",
-        flush=True,
-    )

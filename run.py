@@ -30,8 +30,8 @@ ENV_HELP = """
   FORCE_INT8=1          启用 INT8 量化（CPU/CUDA 支持，MPS 不支持）
   CPU_FORCE_BFLOAT16=1  CPU 使用 bfloat16
   INFORADAR_REMOTE_HF_TOKEN  --remote 时必填；accelerate 出站有则带 Bearer（公开提供方可不设）
-  INFORADAR_ACCELERATE_INSTRUCT_MAX_RTT_MS  加速 RTT 上限，默认 1000
   INFORADAR_ACCELERATE_INSTRUCT_MAX_INFLIGHT  打向加速 origin 的最大 in-flight，默认 5
+  INFORADAR_ACCELERATE_INSTRUCT_TTL_SEC  加速 origin 登记 TTL（秒），默认 90；靠登记方探通后续期
   （加速 origin 仅运行时 PUT /api/accelerate_instruct_origin，不经环境变量；指日常 --port）
   INFORADAR_PORT            Docker 监听端口（默认 7860）
   INFORADAR_BASE_MODEL      Docker 覆盖 base 模型 id（可选）
@@ -149,7 +149,6 @@ def _load_and_run(args):
     from backend.platform.remote_keepalive import start_remote_keepalive
 
     start_remote_keepalive()
-    instruct_accelerate.start_probe_loop()
 
     if not getattr(ctx.args, "no_auto_load", False):
         def load_model_in_background():

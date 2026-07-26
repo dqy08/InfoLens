@@ -41,6 +41,7 @@ user_dialog_history/*
 .dev.vars
 **/.dev.vars
 cf/facade/.wrangler/
+cf/ops/
 # 音效源文件（仅本地保留，不入库）
 client/src/assets/audio/thunder-strikes-lightning-storm-rumble.mp3
 

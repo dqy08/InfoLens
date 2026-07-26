@@ -5,5 +5,11 @@
   "workers_dev": true,
   "vars": {
     "HF_ORIGIN": "https://dqy08-infolens-worker1.hf.space"
-  }
+  },
+  "kv_namespaces": [
+    {
+      "binding": "STATE",
+      "id": "5666f6dc489a443c8f22fdeda6507f57"
+    }
+  ]
 }
