@@ -86,6 +86,7 @@ def set_accelerate_origin(origin: str | None) -> str | None:
     normalized = normalize_origin(raw) if raw else None
 
     with _lock:
+        prev = _origin
         if normalized:
             _origin = normalized
             _expires_at = time.monotonic() + float(_ttl_sec)
@@ -95,13 +96,16 @@ def set_accelerate_origin(origin: str | None) -> str | None:
             _origin = None
             _expires_at = 0.0
 
+    if prev == normalized:
+        return normalized
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
     if normalized:
         print(
-            f"[inforadar] accelerate origin set: {normalized} (ttl={_ttl_sec}s)",
+            f"[inforadar] {ts} accelerate origin set: {normalized} (ttl={_ttl_sec}s)",
             flush=True,
         )
     else:
-        print("[inforadar] accelerate origin cleared", flush=True)
+        print(f"[inforadar] {ts} accelerate origin cleared", flush=True)
     return normalized
 
 

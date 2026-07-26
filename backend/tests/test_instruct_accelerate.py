@@ -92,7 +92,7 @@ def test_health():
     assert body == {"ok": True}
 
 
-def test_set_accelerate_origin_runtime():
+def test_set_accelerate_origin_runtime(capsys):
     instruct_accelerate.configure()
     assert instruct_accelerate.accelerate_origin() is None
 
@@ -101,13 +101,24 @@ def test_set_accelerate_origin_runtime():
         == "https://x.accel.example"
     )
     assert instruct_accelerate.is_accelerate_eligible()
+    assert "accelerate origin set: https://x.accel.example" in capsys.readouterr().out
+
+    # 同 origin 续期：不重复打印
+    instruct_accelerate.set_accelerate_origin("https://x.accel.example")
+    assert capsys.readouterr().out == ""
 
     instruct_accelerate.set_accelerate_origin("https://y.accel.example")
     assert instruct_accelerate.accelerate_origin() == "https://y.accel.example"
     assert not instruct_accelerate.is_circuit_open()
+    assert "accelerate origin set: https://y.accel.example" in capsys.readouterr().out
 
     assert instruct_accelerate.set_accelerate_origin("") is None
     assert instruct_accelerate.accelerate_origin() is None
+    assert "accelerate origin cleared" in capsys.readouterr().out
+
+    # 已清空再 clear：不重复打印
+    instruct_accelerate.set_accelerate_origin("")
+    assert capsys.readouterr().out == ""
 
 
 def test_set_accelerate_origin_without_remote_token(monkeypatch):

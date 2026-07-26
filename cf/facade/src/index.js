@@ -1,7 +1,10 @@
 /**
  * InfoLens 门面：
  * - 默认 /api/*、/demo/* → HF_ORIGIN
- * - 已登记 backup → 全部打 backup origin（带 TTL；过期或清空后回 HF_ORIGIN）
+ * - 已登记 origin：
+ *   - mode=accelerate（默认）：仅算力路径 → backup；其余仍 HF_ORIGIN
+ *   - mode=full：/api/*、/demo/* 全部 → backup（HF 灾备）
+ * - TTL≈90s；过期或清空后回 HF_ORIGIN
  */
 const HOP_BY_HOP = new Set([
   'connection',
@@ -23,6 +26,24 @@ const HOP_BY_HOP = new Set([
 const BACKUP_KEY = 'backup_origin';
 /** KV 最短 TTL 60s；登记方续期；约 90s 无续期则回 HF_ORIGIN */
 const BACKUP_TTL_SEC = 90;
+
+/** mode=accelerate 时走 backup 的算力路径（其余 /api|/demo 仍 HF） */
+const COMPUTE_PATHS = new Set([
+  '/api/analyze',
+  '/api/tokenize',
+  '/api/prediction-attribute',
+  '/api/analyze-semantic',
+  '/api/analyze-semantic-relevance',
+  '/api/analyze-semantic-keywords',
+  '/api/available_models',
+  '/api/current_model',
+  '/api/switch_model',
+]);
+
+function isComputePath(path) {
+  if (path === '/api/v1/completions' || path.startsWith('/api/v1/completions/')) return true;
+  return COMPUTE_PATHS.has(path);
+}
 
 function corsHeaders(req) {
   const origin = req.headers.get('Origin') || '*';
@@ -54,6 +75,10 @@ function normalizeOrigin(raw) {
   return s;
 }
 
+function normalizeMode(raw) {
+  return raw === 'full' ? 'full' : 'accelerate';
+}
+
 function requireAdmin(req, env) {
   const expected = (env.ADMIN_TOKEN || '').trim();
   if (!expected) return 'ADMIN_TOKEN secret is not set';
@@ -66,15 +91,32 @@ function hfOrigin(env) {
   return (env.HF_ORIGIN || '').replace(/\/+$/, '') || null;
 }
 
-async function getBackupOrigin(env) {
+/** @returns {{ origin: string, mode: 'accelerate'|'full' } | null} */
+async function getBackup(env) {
   if (!env.STATE) return null;
-  return normalizeOrigin(await env.STATE.get(BACKUP_KEY));
+  const raw = await env.STATE.get(BACKUP_KEY);
+  if (!raw) return null;
+  if (raw.startsWith('{')) {
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    const origin = normalizeOrigin(parsed && parsed.origin);
+    if (!origin) return null;
+    return { origin, mode: normalizeMode(parsed && parsed.mode) };
+  }
+  // 旧值：纯 origin 字符串 → 视为 full（与改前整站切流一致）
+  const origin = normalizeOrigin(raw);
+  return origin ? { origin, mode: 'full' } : null;
 }
 
-async function setBackupOrigin(env, origin) {
+async function setBackup(env, origin, mode) {
   if (!env.STATE) throw new Error('STATE KV binding is not configured');
   if (origin) {
-    await env.STATE.put(BACKUP_KEY, origin, { expirationTtl: BACKUP_TTL_SEC });
+    const payload = JSON.stringify({ origin, mode: normalizeMode(mode) });
+    await env.STATE.put(BACKUP_KEY, payload, { expirationTtl: BACKUP_TTL_SEC });
   } else {
     await env.STATE.delete(BACKUP_KEY);
   }
@@ -94,11 +136,12 @@ async function handleBackupAdmin(request, env) {
   if (denied) return json(request, { ok: false, error: denied }, 403);
 
   if (request.method === 'GET') {
-    const backup = await getBackupOrigin(env);
+    const backup = await getBackup(env);
     return json(request, {
       ok: true,
-      active: backup ? 'backup' : 'hf',
-      origin: backup,
+      active: backup ? backup.mode : 'hf',
+      origin: backup ? backup.origin : null,
+      mode: backup ? backup.mode : null,
       ttl_sec: BACKUP_TTL_SEC,
       hf_origin: hfOrigin(env),
     });
@@ -116,23 +159,50 @@ async function handleBackupAdmin(request, env) {
       return json(request, { ok: false, error: 'missing origin field' }, 400);
     }
     if (raw === null || raw === '') {
-      await setBackupOrigin(env, null);
-      return json(request, { ok: true, active: 'hf', origin: null, ttl_sec: BACKUP_TTL_SEC });
+      await setBackup(env, null);
+      return json(request, {
+        ok: true,
+        active: 'hf',
+        origin: null,
+        mode: null,
+        ttl_sec: BACKUP_TTL_SEC,
+      });
     }
     const origin = normalizeOrigin(String(raw));
     if (!origin) {
       return json(request, { ok: false, error: 'invalid origin' }, 400);
     }
-    await setBackupOrigin(env, origin);
+    if (body.mode != null && body.mode !== 'accelerate' && body.mode !== 'full') {
+      return json(request, { ok: false, error: 'invalid mode (accelerate|full)' }, 400);
+    }
+    const mode = normalizeMode(body.mode);
+    await setBackup(env, origin, mode);
     return json(request, {
       ok: true,
-      active: 'backup',
+      active: mode,
       origin,
+      mode,
       ttl_sec: BACKUP_TTL_SEC,
     });
   }
 
   return json(request, { ok: false, error: 'method_not_allowed' }, 405);
+}
+
+/** 有 backup 时选上游：full 全走 backup；accelerate 仅算力走 backup */
+function pickUpstream(path, backup, env) {
+  const hf = hfOrigin(env);
+  if (!backup) {
+    return { origin: hf, via: 'hf' };
+  }
+  if (backup.mode === 'full') {
+    return { origin: backup.origin, via: 'full' };
+  }
+  // accelerate
+  if (isComputePath(path)) {
+    return { origin: backup.origin, via: 'accelerate' };
+  }
+  return { origin: hf, via: 'hf' };
 }
 
 export default {
@@ -147,14 +217,15 @@ export default {
       return handleBackupAdmin(request, env);
     }
 
-    const backup = await getBackupOrigin(env);
+    const backup = await getBackup(env);
 
     if (url.pathname === '/' || url.pathname === '/facade-health') {
       return json(request, {
         ok: true,
         facade: true,
-        active: backup ? 'backup' : 'hf',
-        upstream: backup || hfOrigin(env),
+        active: backup ? backup.mode : 'hf',
+        mode: backup ? backup.mode : null,
+        forward_to: backup ? backup.origin : hfOrigin(env),
         ttl_sec: BACKUP_TTL_SEC,
       });
     }
@@ -164,14 +235,13 @@ export default {
       return json(request, { ok: false, error: 'not_found' }, 404);
     }
 
-    const usingBackup = Boolean(backup);
-    const origin = usingBackup ? backup : hfOrigin(env);
+    const { origin, via } = pickUpstream(path, backup, env);
     if (!origin) {
       return json(
         request,
         {
           ok: false,
-          error: usingBackup ? 'backup origin missing' : 'HF_ORIGIN is not configured',
+          error: via === 'hf' ? 'HF_ORIGIN is not configured' : 'backup origin missing',
         },
         500,
       );
@@ -191,7 +261,7 @@ export default {
     for (const [k, v] of Object.entries(corsHeaders(request))) {
       respHeaders.set(k, v);
     }
-    respHeaders.set('X-Infolens-Upstream', usingBackup ? 'backup' : 'hf');
+    respHeaders.set('X-Infolens-Upstream', via);
     if ((respHeaders.get('content-type') || '').includes('text/event-stream')) {
       respHeaders.set('Cache-Control', 'no-cache');
       respHeaders.set('X-Accel-Buffering', 'no');

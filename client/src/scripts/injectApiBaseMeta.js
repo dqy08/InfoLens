@@ -1,6 +1,6 @@
 /**
  * 构建时向 HTML <head> 注入 inforadar-api-base meta（仅当 INFORADAR_API_BASE 已设置）。
- * GitHub Pages：`INFORADAR_API_BASE=https://dqy08-infolens.hf.space npm run build`
+ * GitHub Pages：`INFORADAR_API_BASE=https://dqy08-infolens-worker1.hf.space npm run build`
  * HF / 本地：不设该变量 → 无 meta → 运行时 resolveApiBase() 为同源 ''。
  */
 
