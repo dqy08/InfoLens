@@ -79,6 +79,7 @@
   },
   {
     "slug": "CoT｜the capital of the state where Dallas is located",
-    "label": "CoT｜The capital ... Dallas"
+    "label": "CoT｜The capital ... Dallas",
+    "featured": "bold"
   }
 ]
