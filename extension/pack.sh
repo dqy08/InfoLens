@@ -60,7 +60,7 @@ def store_manifest_text() -> str:
 
 
 KNOWN_TOP_KEYS = {
-    "manifest_version", "name", "version", "description",
+    "manifest_version", "default_locale", "name", "version", "description",
     "icons", "permissions", "background", "commands", "action",
     "web_accessible_resources",
 }
@@ -128,12 +128,23 @@ def manifest_asset_paths(manifest: dict) -> list[str]:
     return sorted(set(paths))
 
 
+def locale_files() -> list[str]:
+    return sorted(
+        p.relative_to(ROOT).as_posix()
+        for p in ROOT.glob("_locales/*/messages.json")
+        if p.is_file()
+    )
+
+
 def package_destinations() -> dict[str, Path]:
     """包内相对路径 -> 工作区源文件。名单由 CONTENT_JS/CSS 与 manifest 推导。"""
     mapping: dict[str, Path] = {}
 
     for rel in runtime_files():
         mapping[rel] = source_path(rel)
+
+    for rel in locale_files():
+        mapping[rel] = ROOT / rel
 
     dev_manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
     for rel in manifest_asset_paths(dev_manifest):

@@ -162,7 +162,10 @@ chrome.commands.onCommand.addListener(async (command) => {
   await activateTab(tab);
 });
 
-/** POST JSON；要求 HTTP ok 且 body.success === true（避免 2xx HTML/空对象被当成成功）。 */
+/**
+ * POST JSON；要求 HTTP ok 且 body.success === true（避免 2xx HTML/空对象被当成成功）。
+ * @returns {{ data: object, backend: string | null }} backend = X-Infolens-Backend（hf|accel）
+ */
 async function postJsonApi(url, body) {
   const res = await fetch(url, {
     method: 'POST',
@@ -179,7 +182,8 @@ async function postJsonApi(url, body) {
     const detail = data?.message || data?.detail || `HTTP ${res.status}`;
     throw new Error(detail);
   }
-  return data;
+  const backend = res.headers.get('X-Infolens-Backend');
+  return { data, backend: backend || null };
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -188,11 +192,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       try {
         const apiBase = msg.apiBase || IL_CONFIG.apiBase;
         const path = msg.path || '/api/analyze-semantic';
-        const data = await postJsonApi(
+        const { data, backend } = await postJsonApi(
           `${String(apiBase).replace(/\/$/, '')}${path}`,
           msg.body
         );
-        sendResponse({ ok: true, data });
+        sendResponse({ ok: true, data, backend });
       } catch (err) {
         sendResponse({ ok: false, error: String(err?.message || err) });
       }
@@ -208,7 +212,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           ...(msg.body && typeof msg.body === 'object' ? msg.body : {}),
           extension_version: chrome.runtime.getManifest().version,
         };
-        const data = await postJsonApi(
+        const { data } = await postJsonApi(
           `${String(apiBase).replace(/\/$/, '')}/api/extension-feedback`,
           body
         );

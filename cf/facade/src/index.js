@@ -4,7 +4,9 @@
  * - 已登记 origin：
  *   - mode=accelerate（默认）：仅算力路径 → backup；其余仍 HF_ORIGIN
  *   - mode=full：/api/*、/demo/* 全部 → backup（HF 灾备）
- * - TTL≈90s；过期或清空后回 HF_ORIGIN
+ * - TTL≈5min；过期或清空后回 HF_ORIGIN
+ * - backup 连不上（fetch 抛错 / 502·52x·530）→ 清 KV 并改打 HF（本请求）
+ *   不含源站业务 503/504（如模型加载中），避免误踢加速
  */
 const HOP_BY_HOP = new Set([
   'connection',
@@ -24,8 +26,8 @@ const HOP_BY_HOP = new Set([
 ]);
 
 const BACKUP_KEY = 'backup_origin';
-/** KV 最短 TTL 60s；登记方续期；约 90s 无续期则回 HF_ORIGIN */
-const BACKUP_TTL_SEC = 90;
+/** KV 最短 TTL 60s；登记方在剩余约 20s 时续期；约 5min 无续期则回 HF_ORIGIN */
+const BACKUP_TTL_SEC = 300;
 
 /** mode=accelerate 时走 backup 的算力路径（其余 /api|/demo 仍 HF） */
 const COMPUTE_PATHS = new Set([
@@ -112,13 +114,21 @@ async function getBackup(env) {
   return origin ? { origin, mode: 'full' } : null;
 }
 
+/** @returns {Promise<{ ok: true } | { ok: false, error: string }>} */
 async function setBackup(env, origin, mode) {
-  if (!env.STATE) throw new Error('STATE KV binding is not configured');
-  if (origin) {
-    const payload = JSON.stringify({ origin, mode: normalizeMode(mode) });
-    await env.STATE.put(BACKUP_KEY, payload, { expirationTtl: BACKUP_TTL_SEC });
-  } else {
-    await env.STATE.delete(BACKUP_KEY);
+  if (!env.STATE) return { ok: false, error: 'STATE KV binding is not configured' };
+  try {
+    if (origin) {
+      const payload = JSON.stringify({ origin, mode: normalizeMode(mode) });
+      await env.STATE.put(BACKUP_KEY, payload, { expirationTtl: BACKUP_TTL_SEC });
+    } else {
+      await env.STATE.delete(BACKUP_KEY);
+    }
+    return { ok: true };
+  } catch (err) {
+    // 免费 KV 写满等会抛错；勿再 throw，否则平台回 1101 HTML
+    const msg = err && err.message ? String(err.message) : String(err);
+    return { ok: false, error: msg || 'STATE KV write failed' };
   }
 }
 
@@ -136,7 +146,13 @@ async function handleBackupAdmin(request, env) {
   if (denied) return json(request, { ok: false, error: denied }, 403);
 
   if (request.method === 'GET') {
-    const backup = await getBackup(env);
+    let backup;
+    try {
+      backup = await getBackup(env);
+    } catch (err) {
+      const msg = err && err.message ? String(err.message) : String(err);
+      return json(request, { ok: false, error: msg || 'STATE KV read failed' }, 503);
+    }
     return json(request, {
       ok: true,
       active: backup ? backup.mode : 'hf',
@@ -159,7 +175,8 @@ async function handleBackupAdmin(request, env) {
       return json(request, { ok: false, error: 'missing origin field' }, 400);
     }
     if (raw === null || raw === '') {
-      await setBackup(env, null);
+      const cleared = await setBackup(env, null);
+      if (!cleared.ok) return json(request, { ok: false, error: cleared.error }, 503);
       return json(request, {
         ok: true,
         active: 'hf',
@@ -176,7 +193,8 @@ async function handleBackupAdmin(request, env) {
       return json(request, { ok: false, error: 'invalid mode (accelerate|full)' }, 400);
     }
     const mode = normalizeMode(body.mode);
-    await setBackup(env, origin, mode);
+    const saved = await setBackup(env, origin, mode);
+    if (!saved.ok) return json(request, { ok: false, error: saved.error }, 503);
     return json(request, {
       ok: true,
       active: mode,
@@ -189,88 +207,166 @@ async function handleBackupAdmin(request, env) {
   return json(request, { ok: false, error: 'method_not_allowed' }, 405);
 }
 
-/** 有 backup 时选上游：full 全走 backup；accelerate 仅算力走 backup */
+/** 有 backup 时选上游：full 全走 backup；accelerate 仅算力走 backup。via = 实际落点 hf|accel */
 function pickUpstream(path, backup, env) {
   const hf = hfOrigin(env);
   if (!backup) {
     return { origin: hf, via: 'hf' };
   }
   if (backup.mode === 'full') {
-    return { origin: backup.origin, via: 'full' };
+    return { origin: backup.origin, via: 'accel' };
   }
-  // accelerate
+  // accelerate：仅算力路径走 backup
   if (isComputePath(path)) {
-    return { origin: backup.origin, via: 'accelerate' };
+    return { origin: backup.origin, via: 'accel' };
   }
   return { origin: hf, via: 'hf' };
 }
 
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
+/** 边缘/隧道不可达类状态 → 可回退 HF（不含源站业务 503/504） */
+function isUpstreamDeadStatus(status) {
+  return status === 502 || status === 530 || (status >= 521 && status <= 525);
+}
 
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders(request) });
-    }
+function withUpstreamMeta(request, upstream, via) {
+  const respHeaders = new Headers(upstream.headers);
+  for (const [k, v] of Object.entries(corsHeaders(request))) {
+    respHeaders.set(k, v);
+  }
+  respHeaders.set('X-Infolens-Backend', via);
+  if ((respHeaders.get('content-type') || '').includes('text/event-stream')) {
+    respHeaders.set('Cache-Control', 'no-cache');
+    respHeaders.set('X-Accel-Buffering', 'no');
+  }
+  return new Response(upstream.body, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers: respHeaders,
+  });
+}
 
-    if (url.pathname === '/facade-backup') {
-      return handleBackupAdmin(request, env);
-    }
+async function handleRequest(request, env) {
+  const url = new URL(request.url);
 
-    const backup = await getBackup(env);
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders(request) });
+  }
 
-    if (url.pathname === '/' || url.pathname === '/facade-health') {
-      return json(request, {
-        ok: true,
-        facade: true,
-        active: backup ? backup.mode : 'hf',
-        mode: backup ? backup.mode : null,
-        forward_to: backup ? backup.origin : hfOrigin(env),
-        ttl_sec: BACKUP_TTL_SEC,
-      });
-    }
+  if (url.pathname === '/facade-backup') {
+    return handleBackupAdmin(request, env);
+  }
 
-    const path = url.pathname;
-    if (!(path === '/api' || path.startsWith('/api/') || path === '/demo' || path.startsWith('/demo/'))) {
-      return json(request, { ok: false, error: 'not_found' }, 404);
-    }
+  let backup;
+  try {
+    backup = await getBackup(env);
+  } catch (err) {
+    const msg = err && err.message ? String(err.message) : String(err);
+    return json(request, { ok: false, error: msg || 'STATE KV read failed' }, 503);
+  }
 
-    const { origin, via } = pickUpstream(path, backup, env);
-    if (!origin) {
-      return json(
-        request,
-        {
-          ok: false,
-          error: via === 'hf' ? 'HF_ORIGIN is not configured' : 'backup origin missing',
-        },
-        500,
-      );
-    }
+  if (url.pathname === '/' || url.pathname === '/facade-health') {
+    const forwardTo = backup ? backup.origin : hfOrigin(env);
+    return json(request, {
+      ok: true,
+      facade: true,
+      active: backup ? backup.mode : 'hf',
+      mode: backup ? backup.mode : null,
+      forward_to: forwardTo,
+      // 兼容旧客户端/脚本（曾用 upstream）
+      upstream: forwardTo,
+      ttl_sec: BACKUP_TTL_SEC,
+    });
+  }
 
+  const path = url.pathname;
+  if (!(path === '/api' || path.startsWith('/api/') || path === '/demo' || path.startsWith('/demo/'))) {
+    return json(request, { ok: false, error: 'not_found' }, 404);
+  }
+
+  const { origin, via } = pickUpstream(path, backup, env);
+  if (!origin) {
+    return json(
+      request,
+      {
+        ok: false,
+        error: via === 'hf' ? 'HF_ORIGIN is not configured' : 'backup origin missing',
+      },
+      500,
+    );
+  }
+
+  // POST 等 body 只能读一次；失败回退 HF 前先缓冲
+  let bodyBuf = null;
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    bodyBuf = await request.arrayBuffer();
+  }
+  const makeInit = () => {
     const init = {
       method: request.method,
       headers: buildUpstreamHeaders(request),
       redirect: 'manual',
     };
-    if (request.method !== 'GET' && request.method !== 'HEAD') {
-      init.body = request.body;
-    }
+    if (bodyBuf !== null) init.body = bodyBuf;
+    return init;
+  };
 
-    const upstream = await fetch(`${origin}${path}${url.search}`, init);
-    const respHeaders = new Headers(upstream.headers);
-    for (const [k, v] of Object.entries(corsHeaders(request))) {
-      respHeaders.set(k, v);
-    }
-    respHeaders.set('X-Infolens-Upstream', via);
-    if ((respHeaders.get('content-type') || '').includes('text/event-stream')) {
-      respHeaders.set('Cache-Control', 'no-cache');
-      respHeaders.set('X-Accel-Buffering', 'no');
-    }
+  const targetUrl = `${origin}${path}${url.search}`;
 
-    return new Response(upstream.body, {
-      status: upstream.status,
-      statusText: upstream.statusText,
-      headers: respHeaders,
+  if (via === 'hf') {
+    const upstream = await fetch(targetUrl, makeInit());
+    return withUpstreamMeta(request, upstream, via);
+  }
+
+  let upstream;
+  let dead = false;
+  try {
+    upstream = await fetch(targetUrl, makeInit());
+    dead = isUpstreamDeadStatus(upstream.status);
+  } catch {
+    dead = true;
+  }
+
+  if (!dead) {
+    return withUpstreamMeta(request, upstream, via);
+  }
+
+  if (upstream && upstream.body) {
+    try {
+      await upstream.body.cancel();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // 清登记，避免后续请求继续打死 origin；脚本 GET 发现丢失后会再 PUT
+  const cleared = await setBackup(env, null);
+
+  const hf = hfOrigin(env);
+  if (!hf) {
+    return json(request, { ok: false, error: 'HF_ORIGIN is not configured' }, 500);
+  }
+  const fallback = await fetch(`${hf}${path}${url.search}`, makeInit());
+  const resp = withUpstreamMeta(request, fallback, 'hf');
+  // KV 写满等导致删不掉时本请求仍回 HF，但登记可能还在
+  if (!cleared.ok) {
+    const headers = new Headers(resp.headers);
+    headers.set('X-Infolens-Backup-Clear', 'failed');
+    return new Response(resp.body, {
+      status: resp.status,
+      statusText: resp.statusText,
+      headers,
     });
+  }
+  return resp;
+}
+
+export default {
+  async fetch(request, env) {
+    try {
+      return await handleRequest(request, env);
+    } catch (err) {
+      const msg = err && err.message ? String(err.message) : String(err);
+      return json(request, { ok: false, error: msg || 'worker error' }, 503);
+    }
   },
 };

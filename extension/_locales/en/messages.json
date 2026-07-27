@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "Semantic Highlight",
+    "description": "Extension name shown in the store and chrome://extensions"
+  },
+  "extDescription": {
+    "message": "Search & highlight by meaning, not keywords",
+    "description": "Short extension description in the store listing"
+  }
+}

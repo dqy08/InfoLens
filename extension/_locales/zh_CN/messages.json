@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "语义高亮｜Semantic Highlight",
+    "description": "商店与扩展管理页显示的扩展名称"
+  },
+  "extDescription": {
+    "message": "通过含义来搜索高亮，而不是字面匹配",
+    "description": "商店列表中的简短介绍"
+  }
+}

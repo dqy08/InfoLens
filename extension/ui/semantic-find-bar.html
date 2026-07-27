@@ -22,10 +22,17 @@
         <svg id="semantic_match_progress" class="semantic-match-progress" viewBox="0 0 100 42" aria-label="Semantic match progress" hidden>
             <g id="semantic_match_progress_lines"></g>
         </svg>
+        <div id="semantic_find_backend_notice" class="semantic-find-strip semantic-find-backend-notice" hidden role="status">
+            <span class="semantic-find-backend-notice-text">Temporarily using backup server(slow)</span>
+            <button type="button" id="semantic_find_backend_notice_feedback" class="semantic-find-status-feedback" title="Report this to the author" aria-label="Report this to the author">
+                <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5 L9.5 2.5 L5.5 10 L5 7 Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+            </button>
+            <button type="button" id="semantic_find_backend_notice_close" class="semantic-find-status-close" title="Dismiss" aria-label="Dismiss">×</button>
+        </div>
     </div>
-    <div id="semantic_find_status" class="semantic-find-status" hidden role="status">
+    <div id="semantic_find_status" class="semantic-find-strip semantic-find-status" hidden role="status">
         <span id="semantic_find_status_text" class="semantic-find-status-text"></span>
-        <button type="button" id="semantic_find_status_feedback" class="semantic-find-status-feedback" title="Report this error to the author" aria-label="Report this error to the author">
+        <button type="button" id="semantic_find_status_feedback" class="semantic-find-status-feedback" title="Report this to the author" aria-label="Report this to the author">
             <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5 L9.5 2.5 L5.5 10 L5 7 Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
         </button>
         <button type="button" id="semantic_find_status_continue" class="semantic-find-status-continue" hidden title="Continue search" aria-label="Continue search">Continue</button>

@@ -69,9 +69,10 @@
   /** @type {{ tone: string, label: string, detail: string } | null} */
   let lastStatusMeta = null;
   let statusFeedbackSent = false;
-  let statusFeedbackHideTimer = 0;
   /** @type {{ query: string, contentChunkCount: number, truncated: boolean, windowEnd: number } | null} */
   let lastSearchMeta = null;
+  /** 本轮搜索是否已处理过 HF 慢速提示（展示或叉掉后均不再弹出） */
+  let slowBackendNoticeShown = false;
   let selectedProgressChunkStart = null;
   let hoveredProgressChunkStart = null;
   let matchIndex = -1;
@@ -688,27 +689,65 @@
   const STATUS_HEART_ICON =
     '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 10.2 C6 10.2 1.8 7.4 1.8 4.6 C1.8 3.2 2.9 2.2 4.2 2.2 C5.1 2.2 5.7 2.7 6 3.3 C6.3 2.7 6.9 2.2 7.8 2.2 C9.1 2.2 10.2 3.2 10.2 4.6 C10.2 7.4 6 10.2 6 10.2 Z" fill="currentColor"/></svg>';
 
-  function resetStatusFeedbackButton() {
-    const btn = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'));
+  function resetFeedbackButton(btn) {
     if (!btn) return;
     btn.hidden = false;
     btn.disabled = false;
     btn.classList.remove('is-thanks');
     btn.innerHTML = STATUS_FEEDBACK_ICON;
-    btn.title = 'Report this error to the author';
-    btn.setAttribute('aria-label', 'Report this error to the author');
+    btn.title = 'Report this to the author';
+    btn.setAttribute('aria-label', 'Report this to the author');
+  }
+
+  function markFeedbackThanks(btn) {
+    if (!btn) return;
+    btn.disabled = true;
+    btn.classList.add('is-thanks');
+    btn.innerHTML = STATUS_HEART_ICON;
+    btn.removeAttribute('title');
+    btn.setAttribute('aria-label', 'Thanks');
+    // 红心稍后收起；条本身保留，由用户手动 ×
+    window.setTimeout(() => {
+      if (!btn.isConnected || !btn.classList.contains('is-thanks')) return;
+      btn.hidden = true;
+      btn.classList.remove('is-thanks');
+      btn.innerHTML = STATUS_FEEDBACK_ICON;
+    }, 3000);
+  }
+
+  /**
+   * @param {{ tone: string, label: string, detail: string }} status
+   * @param {HTMLButtonElement | null} btn
+   */
+  function sendFeedback(status, btn) {
+    if (!status || !btn || btn.disabled) return;
+    btn.disabled = true;
+    chrome.runtime.sendMessage(
+      {
+        type: 'il-extension-feedback',
+        apiBase: CFG.apiBase,
+        body: buildFeedbackBody(status),
+      },
+      () => {
+        void chrome.runtime.lastError; // fire-and-forget
+      }
+    );
+    markFeedbackThanks(btn);
+  }
+
+  /** 反馈文案以 HTML 为准，避免与 DOM 双份漂移 */
+  function backendNoticeFeedbackStatus() {
+    const detail = uiQuery('.semantic-find-backend-notice-text')?.textContent?.trim() || '';
+    if (!detail) throw new Error('backend notice text missing');
+    return { tone: 'info', label: 'Note', detail };
   }
 
   function clearFindStatus() {
     const el = ui$('semantic_find_status');
     const textEl = ui$('semantic_find_status_text');
-    if (statusFeedbackHideTimer) {
-      clearTimeout(statusFeedbackHideTimer);
-      statusFeedbackHideTimer = 0;
-    }
     lastStatusMeta = null;
     statusFeedbackSent = false;
-    resetStatusFeedbackButton();
+    resetFeedbackButton(/** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback')));
     setStatusContinueVisible(false);
     if (!el) return;
     el.hidden = true;
@@ -716,6 +755,24 @@
       textEl.replaceChildren();
       textEl.removeAttribute('title');
     }
+  }
+
+  /** 进度条下：HF 慢速提示（与 Failed/Note 状态条独立；持续显示，叉掉后本轮不再出现） */
+  function clearSlowBackendNotice() {
+    const el = ui$('semantic_find_backend_notice');
+    if (el) el.hidden = true;
+  }
+
+  /** @param {string | null | undefined} via X-Infolens-Backend */
+  function noteBackend(via) {
+    if (via !== 'hf' || slowBackendNoticeShown) return;
+    slowBackendNoticeShown = true;
+    const el = ui$('semantic_find_backend_notice');
+    if (!el) return;
+    resetFeedbackButton(
+      /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_backend_notice_feedback'))
+    );
+    el.hidden = false;
   }
 
   /**
@@ -747,10 +804,6 @@
     const el = ui$('semantic_find_status');
     const textEl = ui$('semantic_find_status_text');
     if (!el || !textEl) return;
-    if (statusFeedbackHideTimer) {
-      clearTimeout(statusFeedbackHideTimer);
-      statusFeedbackHideTimer = 0;
-    }
     const tone = opts?.tone === 'error' ? 'error' : 'info';
     const head = String(label || '').trim() || (tone === 'error' ? 'Failed' : 'Note');
     const body = String(detail || '').trim();
@@ -764,11 +817,9 @@
     lastStatusMeta = { tone, label: head, detail: body };
     statusFeedbackSent = false;
     // 仅 Failed 可上报；Stopped / 截断 Note 不需要反馈按钮
-    if (tone === 'error') resetStatusFeedbackButton();
-    else {
-      const btn = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'));
-      if (btn) btn.hidden = true;
-    }
+    const feedbackBtn = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'));
+    if (tone === 'error') resetFeedbackButton(feedbackBtn);
+    else if (feedbackBtn) feedbackBtn.hidden = true;
     el.hidden = false;
     setStatusContinueVisible(canResumeSearch());
   }
@@ -778,10 +829,10 @@
     showFindStatus('Failed', reason || 'Request failed', { tone: 'error' });
   }
 
-  function buildFeedbackBody() {
-    const status = lastStatusMeta || { tone: 'info', label: 'Note', detail: '' };
+  /** @param {{ tone: string, label: string, detail: string }} status */
+  function buildFeedbackBody(status) {
     return {
-      status,
+      status: status || { tone: 'info', label: 'Note', detail: '' },
       page_url: location.href,
       query: lastSearchMeta?.query
         || /** @type {HTMLInputElement | null} */ (ui$('semantic_find_input'))?.value?.trim()
@@ -807,34 +858,10 @@
   function sendStatusFeedback() {
     if (!lastStatusMeta || statusFeedbackSent) return;
     statusFeedbackSent = true;
-    chrome.runtime.sendMessage(
-      {
-        type: 'il-extension-feedback',
-        apiBase: CFG.apiBase,
-        body: buildFeedbackBody(),
-      },
-      () => {
-        void chrome.runtime.lastError; // fire-and-forget
-      }
+    sendFeedback(
+      lastStatusMeta,
+      /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'))
     );
-    const btn = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'));
-    if (btn) {
-      btn.disabled = true;
-      btn.classList.add('is-thanks');
-      btn.innerHTML = STATUS_HEART_ICON;
-      btn.removeAttribute('title');
-      btn.setAttribute('aria-label', 'Thanks');
-    }
-    if (statusFeedbackHideTimer) clearTimeout(statusFeedbackHideTimer);
-    // 红心稍后收起；状态条保留，由用户手动 ×
-    statusFeedbackHideTimer = window.setTimeout(() => {
-      statusFeedbackHideTimer = 0;
-      const b = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'));
-      if (!b || !statusFeedbackSent) return;
-      b.hidden = true;
-      b.classList.remove('is-thanks');
-      b.innerHTML = STATUS_FEEDBACK_ICON;
-    }, 3000);
   }
 
   /**
@@ -845,6 +872,8 @@
     clearFillBlankQueue();
     clearOverlays();
     clearFindStatus();
+    slowBackendNoticeShown = false;
+    clearSlowBackendNotice();
     matchedChunks = [];
     semanticMatchProgress = [];
     progressTextLength = 0;
@@ -1236,6 +1265,26 @@
   }
 
   /**
+   * 取 cp 附近可用于滚动定位的可视 rect。
+   * 正文起点（第一个 chunk）常有前导换行/空白：单码点 Range 的 getClientRects 为空，
+   * 若仍用 rangeFromCpOffsets(cp0, cp0+1) 会直接放弃滚动；下划线绘制已用
+   * rangesFromCpOffsets 跳过空白，故会出现「点了进度条有线但不跳转」。
+   */
+  function clientRectNearCp(cp0) {
+    if (!extractedText || cp0 < 0) return null;
+    const fullCp = utf16ToCp(extractedText, extractedText.length);
+    if (cp0 >= fullCp) return null;
+    const probeEnd = Math.min(fullCp, cp0 + 128);
+    for (const range of rangesFromCpOffsets(cp0, probeEnd)) {
+      if (!/\S/.test(range.toString())) continue;
+      for (const r of range.getClientRects()) {
+        if (r.width >= 1 && r.height >= 1) return r;
+      }
+    }
+    return null;
+  }
+
+  /**
    * SYNC: client/src/shared/vis/GLTR_Text_Box.ts → scrollToUnicodeCharOffset
    * （宿主页用 findScrollRoot 代替站内 panel）
    */
@@ -1243,15 +1292,7 @@
     scrollEndCancel?.();
     scrollEndCancel = null;
     requestAnimationFrame(() => {
-      const range = rangeFromCpOffsets(cp0, cp0 + 1) || rangeFromCpOffsets(cp0, Math.max(cp0 + 1, cp0));
-      let rect = null;
-      if (range) {
-        rect = range.getBoundingClientRect();
-        if (rect.width === 0 && rect.height === 0) {
-          const rects = range.getClientRects();
-          rect = rects.length ? rects[0] : null;
-        }
-      }
+      const rect = clientRectNearCp(cp0);
       if (!rect || !extractRoot) {
         onScrollEnd?.();
         return;
@@ -1382,7 +1423,10 @@
             return;
           }
           if (!resp?.ok) reject(new Error(resp?.error || 'request failed'));
-          else resolve(resp.data);
+          else {
+            noteBackend(resp.backend);
+            resolve(resp.data);
+          }
         }
       );
     });
@@ -1595,9 +1639,21 @@
       e.stopPropagation();
       clearFindStatus();
     });
+    ui$('semantic_find_backend_notice_close')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      slowBackendNoticeShown = true;
+      clearSlowBackendNotice();
+    });
     ui$('semantic_find_status_feedback')?.addEventListener('click', (e) => {
       e.stopPropagation();
       sendStatusFeedback();
+    });
+    ui$('semantic_find_backend_notice_feedback')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sendFeedback(
+        backendNoticeFeedbackStatus(),
+        /** @type {HTMLButtonElement | null} */ (e.currentTarget)
+      );
     });
     ui$('semantic_find_status_continue')?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2003,6 +2059,13 @@
       advanceFetch(resumeFrom); // 预热：从续跑点起抓取 [resumeFrom, resumeFrom+FETCH_AHEAD]
 
       try {
+        // 第 0 块（或续跑起点）没有「上一块结束时的预滚」；若不先滚到位，本块 hold 后会立刻
+        // 被预滚下一块打断，表现为「第一个 chunk 跳转不行」（匹配与否都一样）。
+        if (stillThisSearch() && resumeFrom < allChunks.length && (followAll || !parkedOnFirstMatch)) {
+          followSearchingChunk(utf16ToCp(extractedText, allChunks[resumeFrom].start));
+          await delayMs(CHUNK_SEARCH_SCROLL_SETTLE_MS);
+        }
+
         for (let i = resumeFrom; i < allChunks.length; i++) {
           if (!stillThisSearch()) break;
           const chunk = allChunks[i];
