@@ -12,6 +12,8 @@ RUN npm ci
 COPY client/src/ ./
 # prebuild 需要读取的 JSON，否则 updateIntroHTML.js 会 ENOENT
 COPY data/demo/public/ /app/data/demo/public/
+# HF Space 前端与 GitHub/CF 同一产品行为：API 走门面
+ENV INFORADAR_API_BASE=https://api.info-lens.app
 RUN npm run build
 
 # -----------------------------------------------------------------------------

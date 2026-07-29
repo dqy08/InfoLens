@@ -69,10 +69,6 @@ from backend.api.openai_completions import (  # noqa: F401
     completions_prompt_incremental,
     completions_stop,
 )
-from backend.api.accelerate_instruct_origin import (  # noqa: F401
-    get_accelerate_instruct_origin,
-    put_accelerate_instruct_origin,
-)
 from backend.core.completion_generator import register_inference_shutdown_handlers
 
 register_inference_shutdown_handlers()

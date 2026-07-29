@@ -3,7 +3,7 @@
  * 挂到 globalThis（background importScripts / content 注入顺序加载）。
  */
 var IL_CONFIG = {
-  apiBase: 'https://infolens-api.xiaoyundqy.workers.dev',
+  apiBase: 'https://api.info-lens.app',
   /**
    * SYNC: client/src/shared/core/constants.ts → SEMANTIC_CHUNK_BYTES；算法见 splitTextToChunks.js
    * 已知问题：与后端 SEMANTIC_RUNTIME_CONFIGS 的 max_token_length（300~1000 token，按平台）无联动。

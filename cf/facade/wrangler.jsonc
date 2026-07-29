@@ -3,6 +3,12 @@
   "main": "src/index.js",
   "compatibility_date": "2026-07-26",
   "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "api.info-lens.app",
+      "custom_domain": true
+    }
+  ],
   "vars": {
     "HF_ORIGIN": "https://dqy08-infolens.hf.space"
   },

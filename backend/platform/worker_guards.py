@@ -18,7 +18,6 @@ _BLOCKED_PREFIXES = (
     "/api/client-activity",
     "/api/visit_stats",
     "/api/extension-feedback",
-    "/api/accelerate_instruct_origin",
 )
 
 

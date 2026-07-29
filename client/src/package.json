@@ -24,9 +24,9 @@
     "ww": "npm run watch",
     "stats": "webpack --mode production --json --profile > stats.json",
     "build": "webpack --mode production",
-    "build:github-pages": "npm run prebuild && INFORADAR_API_BASE=https://infolens-api.xiaoyundqy.workers.dev INFORADAR_WEB_DIST=dist-github_pages webpack --mode production",
+    "build:github-pages": "npm run prebuild && INFORADAR_API_BASE=https://api.info-lens.app INFORADAR_WEB_DIST=dist-github_pages webpack --mode production",
     "preview:github-pages": "npx serve ../dist-github_pages -p 8091 -c ../src/serve.json",
-    "build:cf": "npm run prebuild && INFORADAR_API_BASE=\"${INFORADAR_API_BASE:-https://infolens-api.xiaoyundqy.workers.dev}\" INFORADAR_WEB_DIST=dist-cf webpack --mode production",
+    "build:cf": "npm run prebuild && INFORADAR_API_BASE=\"${INFORADAR_API_BASE:-https://api.info-lens.app}\" INFORADAR_WEB_DIST=dist-cf webpack --mode production",
     "build:dev": "webpack --mode development --devtool=inline-source-map",
     "watch": "webpack --mode development --devtool=inline-source-map --watch",
     "start": "webpack serve --mode development --devtool=inline-source-map"

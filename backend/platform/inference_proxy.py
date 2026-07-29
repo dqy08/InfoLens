@@ -103,7 +103,7 @@ def wrap_sse_response(
 
 def _auth_headers() -> dict[str, str]:
     """出站头：有 INFORADAR_REMOTE_HF_TOKEN 则带 Bearer。
-    --remote 在 configure 时仍强制要求该 env；accelerate 打公开提供方时可无 token。"""
+    --remote 在 configure 时仍强制要求该 env；打公开提供方时可无 token。"""
     headers = {"Content-Type": "application/json"}
     token = remote_hf_token()
     if token:

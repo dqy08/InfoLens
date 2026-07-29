@@ -1,7 +1,7 @@
 /**
  * 构建时向 HTML <head> 注入 inforadar-api-base meta（仅当 INFORADAR_API_BASE 已设置）。
- * GitHub Pages：`INFORADAR_API_BASE=https://infolens-api.xiaoyundqy.workers.dev npm run build`
- * HF / 本地：不设该变量 → 无 meta → 运行时 resolveApiBase() 为同源 ''。
+ * GitHub / CF / HF Docker：`INFORADAR_API_BASE=https://api.info-lens.app`
+ * 本地：不设该变量 → 无 meta → 运行时 resolveApiBase() 为同源 ''。
  */
 
 const { escapeHtmlText } = require('./injectPageMetaIntoHtml.js');

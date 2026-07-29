@@ -43,7 +43,7 @@ jobs:
         run: |
           cd client/src
           npm ci
-          INFORADAR_API_BASE=https://infolens-api.xiaoyundqy.workers.dev npm run build:cf
+          INFORADAR_API_BASE=https://api.info-lens.app npm run build:cf
 
       - name: Deploy Pages
         env:

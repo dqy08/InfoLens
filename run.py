@@ -29,10 +29,7 @@ ENV_HELP = """
   FORCE_CPU=1           强制使用 CPU，忽略 CUDA/MPS
   FORCE_INT8=1          启用 INT8 量化（CPU/CUDA 支持，MPS 不支持）
   CPU_FORCE_BFLOAT16=1  CPU 使用 bfloat16
-  INFORADAR_REMOTE_HF_TOKEN  --remote 时必填；accelerate 出站有则带 Bearer（公开提供方可不设）
-  INFORADAR_ACCELERATE_INSTRUCT_MAX_INFLIGHT  打向加速 origin 的最大 in-flight，默认 5
-  INFORADAR_ACCELERATE_INSTRUCT_TTL_SEC  加速 origin 登记 TTL（秒），默认 90；靠登记方探通后续期
-  （加速 origin 仅运行时 PUT /api/accelerate_instruct_origin，不经环境变量；指日常 --port）
+  INFORADAR_REMOTE_HF_TOKEN  --remote 时必填；出站有则带 Bearer（公开提供方可不设）
   INFORADAR_PORT            Docker 监听端口（默认 7860）
   INFORADAR_BASE_MODEL      Docker 覆盖 base 模型 id（可选）
   INFORADAR_INSTRUCT_MODEL  Docker 覆盖 instruct 模型 id（可选）
@@ -105,11 +102,9 @@ def _parse_args():
 def _load_and_run(args):
     """加载 server、backend 等依赖并启动服务（parse_args 遇 -h 已退出，不会执行到此）"""
     from backend.platform.model_routing import configure_from_args, is_worker
-    from backend.platform import instruct_accelerate
 
     try:
         configure_from_args(args)
-        instruct_accelerate.configure()
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(2)

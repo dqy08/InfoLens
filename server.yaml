@@ -2,6 +2,10 @@ swagger: '2.0'
 info:
   title: InfoRadar API
   version: "0.1"
+  description: |
+    demo（/list_demos、/demo 读、以及 save/delete 等写）与访问统计（/client-activity、/visit_stats*）
+    现由源站承担。读侧 demo、统计虽可迁边缘，暂无流量痛点，等量上来再优化
+    （demo 宜先只读化；统计需换持久化，非原样搬 Worker）。
 consumes:
   - application/json
 produces:
@@ -1114,70 +1118,6 @@ paths:
                 type: boolean
               error:
                 type: string
-
-  /accelerate_instruct_origin:
-    get:
-      tags:
-        - all
-      summary: get instruct accelerate origin (admin only)
-      operationId: server.get_accelerate_instruct_origin
-      responses:
-        200:
-          description: current accelerate origin and gate status
-          schema:
-            type: object
-            properties:
-              success:
-                type: boolean
-              origin:
-                type: string
-                x-nullable: true
-              eligible:
-                type: boolean
-              circuit_open:
-                type: boolean
-              inflight:
-                type: integer
-              ttl_sec:
-                type: integer
-        403:
-          description: admin required
-    put:
-      tags:
-        - all
-      summary: set instruct accelerate origin (admin only)
-      description: |
-        运行时设置本机加速 origin（HTTPS 根 URL）；这是配置 origin 的唯一方式。
-        origin 为空字符串或 null 时关闭加速。成功登记刷新 TTL（默认 90s）；过期后失效。
-      operationId: server.put_accelerate_instruct_origin
-      parameters:
-        - in: body
-          name: body
-          required: true
-          schema:
-            type: object
-            properties:
-              origin:
-                type: string
-                x-nullable: true
-                description: HTTPS origin，或 null/"" 关闭
-      responses:
-        200:
-          description: updated
-          schema:
-            type: object
-            properties:
-              success:
-                type: boolean
-              origin:
-                type: string
-                x-nullable: true
-              ttl_sec:
-                type: integer
-        400:
-          description: invalid origin
-        403:
-          description: admin required
 
   /extension-feedback:
     post:

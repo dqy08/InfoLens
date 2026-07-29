@@ -16,7 +16,7 @@ case "${1:-}" in
     ;;
   prod)
     cp config.prod.js config.js
-    echo "已切回 prod：apiBase=infolens-api.xiaoyundqy.workers.dev。去 chrome://extensions 重新加载生效。"
+    echo "已切回 prod：apiBase=api.info-lens.app。去 chrome://extensions 重新加载生效。"
     ;;
   *)
     echo "用法: $0 local|prod" >&2
