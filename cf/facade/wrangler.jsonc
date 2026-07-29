@@ -4,7 +4,7 @@
   "compatibility_date": "2026-07-26",
   "workers_dev": true,
   "vars": {
-    "HF_ORIGIN": "https://dqy08-infolens-worker1.hf.space"
+    "HF_ORIGIN": "https://dqy08-infolens.hf.space"
   },
   "kv_namespaces": [
     {

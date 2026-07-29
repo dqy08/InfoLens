@@ -52,11 +52,11 @@ def test_remote_origin_without_scheme(monkeypatch):
     monkeypatch.setenv("INFORADAR_REMOTE_HF_TOKEN", "test-token")
     args = Namespace(
         slots="base,instruct",
-        remote=["base=dqy08-infolens-worker1.hf.space"],
+        remote=["base=dqy08-infolens.hf.space"],
         worker=False,
     )
     model_routing.configure_from_args(args)
-    assert model_routing.remote_origin(ModelSlot.BASE) == "https://dqy08-infolens-worker1.hf.space"
+    assert model_routing.remote_origin(ModelSlot.BASE) == "https://dqy08-infolens.hf.space"
 
 
 def test_worker_and_remote_mutually_exclusive(monkeypatch):
