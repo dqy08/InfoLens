@@ -1409,10 +1409,15 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
             }
 
             if (isNarrowScreen()) {
-                const y = window.scrollY + rect.top - window.innerHeight * viewportYRatio;
-                window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+                const ideal = window.scrollY + rect.top - window.innerHeight * viewportYRatio;
+                const maxScroll = Math.max(
+                    0,
+                    (document.scrollingElement || document.documentElement).scrollHeight - window.innerHeight
+                );
+                const y = Math.max(0, Math.min(ideal, maxScroll));
+                window.scrollTo({ top: y, behavior: 'smooth' });
                 if (onScrollEnd) {
-                    this.chunkScrollEndCancel = waitForSmoothScrollEnd(window, onScrollEnd);
+                    this.chunkScrollEndCancel = waitForSmoothScrollEnd(window, y, onScrollEnd);
                 }
                 return;
             }
@@ -1427,9 +1432,10 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
             const topInPanel = rect.top - panelRect.top + panel.scrollTop;
             const target = topInPanel - panel.clientHeight * viewportYRatio;
             const maxScroll = Math.max(0, panel.scrollHeight - panel.clientHeight);
-            panel.scrollTo({ top: Math.max(0, Math.min(target, maxScroll)), behavior: 'smooth' });
+            const top = Math.max(0, Math.min(target, maxScroll));
+            panel.scrollTo({ top, behavior: 'smooth' });
             if (onScrollEnd) {
-                this.chunkScrollEndCancel = waitForSmoothScrollEnd(panel, onScrollEnd);
+                this.chunkScrollEndCancel = waitForSmoothScrollEnd(panel, top, onScrollEnd);
             }
         });
     }

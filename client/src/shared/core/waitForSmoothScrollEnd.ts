@@ -1,19 +1,21 @@
 /**
- * 等待 smooth scroll 结束。返回取消函数。
+ * 等到滚动到达 expectedTop，或 scrollend，或超时。返回取消函数。
  *
- * 仅靠 `scrollend` 不够：无位移时浏览器常不触发该事件，会空等到 maxWait。
- * 语义：滚动已结束，或确认未产生滚动。
+ * - 已在目标附近：立即结束（无位移时 scrollend 常不触发）
+ * - 滚动中：位置接近目标，或浏览器 scrollend → 结束
+ * - 不靠「两帧未动」猜测；超时只作兜底
  */
 export function waitForSmoothScrollEnd(
     target: Window | HTMLElement,
+    expectedTop: number,
     onDone: () => void,
-    maxWaitMs = 5000
+    maxWaitMs = 2000
 ): () => void {
     let settled = false;
+    let timeoutId = 0;
 
     const getTop = () =>
         target === window ? window.scrollY : (target as HTMLElement).scrollTop;
-    const startTop = getTop();
 
     const settle = () => {
         if (settled) return;
@@ -22,23 +24,22 @@ export function waitForSmoothScrollEnd(
         onDone();
     };
 
+    const check = () => {
+        if (Math.abs(getTop() - expectedTop) < 1) settle();
+    };
+
     const onScrollEnd = () => settle();
 
     const dispose = () => {
-        window.clearTimeout(timeoutId);
+        if (timeoutId) window.clearTimeout(timeoutId);
+        target.removeEventListener('scroll', check);
         target.removeEventListener('scrollend', onScrollEnd);
     };
 
+    target.addEventListener('scroll', check, { passive: true });
     target.addEventListener('scrollend', onScrollEnd, { once: true });
-
-    // 两帧后位置仍未变 → scrollTo 未产生运动，scrollend 不会来
-    requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-            if (Math.abs(getTop() - startTop) < 1) settle();
-        });
-    });
-
-    const timeoutId = window.setTimeout(settle, maxWaitMs);
+    check();
+    if (!settled) timeoutId = window.setTimeout(settle, maxWaitMs);
 
     return () => {
         settled = true;

@@ -1,30 +1,18 @@
 /**
- * 定根：Chrome 纯文本查看器（body 下仅一个 <pre>）直接用 body；
- * 其余走 Readability（预打标 → clone 上跑算法 → data-il-rid 映回）。
+ * 定根：text/plain 整页即正文；其余走 Readability（预打标 → clone → data-il-rid 映回）。
  * Readability 失败抛错，不回退启发式。
  */
 (() => {
   const ATTR = 'data-il-rid';
 
-  /** 扩展注入的宿主，不算页面内容子节点 */
-  function isExtensionHost(el) {
-    const id = el.id;
-    return id === 'il-find-root' || id === 'il-overlay-host';
-  }
-
   /**
-   * Chrome/WebKit 对 text/plain 等的包装：<body><pre>…</pre></body>
+   * 浏览器对 text/plain（.txt / .py raw 等）的原生查看器：整页即正文。
    * @param {Document} doc
    * @returns {Element | null}
    */
   function findPlainTextRoot(doc) {
-    const body = doc.body;
-    if (!body) return null;
-    const kids = [];
-    for (const el of body.children) {
-      if (!isExtensionHost(el)) kids.push(el);
-    }
-    if (kids.length === 1 && kids[0].tagName === 'PRE') return body;
+    if (!doc.body) return null;
+    if (doc.contentType === 'text/plain') return doc.body;
     return null;
   }
 

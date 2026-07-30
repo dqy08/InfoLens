@@ -1226,16 +1226,12 @@
 
   /**
    * SYNC: client/src/shared/core/waitForSmoothScrollEnd.ts
-   * 等滚动停稳或确认未滚动；勿仅依赖 scrollend（无位移时常不触发 → 空等 maxWait）。
+   * 等到到达 expectedTop，或 scrollend，或超时；已在目标附近则立即结束。
    */
-  /**
-   * SYNC: client/src/shared/core/waitForSmoothScrollEnd.ts
-   * scrollend + 两帧后位置未变则结束 + maxWait；勿仅依赖 scrollend。
-   */
-  function waitForSmoothScrollEnd(target, onDone, maxWaitMs = 5000) {
+  function waitForSmoothScrollEnd(target, expectedTop, onDone, maxWaitMs = 2000) {
     let settled = false;
+    let timeoutId = 0;
     const getTop = () => (target === window ? window.scrollY : target.scrollTop);
-    const startTop = getTop();
 
     const settle = () => {
       if (settled) return;
@@ -1244,19 +1240,22 @@
       onDone();
     };
 
+    const check = () => {
+      if (Math.abs(getTop() - expectedTop) < 1) settle();
+    };
+
     const onScrollEnd = () => settle();
+
     const dispose = () => {
-      window.clearTimeout(timeoutId);
+      if (timeoutId) window.clearTimeout(timeoutId);
+      target.removeEventListener('scroll', check);
       target.removeEventListener('scrollend', onScrollEnd);
     };
 
+    target.addEventListener('scroll', check, { passive: true });
     target.addEventListener('scrollend', onScrollEnd, { once: true });
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (Math.abs(getTop() - startTop) < 1) settle();
-      });
-    });
-    const timeoutId = window.setTimeout(settle, maxWaitMs);
+    check();
+    if (!settled) timeoutId = window.setTimeout(settle, maxWaitMs);
 
     return () => {
       settled = true;
@@ -1303,9 +1302,14 @@
         scrollRoot === document.documentElement ||
         scrollRoot === document.body;
       if (isWindow) {
-        const y = window.scrollY + rect.top - window.innerHeight * viewportYRatio;
-        window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
-        if (onScrollEnd) scrollEndCancel = waitForSmoothScrollEnd(window, onScrollEnd);
+        const ideal = window.scrollY + rect.top - window.innerHeight * viewportYRatio;
+        const maxScroll = Math.max(
+          0,
+          (document.scrollingElement || document.documentElement).scrollHeight - window.innerHeight
+        );
+        const y = Math.max(0, Math.min(ideal, maxScroll));
+        window.scrollTo({ top: y, behavior: 'smooth' });
+        if (onScrollEnd) scrollEndCancel = waitForSmoothScrollEnd(window, y, onScrollEnd);
         return;
       }
       const panel = /** @type {HTMLElement} */ (scrollRoot);
@@ -1313,8 +1317,9 @@
       const topInPanel = rect.top - panelRect.top + panel.scrollTop;
       const target = topInPanel - panel.clientHeight * viewportYRatio;
       const maxScroll = Math.max(0, panel.scrollHeight - panel.clientHeight);
-      panel.scrollTo({ top: Math.max(0, Math.min(target, maxScroll)), behavior: 'smooth' });
-      if (onScrollEnd) scrollEndCancel = waitForSmoothScrollEnd(panel, onScrollEnd);
+      const top = Math.max(0, Math.min(target, maxScroll));
+      panel.scrollTo({ top, behavior: 'smooth' });
+      if (onScrollEnd) scrollEndCancel = waitForSmoothScrollEnd(panel, top, onScrollEnd);
     });
   }
 
