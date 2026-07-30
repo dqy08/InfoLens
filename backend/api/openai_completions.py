@@ -317,29 +317,8 @@ def _completions_sse_response(
 def completions_stop():
     """
     单用户串行：置位全局停止标志，使当前续写在 generate 与 SSE 回调中尽快结束。
-    若当前续写走 remote / 加速 origin，同步转发 stop。
     """
-    from backend.platform.inference_proxy import (
-        get_active_remote_completion_origin,
-        get_active_remote_completion_slot,
-        proxy_request,
-    )
-    from backend.platform.model_routing import remote_origin
-
     global_completion_stop_event.set()
-
-    origin = get_active_remote_completion_origin()
-    if origin is None:
-        slot = get_active_remote_completion_slot()
-        if slot is not None:
-            origin = remote_origin(slot)
-    if origin:
-        return proxy_request(
-            origin,
-            "POST",
-            "/api/v1/completions/stop",
-            timeout=10.0,
-        )
     return {"ok": True}, 200
 
 
@@ -466,10 +445,6 @@ def completions_prompt(completions_prompt_request):
 
     return ingress_inference(
         slot=slot,
-        api_path="/api/v1/completions/prompt",
-        json_body=completions_prompt_request,
-        stream=False,
-        timeout=30.0,
         log_fn=log_fn,
         local_fn=local_fn,
     )
@@ -533,10 +508,6 @@ def completions_prompt_incremental(completions_prompt_incremental_request):
 
     return ingress_inference(
         slot=slot,
-        api_path="/api/v1/completions/prompt-incremental",
-        json_body=completions_prompt_incremental_request,
-        stream=False,
-        timeout=30.0,
         local_fn=local_fn,
     )
 
@@ -614,12 +585,7 @@ def completions(completions_request):
 
     return ingress_inference(
         slot=slot,
-        api_path="/api/v1/completions",
-        json_body=completions_request,
-        stream=True,
-        timeout=COMPLETION_WALL_CLOCK_TIMEOUT_SEC,
         log_fn=log_fn,
         local_fn=local_fn,
         response_log_fn=make_completions_response_logger(logged),
-        track_remote_completion=True,
     )

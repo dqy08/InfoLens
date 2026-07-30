@@ -222,10 +222,6 @@ def analyze(analyze_request):
 
     return ingress_inference(
         slot=ModelSlot.BASE,
-        api_path="/api/analyze",
-        json_body=analyze_request,
-        stream=bool(stream),
-        timeout=60.0,
         log_fn=log_fn,
         local_fn=local_fn,
         response_log_fn=make_analyze_response_logger(

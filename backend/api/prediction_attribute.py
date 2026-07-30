@@ -161,10 +161,6 @@ def prediction_attribute(attribution_request):
     slot = slot_for_prediction_attr_model(model)
     return ingress_inference(
         slot=slot,
-        api_path="/api/prediction-attribute",
-        json_body=attribution_request,
-        stream=False,
-        timeout=60.0,
         log_fn=log_fn,
         local_fn=local_fn,
         response_log_fn=make_prediction_attribute_response_logger(

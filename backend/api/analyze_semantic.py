@@ -262,7 +262,6 @@ def _analyze_semantic_plain(
 def _ingress_semantic(
     semantic_request: dict,
     *,
-    api_path: str,
     kind: SemanticKind,
     content,
     log_text: str,
@@ -290,22 +289,11 @@ def _ingress_semantic(
 
     from backend.models.model_manager import ModelSlot
     from backend.platform.inference_ingress import ingress_inference
-    from backend.platform.inference_response_log import make_analyze_semantic_response_logger
-    from backend.platform.model_routing import is_local
 
     return ingress_inference(
         slot=ModelSlot.INSTRUCT,
-        api_path=api_path,
-        json_body=semantic_request,
-        stream=bool(stream),
-        timeout=60.0,
         log_fn=log_fn,
         local_fn=local_fn,
-        response_log_fn=(
-            None
-            if is_local(ModelSlot.INSTRUCT)
-            else make_analyze_semantic_response_logger(logged, kind=kind)
-        ),
     )
 
 
@@ -336,7 +324,6 @@ def analyze_semantic_relevance(semantic_request):
         return log_or_err
     return _ingress_semantic(
         semantic_request,
-        api_path="/api/analyze-semantic-relevance",
         kind="relevance",
         content=content,
         log_text=log_or_err,
@@ -351,7 +338,6 @@ def analyze_semantic_keywords(semantic_request):
         return log_or_err
     return _ingress_semantic(
         semantic_request,
-        api_path="/api/analyze-semantic-keywords",
         kind="keywords",
         content=content,
         log_text=log_or_err,
@@ -386,7 +372,6 @@ def analyze_semantic(semantic_request):
 
     return _ingress_semantic(
         semantic_request,
-        api_path="/api/analyze-semantic",
         kind=kind,
         content=content,
         log_text=log_or_err,

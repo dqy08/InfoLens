@@ -37,9 +37,5 @@ def tokenize(tokenize_request):
 
     return ingress_inference(
         slot=slot,
-        api_path="/api/tokenize",
-        json_body=tokenize_request,
-        stream=False,
-        timeout=30.0,
         local_fn=local_fn,
     )

@@ -3,7 +3,7 @@
  * - 默认 /api/*、/demo/* → HF_ORIGIN
  * - home-server 允许访问（粘性 switch，无 TTL）：
  *   - mode=accelerate（默认）：仅算力路径 → HOME_ORIGIN；其余仍 HF
- *   - mode=full：/api/*、/demo/* 全部 → HOME_ORIGIN
+ *   - mode=full：算力路径 + /demo/* + /api/list_demos → HOME_ORIGIN；其余仍 HF
  * - 请求发现 home 不可达（fetch 抛错 / 502·52x·530）→ 写 last_fail_at，本请求改打 HF
  *   冷却期内不再尝试 home；不含源站业务 503/504
  * - /facade-home-probe：始终探 HOME_ORIGIN/api/health；冷却期内若恢复则清 last_fail_at（不通则只观测、不续写）
@@ -29,7 +29,7 @@ const ALLOW_KEY = 'home_allow';
 const HEALTH_KEY = 'home_health';
 const COOLDOWN_SEC = 60;
 
-/** mode=accelerate 时走 home 的算力路径（其余 /api|/demo 仍 HF） */
+/** 两模式均走 home 的算力路径 */
 const COMPUTE_PATHS = new Set([
   '/api/analyze',
   '/api/tokenize',
@@ -42,6 +42,17 @@ const COMPUTE_PATHS = new Set([
 function isComputePath(path) {
   if (path === '/api/v1/completions' || path.startsWith('/api/v1/completions/')) return true;
   return COMPUTE_PATHS.has(path);
+}
+
+/** mode=full 相对 accelerate 多切的 demo 读路径 */
+function isFullExtraPath(path) {
+  if (path === '/api/list_demos') return true;
+  return path === '/demo' || path.startsWith('/demo/');
+}
+
+function isHomePath(path, mode) {
+  if (isComputePath(path)) return true;
+  return mode === 'full' && isFullExtraPath(path);
 }
 
 function corsHeaders(req) {
@@ -295,10 +306,7 @@ function pickUpstream(path, allow, lastFailAt, env) {
   if (!allow || inCooldown(lastFailAt)) {
     return { origin: hf, via: 'hf' };
   }
-  if (allow.mode === 'full') {
-    return { origin: home, via: 'accel' };
-  }
-  if (isComputePath(path)) {
+  if (isHomePath(path, allow.mode)) {
     return { origin: home, via: 'accel' };
   }
   return { origin: hf, via: 'hf' };

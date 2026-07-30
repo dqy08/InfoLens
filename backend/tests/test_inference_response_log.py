@@ -10,13 +10,12 @@ from backend.platform import inference_response_log, model_routing
 @pytest.fixture(autouse=True)
 def _reset_routing():
     model_routing._configured_slots = (ModelSlot.BASE, ModelSlot.INSTRUCT)
-    model_routing._remote_origins = {}
     model_routing._worker_mode = False
     yield
 
 
 def test_portal_analyze_response_not_on_worker(capsys):
-    model_routing.configure_from_args(Namespace(slots="base", remote=None, worker=True))
+    model_routing.configure_from_args(Namespace(slots="base", worker=True))
     inference_response_log.log_analyze_response(
         request_id=1,
         char_count=10,
@@ -28,7 +27,7 @@ def test_portal_analyze_response_not_on_worker(capsys):
 
 
 def test_worker_analyze_response_same_format_as_portal(capsys):
-    model_routing.configure_from_args(Namespace(slots="base", remote=None, worker=True))
+    model_routing.configure_from_args(Namespace(slots="base", worker=True))
     inference_response_log.log_analyze_response(
         request_id=3,
         char_count=10,

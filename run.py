@@ -29,7 +29,6 @@ ENV_HELP = """
   FORCE_CPU=1           强制使用 CPU，忽略 CUDA/MPS
   FORCE_INT8=1          启用 INT8 量化（CPU/CUDA 支持，MPS 不支持）
   CPU_FORCE_BFLOAT16=1  CPU 使用 bfloat16
-  INFORADAR_REMOTE_HF_TOKEN  --remote 时必填；出站有则带 Bearer（公开提供方可不设）
   INFORADAR_PORT            Docker 监听端口（默认 7860）
   INFORADAR_BASE_MODEL      Docker 覆盖 base 模型 id（可选）
   INFORADAR_INSTRUCT_MODEL  Docker 覆盖 instruct 模型 id（可选）
@@ -85,13 +84,6 @@ def _parse_args():
         help="本进程参与的槽位，逗号分隔（默认 base,instruct）",
     )
     parser.add_argument(
-        "--remote",
-        action="append",
-        default=None,
-        metavar="SLOT=ORIGIN",
-        help="槽位不本地加载，请求转发到 Space 根 URL（可重复）",
-    )
-    parser.add_argument(
         "--worker",
         action="store_true",
         help="Worker 形态：关 stats/demo 写/admin；保留静态页",
@@ -140,10 +132,6 @@ def _load_and_run(args):
 
     if is_worker():
         print("[inforadar] worker mode: visit_stats persist and demo writes disabled", flush=True)
-
-    from backend.platform.remote_keepalive import start_remote_keepalive
-
-    start_remote_keepalive()
 
     if not getattr(ctx.args, "no_auto_load", False):
         def load_model_in_background():
