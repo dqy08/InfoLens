@@ -1723,8 +1723,16 @@
     }
   }
 
+  /** 页面级 #il-find-root 已被另一份扩展占用（隔离世界互不可见，只能靠 DOM 标记） */
+  const OTHER_IL_MSG =
+    'Another InfoLens is already on this page. Please refresh the page and try again.';
+
   async function buildBar() {
     let host = document.getElementById('il-find-root');
+    // 已有 host 且不是本扩展标记的（含旧版无标记）→ 报错放弃，不复用、不偷偷重建
+    if (host && host.dataset.ilExtensionId !== chrome.runtime.id) {
+      throw new Error(OTHER_IL_MSG);
+    }
     const existing = /** @type {HTMLElement | null} */ (
       host?.shadowRoot?.getElementById('semantic_find_bar') ?? null
     );
@@ -1739,6 +1747,7 @@
 
     host = document.createElement('div');
     host.id = 'il-find-root';
+    host.dataset.ilExtensionId = chrome.runtime.id;
     document.documentElement.appendChild(host);
     uiShadow = host.attachShadow({ mode: 'open' });
 
@@ -2274,6 +2283,8 @@
       }
     } catch (err) {
       console.error('[InfoLens]', err);
+      const msg = String(err?.message || err);
+      if (msg === OTHER_IL_MSG) alert(msg);
     }
   }
 

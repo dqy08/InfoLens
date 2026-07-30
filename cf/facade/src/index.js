@@ -1,12 +1,12 @@
 /**
  * InfoLens 门面：
  * - 默认 /api/*、/demo/* → HF_ORIGIN
- * - 已登记 origin：
- *   - mode=accelerate（默认）：仅算力路径 → backup；其余仍 HF_ORIGIN
- *   - mode=full：/api/*、/demo/* 全部 → backup（HF 灾备）
- * - TTL≈5min；过期或清空后回 HF_ORIGIN
- * - backup 连不上（fetch 抛错 / 502·52x·530）→ 清 KV 并改打 HF（本请求）
- *   不含源站业务 503/504（如模型加载中），避免误踢加速
+ * - home-server 允许访问（粘性 switch，无 TTL）：
+ *   - mode=accelerate（默认）：仅算力路径 → HOME_ORIGIN；其余仍 HF
+ *   - mode=full：/api/*、/demo/* 全部 → HOME_ORIGIN
+ * - 请求发现 home 不可达（fetch 抛错 / 502·52x·530）→ 写 last_fail_at，本请求改打 HF
+ *   冷却期内不再尝试 home；不含源站业务 503/504
+ * - /facade-home-probe：始终探 HOME_ORIGIN/api/health；冷却期内若恢复则清 last_fail_at（不通则只观测、不续写）
  */
 const HOP_BY_HOP = new Set([
   'connection',
@@ -25,11 +25,11 @@ const HOP_BY_HOP = new Set([
   'cf-worker',
 ]);
 
-const BACKUP_KEY = 'backup_origin';
-/** KV 最短 TTL 60s；登记方在剩余约 20s 时续期；约 5min 无续期则回 HF_ORIGIN */
-const BACKUP_TTL_SEC = 300;
+const ALLOW_KEY = 'home_allow';
+const HEALTH_KEY = 'home_health';
+const COOLDOWN_SEC = 60;
 
-/** mode=accelerate 时走 backup 的算力路径（其余 /api|/demo 仍 HF） */
+/** mode=accelerate 时走 home 的算力路径（其余 /api|/demo 仍 HF） */
 const COMPUTE_PATHS = new Set([
   '/api/analyze',
   '/api/tokenize',
@@ -37,9 +37,6 @@ const COMPUTE_PATHS = new Set([
   '/api/analyze-semantic',
   '/api/analyze-semantic-relevance',
   '/api/analyze-semantic-keywords',
-  '/api/available_models',
-  '/api/current_model',
-  '/api/switch_model',
 ]);
 
 function isComputePath(path) {
@@ -64,19 +61,6 @@ function json(req, body, status = 200) {
   return Response.json(body, { status, headers: corsHeaders(req) });
 }
 
-function normalizeOrigin(raw) {
-  const s = (raw || '').trim().replace(/\/+$/, '');
-  if (!s) return null;
-  let u;
-  try {
-    u = new URL(s);
-  } catch {
-    return null;
-  }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
-  return s;
-}
-
 function normalizeMode(raw) {
   return raw === 'full' ? 'full' : 'accelerate';
 }
@@ -93,74 +77,94 @@ function hfOrigin(env) {
   return (env.HF_ORIGIN || '').replace(/\/+$/, '') || null;
 }
 
-/** @returns {{ origin: string, mode: 'accelerate'|'full' } | null} */
-async function getBackup(env) {
+function homeOrigin(env) {
+  return (env.HOME_ORIGIN || '').replace(/\/+$/, '') || null;
+}
+
+function nowSec() {
+  return Math.floor(Date.now() / 1000);
+}
+
+/** @returns {Promise<{ mode: 'accelerate'|'full' } | null>} */
+async function getAllow(env) {
   if (!env.STATE) return null;
-  const raw = await env.STATE.get(BACKUP_KEY);
+  const raw = await env.STATE.get(ALLOW_KEY);
   if (!raw) return null;
-  if (raw.startsWith('{')) {
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return null;
-    }
-    const origin = normalizeOrigin(parsed && parsed.origin);
-    if (!origin) return null;
-    return { origin, mode: normalizeMode(parsed && parsed.mode) };
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
   }
-  // 旧值：纯 origin 字符串 → 视为 full（与改前整站切流一致）
-  const origin = normalizeOrigin(raw);
-  return origin ? { origin, mode: 'full' } : null;
+  if (!parsed || parsed.allowed !== true) return null;
+  return { mode: normalizeMode(parsed.mode) };
+}
+
+/** @returns {Promise<number|null>} last_fail_at unix sec */
+async function getLastFailAt(env) {
+  if (!env.STATE) return null;
+  const raw = await env.STATE.get(HEALTH_KEY);
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const t = parsed && parsed.last_fail_at;
+  return typeof t === 'number' && t > 0 ? t : null;
+}
+
+function inCooldown(lastFailAt, now = nowSec()) {
+  return lastFailAt != null && now < lastFailAt + COOLDOWN_SEC;
 }
 
 /** @returns {Promise<{ ok: true } | { ok: false, error: string }>} */
-async function setBackup(env, origin, mode) {
+async function kvPut(env, key, value) {
   if (!env.STATE) return { ok: false, error: 'STATE KV binding is not configured' };
   try {
-    if (origin) {
-      const payload = JSON.stringify({ origin, mode: normalizeMode(mode) });
-      await env.STATE.put(BACKUP_KEY, payload, { expirationTtl: BACKUP_TTL_SEC });
-    } else {
-      await env.STATE.delete(BACKUP_KEY);
-    }
+    await env.STATE.put(key, value);
     return { ok: true };
   } catch (err) {
-    // 免费 KV 写满等会抛错；勿再 throw，否则平台回 1101 HTML
     const msg = err && err.message ? String(err.message) : String(err);
     return { ok: false, error: msg || 'STATE KV write failed' };
   }
 }
 
-function buildUpstreamHeaders(req) {
-  const out = new Headers();
-  for (const [k, v] of req.headers) {
-    if (HOP_BY_HOP.has(k.toLowerCase())) continue;
-    out.set(k, v);
+/** @returns {Promise<{ ok: true } | { ok: false, error: string }>} */
+async function kvDelete(env, key) {
+  if (!env.STATE) return { ok: false, error: 'STATE KV binding is not configured' };
+  try {
+    await env.STATE.delete(key);
+    return { ok: true };
+  } catch (err) {
+    const msg = err && err.message ? String(err.message) : String(err);
+    return { ok: false, error: msg || 'STATE KV delete failed' };
   }
-  return out;
 }
 
-async function handleBackupAdmin(request, env) {
+async function setAllow(env, mode) {
+  return kvPut(env, ALLOW_KEY, JSON.stringify({ allowed: true, mode: normalizeMode(mode) }));
+}
+
+async function clearAllow(env) {
+  return kvDelete(env, ALLOW_KEY);
+}
+
+async function setLastFailAt(env, ts) {
+  return kvPut(env, HEALTH_KEY, JSON.stringify({ last_fail_at: ts }));
+}
+
+async function clearHealth(env) {
+  return kvDelete(env, HEALTH_KEY);
+}
+
+async function handleSwitchAdmin(request, env) {
   const denied = requireAdmin(request, env);
   if (denied) return json(request, { ok: false, error: denied }, 403);
 
   if (request.method === 'GET') {
-    let backup;
-    try {
-      backup = await getBackup(env);
-    } catch (err) {
-      const msg = err && err.message ? String(err.message) : String(err);
-      return json(request, { ok: false, error: msg || 'STATE KV read failed' }, 503);
-    }
-    return json(request, {
-      ok: true,
-      active: backup ? backup.mode : 'hf',
-      origin: backup ? backup.origin : null,
-      mode: backup ? backup.mode : null,
-      ttl_sec: BACKUP_TTL_SEC,
-      hf_origin: hfOrigin(env),
-    });
+    return json(request, { ok: true });
   }
 
   if (request.method === 'PUT') {
@@ -170,55 +174,132 @@ async function handleBackupAdmin(request, env) {
     } catch {
       return json(request, { ok: false, error: 'invalid json' }, 400);
     }
-    const raw = body && 'origin' in body ? body.origin : undefined;
-    if (raw === undefined) {
-      return json(request, { ok: false, error: 'missing origin field' }, 400);
+    if (!body || typeof body.allowed !== 'boolean') {
+      return json(request, { ok: false, error: 'missing allowed boolean' }, 400);
     }
-    if (raw === null || raw === '') {
-      const cleared = await setBackup(env, null);
+    if (body.allowed === false) {
+      const cleared = await clearAllow(env);
       if (!cleared.ok) return json(request, { ok: false, error: cleared.error }, 503);
-      return json(request, {
-        ok: true,
-        active: 'hf',
-        origin: null,
-        mode: null,
-        ttl_sec: BACKUP_TTL_SEC,
-      });
-    }
-    const origin = normalizeOrigin(String(raw));
-    if (!origin) {
-      return json(request, { ok: false, error: 'invalid origin' }, 400);
+      return json(request, { ok: true });
     }
     if (body.mode != null && body.mode !== 'accelerate' && body.mode !== 'full') {
       return json(request, { ok: false, error: 'invalid mode (accelerate|full)' }, 400);
     }
     const mode = normalizeMode(body.mode);
-    const saved = await setBackup(env, origin, mode);
+    const saved = await setAllow(env, mode);
     if (!saved.ok) return json(request, { ok: false, error: saved.error }, 503);
-    return json(request, {
-      ok: true,
-      active: mode,
-      origin,
-      mode,
-      ttl_sec: BACKUP_TTL_SEC,
-    });
+    const healthCleared = await clearHealth(env);
+    if (!healthCleared.ok) {
+      const rolled = await clearAllow(env);
+      const error = rolled.ok
+        ? healthCleared.error
+        : `${healthCleared.error}; rollback allow failed: ${rolled.error}`;
+      return json(request, { ok: false, error }, 503);
+    }
+    return json(request, { ok: true });
   }
 
   return json(request, { ok: false, error: 'method_not_allowed' }, 405);
 }
 
-/** 有 backup 时选上游：full 全走 backup；accelerate 仅算力走 backup。via = 实际落点 hf|accel */
-function pickUpstream(path, backup, env) {
+async function handleHomeProbe(request, env) {
+  const denied = requireAdmin(request, env);
+  if (denied) return json(request, { ok: false, error: denied }, 403);
+  if (request.method !== 'POST') {
+    return json(request, { ok: false, error: 'method_not_allowed' }, 405);
+  }
+
+  const home = homeOrigin(env);
+  if (!home) {
+    return json(request, { ok: false, error: 'HOME_ORIGIN is not configured' }, 500);
+  }
+
+  let lastFailAt;
+  try {
+    lastFailAt = await getLastFailAt(env);
+  } catch (err) {
+    const msg = err && err.message ? String(err.message) : String(err);
+    return json(request, { ok: false, error: msg || 'STATE KV read failed' }, 503);
+  }
+
+  const now = nowSec();
+  const cooling = inCooldown(lastFailAt, now);
+  const started = Date.now();
+  let status = null; // 仅真实 HTTP 状态码；无响应时为 null，不造 0
+  let homeOk = false;
+  let healthBodyOk = false;
+  try {
+    const resp = await fetch(`${home}/api/health`, {
+      method: 'GET',
+      redirect: 'manual',
+    });
+    status = resp.status;
+    if (status === 200) {
+      try {
+        const data = await resp.json();
+        healthBodyOk = data && data.ok === true;
+        homeOk = healthBodyOk;
+      } catch {
+        homeOk = false;
+      }
+    }
+  } catch {
+    homeOk = false;
+  }
+  const elapsedMs = Date.now() - started;
+
+  let healthAction = 'none';
+  if (cooling && homeOk) {
+    const cleared = await clearHealth(env);
+    if (!cleared.ok) {
+      return json(
+        request,
+        {
+          ok: false,
+          error: cleared.error,
+          home_ok: homeOk,
+          status,
+          elapsed_ms: elapsedMs,
+          in_cooldown: true,
+          last_fail_at: lastFailAt,
+        },
+        503,
+      );
+    }
+    lastFailAt = null;
+    healthAction = 'cleared';
+  }
+
+  const coolingAfter = inCooldown(lastFailAt, nowSec());
+  return json(request, {
+    ok: true,
+    home_ok: homeOk,
+    status,
+    elapsed_ms: elapsedMs,
+    health_body_ok: healthBodyOk,
+    in_cooldown: coolingAfter,
+    last_fail_at: lastFailAt,
+    health_action: healthAction,
+    cooldown_sec: COOLDOWN_SEC,
+    home_origin: home,
+  });
+}
+
+/**
+ * 有 allow 且不在冷却时选 home；否则 HF。
+ * via = 实际落点 hf|accel
+ */
+function pickUpstream(path, allow, lastFailAt, env) {
   const hf = hfOrigin(env);
-  if (!backup) {
+  const home = homeOrigin(env);
+  if (!allow || inCooldown(lastFailAt)) {
     return { origin: hf, via: 'hf' };
   }
-  if (backup.mode === 'full') {
-    return { origin: backup.origin, via: 'accel' };
+  if (allow.mode === 'full') {
+    return { origin: home, via: 'accel' };
   }
-  // accelerate：仅算力路径走 backup
   if (isComputePath(path)) {
-    return { origin: backup.origin, via: 'accel' };
+    return { origin: home, via: 'accel' };
   }
   return { origin: hf, via: 'hf' };
 }
@@ -245,6 +326,15 @@ function withUpstreamMeta(request, upstream, via) {
   });
 }
 
+function buildUpstreamHeaders(req) {
+  const out = new Headers();
+  for (const [k, v] of req.headers) {
+    if (HOP_BY_HOP.has(k.toLowerCase())) continue;
+    out.set(k, v);
+  }
+  return out;
+}
+
 async function handleRequest(request, env) {
   const url = new URL(request.url);
 
@@ -252,30 +342,24 @@ async function handleRequest(request, env) {
     return new Response(null, { status: 204, headers: corsHeaders(request) });
   }
 
-  if (url.pathname === '/facade-backup') {
-    return handleBackupAdmin(request, env);
+  if (url.pathname === '/facade-switch') {
+    return handleSwitchAdmin(request, env);
+  }
+  if (url.pathname === '/facade-home-probe') {
+    return handleHomeProbe(request, env);
+  }
+  if (url.pathname === '/' || url.pathname === '/facade-health') {
+    return json(request, { ok: true, facade: true });
   }
 
-  let backup;
+  let allow;
+  let lastFailAt;
   try {
-    backup = await getBackup(env);
+    allow = await getAllow(env);
+    lastFailAt = await getLastFailAt(env);
   } catch (err) {
     const msg = err && err.message ? String(err.message) : String(err);
     return json(request, { ok: false, error: msg || 'STATE KV read failed' }, 503);
-  }
-
-  if (url.pathname === '/' || url.pathname === '/facade-health') {
-    const forwardTo = backup ? backup.origin : hfOrigin(env);
-    return json(request, {
-      ok: true,
-      facade: true,
-      active: backup ? backup.mode : 'hf',
-      mode: backup ? backup.mode : null,
-      forward_to: forwardTo,
-      // 兼容旧客户端/脚本（曾用 upstream）
-      upstream: forwardTo,
-      ttl_sec: BACKUP_TTL_SEC,
-    });
   }
 
   const path = url.pathname;
@@ -283,19 +367,18 @@ async function handleRequest(request, env) {
     return json(request, { ok: false, error: 'not_found' }, 404);
   }
 
-  const { origin, via } = pickUpstream(path, backup, env);
+  const { origin, via } = pickUpstream(path, allow, lastFailAt, env);
   if (!origin) {
     return json(
       request,
       {
         ok: false,
-        error: via === 'hf' ? 'HF_ORIGIN is not configured' : 'backup origin missing',
+        error: via === 'hf' ? 'HF_ORIGIN is not configured' : 'HOME_ORIGIN is not configured',
       },
       500,
     );
   }
 
-  // POST 等 body 只能读一次；失败回退 HF 前先缓冲
   let bodyBuf = null;
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     bodyBuf = await request.arrayBuffer();
@@ -338,8 +421,7 @@ async function handleRequest(request, env) {
     }
   }
 
-  // 清登记，避免后续请求继续打死 origin；脚本 GET 发现丢失后会再 PUT
-  const cleared = await setBackup(env, null);
+  const marked = await setLastFailAt(env, nowSec());
 
   const hf = hfOrigin(env);
   if (!hf) {
@@ -347,10 +429,9 @@ async function handleRequest(request, env) {
   }
   const fallback = await fetch(`${hf}${path}${url.search}`, makeInit());
   const resp = withUpstreamMeta(request, fallback, 'hf');
-  // KV 写满等导致删不掉时本请求仍回 HF，但登记可能还在
-  if (!cleared.ok) {
+  if (!marked.ok) {
     const headers = new Headers(resp.headers);
-    headers.set('X-Infolens-Backup-Clear', 'failed');
+    headers.set('X-Infolens-Health-Write', 'failed');
     return new Response(resp.body, {
       status: resp.status,
       statusText: resp.statusText,
