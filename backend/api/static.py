@@ -52,9 +52,9 @@ def register_static_routes(app):
 
     @app.route('/demo/<path:path>')
     def send_demo(path):
-        """serves all demo files from the demo dir to ``/demo/<path:path>``"""
-        from backend.platform.app_context import get_data_dir
-        data_dir = get_data_dir()
+        """serves demo files：普通用户仅 public；有效 admin 可用 --dir（含不公开）"""
+        from backend.platform.app_context import get_demo_directory
+        data_dir = get_demo_directory(create=False)
         log_json_demo(path)
         try:
             decoded_path = unquote(path)

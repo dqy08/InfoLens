@@ -86,10 +86,22 @@ class AppContext:
         """设置模型加载状态"""
         self._model_loading = loading
     
-    def get_demo_dir(self, create: bool = False) -> Path:
-        """获取 demo 目录路径"""
+    def get_admin_demo_dir(self, create: bool = False) -> Path:
+        """管理员 demo 根目录（来自 --dir，未指定则为 public）"""
         from backend.demo.data_utils import get_demo_dir
         return get_demo_dir(self.data_dir, create=create)
+
+    def get_public_demo_dir(self, create: bool = False) -> Path:
+        """普通用户 demo 目录（固定 public）"""
+        from backend.demo.data_utils import PUBLIC_DATA_DIR, get_demo_dir
+        return get_demo_dir(PUBLIC_DATA_DIR, create=create)
+
+    def get_demo_dir(self, create: bool = False) -> Path:
+        """按当前请求鉴权选择 demo 目录：有效 admin → --dir，否则 → public"""
+        from backend.api.utils import request_has_valid_admin
+        if request_has_valid_admin():
+            return self.get_admin_demo_dir(create=create)
+        return self.get_public_demo_dir(create=create)
 
 
 # ============= 兼容性接口（供旧代码平滑迁移）=============
@@ -113,10 +125,10 @@ def get_verbose() -> bool:
 
 
 def get_data_dir() -> Path:
-    """获取数据目录"""
+    """获取管理员数据目录（--dir）；普通读路径请用 get_demo_directory()"""
     return AppContext.get().data_dir
 
 
 def get_demo_directory(create: bool = False) -> Path:
-    """获取 demo 目录"""
+    """按当前请求鉴权获取 demo 目录"""
     return AppContext.get().get_demo_dir(create=create)

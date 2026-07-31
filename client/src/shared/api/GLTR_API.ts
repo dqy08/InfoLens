@@ -4,6 +4,7 @@ Attn API and Types
 
 import * as d3 from "d3";
 import { resolveApiBase, apiUrl } from "./resolveApiBase";
+import { resolveDemoFileUrl } from "./apiConfig";
 import {cleanSpecials} from "../core/Util";
 import * as semanticResultCache from "../cross/semanticResultCache";
 import { getSemanticMatchThreshold } from "../cross/semanticThresholdManager";
@@ -123,7 +124,12 @@ export class TextAnalysisAPI {
 
     public list_demos(path?: string): Promise<{ path: string, items: Array<{type: 'folder'|'file', name: string, path: string}> }> {
         const url = this.url('/api/list_demos') + (path ? `?path=${encodeURIComponent(path)}` : '');
-        return d3.json(url);
+        return d3.json(url, { headers: this.getHeaders() });
+    }
+
+    /** 加载服务端 demo JSON（管理员带 token 时可读 --dir 下不公开文件） */
+    public load_demo_file(path: string): Promise<AnalysisData> {
+        return d3.json(resolveDemoFileUrl(path), { headers: this.getHeaders() });
     }
 
     public save_demo(name: string, data: AnalyzeResponse, path: string = '/', overwrite: boolean = false): Promise<{ success: boolean, exists?: boolean, message?: string, file?: string }> {
@@ -183,7 +189,7 @@ export class TextAnalysisAPI {
     }
 
     public list_all_folders(): Promise<{ folders: string[] }> {
-        return d3.json(this.url('/api/list_all_folders'));
+        return d3.json(this.url('/api/list_all_folders'), { headers: this.getHeaders() });
     }
 
     public create_folder(parentPath: string, folderName: string): Promise<{ success: boolean, message?: string }> {

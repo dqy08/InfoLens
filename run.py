@@ -66,7 +66,13 @@ def _parse_args():
     parser.set_defaults(gradient_checkpointing=True)
     parser.add_argument("--address", default="0.0.0.0")
     parser.add_argument("--port", default="5001")
-    parser.add_argument("--dir", type=str, default=None)
+    parser.add_argument(
+        "--dir",
+        type=str,
+        default=None,
+        help="管理员 demo 根目录（需有效 X-Admin-Token 才使用，可含不公开 demo）；"
+        "普通用户始终使用 data/demo/public",
+    )
     parser.add_argument("--no_cors", action="store_true")
     parser.add_argument(
         "--no_auto_load",
@@ -125,7 +131,7 @@ def _load_and_run(args):
             position=MiddlewarePosition.BEFORE_ROUTING,
             allow_origins=["*"],
             allow_methods=["*"],
-            allow_headers=["Content-Type"],
+            allow_headers=["Content-Type", "X-Admin-Token"],
         )
 
     Compress(app.app)

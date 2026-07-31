@@ -19,14 +19,7 @@ from backend.platform.access_log import log_check_admin
 
 def list_demos(path: str = ""):
     """
-    扫描demo目录下的文件夹和文件，返回列表
-    支持指定路径参数，返回指定路径下的内容
-    文件名（去掉.json后缀）作为demo名称
-    支持中文文件名和路径
-    从data/demo目录读取（更专业的数据目录结构）
-    
-    Args:
-        path: 可选，指定要列出的路径，默认为根目录（空字符串）
+    扫描 demo 目录：普通用户固定 public；有效 admin 使用 --dir（可含不公开）。
     """
     demo_dir = get_demo_directory(create=False)
     try:

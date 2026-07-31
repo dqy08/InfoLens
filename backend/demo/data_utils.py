@@ -3,13 +3,13 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# 普通用户永远只读此目录；管理员在携带有效 token 时才使用 --dir（可含不公开 demo）
 DEFAULT_DATA_DIR = Path(os.path.abspath("data/demo/public"))
+PUBLIC_DATA_DIR = DEFAULT_DATA_DIR
 
 
 def resolve_data_dir(dir_arg: Optional[str]) -> Path:
-    """
-    Resolve the base data directory from CLI args or fall back to demo/public.
-    """
+    """Resolve admin demo root from --dir, or fall back to public."""
     if dir_arg:
         return Path(dir_arg).expanduser().absolute()
     return DEFAULT_DATA_DIR
@@ -17,7 +17,6 @@ def resolve_data_dir(dir_arg: Optional[str]) -> Path:
 
 def get_demo_dir(data_dir: Path, create: bool = False) -> Path:
     """Return the demo directory under the given data dir, optionally creating it."""
-    # data_dir 此时默认就是 data/demo/public 的绝对路径
     demo_dir = data_dir
     if create:
         demo_dir.mkdir(parents=True, exist_ok=True)
