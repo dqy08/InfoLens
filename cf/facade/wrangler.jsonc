@@ -13,6 +13,8 @@
     "HF_ORIGIN": "https://dqy08-infolens.hf.space",
     "HOME_ORIGIN": "https://home-server.info-lens.app"
   },
+  // 本地：cf/facade/.dev.vars 设 OPENROUTER_API_KEY=...
+  // 线上：wrangler secret put OPENROUTER_API_KEY（远程 relevance 使用）
   "kv_namespaces": [
     {
       "binding": "STATE",

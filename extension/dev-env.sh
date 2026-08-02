@@ -1,25 +1,26 @@
 #!/bin/bash
-# 仅切换 apiBase（local=本机后端 / prod=CF 门面）。两者都属于 unpacked 开发版，
-# 图标与商店版无关：本目录固定用 icons/dev/（绿角标），见 manifest.json。
-# config.js 由本脚本生成（gitignore），Chrome unpacked 实际加载它；
-# 源头是 config.prod.js / config.local.js。上架包由 pack.sh 直接用 config.prod.js。
+# 切换 apiBase（unpacked 开发版；图标固定 icons/dev/，与商店版无关）：
+#   prod  = 官方域名 api.info-lens.app
+#   dev   = *.workers.dev（同一 Worker，便于对照）
+# config.js 由本脚本生成（gitignore）；源头为 config.{prod,dev}.js。
+# 上架包由 pack.sh 直接用 config.prod.js。
 # 用法：
-#   ./dev-env.sh local   # 生成本地变体
-#   ./dev-env.sh prod    # 生成上架默认值
+#   ./dev-env.sh prod
+#   ./dev-env.sh dev
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 case "${1:-}" in
-  local)
-    cp config.local.js config.js
-    echo "已切到 local：apiBase=127.0.0.1:5001。去 chrome://extensions 重新加载生效。"
-    ;;
   prod)
     cp config.prod.js config.js
     echo "已切回 prod：apiBase=api.info-lens.app。去 chrome://extensions 重新加载生效。"
     ;;
+  dev)
+    cp config.dev.js config.js
+    echo "已切到 dev：apiBase=infolens-api.xiaoyundqy.workers.dev。去 chrome://extensions 重新加载生效。"
+    ;;
   *)
-    echo "用法: $0 local|prod" >&2
+    echo "用法: $0 prod|dev" >&2
     exit 1
     ;;
 esac

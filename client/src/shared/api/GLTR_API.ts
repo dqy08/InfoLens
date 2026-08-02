@@ -37,9 +37,8 @@ export function isSemanticFromCache(res: unknown): boolean {
     return !!(res as { __fromCache?: boolean } | null | undefined)?.__fromCache;
 }
 
-/** 语义分析 options：onProgress 传入时启用 stream，否则普通 JSON */
+/** 语义分析 options（仅 JSON；不走 SSE/stream，与远程 relevance 契约一致） */
 export interface AnalyzeSemanticOptions {
-    onProgress?: (step: number, totalSteps: number, stage: string, percentage?: number) => void;
     /** 整段模式需要展示时传 true；不传则不请求，默认关 */
     debug_info?: boolean;
     signal?: AbortSignal;
@@ -370,15 +369,14 @@ export class TextAnalysisAPI {
 
     /**
      * Semantic analysis：先相关度门控，再关键词归因（原生两接口组合）。
-     * onProgress 传入时 stream=true，否则普通 JSON；返回格式与旧 hybrid 一致。
+     * 仅 JSON；返回格式与旧 hybrid 一致。
      */
     public async analyzeSemantic(
         query: string,
         text: string,
         options?: AnalyzeSemanticOptions
     ): Promise<SemanticResult> {
-        const { onProgress, debug_info: wantDebugInfo, signal } = options ?? {};
-        const r1 = await this.analyzeSemanticRelevance(query, text, { onProgress, debug_info: wantDebugInfo, signal });
+        const r1 = await this.analyzeSemanticRelevance(query, text, options);
         if (!r1.success) {
             return { success: false, message: r1.message, full_match_degree: 0, token_attention: [] };
         }
@@ -388,7 +386,7 @@ export class TextAnalysisAPI {
         if (r1.full_match_degree < getSemanticMatchThreshold()) {
             return { ...r1, token_attention: [] };
         }
-        const r2 = await this.analyzeSemanticKeywords(query, text, { onProgress, debug_info: wantDebugInfo, signal });
+        const r2 = await this.analyzeSemanticKeywords(query, text, options);
         if (!r2.success) {
             return { success: false, message: r2.message, full_match_degree: r1.full_match_degree, token_attention: [] };
         }
@@ -439,17 +437,14 @@ export class TextAnalysisAPI {
         options: AnalyzeSemanticOptions | undefined,
         cacheOk: (cached: semanticResultCache.SemanticCacheResult) => cached is T,
     ): Promise<T> {
-        const { onProgress, debug_info: wantDebugInfo, signal } = options ?? {};
+        const { debug_info: wantDebugInfo, signal } = options ?? {};
         const cached = semanticResultCache.get(text, query, cacheKey);
         if (cached && cacheOk(cached)) {
             return { ...cached, __fromCache: true };
         }
-        const stream = !!onProgress;
-        const payload: Record<string, unknown> = { query, text, stream };
+        const payload: Record<string, unknown> = { query, text };
         if (wantDebugInfo) payload.debug_info = true;
-        const res = stream
-            ? await this.fetchSSEStream<T>(path, payload, onProgress, 'Semantic analysis failed', signal)
-            : await this.fetchSemanticJson<T>(path, payload, signal);
+        const res = await this.fetchSemanticJson<T>(path, payload, signal);
         if (res?.success) semanticResultCache.set(text, query, res, cacheKey);
         return res;
     }

@@ -102,13 +102,7 @@ export class SemanticSearchController {
 
     private async runWhole(params: { query: string; text: string; signal: AbortSignal }): Promise<void> {
         const { query, text, signal } = params;
-        const onProgress = (step: number, totalSteps: number, stage: string, percentage?: number) => {
-            const progressText = percentage !== undefined && percentage !== null
-                ? `Step ${step}/${totalSteps}:\t ${stage} ${percentage}%`
-                : `Step ${step}/${totalSteps}:\t ${stage}`;
-            d3.select('#semantic_progress').text(progressText).style('display', 'inline-block');
-        };
-        const res = await this.deps.api.analyzeSemantic(query, text, { onProgress, debug_info: true, signal });
+        const res = await this.deps.api.analyzeSemantic(query, text, { debug_info: true, signal });
         if (res?.success && res?.token_attention) {
             this.deps.visualizationUpdater.handleSemanticResponse(res, text);
             const md = res?.full_match_degree;

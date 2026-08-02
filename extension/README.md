@@ -11,17 +11,17 @@ Find bar 权威源在 `extension/ui/`，站内为手工副本。挂 Shadow DOM�
 ## 开发
 
 ```bash
-./extension/dev-env.sh prod   # 或 local；生成 gitignore 的 config.js（clone 后至少一次）
+./extension/dev-env.sh prod   # 或 dev；生成 gitignore 的 config.js（clone 后至少一次）
 ```
 
-Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选 `extension/`（绿角标 = dev 版）。  
+Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选 `extension/`（绿角标 = unpack 开发版）。  
 普通 `https` 页 → 工具栏图标或 `Ctrl+Shift+F`（Mac `⌘⇧F`）→ 输入 query → Enter。
 
 改配置改源头，再生成（**不要手改** `config.js`）：
 
 ```bash
-./extension/dev-env.sh local   # apiBase=127.0.0.1:5001（需本地后端，且未传 --no_cors）
-./extension/dev-env.sh prod    # apiBase=HF Spaces
+./extension/dev-env.sh prod    # apiBase=api.info-lens.app
+./extension/dev-env.sh dev     # apiBase=*.workers.dev（同一 Worker）
 ```
 
 改完扩展页「重新加载」。浮条改 `extension/ui/`，需站内一致再手工同步 client。
@@ -38,7 +38,7 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 
 | 字段 | 含义 |
 |------|------|
-| `apiBase` | API 根；local / prod 由 `dev-env.sh` 切换 |
+| `apiBase` | API 根；prod / dev 由 `dev-env.sh` 切换 |
 | `chunkBytes` | 分块字节上限 |
 | `maxChunks` | demo 最多请求块数 |
 | `matchThreshold` | 计入 ↑↓ 的 match 阈值 |
@@ -58,8 +58,8 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 manifest.json          # unpacked；图标 icons/dev/
 icons/icon*.png        # 上架正式图标
 pack.sh / dev-env.sh
-config.prod.js         # 上架默认（源头）；pack 打进包
-config.local.js        # 本地（源头）
+config.prod.js         # 上架默认 / 官方域名（源头）；pack 打进包
+config.dev.js          # Dev 门面 *.workers.dev（源头）
 config.js              # gitignore；dev-env 生成
 ui/                    # Find bar 权威源
 articleRoot.js         # Readability 定根

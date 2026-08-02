@@ -55,3 +55,4 @@ client/src/assets/audio/thunder-strikes-lightning-storm-rumble.mp3
 .specstory
 scripts/log.py
 scripts/results/
+scripts/cases/

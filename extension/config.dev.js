@@ -1,9 +1,10 @@
 /**
- * 本地调试变体（源头）：apiBase 打本地后端；用 dev-env.sh local 生成 config.js。
- * 除 apiBase（及有意的本地差异如 maxChunks）外与 config.prod.js 对齐。
+ * Dev 入口变体（源头）：apiBase 打门面 *.workers.dev。
+ * 与官方域名同一 Worker；远程 relevance 由门面开关控制，与入口无关。
+ * 用 dev-env.sh dev 生成 config.js。除 apiBase 外与 config.prod.js 对齐。
  */
 var IL_CONFIG = {
-  apiBase: 'http://127.0.0.1:5001',
+  apiBase: 'https://infolens-api.xiaoyundqy.workers.dev',
   /**
    * SYNC: client/src/shared/core/constants.ts → SEMANTIC_CHUNK_BYTES；算法见 splitTextToChunks.js
    * 已知问题：见 config.prod.js 同名字段注释（与后端 token 截断无联动，密集内容会漏检）。

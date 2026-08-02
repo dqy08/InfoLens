@@ -23,17 +23,10 @@
     window.__IL_SEMANTIC_DEMO__ = undefined;
   }
 
-  const CFG = globalThis.IL_CONFIG || {
-    apiBase: 'http://127.0.0.1:5001',
-    chunkBytes: 800,
-    maxChunks: 3,
-    matchThreshold: 0.1,
-    // SYNC 默认：站内 signal-fit 失败回退 P90；扩展用分位近似（见 prepareChunkTokens）
-    pwScorePercentile: 0.9,
-    domDebug: true,
-    // 扩展侧节奏：默认 false = 无匹配时跟随、首个匹配后停下并划线（站内 demo 已无 Follow UI）
-    followSearching: false,
-  };
+  if (!globalThis.IL_CONFIG) {
+    throw new Error('IL_CONFIG missing — inject config.js before content.js');
+  }
+  const CFG = globalThis.IL_CONFIG;
   const DOM_DEBUG = !!CFG.domDebug;
 
   // SYNC: client/src/shared/cross/SurprisalColorConfig.ts → SURPRISAL_RED / MAX_ALPHA（色值见 content.css ::highlight）
@@ -1411,7 +1404,6 @@
     const body = {
       query,
       text,
-      stream: false,
       privacy_mode: true,
     };
     return new Promise((resolve, reject) => {
