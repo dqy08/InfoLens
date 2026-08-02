@@ -40,7 +40,7 @@
   // SYNC: client/src/shared/vis/GLTR_Text_Box.ts → scrollToUnicodeCharOffset 默认 viewportYRatio
   const CHUNK_JUMP_VIEWPORT_Y_RATIO = 0.2;
   // 分块语义搜索：最快节奏下限——两次渲染之间至少间隔这么久（无论是否有滚动）
-  const CHUNK_SEARCH_MIN_CYCLE_MS = 500;
+  const CHUNK_SEARCH_MIN_CYCLE_MS = 250;
   // 有后续滚动时：染色后先停留一半，另一半留给滚动 settle；无滚动（已 park）时整段都算这里，见下方用法
   const CHUNK_SEARCH_HOLD_MS = CHUNK_SEARCH_MIN_CYCLE_MS / 2;
   const CHUNK_SEARCH_FOLLOW_VIEWPORT_Y_RATIO = 0.6;
@@ -128,75 +128,65 @@
   let chunkSearchAutoScrollCleanup;
 
   /**
-   * fill_blank 串行（在途最多 1）+ 匹配差背压：
-   * pending = 排队 + 在飞；count 可超前至多 FILL_MATCH_LAG 个未完成 fill，再多则等。
-   * 相对旧 hybrid（单块内 count→await fill 串行），异步 fill 会与 count 预取叠跑，
-   * 增加额外并发（FETCH_AHEAD=1 时最坏约 2×count + 1×fill）。
+   * 在途上限 concurrency 的任务池；多出的在前端短队列等。
+   * 供 keywords 段消费；relevance 段自管有界缓冲，不用此池。
+   * @param {number} concurrency
    */
-  const FILL_MATCH_LAG = 2;
-  /** @type {(() => Promise<void>)[]} */
-  const fillBlankQueue = [];
-  let fillBlankBusy = false;
-  /** @type {(() => void)[]} */
-  let fillLagWaiters = [];
-  /** 与 searchEpoch 分离：Continue 抬 epoch 不该作废上一批未完成的 fill */
-  let fillGen = 0;
+  function createPool(concurrency) {
+    /** @type {{ exec: () => Promise<void> }[]} */
+    const queue = [];
+    let active = 0;
+    let gen = 0;
 
-  function fillPendingCount() {
-    return fillBlankQueue.length + (fillBlankBusy ? 1 : 0);
-  }
-
-  function wakeFillLagWaiters() {
-    const waiters = fillLagWaiters.splice(0);
-    for (const w of waiters) w();
-  }
-
-  function notifyFillLagWaiters() {
-    if (fillPendingCount() >= FILL_MATCH_LAG) return;
-    wakeFillLagWaiters();
-  }
-
-  function clearFillBlankQueue() {
-    fillBlankQueue.length = 0;
-    fillGen += 1;
-    // 停止/重置须无条件唤醒，不可等在途 fill 降 pending
-    wakeFillLagWaiters();
-  }
-
-  /** pending 降到 < FILL_MATCH_LAG 后再继续（允许再入队一个） */
-  function waitUntilFillLagOk() {
-    if (fillPendingCount() < FILL_MATCH_LAG) return Promise.resolve();
-    return new Promise((resolve) => {
-      fillLagWaiters.push(resolve);
-    });
-  }
-
-  /** @param {(gen: number) => Promise<void>} job */
-  function enqueueFillBlank(job) {
-    const gen = fillGen;
-    fillBlankQueue.push(() => job(gen));
-    pumpFillBlankQueue();
-  }
-
-  function pumpFillBlankQueue() {
-    if (fillBlankBusy) return;
-    const job = fillBlankQueue.shift();
-    if (!job) {
-      notifyFillLagWaiters();
-      return;
+    function pump() {
+      while (active < concurrency && queue.length) {
+        const item = queue.shift();
+        active++;
+        Promise.resolve()
+          .then(() => item.exec())
+          .catch(() => {})
+          .finally(() => {
+            active--;
+            pump();
+          });
+      }
     }
-    fillBlankBusy = true;
-    Promise.resolve()
-      .then(() => job())
-      .catch((err) => {
-        console.error('[InfoLens] fill_blank queue', err?.message || err);
-      })
-      .finally(() => {
-        fillBlankBusy = false;
-        notifyFillLagWaiters();
-        pumpFillBlankQueue();
-      });
+
+    return {
+      /** @param {(gen: number) => Promise<void>} job */
+      schedule(job) {
+        const g = gen;
+        queue.push({
+          exec: async () => {
+            try {
+              await job(g);
+            } catch (err) {
+              console.error('[InfoLens] pool job', err?.message || err);
+            }
+          },
+        });
+        pump();
+      },
+      /** 丢弃未开工；在途跑完但 job 内比对 gen 作废 */
+      invalidate() {
+        gen += 1;
+        queue.length = 0;
+      },
+      get gen() {
+        return gen;
+      },
+    };
   }
+
+  // 分块搜索两段流水线（渲染身兼两职：上段消费者 + 下段生产者）：
+  //   [relevance 生产] ──► [渲染] ──匹配任务──► [keywords 消费]
+  // relevance：在途与存货分计；done 补发，存货满则停发。keywords 自有在途上限。
+  const MAX_RELEVANCE_IN_FLIGHT = 4;
+  // 发送侧门槛：ready 达此则停发；齐回时 ready 可短暂超过。取 > IN_FLIGHT 以便渲染慢时仍能补满在途
+  const MAX_RELEVANCE_BUFFER = 8;
+  const MAX_KEYWORDS_IN_FLIGHT = 2; // keywords 在途（池并发）
+  /** 与 searchEpoch 分离：Stop/Continue 不该作废已匹配块的 keywords */
+  const keywordsPool = createPool(MAX_KEYWORDS_IN_FLIGHT);
 
   // ---------- extract（纯文本查看器 / Readability 定根；后者失败不回退） ----------
 
@@ -862,7 +852,7 @@
    * @param {{ clearCache?: boolean }} [options] clearCache=true 时连 lastResult 一并丢弃（改 query / giveUp）
    */
   function resetSearchSession({ clearCache = false } = {}) {
-    clearFillBlankQueue();
+    keywordsPool.invalidate();
     clearOverlays();
     clearFindStatus();
     slowBackendNoticeShown = false;
@@ -1431,7 +1421,6 @@
 
   /**
    * SYNC: client GLTR_API.analyzeSemantic — 相关度门控；达阈值时由调用方异步 keywords 染色（等待线）。
-   * 注意：异步 fill 相对「relevance 后 await keywords」会增加与后续 relevance 的额外并发。
    */
   async function analyzeSemantic(query, text) {
     const r1 = await analyzeSemanticRaw(query, text, '/api/analyze-semantic-relevance');
@@ -1659,9 +1648,8 @@
     ui$('semantic_find_clear')?.addEventListener('click', (e) => {
       e.stopPropagation();
       if (searching) {
-        // 立刻空闲 UI；旧轮靠 abortWanted 退出主循环。不清 fill：已匹配块继续染色，Continue 可接上
+        // 立刻空闲 UI；旧轮靠 abortWanted 退出主循环。不清 keywords：已匹配块继续染色，Continue 可接上
         abortWanted = true;
-        wakeFillLagWaiters();
         setSearching(false);
         // 不等主循环退出：可续跑时立刻给出 Stopped + Continue（与循环尾部分支同条件）
         if (canResumeSearch()) {
@@ -1952,7 +1940,8 @@
     // 旧轮 finally 清掉 searching，新轮仍在跑 → 有报错、像在搜、却没有停止按钮。
     const epoch = ++searchEpoch;
     abortWanted = false;
-    if (!resume) clearFillBlankQueue();
+    // 重开须在 await 前作废旧 keywords，避免 ensureHistory 窗口内旧任务仍落笔；Continue 保留
+    if (!resume) keywordsPool.invalidate();
     setSearching(true);
     setStatusContinueVisible(false);
 
@@ -2044,25 +2033,71 @@
 
       beginChunkSearchAutoScroll();
 
-      // 双循环流水线：抓取循环只管领先渲染 FETCH_AHEAD 步尽早发请求，不含任何延迟；
-      // 渲染循环按 chunk 顺序消费结果、维持 CHUNK_SEARCH_MIN_CYCLE_MS 展示节奏——二者互不阻塞，
-      // 停留只影响「多久展示下一块」，不再卡住下一次请求的发出时机
-      const FETCH_AHEAD = 1;
-      const pendingChunkResults = new Map();
-      let fetchCursor = resumeFrom;
+      // --- 段1：relevance（在途 / 存货分计；done 补发，consume 降存货后恢复）---
       const stillThisSearch = () => epoch === searchEpoch && !abortWanted;
-      const prefetchChunk = (idx) => {
-        const p = analyzeSemantic(query, allChunks[idx].text);
-        p.catch(() => {}); // 真正的错误仍会在被 await 时抛出，这里只是防止预取阶段的悬空 rejection 噪音
-        pendingChunkResults.set(idx, p);
-      };
-      const advanceFetch = (renderIndex) => {
-        while (stillThisSearch() && fetchCursor < allChunks.length && fetchCursor <= renderIndex + FETCH_AHEAD) {
-          prefetchChunk(fetchCursor);
-          fetchCursor++;
+      /** @type {Map<number, Promise>} */
+      const relevanceBuffer = new Map();
+      let relevanceProduceIdx = resumeFrom;
+      let relevanceInFlight = 0;
+      let relevanceReady = 0;
+
+      const tryProduceRelevance = () => {
+        while (
+          stillThisSearch() &&
+          relevanceProduceIdx < allChunks.length &&
+          relevanceInFlight < MAX_RELEVANCE_IN_FLIGHT &&
+          relevanceReady < MAX_RELEVANCE_BUFFER
+        ) {
+          const idx = relevanceProduceIdx++;
+          relevanceInFlight++;
+          const p = analyzeSemantic(query, allChunks[idx].text).finally(() => {
+            relevanceInFlight--;
+            relevanceReady++;
+            tryProduceRelevance();
+          });
+          p.catch(() => {}); // 真正的错误在 consume await 时抛出；此处仅消预取悬空 rejection
+          relevanceBuffer.set(idx, p);
         }
       };
-      advanceFetch(resumeFrom); // 预热：从续跑点起抓取 [resumeFrom, resumeFrom+FETCH_AHEAD]
+
+      /** 渲染按序取走（未完成则等）；取走后降存货，可能恢复发送 */
+      const consumeRelevance = async (idx) => {
+        const p = relevanceBuffer.get(idx);
+        if (!p) throw new Error(`relevance buffer miss: chunk ${idx}`);
+        try {
+          return await p;
+        } finally {
+          relevanceBuffer.delete(idx);
+          relevanceReady--;
+          tryProduceRelevance();
+        }
+      };
+
+      // --- 段2：keywords（渲染匹配后投递；池内消费，不反压段1）---
+      const enqueueKeywords = (chunk, chunkCpStart, chunkCpEnd, degree) => {
+        keywordsPool.schedule(async (jobGen) => {
+          if (jobGen !== keywordsPool.gen) return;
+          try {
+            const r2 = await analyzeSemanticRaw(query, chunk.text, '/api/analyze-semantic-keywords');
+            if (jobGen !== keywordsPool.gen) return;
+            if (!extractRoot?.isConnected) return;
+            // 有红色 token → 拆 pending；否则留下 = chunk 级匹配标记（失败/无色同理）
+            const painted = paintChunkTokens(
+              r2.token_attention,
+              chunk.text,
+              chunkCpStart,
+              degree
+            );
+            if (painted > 0) clearPendingUnderline(chunkCpStart, chunkCpEnd);
+            snapshotLastResult(query);
+          } catch (err) {
+            // 无 token 可画：pending 留下表示本 chunk 已匹配
+            console.error('[InfoLens] keywords', err?.message || err);
+          }
+        });
+      };
+
+      tryProduceRelevance();
 
       try {
         // 第 0 块（或续跑起点）没有「上一块结束时的预滚」；若不先滚到位，本块 hold 后会立刻
@@ -2075,8 +2110,7 @@
         for (let i = resumeFrom; i < allChunks.length; i++) {
           if (!stillThisSearch()) break;
           const chunk = allChunks[i];
-          const res = await pendingChunkResults.get(i);
-          pendingChunkResults.delete(i);
+          const res = await consumeRelevance(i);
           if (!stillThisSearch()) break;
 
           const degree = res.full_match_degree ?? 0;
@@ -2105,12 +2139,12 @@
             });
           }
 
-          // 相关度通过后：异步 keywords 染色（相对整包 await，增加与 relevance 的额外并发）
+          // 匹配：先画等待线；keywords 在 hold 后 enqueue（不挡本段渲染节奏）
           if (matched) {
             upsertSpec({ kind: 'pending-underline', cp0: chunkCpStart, cp1: chunkCpEnd });
             renderUnderlinesOfKind('pending-underline');
           }
-          // count 完即恢复灰字/画等待线；fill 背压只推迟入队与下一块，不挡本块 hold/jump
+          // 段1 消费完即恢复灰字/画等待线
           setTruncatedHighlight(analyzedCpEnd);
 
           // followThis = followAll || !hadMatchBefore；willJump 块滚动延后到 hold 后（扩展节奏，非站内）
@@ -2119,9 +2153,6 @@
           }
           // 每块后快照：close 中途清高亮时仍保留上一版
           snapshotLastResult(query);
-
-          // 渲染完立即放行抓取循环（不等 hold），避免网络/服务器因停留而空闲
-          advanceFetch(i + 1);
 
           // 首个匹配块也要先经过与其它块一致的 hold，再触发自动滚动，
           // 避免着色刚出现就被立刻滚走——即使命中的正好是最后一块
@@ -2142,43 +2173,20 @@
             if (!stillThisSearch()) break;
           }
 
-          // hold/jump 已完成后再等 fill 空位，避免首个匹配等待线出现后被背压卡住才开始滚
-          if (matched) {
-            await waitUntilFillLagOk();
-            if (!stillThisSearch()) break;
-            enqueueFillBlank(async (gen) => {
-              if (gen !== fillGen) return;
-              try {
-                const r2 = await analyzeSemanticRaw(query, chunk.text, '/api/analyze-semantic-keywords');
-                if (gen !== fillGen) return;
-                if (!extractRoot?.isConnected) return;
-                // 有红色 token → 拆 pending；否则留下 = chunk 级匹配标记（失败/无色同理）
-                const painted = paintChunkTokens(
-                  r2.token_attention,
-                  chunk.text,
-                  chunkCpStart,
-                  degree
-                );
-                if (painted > 0) clearPendingUnderline(chunkCpStart, chunkCpEnd);
-                snapshotLastResult(query);
-              } catch (err) {
-                // 无 token 可画：pending 留下表示本 chunk 已匹配
-                console.error('[InfoLens] keywords', err?.message || err);
-              }
-            });
-          }
+          if (matched) enqueueKeywords(chunk, chunkCpStart, chunkCpEnd, degree);
 
           if (nextIndex < allChunks.length && (followAll || !parkedOnFirstMatch)) {
             const nextChunk = allChunks[nextIndex];
             followSearchingChunk(utf16ToCp(extractedText, nextChunk.start));
             // 滚动后的新位置也要停留够 CHUNK_SEARCH_SCROLL_SETTLE_MS，
-            // 否则分析过快时会出现「刚滚过去就立刻变色」的突变感；抓取循环已提前放行，不受影响
+            // 否则分析过快时会出现「刚滚过去就立刻变色」的突变感；relevance 在途由 done 补发维持
             await delayMs(CHUNK_SEARCH_SCROLL_SETTLE_MS);
             if (!stillThisSearch()) break;
           }
         }
       } finally {
         endChunkSearchAutoScroll();
+        // 停段1生产：tryProduceRelevance 见 stillThisSearch 为假即停；在途自然结束
       }
 
       if (epoch !== searchEpoch) return;

@@ -16,7 +16,7 @@
   display: none !important;
 }
 
-/* bar 定宽；进度图跟 bar；状态条可更宽且不反推二者 */
+/* bar 定宽；进度图 / 状态条跟 bar 同宽 */
 .semantic-find-bar-stack {
   display: flex;
   flex-direction: column;
@@ -86,9 +86,16 @@
   color: #9aa0a6;
 }
 .semantic-find-status {
-  align-self: stretch;
-  width: auto;
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
   color: #e8eaed;
+}
+.semantic-find-status-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
 }
 .semantic-find-backend-notice-text,
 .semantic-find-status-text {
