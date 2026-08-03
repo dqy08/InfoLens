@@ -5,10 +5,10 @@
   "version": "0.4.0",
   "description": "__MSG_extDescription__",
   "icons": {
-    "16": "icons/dev/icon16.png",
-    "32": "icons/dev/icon32.png",
-    "48": "icons/dev/icon48.png",
-    "128": "icons/dev/icon128.png"
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   },
   "permissions": ["activeTab", "scripting", "storage"],
   "background": {
@@ -26,10 +26,10 @@
   "action": {
     "default_title": "Info Lens – Semantic Highlight",
     "default_icon": {
-      "16": "icons/dev/icon16.png",
-      "32": "icons/dev/icon32.png",
-      "48": "icons/dev/icon48.png",
-      "128": "icons/dev/icon128.png"
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     }
   },
   "web_accessible_resources": [
