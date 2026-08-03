@@ -157,12 +157,6 @@ async function activateTab(tab) {
 
 chrome.action.onClicked.addListener(activateTab);
 
-chrome.commands.onCommand.addListener(async (command) => {
-  if (command !== 'toggle-find') return;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  await activateTab(tab);
-});
-
 /**
  * POST JSON；要求 HTTP ok 且 body.success === true（避免 2xx HTML/空对象被当成成功）。
  * @returns {{ data: object, backend: string | null }} backend = X-Infolens-Backend（hf|accel）

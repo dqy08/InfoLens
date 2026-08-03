@@ -230,6 +230,7 @@
     contentDirty = false;
     matchedChunks = [];
     semanticMatchProgress = [];
+    selectedProgressChunkStart = null;
     matchIndex = -1;
     return { root, length: extractedText.length };
   }
@@ -778,7 +779,7 @@
 
   /**
    * 有未分析 chunk 时可续跑：Failed / Stopped 半截，或 maxChunks 截断后的下一批。
-   * 需已有进度（n>0）；首块即失败用 Enter 重开即可，不必 Continue。
+   * 需已有进度（n>0）；首块即失败无匹配时用 Enter 重开即可，不必 Continue。
    */
   function canResumeSearch() {
     const query =
@@ -1201,15 +1202,11 @@
    */
   function fadeCurrentUnderline() {
     const gen = ++underlineFadeGen;
-    const fadingProgressChunkStart = selectedProgressChunkStart;
-    // 只 fade 导航线；等待线独立，不在此列。进度线保持选中蓝，等 fade 结束再变红。
+    // 只 fade 导航线；等待线独立，不在此列。当前 chunk 状态不随正文下划线淡出。
     const lines = overlayEls.filter((el) => el.dataset.ilUnderline === 'nav');
     if (!lines.length) {
       paintSpecs = paintSpecs.filter((s) => s.kind !== 'underline');
-      if (fadingProgressChunkStart != null) {
-        selectedProgressChunkStart = null;
-        renderSemanticMatchProgress();
-      }
+      if (lastResult) snapshotLastResult(lastResult.query);
       return;
     }
     for (const el of lines) {
@@ -1227,10 +1224,8 @@
         if (gen !== underlineFadeGen) return;
         paintSpecs = paintSpecs.filter((s) => s.kind !== 'underline');
         clearOverlayRole('nav');
-        if (selectedProgressChunkStart === fadingProgressChunkStart) {
-          selectedProgressChunkStart = null;
-          renderSemanticMatchProgress();
-        }
+        // 下划线已淡出，但当前 chunk 仍由进度图蓝线和导航逻辑保留。
+        if (lastResult) snapshotLastResult(lastResult.query);
       }, CHUNK_HIGHLIGHT_FADE_MS);
     });
   }
@@ -1394,15 +1389,50 @@
     updateNav();
   }
 
+  /** 当前输入是否与最近一次搜索的 query 一致。 */
+  function queryMatchesCurrentResults() {
+    const query =
+      /** @type {HTMLInputElement | null} */ (ui$('semantic_find_input'))?.value?.trim() || '';
+    return !!query && lastSearchMeta?.query === query;
+  }
+
   /**
-   * 选中并展示一个 chunk：进度图线变蓝 + 下划线 → 滚到起点 → hold → 下划线 fade；
-   * 进度线保持蓝至 fade 结束再恢复红。
+   * 从当前进度图位置计算上下导航的目标。
+   * 点击了低于阈值的 chunk 时，也应从该位置继续，而不是回到旧的 matchIndex。
+   */
+  function navigateMatch(delta) {
+    if (!matchedChunks.length) return;
+
+    if (selectedProgressChunkStart == null) {
+      jumpToMatch(matchIndex < 0 ? (delta < 0 ? matchedChunks.length - 1 : 0) : matchIndex + delta);
+      return;
+    }
+
+    const currentIndex = matchedChunks.findIndex(
+      (chunk) => chunk.start === selectedProgressChunkStart
+    );
+    if (currentIndex >= 0) {
+      jumpToMatch(currentIndex + delta);
+      return;
+    }
+
+    const nextIndex = matchedChunks.findIndex(
+      (chunk) => chunk.start > selectedProgressChunkStart
+    );
+    const insertionIndex = nextIndex < 0 ? matchedChunks.length : nextIndex;
+    jumpToMatch(delta < 0 ? insertionIndex - 1 : insertionIndex);
+  }
+
+  /**
+   * 选中并展示一个 chunk：进度图线变蓝 + 下划线 → 滚到起点 → hold → 下划线 fade。
+   * 当前 chunk 状态持续保留，进度图点击与上下按钮共用。
    * 由「点击进度线」（selectProgressChunk）和「上下按钮跳转」（jumpToMatch）共用，
    * 保证两者对进度图选中态的表现始终一致。
    */
   function revealChunk(chunk) {
     setCurrentUnderline(chunk);
     selectedProgressChunkStart = chunk.start;
+    matchIndex = matchedChunks.findIndex((item) => item.start === chunk.start);
     renderSemanticMatchProgress();
     // 导航态需要跟着刷新快照，否则关闭再打开搜索栏时，下划线（回退到旧快照）
     // 会和进度图选中线（读实时变量）错位
@@ -1642,12 +1672,8 @@
 
     void ensureHistory();
 
-    ui$('semantic_find_prev')?.addEventListener('click', () =>
-      jumpToMatch(matchIndex < 0 ? matchedChunks.length - 1 : matchIndex - 1)
-    );
-    ui$('semantic_find_next')?.addEventListener('click', () =>
-      jumpToMatch(matchIndex < 0 ? 0 : matchIndex + 1)
-    );
+    ui$('semantic_find_prev')?.addEventListener('click', () => navigateMatch(-1));
+    ui$('semantic_find_next')?.addEventListener('click', () => navigateMatch(1));
     ui$('semantic_find_close')?.addEventListener('click', () => close());
     ui$('semantic_find_status_close')?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1701,10 +1727,16 @@
       if (uiShadow?.activeElement === findInput) renderHistoryDropdown();
     });
     findInput.addEventListener('keydown', (e) => {
+      // 输入框 Enter：与上次搜索 query 一致 → 上下翻匹配（无匹配则空操作）；
+      // 否则开搜并停在首个匹配，之后再 Enter 即在匹配间跳转（对齐 Chrome Find 心智）。
       if (e.key === 'Enter' && !e.isComposing) {
         e.preventDefault();
         hideHistoryDropdown();
-        void runSearch();
+        if (queryMatchesCurrentResults()) {
+          navigateMatch(e.shiftKey ? -1 : 1);
+        } else if (!searching) {
+          void runSearch();
+        }
       } else if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
@@ -1926,14 +1958,8 @@
   function selectProgressChunk(start) {
     const chunk = semanticMatchProgress.find((item) => item.start === start);
     if (!chunk) return;
-    if (selectedProgressChunkStart === start) {
-      selectedProgressChunkStart = null;
-      setCurrentUnderline(null);
-      renderSemanticMatchProgress();
-      if (lastResult) snapshotLastResult(lastResult.query);
-    } else {
-      revealChunk(chunk);
-    }
+    // 再次点击当前 chunk 保持选中状态，不做 toggle。
+    revealChunk(chunk);
   }
 
   function setSearching(on) {
@@ -1953,7 +1979,7 @@
   }
 
   /**
-   * @param {{ resume?: boolean }} [opts] resume=true：保留已有进度，从下一未分析 chunk 继续（Enter 仍重开）
+   * @param {{ resume?: boolean }} [opts] resume=true：保留已有进度，从下一未分析 chunk 继续
    */
   async function runSearch(opts) {
     if (searching) return;

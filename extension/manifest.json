@@ -2,34 +2,33 @@
   "manifest_version": 3,
   "default_locale": "en",
   "name": "__MSG_extName__",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "__MSG_extDescription__",
   "icons": {
-    "16": "icons/icon16.png",
-    "32": "icons/icon32.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
+    "16": "icons/dev/icon16.png",
+    "32": "icons/dev/icon32.png",
+    "48": "icons/dev/icon48.png",
+    "128": "icons/dev/icon128.png"
   },
   "permissions": ["activeTab", "scripting", "storage"],
   "background": {
     "service_worker": "background.js"
   },
   "commands": {
-    "toggle-find": {
+    "_execute_action": {
       "suggested_key": {
         "default": "Ctrl+Shift+F",
         "mac": "Command+Shift+F"
-      },
-      "description": "Toggle Semantic Find bar"
+      }
     }
   },
   "action": {
     "default_title": "Info Lens – Semantic Highlight",
     "default_icon": {
-      "16": "icons/icon16.png",
-      "32": "icons/icon32.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
+      "16": "icons/dev/icon16.png",
+      "32": "icons/dev/icon32.png",
+      "48": "icons/dev/icon48.png",
+      "128": "icons/dev/icon128.png"
     }
   },
   "web_accessible_resources": [
