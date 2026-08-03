@@ -10,6 +10,7 @@ const CONTENT_JS = [
   'config.js',
   'vendor/Readability.js',
   'articleRoot.js',
+  'collectTextMap.js',
   'splitTextToChunks.js',
   'mergeTokenSpans.js',
   'content.js',

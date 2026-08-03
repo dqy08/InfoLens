@@ -207,31 +207,11 @@
   }
 
   function collectTextMap(root) {
-    const out = [];
-    let text = '';
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        if (!node.nodeValue) return NodeFilter.FILTER_REJECT;
-        const p = node.parentElement;
-        if (!p) return NodeFilter.FILTER_REJECT;
-        const tag = p.tagName;
-        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'TEXTAREA' || tag === 'SVG') {
-          return NodeFilter.FILTER_REJECT;
-        }
-        if (p.closest('#il-find-root, #il-overlay-host, [data-il-underline]')) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
-    let n;
-    while ((n = walker.nextNode())) {
-      const value = n.nodeValue;
-      const start = text.length;
-      text += value;
-      out.push({ node: n, start, end: text.length });
+    const fn = globalThis.IL_collectTextMap;
+    if (typeof fn !== 'function') {
+      throw new Error('IL_collectTextMap missing — inject collectTextMap.js before content.js');
     }
-    return { text, pieces: out, root };
+    return fn(root);
   }
 
   function setPieces(newPieces) {

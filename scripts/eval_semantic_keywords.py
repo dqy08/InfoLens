@@ -3,17 +3,17 @@
 关键词归因评测：只打 /api/analyze-semantic-keywords（默认本地）。
 
 真值约定：
-  - 每条须有 expect_relevant
-  - 仅 expect_relevant=true 的用例参与本脚本；无关例跳过（expect_keywords 无意义）
+  - 磁盘上每 chunk 的 query 为数组，每项自带 expect_relevant / expect_keywords
+  - 加载后展平；仅 expect_relevant=true 的用例参与本脚本；无关例跳过（expect_keywords 无意义）
   - 相关例对照 expect_keywords 与 top scored raw（粗匹配）
 
 相关性门控请用 scripts/eval_semantic_relevance_remote.py（云端 Chat）。
 
 用法（项目根目录）:
   python scripts/eval_semantic_keywords.py \\
-    -c scripts/cases/林黛玉哭-1_plugin.json \\
-    -o scripts/results/林黛玉哭-1_kw.jsonl \\
-    --review-md scripts/results/林黛玉哭-1_kw_review.md
+    -c scripts/cases/红楼-第3回.json \\
+    -o scripts/results/红楼-第3回_kw.jsonl \\
+    --review-md scripts/results/红楼-第3回_kw_review.md
 """
 
 from __future__ import annotations
@@ -25,6 +25,11 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+from semantic_case_load import load_relevant_cases
 
 HF_TOKEN_ENV = "HF_TOKEN"
 
@@ -127,23 +132,7 @@ def _top5_raw(top_scored: List[dict]) -> str:
 
 def load_cases(path: Path) -> tuple[List[dict], int]:
     """返回 (相关用例, 跳过的无关条数)。无关例的 expect_keywords 忽略。"""
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, list):
-        raise ValueError(f"用例文件须为 JSON 数组: {path}")
-    cases = []
-    skipped = 0
-    for c in raw:
-        if "name" not in c or "query" not in c or "text" not in c:
-            raise ValueError(f"用例缺少 name/query/text: {c.get('name')}")
-        if c.get("expect_relevant") is None:
-            raise ValueError(f"用例 {c['name']} 的 expect_relevant 未填写（勿提交 skeleton）")
-        if not bool(c.get("expect_relevant")):
-            skipped += 1
-            continue
-        if not isinstance(c.get("expect_keywords"), list):
-            raise ValueError(f"相关用例 {c['name']} 须有 expect_keywords 数组")
-        cases.append(c)
-    return cases, skipped
+    return load_relevant_cases(path)
 
 
 def run_one(
