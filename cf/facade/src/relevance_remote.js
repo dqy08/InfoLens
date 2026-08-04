@@ -29,6 +29,66 @@ function parseCount(content) {
   return m ? parseInt(m[1], 10) : null;
 }
 
+const ERROR_DETAIL_MAX = 500;
+
+/**
+ * 远程 relevance 失败粗分（message 给用户；error_detail 仅日志/反馈，不含 query/text）：
+ * - network：Worker↔OpenRouter 传输层（超时、断连、fetch 失败）
+ * - inference：推理 API 暂时/服务端错误（408/429/5xx、响应体内 error）
+ * - internal：我方未预期（缺密钥、输出不可解析、4xx 鉴权/请求、未知）
+ *
+ * 扩展本地错误（正文变化、无正文等）不经此函数，见 content.js showFindError。
+ * @returns {{ kind: 'network' | 'inference' | 'internal', message: string, error_detail: string }}
+ */
+function publicRelevanceError(err) {
+  const raw = err && err.message != null ? String(err.message) : String(err);
+  const error_detail =
+    raw.length <= ERROR_DETAIL_MAX ? raw : raw.slice(0, ERROR_DETAIL_MAX - 1) + '…';
+
+  if (
+    /^network:/i.test(raw) ||
+    (typeof TypeError !== 'undefined' && err instanceof TypeError) ||
+    /network|fetch failed|timed out|timeout|ECONNRESET|connection/i.test(raw)
+  ) {
+    return { kind: 'network', message: 'Network error', error_detail };
+  }
+
+  const http =
+    raw.match(/OpenRouter HTTP (\d+)/) ||
+    raw.match(/OpenRouter non-JSON response: HTTP (\d+)/);
+  if (http) {
+    const code = parseInt(http[1], 10);
+    if (code === 408 || code === 429 || code >= 500) {
+      return {
+        kind: 'inference',
+        message: `Inference API temporarily unavailable (${code})`,
+        error_detail,
+      };
+    }
+    // 4xx（含 401/403/402/404/400）：配置或请求侧，归我方未预期
+    return {
+      kind: 'internal',
+      message: `Unexpected analysis error (${code})`,
+      error_detail,
+    };
+  }
+
+  // HTTP 200 但 body 带 error：视为推理侧
+  if (/^OpenRouter error:/i.test(raw)) {
+    return {
+      kind: 'inference',
+      message: 'Inference API temporarily unavailable',
+      error_detail,
+    };
+  }
+
+  return {
+    kind: 'internal',
+    message: 'Unexpected analysis error',
+    error_detail,
+  };
+}
+
 /**
  * @returns {Promise<{ full_match_degree: number, model: string, input_token_count: number }>}
  */
@@ -38,23 +98,29 @@ export async function chatRelevance(env, query, text) {
     throw new Error('OPENROUTER_API_KEY secret is not set');
   }
 
-  const resp = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://info-lens.app',
-      'X-Title': 'infolens-relevance',
-    },
-    body: JSON.stringify({
-      model: RELEVANCE_MODEL,
-      messages: [{ role: 'user', content: buildRelevanceUserContent(query, text) }],
-      temperature: 0,
-      max_tokens: RELEVANCE_MAX_TOKENS,
-      stream: false,
-      reasoning: { effort: 'none' },
-    }),
-  });
+  let resp;
+  try {
+    resp = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://info-lens.app',
+        'X-Title': 'infolens-relevance',
+      },
+      body: JSON.stringify({
+        model: RELEVANCE_MODEL,
+        messages: [{ role: 'user', content: buildRelevanceUserContent(query, text) }],
+        temperature: 0,
+        max_tokens: RELEVANCE_MAX_TOKENS,
+        stream: false,
+        reasoning: { effort: 'none' },
+      }),
+    });
+  } catch (e) {
+    const m = e && e.message != null ? String(e.message) : String(e);
+    throw new Error(`network: ${m}`);
+  }
 
   let data;
   try {
@@ -67,7 +133,8 @@ export async function chatRelevance(env, query, text) {
     throw new Error(`OpenRouter HTTP ${resp.status}: ${JSON.stringify(err)}`);
   }
   if (data && data.error) {
-    throw new Error(String(typeof data.error === 'string' ? data.error : JSON.stringify(data.error)));
+    const errStr = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+    throw new Error(`OpenRouter error: ${errStr}`);
   }
 
   const choice = (data.choices && data.choices[0]) || {};
@@ -135,7 +202,12 @@ export async function handleRemoteRelevance(request, env, json) {
       input_token_count: r.input_token_count,
     });
   } catch (err) {
-    console.error('remote relevance failed', err);
-    return json(request, { success: false, message: 'Model analysis failed' }, 503);
+    const pub = publicRelevanceError(err);
+    console.error('remote relevance failed', pub.kind, pub.error_detail);
+    return json(
+      request,
+      { success: false, message: pub.message, error_detail: pub.error_detail },
+      503,
+    );
   }
 }

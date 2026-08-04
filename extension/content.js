@@ -799,8 +799,9 @@
   /**
    * Status strip under bar / progress.
    * @param {string} label short prefix (Failed / Note / Stopped)
-   * @param {string} detail reason or explanation
-   * @param {{ tone?: 'error' | 'info' }} [opts]
+   * @param {string} detail reason or explanation（用户可见）
+   * @param {{ tone?: 'error' | 'info', errorDetail?: string }} [opts]
+   *   errorDetail 仅进反馈，不展示
    */
   function showFindStatus(label, detail, opts) {
     const el = ui$('semantic_find_status');
@@ -816,7 +817,16 @@
     labelEl.textContent = head;
     textEl.replaceChildren(labelEl, ...(body ? [document.createTextNode(` · ${body}`)] : []));
     textEl.title = text;
-    lastStatusMeta = { tone, label: head, detail: body };
+    const errorDetail =
+      opts?.errorDetail != null && String(opts.errorDetail).trim()
+        ? String(opts.errorDetail).trim()
+        : undefined;
+    lastStatusMeta = {
+      tone,
+      label: head,
+      detail: body,
+      ...(errorDetail ? { error_detail: errorDetail } : {}),
+    };
     statusFeedbackSent = false;
     // 仅 Failed 可上报；Stopped / 截断 Note 不需要反馈按钮
     const feedbackBtn = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'));
@@ -826,9 +836,12 @@
     setStatusContinueVisible(canResumeSearch());
   }
 
-  /** Task failure; reason from backend message or local error text */
-  function showFindError(reason) {
-    showFindStatus('Failed', reason || 'Request failed', { tone: 'error' });
+  /** Task failure; reason 用户可见；errorDetail 仅反馈 */
+  function showFindError(reason, opts) {
+    showFindStatus('Failed', reason || 'Request failed', {
+      tone: 'error',
+      errorDetail: opts?.errorDetail,
+    });
   }
 
   /** @param {{ tone: string, label: string, detail: string }} status */
@@ -950,6 +963,7 @@
     if (lastResult.status) {
       showFindStatus(lastResult.status.label, lastResult.status.detail, {
         tone: lastResult.status.tone === 'error' ? 'error' : 'info',
+        errorDetail: lastResult.status.error_detail,
       });
     }
     return true;
@@ -1467,11 +1481,14 @@
             reject(new Error(chrome.runtime.lastError.message));
             return;
           }
-          if (!resp?.ok) reject(new Error(resp?.error || 'request failed'));
-          else {
-            noteBackend(resp.backend);
-            resolve(resp.data);
+          if (!resp?.ok) {
+            const err = new Error(resp?.error || 'request failed');
+            if (resp?.error_detail) err.errorDetail = String(resp.error_detail);
+            reject(err);
+            return;
           }
+          noteBackend(resp.backend);
+          resolve(resp.data);
         }
       );
     });
@@ -2059,7 +2076,7 @@
           refreshExtract();
         } catch (err) {
           console.error('[InfoLens] extract aborted:', err?.message || err);
-          if (epoch === searchEpoch) showFindError(err?.message || err);
+          if (epoch === searchEpoch) showFindError(err?.message || err, { errorDetail: err?.errorDetail });
           return;
         }
         if (!extractedText.trim()) {
@@ -2268,7 +2285,7 @@
       }
       console.error('[InfoLens]', err?.message || err);
       updateNav();
-      showFindError(err?.message || err);
+      showFindError(err?.message || err, { errorDetail: err?.errorDetail });
       snapshotLastResult(query);
     } finally {
       // 仅本轮结束时清 searching；过期轮次不能关掉仍在跑的新一轮

@@ -47,6 +47,8 @@ def post_extension_feedback(feedback_body=None):
             "tone": _clip_str(status.get("tone"), 32),
             "label": _clip_str(status.get("label"), 64),
             "detail": _clip_str(status.get("detail"), 2000),
+            # 技术细节（用户 UI 不展示；扩展 Failed 反馈携带）
+            "error_detail": _clip_str(status.get("error_detail"), 2000),
         },
         "page_url": _clip_str(d.get("page_url"), 2000),
         "query": _clip_str(d.get("query"), 500),

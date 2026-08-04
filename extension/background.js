@@ -174,8 +174,12 @@ async function postJsonApi(url, body) {
     throw new Error(`HTTP ${res.status}: invalid JSON`);
   }
   if (!res.ok || data?.success !== true) {
-    const detail = data?.message || data?.detail || `HTTP ${res.status}`;
-    throw new Error(detail);
+    const message = data?.message || data?.detail || `HTTP ${res.status}`;
+    const err = new Error(message);
+    if (data?.error_detail != null && String(data.error_detail).trim()) {
+      err.errorDetail = String(data.error_detail);
+    }
+    throw err;
   }
   const backend = res.headers.get('X-Infolens-Backend');
   return { data, backend: backend || null };
@@ -193,7 +197,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         );
         sendResponse({ ok: true, data, backend });
       } catch (err) {
-        sendResponse({ ok: false, error: String(err?.message || err) });
+        const payload = { ok: false, error: String(err?.message || err) };
+        if (err?.errorDetail) payload.error_detail = String(err.errorDetail);
+        sendResponse(payload);
       }
     })();
     return true;
