@@ -5,6 +5,8 @@
  */
 var IL_CONFIG = {
   apiBase: 'https://infolens-api.xiaoyundqy.workers.dev',
+  /** 开发入口：服务端可落完整 query/text 日志 */
+  privacyMode: false,
   /**
    * SYNC: client/src/shared/core/constants.ts → SEMANTIC_CHUNK_BYTES；算法见 splitTextToChunks.js
    * 已知问题：见 config.prod.js 同名字段注释（与后端 token 截断无联动，密集内容会漏检）。

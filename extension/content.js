@@ -1452,7 +1452,7 @@
     const body = {
       query,
       text,
-      privacy_mode: true,
+      privacy_mode: CFG.privacyMode !== false,
     };
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(

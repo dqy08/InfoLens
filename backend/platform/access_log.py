@@ -188,7 +188,7 @@ def log_analyze_semantic_request(
 ):
     """
     记录收到 semantic 分析请求。
-    privacy_mode=True（插件请求固定如此）时不落 query/text 内容与明文 IP，仅记字符数和 IP 摘要。
+    privacy_mode=True 时不落 query/text 内容与明文 IP，仅记字符数和 IP 摘要。
     kind（relevance/keywords）：额外计入 analyze_semantic__{kind} 细分项，analyze_semantic 总项不受影响。
 
     Returns:
