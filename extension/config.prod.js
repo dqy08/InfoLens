@@ -4,6 +4,8 @@
  */
 var IL_CONFIG = {
   apiBase: 'https://api.info-lens.app',
+  /** 正式入口：服务端不落 query/text 与明文 IP */
+  privacyMode: true,
   /**
    * SYNC: client/src/shared/core/constants.ts → SEMANTIC_CHUNK_BYTES；算法见 splitTextToChunks.js
    * 已知问题：与后端 SEMANTIC_RUNTIME_CONFIGS 的 max_token_length（300~1000 token，按平台）无联动。

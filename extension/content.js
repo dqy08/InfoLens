@@ -53,6 +53,14 @@
   /** @type {Set<Text>} */
   let pieceNodeSet = new Set();
   let extractedText = '';
+  /**
+   * 补充平面字符（占 2 个 UTF-16 单元）的码点下标，升序、通常很稀。
+   * utf16 = cp +（该 cp 之前的补充字符个数）；无补充时两套下标恒等。
+   * @type {number[]}
+   */
+  let suppCpIndices = [];
+  /** extractedText 的码点长度（建表时一并缓存） */
+  let extractedCpLength = 0;
   /** @type {{ start: number, end: number, matchDegree: number }[]} */
   let matchedChunks = [];
   /** @type {{ start: number, end: number, matchDegree: number }[]} */
@@ -199,31 +207,11 @@
   }
 
   function collectTextMap(root) {
-    const out = [];
-    let text = '';
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        if (!node.nodeValue) return NodeFilter.FILTER_REJECT;
-        const p = node.parentElement;
-        if (!p) return NodeFilter.FILTER_REJECT;
-        const tag = p.tagName;
-        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'TEXTAREA' || tag === 'SVG') {
-          return NodeFilter.FILTER_REJECT;
-        }
-        if (p.closest('#il-find-root, #il-overlay-host, [data-il-underline]')) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
-    let n;
-    while ((n = walker.nextNode())) {
-      const value = n.nodeValue;
-      const start = text.length;
-      text += value;
-      out.push({ node: n, start, end: text.length });
+    const fn = globalThis.IL_collectTextMap;
+    if (typeof fn !== 'function') {
+      throw new Error('IL_collectTextMap missing — inject collectTextMap.js before content.js');
     }
-    return { text, pieces: out, root };
+    return fn(root);
   }
 
   function setPieces(newPieces) {
@@ -237,37 +225,68 @@
     extractRoot = root;
     ensurePaintMount(root);
     const mapped = collectTextMap(root);
-    extractedText = mapped.text;
+    setExtractedText(mapped.text);
     setPieces(mapped.pieces);
     contentDirty = false;
     matchedChunks = [];
     semanticMatchProgress = [];
+    selectedProgressChunkStart = null;
     matchIndex = -1;
     return { root, length: extractedText.length };
   }
 
   // ---------- offsets (API = code points; piece map = UTF-16) ----------
 
-  function cpToUtf16(str, cpIndex) {
-    let i = 0;
+  /** 写入 extractedText 并重建补充字符稀疏表（仅此处改正文缓存） */
+  function setExtractedText(text) {
+    extractedText = text || '';
+    const supp = [];
     let cps = 0;
-    while (cps < cpIndex && i < str.length) {
-      const cp = str.codePointAt(i);
-      i += cp > 0xffff ? 2 : 1;
+    for (let i = 0; i < extractedText.length; ) {
+      const cp = extractedText.codePointAt(i);
+      const w = cp > 0xffff ? 2 : 1;
+      if (w === 2) supp.push(cps);
+      i += w;
       cps += 1;
     }
-    return i;
+    suppCpIndices = supp;
+    extractedCpLength = cps;
   }
 
-  function utf16ToCp(str, utf16Index) {
-    let i = 0;
-    let cps = 0;
-    while (i < utf16Index && i < str.length) {
-      const cp = str.codePointAt(i);
-      i += cp > 0xffff ? 2 : 1;
-      cps += 1;
+  /** 有序数组中严格小于 x 的个数 */
+  function countBefore(sorted, x) {
+    let lo = 0;
+    let hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid] < x) lo = mid + 1;
+      else hi = mid;
     }
-    return cps;
+    return lo;
+  }
+
+  function cpToUtf16(cpIndex) {
+    const cp = cpIndex < 0 ? 0 : cpIndex > extractedCpLength ? extractedCpLength : cpIndex;
+    return cp + countBefore(suppCpIndices, cp);
+  }
+
+  function utf16ToCp(utf16Index) {
+    const u =
+      utf16Index < 0
+        ? 0
+        : utf16Index > extractedText.length
+          ? extractedText.length
+          : utf16Index;
+    // 与从头扫描一致：统计 start < u 的码点数 = u −（下标 < u 的低代理个数）
+    // 补充字符 k 的低代理下标 = supp[k] + k + 1
+    let lo = 0;
+    let hi = suppCpIndices.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (suppCpIndices[mid] + mid + 1 < u) lo = mid + 1;
+      else hi = mid;
+    }
+    return u - lo;
   }
 
   function findPiece(utf16Offset) {
@@ -324,8 +343,8 @@
   /** 整段 Range（滚动定位等）；绘制请用 rangesFromCpOffsets */
   function rangeFromCpOffsets(cp0, cp1) {
     if (!extractedText || cp1 <= cp0) return null;
-    const u0 = cpToUtf16(extractedText, cp0);
-    const u1 = cpToUtf16(extractedText, cp1);
+    const u0 = cpToUtf16(cp0);
+    const u1 = cpToUtf16(cp1);
     if (u1 <= u0) return null;
 
     const startPiece = findPiece(u0);
@@ -349,8 +368,8 @@
    */
   function rangesFromCpOffsets(cp0, cp1) {
     if (!extractedText || cp1 <= cp0) return [];
-    const u0 = cpToUtf16(extractedText, cp0);
-    const u1 = cpToUtf16(extractedText, cp1);
+    const u0 = cpToUtf16(cp0);
+    const u1 = cpToUtf16(cp1);
     if (u1 <= u0) return [];
 
     let i = findPieceIndex(u0);
@@ -635,7 +654,7 @@
     if (!h) throw new Error('highlight missing: il-truncated');
     h.clear();
     if (truncatedAnalyzedCpEnd == null || !extractedText || !extractRoot?.isConnected) return;
-    const fullCp = utf16ToCp(extractedText, extractedText.length);
+    const fullCp = extractedCpLength;
     const cp0 = Math.max(0, Math.min(truncatedAnalyzedCpEnd, fullCp));
     if (cp0 >= fullCp) return;
     addCpRangeToHighlight(h, cp0, fullCp);
@@ -760,7 +779,7 @@
 
   /**
    * 有未分析 chunk 时可续跑：Failed / Stopped 半截，或 maxChunks 截断后的下一批。
-   * 需已有进度（n>0）；首块即失败用 Enter 重开即可，不必 Continue。
+   * 需已有进度（n>0）；首块即失败无匹配时用 Enter 重开即可，不必 Continue。
    */
   function canResumeSearch() {
     const query =
@@ -780,8 +799,9 @@
   /**
    * Status strip under bar / progress.
    * @param {string} label short prefix (Failed / Note / Stopped)
-   * @param {string} detail reason or explanation
-   * @param {{ tone?: 'error' | 'info' }} [opts]
+   * @param {string} detail reason or explanation（用户可见）
+   * @param {{ tone?: 'error' | 'info', errorDetail?: string }} [opts]
+   *   errorDetail 仅进反馈，不展示
    */
   function showFindStatus(label, detail, opts) {
     const el = ui$('semantic_find_status');
@@ -797,7 +817,16 @@
     labelEl.textContent = head;
     textEl.replaceChildren(labelEl, ...(body ? [document.createTextNode(` · ${body}`)] : []));
     textEl.title = text;
-    lastStatusMeta = { tone, label: head, detail: body };
+    const errorDetail =
+      opts?.errorDetail != null && String(opts.errorDetail).trim()
+        ? String(opts.errorDetail).trim()
+        : undefined;
+    lastStatusMeta = {
+      tone,
+      label: head,
+      detail: body,
+      ...(errorDetail ? { error_detail: errorDetail } : {}),
+    };
     statusFeedbackSent = false;
     // 仅 Failed 可上报；Stopped / 截断 Note 不需要反馈按钮
     const feedbackBtn = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'));
@@ -807,9 +836,12 @@
     setStatusContinueVisible(canResumeSearch());
   }
 
-  /** Task failure; reason from backend message or local error text */
-  function showFindError(reason) {
-    showFindStatus('Failed', reason || 'Request failed', { tone: 'error' });
+  /** Task failure; reason 用户可见；errorDetail 仅反馈 */
+  function showFindError(reason, opts) {
+    showFindStatus('Failed', reason || 'Request failed', {
+      tone: 'error',
+      errorDetail: opts?.errorDetail,
+    });
   }
 
   /** @param {{ tone: string, label: string, detail: string }} status */
@@ -931,6 +963,7 @@
     if (lastResult.status) {
       showFindStatus(lastResult.status.label, lastResult.status.detail, {
         tone: lastResult.status.tone === 'error' ? 'error' : 'info',
+        errorDetail: lastResult.status.error_detail,
       });
     }
     return true;
@@ -938,7 +971,7 @@
 
   /**
    * ChatGPT 等会在滚动时改布局/换节点；滚动停稳或尺寸变化后按需重绑 Range / 重测 underline。
-   * 无 mutation 且 pieces 仍 connected 时跳过全量 collectTextMap（滚动热路径）。
+   * 无 mutation 且 pieces 仍 connected 时跳过 collectTextMap，且不重绑 CSS Highlight（只重测线）。
    */
   function syncPaintAfterLayout() {
     if (!extractRoot?.isConnected) {
@@ -956,9 +989,9 @@
     if (paintSpecs.length === 0 && truncatedAnalyzedCpEnd == null) return;
 
     const stale = pieces.some((p) => !p.node.isConnected);
-    // 无 mutation 且节点仍在：跳过全页 collectTextMap，但仍重测 underline（resize/reflow）
+    // 无 mutation 且节点仍在：Highlight Range 仍有效，只重测依赖 getClientRects 的 underline
     if (!contentDirty && !stale) {
-      renderAllSpecs({
+      remeasureUnderlines({
         preserveUnderline: paintSpecs.some((s) => s.kind === 'underline'),
       });
       return;
@@ -969,7 +1002,7 @@
     if (mapped.text !== extractedText) {
       // DOM_DEBUG 只是目测提取范围的调试预览，永远反映"当前"文本，文本变了就重新按当前内容分块展示
       if (DOM_DEBUG) {
-        extractedText = mapped.text;
+        setExtractedText(mapped.text);
         setPieces(mapped.pieces);
         if (!extractedText.trim()) {
           clearOverlayEls();
@@ -978,8 +1011,8 @@
         }
         const allChunks = splitChunks(extractedText, CFG.chunkBytes).filter(chunkHasContent);
         matchedChunks = allChunks.map((chunk) => ({
-          start: utf16ToCp(extractedText, chunk.start),
-          end: utf16ToCp(extractedText, chunk.end),
+          start: utf16ToCp(chunk.start),
+          end: utf16ToCp(chunk.end),
           matchDegree: 1,
         }));
         matchIndex = -1;
@@ -1098,17 +1131,26 @@
   }
 
   /**
-   * 全量：token + truncated + 下划线。仅用于重绑/还原/reflow 等必须整表一致的场景。
+   * 只重测 underline（不动 token / truncated Highlight）。
+   * 滚动停稳、resize 等几何可能变、节点未换时用这条路径。
    * @param {{ preserveUnderline?: boolean }} [options]
    *   preserveUnderline：不拆蓝导航线 DOM（hold/fade 不被流式更新打断）
+   */
+  function remeasureUnderlines(options) {
+    if (options?.preserveUnderline !== true) renderUnderlinesOfKind('underline');
+    renderUnderlinesOfKind('pending-underline');
+  }
+
+  /**
+   * 全量：token + truncated + 下划线。仅用于节点重绑 / 还原等必须整表一致的场景。
+   * @param {{ preserveUnderline?: boolean }} [options]
    */
   function renderAllSpecs(options) {
     if (!extractRoot?.isConnected) return 0;
     ensurePaintMount(extractRoot);
     renderTokenHighlights();
     applyTruncatedHighlight();
-    if (options?.preserveUnderline !== true) renderUnderlinesOfKind('underline');
-    renderUnderlinesOfKind('pending-underline');
+    remeasureUnderlines(options);
     return overlayEls.length;
   }
 
@@ -1138,7 +1180,8 @@
     reflowQueued = true;
     requestAnimationFrame(() => {
       reflowQueued = false;
-      renderAllSpecs({
+      // resize 只改几何：Highlight 无需重绑，只重测 underline
+      remeasureUnderlines({
         preserveUnderline: paintSpecs.some((s) => s.kind === 'underline'),
       });
     });
@@ -1173,15 +1216,11 @@
    */
   function fadeCurrentUnderline() {
     const gen = ++underlineFadeGen;
-    const fadingProgressChunkStart = selectedProgressChunkStart;
-    // 只 fade 导航线；等待线独立，不在此列。进度线保持选中蓝，等 fade 结束再变红。
+    // 只 fade 导航线；等待线独立，不在此列。当前 chunk 状态不随正文下划线淡出。
     const lines = overlayEls.filter((el) => el.dataset.ilUnderline === 'nav');
     if (!lines.length) {
       paintSpecs = paintSpecs.filter((s) => s.kind !== 'underline');
-      if (fadingProgressChunkStart != null) {
-        selectedProgressChunkStart = null;
-        renderSemanticMatchProgress();
-      }
+      if (lastResult) snapshotLastResult(lastResult.query);
       return;
     }
     for (const el of lines) {
@@ -1199,10 +1238,8 @@
         if (gen !== underlineFadeGen) return;
         paintSpecs = paintSpecs.filter((s) => s.kind !== 'underline');
         clearOverlayRole('nav');
-        if (selectedProgressChunkStart === fadingProgressChunkStart) {
-          selectedProgressChunkStart = null;
-          renderSemanticMatchProgress();
-        }
+        // 下划线已淡出，但当前 chunk 仍由进度图蓝线和导航逻辑保留。
+        if (lastResult) snapshotLastResult(lastResult.query);
       }, CHUNK_HIGHLIGHT_FADE_MS);
     });
   }
@@ -1254,7 +1291,7 @@
    */
   function clientRectNearCp(cp0) {
     if (!extractedText || cp0 < 0) return null;
-    const fullCp = utf16ToCp(extractedText, extractedText.length);
+    const fullCp = extractedCpLength;
     if (cp0 >= fullCp) return null;
     const probeEnd = Math.min(fullCp, cp0 + 128);
     for (const range of rangesFromCpOffsets(cp0, probeEnd)) {
@@ -1366,15 +1403,50 @@
     updateNav();
   }
 
+  /** 当前输入是否与最近一次搜索的 query 一致。 */
+  function queryMatchesCurrentResults() {
+    const query =
+      /** @type {HTMLInputElement | null} */ (ui$('semantic_find_input'))?.value?.trim() || '';
+    return !!query && lastSearchMeta?.query === query;
+  }
+
   /**
-   * 选中并展示一个 chunk：进度图线变蓝 + 下划线 → 滚到起点 → hold → 下划线 fade；
-   * 进度线保持蓝至 fade 结束再恢复红。
+   * 从当前进度图位置计算上下导航的目标。
+   * 点击了低于阈值的 chunk 时，也应从该位置继续，而不是回到旧的 matchIndex。
+   */
+  function navigateMatch(delta) {
+    if (!matchedChunks.length) return;
+
+    if (selectedProgressChunkStart == null) {
+      jumpToMatch(matchIndex < 0 ? (delta < 0 ? matchedChunks.length - 1 : 0) : matchIndex + delta);
+      return;
+    }
+
+    const currentIndex = matchedChunks.findIndex(
+      (chunk) => chunk.start === selectedProgressChunkStart
+    );
+    if (currentIndex >= 0) {
+      jumpToMatch(currentIndex + delta);
+      return;
+    }
+
+    const nextIndex = matchedChunks.findIndex(
+      (chunk) => chunk.start > selectedProgressChunkStart
+    );
+    const insertionIndex = nextIndex < 0 ? matchedChunks.length : nextIndex;
+    jumpToMatch(delta < 0 ? insertionIndex - 1 : insertionIndex);
+  }
+
+  /**
+   * 选中并展示一个 chunk：进度图线变蓝 + 下划线 → 滚到起点 → hold → 下划线 fade。
+   * 当前 chunk 状态持续保留，进度图点击与上下按钮共用。
    * 由「点击进度线」（selectProgressChunk）和「上下按钮跳转」（jumpToMatch）共用，
    * 保证两者对进度图选中态的表现始终一致。
    */
   function revealChunk(chunk) {
     setCurrentUnderline(chunk);
     selectedProgressChunkStart = chunk.start;
+    matchIndex = matchedChunks.findIndex((item) => item.start === chunk.start);
     renderSemanticMatchProgress();
     // 导航态需要跟着刷新快照，否则关闭再打开搜索栏时，下划线（回退到旧快照）
     // 会和进度图选中线（读实时变量）错位
@@ -1394,7 +1466,7 @@
     const body = {
       query,
       text,
-      privacy_mode: true,
+      privacy_mode: CFG.privacyMode !== false,
     };
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(
@@ -1409,11 +1481,14 @@
             reject(new Error(chrome.runtime.lastError.message));
             return;
           }
-          if (!resp?.ok) reject(new Error(resp?.error || 'request failed'));
-          else {
-            noteBackend(resp.backend);
-            resolve(resp.data);
+          if (!resp?.ok) {
+            const err = new Error(resp?.error || 'request failed');
+            if (resp?.error_detail) err.errorDetail = String(resp.error_detail);
+            reject(err);
+            return;
           }
+          noteBackend(resp.backend);
+          resolve(resp.data);
         }
       );
     });
@@ -1614,12 +1689,8 @@
 
     void ensureHistory();
 
-    ui$('semantic_find_prev')?.addEventListener('click', () =>
-      jumpToMatch(matchIndex < 0 ? matchedChunks.length - 1 : matchIndex - 1)
-    );
-    ui$('semantic_find_next')?.addEventListener('click', () =>
-      jumpToMatch(matchIndex < 0 ? 0 : matchIndex + 1)
-    );
+    ui$('semantic_find_prev')?.addEventListener('click', () => navigateMatch(-1));
+    ui$('semantic_find_next')?.addEventListener('click', () => navigateMatch(1));
     ui$('semantic_find_close')?.addEventListener('click', () => close());
     ui$('semantic_find_status_close')?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1673,10 +1744,16 @@
       if (uiShadow?.activeElement === findInput) renderHistoryDropdown();
     });
     findInput.addEventListener('keydown', (e) => {
+      // 输入框 Enter：与上次搜索 query 一致 → 上下翻匹配（无匹配则空操作）；
+      // 否则开搜并停在首个匹配，之后再 Enter 即在匹配间跳转（对齐 Chrome Find 心智）。
       if (e.key === 'Enter' && !e.isComposing) {
         e.preventDefault();
         hideHistoryDropdown();
-        void runSearch();
+        if (queryMatchesCurrentResults()) {
+          navigateMatch(e.shiftKey ? -1 : 1);
+        } else if (!searching) {
+          void runSearch();
+        }
       } else if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
@@ -1808,7 +1885,7 @@
     const x1 = width - 4;
     const y0 = height - 7;
     const y1 = 4;
-    const textLength = progressTextLength || [...extractedText].length;
+    const textLength = progressTextLength || extractedCpLength;
     const groupsByStart = new Map(
       [...lines.children]
         .filter((el) => el instanceof SVGGElement && el.dataset.progressStart != null)
@@ -1898,14 +1975,8 @@
   function selectProgressChunk(start) {
     const chunk = semanticMatchProgress.find((item) => item.start === start);
     if (!chunk) return;
-    if (selectedProgressChunkStart === start) {
-      selectedProgressChunkStart = null;
-      setCurrentUnderline(null);
-      renderSemanticMatchProgress();
-      if (lastResult) snapshotLastResult(lastResult.query);
-    } else {
-      revealChunk(chunk);
-    }
+    // 再次点击当前 chunk 保持选中状态，不做 toggle。
+    revealChunk(chunk);
   }
 
   function setSearching(on) {
@@ -1925,7 +1996,7 @@
   }
 
   /**
-   * @param {{ resume?: boolean }} [opts] resume=true：保留已有进度，从下一未分析 chunk 继续（Enter 仍重开）
+   * @param {{ resume?: boolean }} [opts] resume=true：保留已有进度，从下一未分析 chunk 继续
    */
   async function runSearch(opts) {
     if (searching) return;
@@ -1994,7 +2065,7 @@
           windowEnd: allChunks.length,
         };
         progressTextLength = allChunks.length
-          ? utf16ToCp(extractedText, allChunks[allChunks.length - 1].end)
+          ? utf16ToCp(allChunks[allChunks.length - 1].end)
           : 0;
         // 分母变大：已完成竖线重标定到新窗口（仍全部绘制）
         renderSemanticMatchProgress();
@@ -2005,7 +2076,7 @@
           refreshExtract();
         } catch (err) {
           console.error('[InfoLens] extract aborted:', err?.message || err);
-          if (epoch === searchEpoch) showFindError(err?.message || err);
+          if (epoch === searchEpoch) showFindError(err?.message || err, { errorDetail: err?.errorDetail });
           return;
         }
         if (!extractedText.trim()) {
@@ -2024,7 +2095,7 @@
           windowEnd: allChunks.length,
         };
         progressTextLength = allChunks.length
-          ? utf16ToCp(extractedText, allChunks[allChunks.length - 1].end)
+          ? utf16ToCp(allChunks[allChunks.length - 1].end)
           : 0;
 
         // SYNC：站内 truncated-text — 搜索开始全文置灰，随已分析边界后移恢复原色
@@ -2103,7 +2174,7 @@
         // 第 0 块（或续跑起点）没有「上一块结束时的预滚」；若不先滚到位，本块 hold 后会立刻
         // 被预滚下一块打断，表现为「第一个 chunk 跳转不行」（匹配与否都一样）。
         if (stillThisSearch() && resumeFrom < allChunks.length && (followAll || !parkedOnFirstMatch)) {
-          followSearchingChunk(utf16ToCp(extractedText, allChunks[resumeFrom].start));
+          followSearchingChunk(utf16ToCp(allChunks[resumeFrom].start));
           await delayMs(CHUNK_SEARCH_SCROLL_SETTLE_MS);
         }
 
@@ -2116,8 +2187,8 @@
           const degree = res.full_match_degree ?? 0;
           // SYNC: semanticSearchController — matched = degree >= threshold；未匹配块不上色
           const matched = degree >= CFG.matchThreshold;
-          const chunkCpStart = utf16ToCp(extractedText, chunk.start);
-          const chunkCpEnd = utf16ToCp(extractedText, chunk.end);
+          const chunkCpStart = utf16ToCp(chunk.start);
+          const chunkCpEnd = utf16ToCp(chunk.end);
           analyzedCpEnd = Math.max(analyzedCpEnd, chunkCpEnd);
           semanticMatchProgress.push({
             start: chunkCpStart,
@@ -2177,7 +2248,7 @@
 
           if (nextIndex < allChunks.length && (followAll || !parkedOnFirstMatch)) {
             const nextChunk = allChunks[nextIndex];
-            followSearchingChunk(utf16ToCp(extractedText, nextChunk.start));
+            followSearchingChunk(utf16ToCp(nextChunk.start));
             // 滚动后的新位置也要停留够 CHUNK_SEARCH_SCROLL_SETTLE_MS，
             // 否则分析过快时会出现「刚滚过去就立刻变色」的突变感；relevance 在途由 done 补发维持
             await delayMs(CHUNK_SEARCH_SCROLL_SETTLE_MS);
@@ -2214,7 +2285,7 @@
       }
       console.error('[InfoLens]', err?.message || err);
       updateNav();
-      showFindError(err?.message || err);
+      showFindError(err?.message || err, { errorDetail: err?.errorDetail });
       snapshotLastResult(query);
     } finally {
       // 仅本轮结束时清 searching；过期轮次不能关掉仍在跑的新一轮
@@ -2232,7 +2303,7 @@
       info = refreshExtract();
     } catch (err) {
       clearOverlays();
-      extractedText = '';
+      setExtractedText('');
       setPieces([]);
       matchedChunks = [];
       matchIndex = -1;
@@ -2245,8 +2316,8 @@
     }
     const allChunks = splitChunks(extractedText, CFG.chunkBytes).filter(chunkHasContent);
     matchedChunks = allChunks.map((chunk) => ({
-      start: utf16ToCp(extractedText, chunk.start),
-      end: utf16ToCp(extractedText, chunk.end),
+      start: utf16ToCp(chunk.start),
+      end: utf16ToCp(chunk.end),
       matchDegree: 1,
     }));
     matchIndex = -1;

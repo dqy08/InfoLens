@@ -19,6 +19,8 @@
   function mark(doc) {
     if (!doc.body) return;
     let seq = 0;
+    // body 本身也要打标：Readability 退到合成根时映回 page/body
+    doc.body.setAttribute(ATTR, String(++seq));
     for (const el of doc.body.querySelectorAll('*')) {
       el.setAttribute(ATTR, String(++seq));
     }
@@ -26,6 +28,7 @@
 
   function unmark(doc) {
     if (!doc.body) return;
+    doc.body.removeAttribute(ATTR);
     for (const el of doc.body.querySelectorAll(`[${ATTR}]`)) {
       el.removeAttribute(ATTR);
     }

@@ -1413,9 +1413,9 @@ Readability.prototype = {
       }
 
       // InfoLens: capture rid for live-DOM map-back (set before mutations below).
-      // Synthetic BODY-replacement roots are not mappable → leave null.
+      // Synthetic DIV is clone-only; map to `page` (normally body) instead.
       this._ilArticleRootRid = neededToCreateTopCandidate
-        ? null
+        ? page.getAttribute("data-il-rid")
         : topCandidate.getAttribute("data-il-rid");
 
       // Now that we have the top candidate, look through its siblings for content

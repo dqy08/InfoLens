@@ -10,6 +10,7 @@ const CONTENT_JS = [
   'config.js',
   'vendor/Readability.js',
   'articleRoot.js',
+  'collectTextMap.js',
   'splitTextToChunks.js',
   'mergeTokenSpans.js',
   'content.js',
@@ -156,12 +157,6 @@ async function activateTab(tab) {
 
 chrome.action.onClicked.addListener(activateTab);
 
-chrome.commands.onCommand.addListener(async (command) => {
-  if (command !== 'toggle-find') return;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  await activateTab(tab);
-});
-
 /**
  * POST JSON；要求 HTTP ok 且 body.success === true（避免 2xx HTML/空对象被当成成功）。
  * @returns {{ data: object, backend: string | null }} backend = X-Infolens-Backend（hf|accel）
@@ -179,8 +174,12 @@ async function postJsonApi(url, body) {
     throw new Error(`HTTP ${res.status}: invalid JSON`);
   }
   if (!res.ok || data?.success !== true) {
-    const detail = data?.message || data?.detail || `HTTP ${res.status}`;
-    throw new Error(detail);
+    const message = data?.message || data?.detail || `HTTP ${res.status}`;
+    const err = new Error(message);
+    if (data?.error_detail != null && String(data.error_detail).trim()) {
+      err.errorDetail = String(data.error_detail);
+    }
+    throw err;
   }
   const backend = res.headers.get('X-Infolens-Backend');
   return { data, backend: backend || null };
@@ -198,7 +197,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         );
         sendResponse({ ok: true, data, backend });
       } catch (err) {
-        sendResponse({ ok: false, error: String(err?.message || err) });
+        const payload = { ok: false, error: String(err?.message || err) };
+        if (err?.errorDetail) payload.error_detail = String(err.errorDetail);
+        sendResponse(payload);
       }
     })();
     return true;

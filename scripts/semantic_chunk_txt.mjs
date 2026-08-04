@@ -3,9 +3,11 @@
  * 按插件分块规则切 txt（SYNC: extension/splitTextToChunks.js ← semanticUtils.splitTextToChunks）。
  *
  * 用法（项目根目录）:
- *   node scripts/semantic_chunk_txt.mjs scripts/cases/林黛玉哭.txt
- *   node scripts/semantic_chunk_txt.mjs scripts/cases/林黛玉哭.txt -o scripts/cases/林黛玉哭.chunks.json
- *   node scripts/semantic_chunk_txt.mjs scripts/cases/林黛玉哭.txt --skeleton -o scripts/cases/林黛玉哭_plugin.json
+ *   node scripts/semantic_chunk_txt.mjs scripts/cases/红楼-第3回.txt
+ *   node scripts/semantic_chunk_txt.mjs scripts/cases/红楼-第3回.txt -o /tmp/红楼-第3回.chunks.json
+ *   node scripts/semantic_chunk_txt.mjs scripts/cases/红楼-第3回.txt --skeleton --query 林黛玉哭 -o scripts/cases/红楼-第3回.json
+ *
+ * 注意：文件名是语料身份，不是 query；--skeleton 请显式传 --query（勿依赖默认用 stem）。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -54,6 +56,10 @@ function parseArgs(argv) {
     console.error(`--bytes must be > 0, got ${args.bytes}`);
     process.exit(2);
   }
+  if (args.skeleton && args.query == null) {
+    console.error('--skeleton 须显式传 --query（文件名是语料身份，不能当 query）');
+    process.exit(2);
+  }
   return args;
 }
 
@@ -76,7 +82,8 @@ function main() {
 
   const relSource = path.relative(ROOT, abs) || abs;
   const stem = path.basename(abs, path.extname(abs));
-  const query = args.query != null ? args.query : stem;
+  // 非 skeleton 输出不含 query；skeleton 已在 parseArgs 强制要求 --query
+  const query = args.query;
 
   let payload;
   if (args.skeleton) {
@@ -85,10 +92,14 @@ function main() {
       name: `${stem}_c${c.chunk_index}`,
       source: relSource.split(path.sep).join('/'),
       chunk_index: c.chunk_index,
-      query,
       text: c.text,
-      expect_relevant: null,
-      expect_keywords: [],
+      query: [
+        {
+          query,
+          expect_relevant: null,
+          expect_keywords: [],
+        },
+      ],
     }));
   } else {
     payload = contentChunks;

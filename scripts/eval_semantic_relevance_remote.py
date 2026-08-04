@@ -3,6 +3,7 @@
 远程 Chat API 相关性门控评测（默认 OpenRouter；与门面 Worker 同提示词基线）。
 
 主题：只评 expect_relevant（云端）；不管 expect_keywords / 本地 instruct relevance。
+（磁盘上 query 为数组且真值在项内；加载后展平为 query:str。）
 关键词归因请用 scripts/eval_semantic_keywords.py。
 
 提示词相对基线只保留一个变量：是否追加
@@ -10,13 +11,19 @@
 
 用法（项目根目录）:
   python scripts/eval_semantic_relevance_remote.py \\
-    -c scripts/cases/林黛玉哭-1_plugin.json \\
-    -o scripts/results/林黛玉哭-1_hy3_rel.jsonl
+    -c scripts/cases/红楼-第3回.json \\
+    -o scripts/results/红楼-第3回_hy3_rel.jsonl
+
+  # 并发（用例彼此独立；默认 jobs=1）
+  python scripts/eval_semantic_relevance_remote.py \\
+    -c scripts/cases/论文.json \\
+    -o scripts/results/论文_rel.jsonl \\
+    -j 8
 
   # 开启 clearly→0
   python scripts/eval_semantic_relevance_remote.py \\
-    -c scripts/cases/林黛玉哭-1_plugin.json \\
-    -o scripts/results/林黛玉哭-1_hy3_clearly_rel.jsonl \\
+    -c scripts/cases/红楼-第3回.json \\
+    -o scripts/results/红楼-第3回_hy3_clearly_rel.jsonl \\
     --clearly-zero
 """
 
@@ -27,9 +34,16 @@ import json
 import os
 import re
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+from semantic_case_load import load_all_cases
 
 try:
     import requests
@@ -48,7 +62,7 @@ SEMANTIC_MATCH_THRESHOLD = 0.1  # SYNC: count>0 映射为 degree=1.0，否则 0.
 CLEARLY_ZERO_SENTENCE = (
     "If the text is not clearly related to the query topic, reply 0."
 )
-# clearly_zero 对两模型的总体影响（林黛玉哭 20 条子集、相对基线）：
+# clearly_zero 对两模型的总体影响（cases/subsets/红楼.smoke20、相对基线）：
 # - DeepSeek-V4-Flash：拒识明显变好、召回下降（假阳↓、漏检↑），acc 净升
 # - Hy3：两边都略伤，acc 净降；基线已较好时不必开
 
@@ -97,17 +111,7 @@ def _append_record(path: Path, record: dict) -> None:
 
 
 def load_cases(path: Path) -> List[dict]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, list):
-        raise ValueError(f"用例文件须为 JSON 数组: {path}")
-    cases = []
-    for c in raw:
-        if "name" not in c or "query" not in c or "text" not in c:
-            raise ValueError(f"用例缺少 name/query/text: {c.get('name')}")
-        if c.get("expect_relevant") is None:
-            raise ValueError(f"用例 {c['name']} 的 expect_relevant 未填写（勿提交 skeleton）")
-        cases.append(c)
-    return cases
+    return load_all_cases(path)
 
 
 def parse_count(content: Optional[str]) -> Optional[int]:
@@ -278,7 +282,8 @@ def write_review_markdown(results: List[dict], path: Path, clearly_zero: bool) -
     total = tn + tp + fp + fn
     acc = (tn + tp) / total if total else 0.0
     lines[4:4] = [
-        f"汇总：TN={tn} TP={tp} FP={fp} FN={fn} acc={acc:.1%}（n={total}）",
+        f"汇总：TN（拒识对）={tn} TP（正检）={tp} "
+        f"FP（误检）={fp} FN（漏检）={fn} acc={acc:.1%}（n={total}）",
         "",
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -313,7 +318,14 @@ def main() -> None:
     parser.add_argument("--token", default=None, help="API token（优先于环境变量）")
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--timeout", type=int, default=180)
-    parser.add_argument("--sleep", type=float, default=0.2, help="请求间隔秒")
+    parser.add_argument("--sleep", type=float, default=0.2, help="每条请求前额外等待秒（每 worker）")
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=1,
+        help="并发数（用例彼此独立；默认 1；可试 4/8）",
+    )
     args = parser.parse_args()
 
     _load_env_file(Path(__file__).resolve().parents[1] / ".env")
@@ -338,7 +350,11 @@ def main() -> None:
         print(f"错误: 需要 --token / {OPENROUTER_TOKEN_ENV} / {HF_TOKEN_ENV}")
         sys.exit(1)
 
-    print(f"已加载 {len(cases)} 个 chunk；model={args.model}；clearly_zero={args.clearly_zero}")
+    jobs = max(1, int(args.jobs))
+    print(
+        f"已加载 {len(cases)} 条用例；model={args.model}；"
+        f"clearly_zero={args.clearly_zero}；jobs={jobs}"
+    )
 
     completed = set()
     all_results: list = []
@@ -347,45 +363,90 @@ def main() -> None:
         completed = {r["case"] for r in all_results if "case" in r}
         print(f"已加载 {len(all_results)} 条历史，跳过 {len(completed)} 个 case")
 
-    for i, case in enumerate(cases):
-        name = case["name"]
-        prog = f"[{i + 1}/{len(cases)}]"
-        if name in completed:
-            print(f"{prog} ⏭ {name}", flush=True)
-            continue
-        print(f"{prog} 执行 {name}", flush=True)
+    pending: List[Tuple[int, dict]] = [
+        (i, case) for i, case in enumerate(cases) if case["name"] not in completed
+    ]
+    skipped = len(cases) - len(pending)
+    if skipped:
+        print(f"⏭ 跳过已完成 {skipped} 条", flush=True)
+
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+    write_lock = threading.Lock()
+    stop = threading.Event()
+    done_n = skipped
+
+    def _work(item: Tuple[int, dict]) -> Tuple[int, dict, dict]:
+        i, case = item
+        if stop.is_set():
+            return i, case, {"case": case["name"], "error": "skipped after failure"}
+        if args.sleep > 0:
+            time.sleep(args.sleep)
         record = run_one(
-            args.url, args.model, case,
+            args.url,
+            args.model,
+            case,
             clearly_zero=args.clearly_zero,
             token=token,
             timeout=args.timeout,
             max_retries=args.retries,
         )
+        return i, case, record
+
+    def _commit(i: int, case: dict, record: dict) -> bool:
+        """写入并打印；返回是否应继续（False=失败中断）。"""
+        nonlocal done_n
+        name = case["name"]
+        done_n += 1
+        prog = f"[{done_n}/{len(cases)}]"
+        all_results.append(record)
+        if args.output:
+            with write_lock:
+                _append_record(args.output, record)
         if record.get("error"):
             print(f"{prog} ✗ {name}: {record['error']}", flush=True)
-            all_results.append(record)
-            if args.output:
-                args.output.parent.mkdir(parents=True, exist_ok=True)
-                _append_record(args.output, record)
-            print("⚠ 失败中断后续", flush=True)
-            break
+            return False
         gate = "PASS" if record["gate_passed"] else "fail"
         print(
-            f"{prog} ✓ {name} gate={gate} count={record['count']} degree={record['full_match_degree']}",
+            f"{prog} ✓ {name} gate={gate} count={record['count']} "
+            f"degree={record['full_match_degree']}",
             flush=True,
         )
-        all_results.append(record)
         completed.add(name)
-        if args.output:
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            _append_record(args.output, record)
-        if args.sleep > 0:
-            time.sleep(args.sleep)
+        return True
+
+    if jobs == 1:
+        for item in pending:
+            if stop.is_set():
+                break
+            i, case, record = _work(item)
+            if not _commit(i, case, record):
+                print("⚠ 失败中断后续", flush=True)
+                stop.set()
+                break
+    else:
+        with ThreadPoolExecutor(max_workers=jobs) as ex:
+            futures = {ex.submit(_work, item): item for item in pending}
+            for fut in as_completed(futures):
+                i, case, record = fut.result()
+                if record.get("error") == "skipped after failure":
+                    continue
+                if not _commit(i, case, record):
+                    print("⚠ 失败中断后续（已提交的 in-flight 仍会跑完）", flush=True)
+                    stop.set()
+                    for f in futures:
+                        f.cancel()
+                    break
 
     if args.output:
         print(f"\n✅ 结果已写入 {args.output}（共 {len(all_results)} 条）")
     if args.review_md and all_results:
-        write_review_markdown(all_results, args.review_md, args.clearly_zero)
+        order = {c["name"]: i for i, c in enumerate(cases)}
+        ordered = sorted(
+            all_results,
+            key=lambda r: order.get(r.get("case") or "", 10**9),
+        )
+        write_review_markdown(ordered, args.review_md, args.clearly_zero)
 
 
 if __name__ == "__main__":
