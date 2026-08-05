@@ -151,6 +151,18 @@
                     </div>
                     <div class="textarea-wrapper chat-prompt-actions-row">
                         <!-- INCLUDE partials/completion-options-row.html -->
+                        <div id="chat_openrouter_creds_row" class="options-row chat-openrouter-creds-row" hidden>
+                            <span class="options-group chat-openrouter-field">
+                                <label class="options-label" for="chat_openrouter_model_id" data-i18n>OpenRouter model</label>
+                                <input type="text" id="chat_openrouter_model_id" class="chat-openrouter-input"
+                                    spellcheck="false" autocomplete="off" placeholder="tencent/hy3">
+                            </span>
+                            <span class="options-group chat-openrouter-field">
+                                <label class="options-label" for="chat_openrouter_api_key" data-i18n>OpenRouter API key</label>
+                                <input type="password" id="chat_openrouter_api_key" class="chat-openrouter-input"
+                                    spellcheck="false" autocomplete="off" placeholder="sk-or-…">
+                            </span>
+                        </div>
                         <div class="button-group">
                             <div class="button-left">
                                 <div class="button-left-primary">

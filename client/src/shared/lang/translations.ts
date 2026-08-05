@@ -206,6 +206,11 @@ export const translations: Translations = {
         'Raw prompt': '原始提示词',
         'Raw prompt mode': '原始提示词模式',
         'Enable thinking': '启用思考模式',
+        'OpenRouter (custom)': 'OpenRouter（自定义）',
+        'OpenRouter model': 'OpenRouter 模型',
+        'OpenRouter API key': 'OpenRouter API Key',
+        'Enter OpenRouter model id and API key (admin).':
+            '请填写 OpenRouter 模型 ID 与 API Key（管理员实验功能）。',
         'Tool use': '工具使用',
         'Multi-turn': '多轮',
         'Config tools': '配置工具',

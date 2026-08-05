@@ -24,6 +24,10 @@ import {
     postCompletionsStop,
     type OpenAICompletionsResponse
 } from '../../shared/api/completionsClient';
+import {
+    formatOpenRouterMessagesAsPrompt,
+    postOpenRouterChat,
+} from '../../shared/api/openrouterChatClient';
 import { translateApiErrorMessage } from '../../shared/core/errorUtils';
 import { buildInitialChatMessages } from '../../features/chat/chatMessages';
 import type { ChatDisplaySegment } from '../../features/chat/chatSegments';
@@ -69,14 +73,18 @@ import {
     replaceContentUrlParam,
     runContentUrlHydrate,
 } from '../../shared/cross/contentUrl';
-import { updateChatCompletionMetrics } from '../../shared/cross/textMetricsUpdater';
-import { lsReadBool, lsSet, lsWriteBool, lsWriteString } from '../../shared/storage/localStorageHelpers';
+import { updateChatCompletionMetrics, validateMetricsElements } from '../../shared/cross/textMetricsUpdater';
+import { lsGet, lsReadBool, lsSet, lsWriteBool, lsWriteString } from '../../shared/storage/localStorageHelpers';
 import {
     CHAT_ENABLE_THINKING_STORAGE_KEY,
     CHAT_ENABLE_TOOL_CALLING_STORAGE_KEY,
     CHAT_MAX_NEW_TOKENS_STORAGE_KEY,
     CHAT_MODEL_VARIANT_STORAGE_KEY,
     CHAT_MULTI_TURN_MOCK_STORAGE_KEY,
+    CHAT_OPENROUTER_API_KEY_STORAGE_KEY,
+    CHAT_OPENROUTER_ENABLED_STORAGE_KEY,
+    CHAT_OPENROUTER_MODEL_ID_STORAGE_KEY,
+    CHAT_OPENROUTER_SELECT_VALUE,
     CHAT_TOOL_CONFIG_STORAGE_KEY,
     LS_SKIP_CHAT_TEMPLATE,
 } from '../../features/chat/chatPromptTemplateMode';
@@ -143,8 +151,131 @@ const chatTeacherForcingEnable = document.getElementById(
     'chat_teacher_forcing_enable'
 ) as HTMLInputElement | null;
 const chatTeacherForcingBlock = document.getElementById('chat_teacher_forcing_block');
+const chatRawPromptModeRow = document.querySelector(
+    '.chat-raw-prompt-mode-row'
+) as HTMLElement | null;
+const chatTeacherForcingRow = document.querySelector(
+    '.teacher-forcing-row'
+) as HTMLElement | null;
+const chatEnableThinkingRow = document.querySelector(
+    '.chat-enable-thinking-row'
+) as HTMLElement | null;
+const toolCallingOptionsMount = document.getElementById('tool_calling_options_mount');
+const openRouterCredsRow = document.getElementById('chat_openrouter_creds_row');
+const openRouterModelIdInput = document.getElementById(
+    'chat_openrouter_model_id'
+) as HTMLInputElement | null;
+const openRouterApiKeyInput = document.getElementById(
+    'chat_openrouter_api_key'
+) as HTMLInputElement | null;
+
+const OPENROUTER_OPTION_ID = 'chat_model_option_openrouter';
+
+function isOpenRouterMode(): boolean {
+    const sel = document.getElementById(
+        'completion_model_variant'
+    ) as HTMLSelectElement | null;
+    return (
+        adminManager.isInAdminMode() &&
+        sel?.value === CHAT_OPENROUTER_SELECT_VALUE
+    );
+}
+
+function readOpenRouterModelId(): string {
+    return (openRouterModelIdInput?.value ?? '').trim();
+}
+
+function readOpenRouterApiKey(): string {
+    return (openRouterApiKeyInput?.value ?? '').trim();
+}
+
+function ensureOpenRouterSelectOption(): void {
+    const sel = document.getElementById(
+        'completion_model_variant'
+    ) as HTMLSelectElement | null;
+    if (!sel) return;
+    let opt = document.getElementById(OPENROUTER_OPTION_ID) as HTMLOptionElement | null;
+    if (!opt) {
+        opt = document.createElement('option');
+        opt.id = OPENROUTER_OPTION_ID;
+        opt.value = CHAT_OPENROUTER_SELECT_VALUE;
+        opt.textContent = tr('OpenRouter (custom)');
+        sel.appendChild(opt);
+    }
+    opt.hidden = !adminManager.isInAdminMode();
+    opt.disabled = !adminManager.isInAdminMode();
+}
+
+function persistOpenRouterCreds(): void {
+    if (openRouterModelIdInput) {
+        lsWriteString(CHAT_OPENROUTER_MODEL_ID_STORAGE_KEY, openRouterModelIdInput.value);
+    }
+    if (openRouterApiKeyInput) {
+        lsWriteString(CHAT_OPENROUTER_API_KEY_STORAGE_KEY, openRouterApiKeyInput.value);
+    }
+}
+
+/** 在 createCompletionOptionsRow 之后赋值；此处仅声明供 sync 使用 */
+let syncModelVariantUiRef: () => void = () => {};
+let syncIdleModelMetricRef: () => void = () => {};
+
+function syncOpenRouterExperimentUi(): void {
+    ensureOpenRouterSelectOption();
+    const sel = document.getElementById(
+        'completion_model_variant'
+    ) as HTMLSelectElement | null;
+    const admin = adminManager.isInAdminMode();
+    if (!admin && sel?.value === CHAT_OPENROUTER_SELECT_VALUE) {
+        sel.value = 'instruct';
+        lsWriteBool(CHAT_OPENROUTER_ENABLED_STORAGE_KEY, false);
+    }
+    const openrouter = isOpenRouterMode();
+    lsWriteBool(CHAT_OPENROUTER_ENABLED_STORAGE_KEY, openrouter);
+
+    if (openRouterCredsRow) {
+        openRouterCredsRow.hidden = !openrouter;
+    }
+    if (chatRawPromptModeRow) {
+        chatRawPromptModeRow.hidden = openrouter;
+    }
+    if (chatTeacherForcingRow) {
+        chatTeacherForcingRow.hidden = openrouter;
+    }
+    if (chatEnableThinkingRow) {
+        chatEnableThinkingRow.hidden = openrouter;
+    }
+    if (toolCallingOptionsMount) {
+        toolCallingOptionsMount.hidden = openrouter;
+    }
+
+    if (openrouter) {
+        if (skipChatTemplateInput?.checked) {
+            skipChatTemplateInput.checked = false;
+            lsWriteBool(LS_SKIP_CHAT_TEMPLATE, false);
+        }
+        if (chatTeacherForcingEnable?.checked) {
+            chatTeacherForcingEnable.checked = false;
+        }
+        if (enableThinkingInput?.checked) {
+            enableThinkingInput.checked = false;
+        }
+        syncPromptPanelVisibility();
+        syncTeacherForcingRow();
+    } else {
+        syncModelVariantUiRef();
+        syncPromptPanelVisibility();
+        syncTeacherForcingRow();
+    }
+    // 管理员：始终可打开 Model 下拉（否则 Chat template 模式下 select 被禁用，无法选 OpenRouter）
+    if (admin && sel) {
+        sel.disabled = false;
+    }
+    syncIdleModelMetricRef();
+    syncAskButtonState();
+}
 
 function isSkipChatTemplate(): boolean {
+    if (isOpenRouterMode()) return false;
     return skipChatTemplateInput?.checked ?? false;
 }
 
@@ -343,6 +474,18 @@ const {
     normalizeMaxTokensField,
 } = completionOptions;
 
+syncModelVariantUiRef = syncModelVariantUi;
+syncIdleModelMetricRef = () => {
+    if (isOpenRouterMode()) {
+        if (validateMetricsElements(metricModel)) {
+            const id = readOpenRouterModelId() || 'openrouter';
+            metricModel.text(`${tr('model')}: ${id}`);
+        }
+        return;
+    }
+    syncIdleModelMetric();
+};
+
 const toolCallingOptions = createToolCallingOptionsRow({
     enableToolCallingStorageKey: CHAT_ENABLE_TOOL_CALLING_STORAGE_KEY,
     multiTurnStorageKey: CHAT_MULTI_TURN_MOCK_STORAGE_KEY,
@@ -507,6 +650,10 @@ function fingerprintsEqual(a: ChatCommittedFingerprint, b: ChatCommittedFingerpr
 /** 当前输入是否满足可以发起 Ask（不含 inFlight）。 */
 function isAskInputsReady(): boolean {
     if (!isMaxNewTokensInputValid()) return false;
+    if (isOpenRouterMode()) {
+        if (!readOpenRouterModelId() || !readOpenRouterApiKey()) return false;
+        return getActivePromptValue().length > 0;
+    }
     const prompt = getActivePromptValue();
     const forcing = teacherForcingContinuationForRun();
     if (prompt.length === 0 && forcing === undefined) return false;
@@ -682,6 +829,7 @@ adminManager.onAdminModeChange(() => {
     api.setAdminToken(adminManager.isInAdminMode() ? adminManager.getAdminToken() : null);
     syncMaxTokensUi();
     normalizeMaxTokensField();
+    syncOpenRouterExperimentUi();
 });
 
 const clearStreamingPreview = (): void => {
@@ -866,6 +1014,87 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
     const prompt = getActivePromptValue();
     if (askInFlight || !isAskInputsReady()) return;
     const skipTemplate = skipChatTemplateInput?.checked ?? false;
+    if (isOpenRouterMode()) {
+        // OpenRouter 实验路径：System/User → 浏览器直连；无本地缓存 / tools / TF
+        const remoteModel = readOpenRouterModelId();
+        const apiKey = readOpenRouterApiKey();
+        if (!remoteModel || !apiKey) {
+            showAlertDialog(
+                tr('LLM Raw Chat'),
+                tr('Enter OpenRouter model id and API key (admin).'),
+            );
+            return;
+        }
+        let maxTokensOpt: number;
+        try {
+            maxTokensOpt = parseMaxNewTokensFromField();
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            showAlertDialog(tr('LLM Raw Chat'), translateApiErrorMessage(msg));
+            return;
+        }
+        askAbort?.abort();
+        askAbort = new AbortController();
+        setAskLoading(true);
+        try {
+            let streamedText = '';
+            const messages = buildInitialChatMessages({
+                user: prompt,
+                system:
+                    (chatSystemTextField.node() as HTMLTextAreaElement | null)?.value ?? '',
+                useSystem: isChatUseSystemPrompt(),
+            });
+            const displayPrompt = formatOpenRouterMessagesAsPrompt(messages);
+            chatTurnsView.render([{ kind: 'input', text: displayPrompt }]);
+            saveChatPromptHistories(prompt, false, undefined);
+            persistOpenRouterCreds();
+            const { response: res, apiMeta } = await postOpenRouterChat({
+                apiKey,
+                model: remoteModel,
+                messages,
+                maxTokens: maxTokensOpt,
+                signal: askAbort.signal,
+                onDelta: (chunk, streamEnd) => {
+                    streamedText += chunk;
+                    flushStreamingPreview(streamedText, streamEnd);
+                },
+            });
+            const finalText = res.choices?.[0]?.text;
+            if (typeof finalText !== 'string') {
+                throw new Error('Completion response missing choices[0].text');
+            }
+            assertStreamMatchesFinal(streamedText, finalText);
+            const segments: ChatDisplaySegment[] = [
+                { kind: 'input', text: displayPrompt },
+                {
+                    kind: 'output',
+                    text: finalText,
+                    promptUsed: displayPrompt,
+                    response: res,
+                    modelName: res.model ?? remoteModel,
+                    metaJson: apiMeta,
+                },
+            ];
+            renderCompletionResultToUi(res, displayPrompt, segments);
+            lastCommittedFingerprint = getCurrentFingerprint();
+            syncAskButtonState();
+        } catch (err: unknown) {
+            if (
+                err &&
+                typeof err === 'object' &&
+                'name' in err &&
+                (err as { name: string }).name === 'AbortError'
+            ) {
+                return;
+            }
+            const msg = err instanceof Error ? err.message : String(err);
+            showAlertDialog(tr('LLM Raw Chat'), translateApiErrorMessage(msg));
+        } finally {
+            streamingPreviewLastFlush = 0;
+            setAskLoading(false);
+        }
+        return;
+    }
     if (!skipTemplate && isToolCallingEnabled() && !isToolCallingConfigReady()) {
         showAlertDialog(
             tr('LLM Raw Chat'),
@@ -995,10 +1224,15 @@ const runAsk = async (options?: { forceRefresh?: boolean }): Promise<void> => {
 if (skipChatTemplateInput) {
     skipChatTemplateInput.checked = lsReadBool(LS_SKIP_CHAT_TEMPLATE, false);
     skipChatTemplateInput.addEventListener('change', () => {
+        if (isOpenRouterMode() && skipChatTemplateInput.checked) {
+            skipChatTemplateInput.checked = false;
+            return;
+        }
         lsWriteBool(LS_SKIP_CHAT_TEMPLATE, skipChatTemplateInput.checked);
         syncPromptPanelVisibility();
         syncChatSystemPromptSuppressedUi();
         syncModelVariantUi();
+        syncOpenRouterExperimentUi();
         syncAskButtonState();
     });
 }
@@ -1013,6 +1247,55 @@ syncPromptPanelVisibility();
 syncModelVariantUi();
 syncIdleModelMetric();
 syncChatSystemPromptSuppressedUi();
+
+// OpenRouter 实验：恢复凭据与管理员下拉项
+if (openRouterModelIdInput) {
+    openRouterModelIdInput.value = lsGet(CHAT_OPENROUTER_MODEL_ID_STORAGE_KEY) ?? '';
+    openRouterModelIdInput.addEventListener('input', () => {
+        persistOpenRouterCreds();
+        syncIdleModelMetricRef();
+        syncAskButtonState();
+    });
+}
+if (openRouterApiKeyInput) {
+    openRouterApiKeyInput.value = lsGet(CHAT_OPENROUTER_API_KEY_STORAGE_KEY) ?? '';
+    openRouterApiKeyInput.addEventListener('input', () => {
+        persistOpenRouterCreds();
+        syncAskButtonState();
+    });
+}
+modelVariantSelect?.addEventListener('change', () => {
+    if (modelVariantSelect.value === CHAT_OPENROUTER_SELECT_VALUE) {
+        if (!adminManager.isInAdminMode()) {
+            modelVariantSelect.value = 'instruct';
+            return;
+        }
+        lsWriteBool(CHAT_OPENROUTER_ENABLED_STORAGE_KEY, true);
+    } else {
+        lsWriteBool(CHAT_OPENROUTER_ENABLED_STORAGE_KEY, false);
+        // Chat template 下本地槽位固定 instruct；非 Raw 时选 base 无意义，扳回
+        if (
+            !isSkipChatTemplate() &&
+            modelVariantSelect.value === 'base'
+        ) {
+            modelVariantSelect.value = 'instruct';
+        }
+        if (modelVariantSelect.value === 'base' || modelVariantSelect.value === 'instruct') {
+            lsWriteString(CHAT_MODEL_VARIANT_STORAGE_KEY, modelVariantSelect.value);
+        }
+    }
+    syncOpenRouterExperimentUi();
+});
+if (
+    adminManager.isInAdminMode() &&
+    lsReadBool(CHAT_OPENROUTER_ENABLED_STORAGE_KEY, false) &&
+    modelVariantSelect
+) {
+    ensureOpenRouterSelectOption();
+    modelVariantSelect.value = CHAT_OPENROUTER_SELECT_VALUE;
+}
+syncOpenRouterExperimentUi();
+
 chatUseSystemPromptInput?.addEventListener('change', () => {
     syncChatSystemPromptSuppressedUi();
     syncAskButtonState();
@@ -1102,6 +1385,10 @@ async function restoreChatFromCachedPrompt(
 
 submitBtn.on('click', () => {
     if (askInFlight) {
+        if (isOpenRouterMode()) {
+            askAbort?.abort();
+            return;
+        }
         postCompletionsStop();
         // 不断开 SSE：后端 Stop 后仍会发送末条 result（含 info_radar），以便渲染 bpe_strings。
         return;
