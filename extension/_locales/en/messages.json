@@ -4,7 +4,7 @@
     "description": "Extension name shown in the store and chrome://extensions"
   },
   "extDescription": {
-    "message": "Search and highlight relevant words by meaning, adding an AI reading filter to the webpage — helping you read, not reading for you.",
+    "message": "Search and highlight relevant words by meaning, adding a semantic heatmap to webpages — helping you read, not reading for you.",
     "description": "Short extension description in the store listing"
   }
 }
