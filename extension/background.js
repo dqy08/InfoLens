@@ -12,7 +12,6 @@ const CONTENT_JS = [
   'articleRoot.js',
   'collectTextMap.js',
   'splitTextToChunks.js',
-  'mergeTokenSpans.js',
   'content.js',
 ];
 
@@ -157,8 +156,27 @@ async function activateTab(tab) {
 
 chrome.action.onClicked.addListener(activateTab);
 
+const ERROR_BODY_SNIPPET = 500;
+
+/** @param {string} contentTypeHeader */
+function isJsonContentType(contentTypeHeader) {
+  const ct = (contentTypeHeader || '').split(';')[0].trim().toLowerCase();
+  return ct === 'application/json' || ct.endsWith('+json');
+}
+
+/**
+ * @param {string} message 用户可见
+ * @param {string} [detail] 仅反馈
+ */
+function apiHttpError(message, detail) {
+  const err = new Error(message);
+  if (detail != null && String(detail).trim()) err.errorDetail = String(detail).trim();
+  return err;
+}
+
 /**
  * POST JSON；要求 HTTP ok 且 body.success === true（避免 2xx HTML/空对象被当成成功）。
+ * 先读正文；仅 Content-Type 为 JSON 时再 parse（平台 HTML 错误页等在 parse 前失败）。
  * @returns {{ data: object, backend: string | null }} backend = X-Infolens-Backend（hf|accel）
  */
 async function postJsonApi(url, body) {
@@ -167,19 +185,34 @@ async function postJsonApi(url, body) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  const raw = await res.text();
+  const ctHeader = res.headers.get('Content-Type') || '';
+  const ct = ctHeader.split(';')[0].trim().toLowerCase() || '(none)';
+  const snippet =
+    raw.length <= ERROR_BODY_SNIPPET ? raw : raw.slice(0, ERROR_BODY_SNIPPET - 1) + '…';
+
+  if (!raw.trim()) {
+    throw apiHttpError(`HTTP ${res.status}: empty response`);
+  }
+  if (!isJsonContentType(ctHeader)) {
+    throw apiHttpError(`HTTP ${res.status}: expected application/json, got ${ct}`, snippet);
+  }
+
   let data;
   try {
-    data = await res.json();
-  } catch {
-    throw new Error(`HTTP ${res.status}: invalid JSON`);
+    data = JSON.parse(raw);
+  } catch (e) {
+    const why = e && e.message ? String(e.message) : 'parse failed';
+    throw apiHttpError(`HTTP ${res.status}: malformed JSON (${why})`, snippet);
   }
+
   if (!res.ok || data?.success !== true) {
     const message = data?.message || data?.detail || `HTTP ${res.status}`;
-    const err = new Error(message);
-    if (data?.error_detail != null && String(data.error_detail).trim()) {
-      err.errorDetail = String(data.error_detail);
-    }
-    throw err;
+    const detail =
+      data?.error_detail != null && String(data.error_detail).trim()
+        ? String(data.error_detail).trim()
+        : undefined;
+    throw apiHttpError(message, detail);
   }
   const backend = res.headers.get('X-Infolens-Backend');
   return { data, backend: backend || null };

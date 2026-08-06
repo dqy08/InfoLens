@@ -4,23 +4,16 @@
  *
  * token / truncated：CSS Custom Highlight API（不改 DOM；truncated 为 CanvasText×Canvas 统一灰）。
  * underline（导航）/ pending-underline：#il-overlay-host 盖层，可叠画；统一蓝。
- * pending：fill 前是「等待染色」；fill 后若无红色 token，则留下作为 chunk 级匹配标记（有 token 才拆）。
+ * pending：fill 前是「等待染色」；keywords 成功（含空 token_attention）后拆掉；失败则留下。
+ * keywords：新扩展打 /api/v2/analyze-semantic-keywords（边缘远程，无重叠可上色）；旧路径留给旧扩展。
  *
  * IL_CONFIG.domDebug：点击后只抽正文并下划线，便于目测提取范围（不唤起 Find bar）。
  */
 (() => {
-  // 已注入过：依赖齐全则只 reopen；缺 merge 副本说明上次注入过期（未重载扩展），拆掉重装
+  // 已注入过：直接 reopen
   if (window.__IL_SEMANTIC_DEMO__) {
-    if (typeof globalThis.IL_mergeTokenSpansFullyForRendering === 'function') {
-      window.__IL_SEMANTIC_DEMO__.open();
-      return;
-    }
-    try {
-      window.__IL_SEMANTIC_DEMO__.destroy();
-    } catch {
-      /* ignore */
-    }
-    window.__IL_SEMANTIC_DEMO__ = undefined;
+    window.__IL_SEMANTIC_DEMO__.open();
+    return;
   }
 
   if (!globalThis.IL_CONFIG) {
@@ -63,13 +56,16 @@
   let extractedCpLength = 0;
   /** @type {{ start: number, end: number, matchDegree: number }[]} */
   let matchedChunks = [];
-  /** @type {{ start: number, end: number, matchDegree: number }[]} */
+  /**
+   * 进度图：全量已分析块。
+   * hasKeywords=true 才画红（keywords 已回且有可上色段）；相关等待中 / 无词 / 未过阈值均为灰，高度仍跟 matchDegree。
+   * @type {{ start: number, end: number, matchDegree: number, hasKeywords?: boolean }[]}
+   */
   let semanticMatchProgress = [];
   /** 进度条分母（码点数）：maxChunks 截断时用实际搜索覆盖长度，而非全文长度；0 = 未搜索，回退全文 */
   let progressTextLength = 0;
-  /** @type {{ tone: string, label: string, detail: string } | null} */
-  let lastStatusMeta = null;
-  let statusFeedbackSent = false;
+  /** @type {{ tone: string, label: string, detail: string, error_detail?: string, resumable?: boolean, feedbackSent: boolean, el: HTMLElement }[]} */
+  let statusEntries = [];
   /** @type {{ query: string, contentChunkCount: number, truncated: boolean, windowEnd: number } | null} */
   let lastSearchMeta = null;
   /** 本轮搜索是否已处理过 HF 慢速提示（展示或叉掉后均不再弹出） */
@@ -100,10 +96,10 @@
    *   matchIndex: number,
    *   truncatedAnalyzedCpEnd: number | null,
    *   selectedProgressChunkStart: number | null,
-   *   status: typeof lastStatusMeta,
-   *   searchMeta: typeof lastSearchMeta,
-   * }}
-   */
+  *   statuses: Array<{ tone: string, label: string, detail: string, error_detail?: string, resumable?: boolean }>,
+  *   searchMeta: typeof lastSearchMeta,
+  * }}
+  */
   let lastResult = null;
   /** @type {Element | null} 正文根（定滚动根用） */
   let extractRoot = null;
@@ -447,58 +443,6 @@
     return Math.min(TOKEN_LEVELS - 1, Math.floor(t * TOKEN_LEVELS));
   }
 
-  /**
-   * SYNC: client/src/shared/cross/textStatistics.ts → computeP90（同插值：index = (n-1)*p；站内固定 p=0.9）
-   * @param {number[]} values
-   * @param {number} p 0~1
-   * @returns {number | null}
-   */
-  function computePercentile(values, p) {
-    if (!values?.length) return null;
-    if (!(p >= 0 && p <= 1)) {
-      throw new Error(`pwScorePercentile must be in [0,1], got ${p}`);
-    }
-    const sorted = values.filter(Number.isFinite).slice().sort((a, b) => a - b);
-    const n = sorted.length;
-    if (n === 0) return null;
-    const index = (n - 1) * p;
-    const lower = Math.floor(index);
-    const upper = Math.ceil(index);
-    const weight = index - lower;
-    if (lower === upper) return sorted[lower];
-    return sorted[lower] * (1 - weight) + sorted[upper] * weight;
-  }
-
-  /**
-   * SYNC 语义（近似）：
-   * - merge/normalize：client/src/shared/controllers/semanticSearchController.ts
-   *   + semanticUtils.mergeTokenSpansFullyForRendering / normalizeTokenScores
-   * - pw_score：client/src/features/analysis/visualizationUpdater.ts
-   *   → pw_score = score×P_pw×matchDegree（P_pw：score>τ→1）
-   * - τ：站内为 signal-fit（失败回退 P90）；扩展无 fit，用可配置分位代替（默认 0.9 ≈ P90）
-   */
-  function prepareChunkTokens(tokenAttention, chunkText, matchDegree) {
-    const merge = globalThis.IL_mergeTokenSpansFullyForRendering;
-    const normalize = globalThis.IL_normalizeTokenScores;
-    if (typeof merge !== 'function' || typeof normalize !== 'function') {
-      throw new Error(
-        'IL_mergeTokenSpansFullyForRendering missing — reload this extension in chrome://extensions, then click the icon again'
-      );
-    }
-    const normalized = normalize(merge(tokenAttention || [], chunkText));
-    const p = CFG.pwScorePercentile ?? 0.9;
-    const tau = computePercentile(
-      normalized.map((t) => t.score),
-      p
-    );
-    if (tau == null) return [];
-    const degree = Number.isFinite(matchDegree) ? matchDegree : 0;
-    return normalized.map((t) => ({
-      ...t,
-      score: t.score > tau ? t.score * degree : 0,
-    }));
-  }
-
   function isScrollableEl(el) {
     if (!(el instanceof Element)) return false;
     const st = getComputedStyle(el);
@@ -745,18 +689,9 @@
   }
 
   function clearFindStatus() {
-    const el = ui$('semantic_find_status');
-    const textEl = ui$('semantic_find_status_text');
-    lastStatusMeta = null;
-    statusFeedbackSent = false;
-    resetFeedbackButton(/** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback')));
-    setStatusContinueVisible(false);
-    if (!el) return;
-    el.hidden = true;
-    if (textEl) {
-      textEl.replaceChildren();
-      textEl.removeAttribute('title');
-    }
+    statusEntries = [];
+    const list = ui$('semantic_find_status_list');
+    if (list) list.replaceChildren();
   }
 
   /** 进度条下：HF 慢速提示（与 Failed/Note 状态条独立；持续显示，叉掉后本轮不再出现） */
@@ -791,49 +726,104 @@
     return n < (lastSearchMeta.contentChunkCount ?? 0);
   }
 
-  function setStatusContinueVisible(on) {
-    const btn = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_continue'));
-    if (btn) btn.hidden = !on;
+  function refreshStatusContinueButtons() {
+    const show = canResumeSearch();
+    for (const entry of statusEntries) {
+      const btn = entry.el.querySelector('.semantic-find-status-continue');
+      if (!(btn instanceof HTMLButtonElement)) continue;
+      // Failed / Stopped / 截断 Note 可续跑；chunk 级 keywords 失败 resumable=false 不挂
+      const allow =
+        show &&
+        entry.resumable !== false &&
+        (entry.label === 'Failed' ||
+          entry.label === 'Stopped' ||
+          entry.label === 'Note');
+      btn.hidden = !allow;
+    }
+  }
+
+  function statusEntryKey(tone, label, detail) {
+    return `${tone}\0${label}\0${detail}`;
   }
 
   /**
-   * Status strip under bar / progress.
+   * 追加一条状态条（同文案不重复）；样式复用原 Failed/Note strip。
    * @param {string} label short prefix (Failed / Note / Stopped)
    * @param {string} detail reason or explanation（用户可见）
-   * @param {{ tone?: 'error' | 'info', errorDetail?: string }} [opts]
-   *   errorDetail 仅进反馈，不展示
+   * @param {{ tone?: 'error' | 'info', errorDetail?: string, resumable?: boolean }} [opts]
+   *   errorDetail 仅进反馈，不展示；resumable===false 时不挂 Continue（chunk 级 keywords 失败）
    */
   function showFindStatus(label, detail, opts) {
-    const el = ui$('semantic_find_status');
-    const textEl = ui$('semantic_find_status_text');
-    if (!el || !textEl) return;
+    const list = ui$('semantic_find_status_list');
+    if (!list) return;
     const tone = opts?.tone === 'error' ? 'error' : 'info';
     const head = String(label || '').trim() || (tone === 'error' ? 'Failed' : 'Note');
     const body = String(detail || '').trim();
-    const text = body ? `${head} · ${body}` : head;
+    const key = statusEntryKey(tone, head, body);
+    if (statusEntries.some((e) => statusEntryKey(e.tone, e.label, e.detail) === key)) {
+      refreshStatusContinueButtons();
+      return;
+    }
+
+    const errorDetail =
+      opts?.errorDetail != null && String(opts.errorDetail).trim()
+        ? String(opts.errorDetail).trim()
+        : undefined;
+    const resumable = opts?.resumable !== false;
+
+    const el = document.createElement('div');
+    el.className = 'semantic-find-strip semantic-find-status';
+    el.setAttribute('role', 'status');
+
+    const textEl = document.createElement('span');
+    textEl.className = 'semantic-find-status-text';
     const labelEl = document.createElement('span');
     labelEl.className =
       tone === 'error' ? 'semantic-find-status-label is-error' : 'semantic-find-status-label';
     labelEl.textContent = head;
     textEl.replaceChildren(labelEl, ...(body ? [document.createTextNode(` · ${body}`)] : []));
-    textEl.title = text;
-    const errorDetail =
-      opts?.errorDetail != null && String(opts.errorDetail).trim()
-        ? String(opts.errorDetail).trim()
-        : undefined;
-    lastStatusMeta = {
+    textEl.title = body ? `${head} · ${body}` : head;
+
+    const actions = document.createElement('div');
+    actions.className = 'semantic-find-status-actions';
+
+    const feedbackBtn = document.createElement('button');
+    feedbackBtn.type = 'button';
+    feedbackBtn.className = 'semantic-find-status-feedback';
+    feedbackBtn.title = 'Report this to the author';
+    feedbackBtn.setAttribute('aria-label', 'Report this to the author');
+    if (tone === 'error') resetFeedbackButton(feedbackBtn);
+    else feedbackBtn.hidden = true;
+
+    const continueBtn = document.createElement('button');
+    continueBtn.type = 'button';
+    continueBtn.className = 'semantic-find-status-continue';
+    continueBtn.title = 'Continue search';
+    continueBtn.setAttribute('aria-label', 'Continue search');
+    continueBtn.textContent = 'Continue';
+    continueBtn.hidden = true;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'semantic-find-status-close';
+    closeBtn.title = 'Dismiss';
+    closeBtn.setAttribute('aria-label', 'Dismiss');
+    closeBtn.textContent = '×';
+
+    actions.append(feedbackBtn, continueBtn, closeBtn);
+    el.append(textEl, actions);
+    list.appendChild(el);
+
+    statusEntries.push({
       tone,
       label: head,
       detail: body,
       ...(errorDetail ? { error_detail: errorDetail } : {}),
-    };
-    statusFeedbackSent = false;
-    // 仅 Failed 可上报；Stopped / 截断 Note 不需要反馈按钮
-    const feedbackBtn = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'));
-    if (tone === 'error') resetFeedbackButton(feedbackBtn);
-    else if (feedbackBtn) feedbackBtn.hidden = true;
-    el.hidden = false;
-    setStatusContinueVisible(canResumeSearch());
+      resumable,
+      feedbackSent: false,
+      el,
+    });
+    refreshStatusContinueButtons();
   }
 
   /** Task failure; reason 用户可见；errorDetail 仅反馈 */
@@ -841,7 +831,29 @@
     showFindStatus('Failed', reason || 'Request failed', {
       tone: 'error',
       errorDetail: opts?.errorDetail,
+      resumable: opts?.resumable,
     });
+  }
+
+  /**
+   * 失败 chunk 上下文写入已有 error_detail（后端原样落库，无需新字段）。
+   * @param {string} stage
+   * @param {number} chunkIndex
+   * @param {{ text?: string, start?: number, end?: number }} chunk
+   * @param {string} [tech]
+   */
+  function formatChunkErrorDetail(stage, chunkIndex, chunk, tech) {
+    const lines = [
+      `stage=${stage}`,
+      `chunk_index=${chunkIndex}`,
+      `chunk_start=${typeof chunk?.start === 'number' ? chunk.start : ''}`,
+      `chunk_end=${typeof chunk?.end === 'number' ? chunk.end : ''}`,
+      '--- chunk ---',
+      chunk?.text != null ? String(chunk.text) : '',
+    ];
+    const t = tech != null ? String(tech).trim() : '';
+    if (t) lines.push('--- error ---', t);
+    return lines.join('\n');
   }
 
   /** @param {{ tone: string, label: string, detail: string }} status */
@@ -857,7 +869,6 @@
         chunkBytes: CFG.chunkBytes,
         maxChunks: CFG.maxChunks,
         matchThreshold: CFG.matchThreshold,
-        pwScorePercentile: CFG.pwScorePercentile,
         followSearching: !!CFG.followSearching,
       },
       progress: {
@@ -870,13 +881,27 @@
     };
   }
 
-  function sendStatusFeedback() {
-    if (!lastStatusMeta || statusFeedbackSent) return;
-    statusFeedbackSent = true;
+  /** @param {{ tone: string, label: string, detail: string, error_detail?: string, feedbackSent: boolean, el: HTMLElement }} entry */
+  function sendStatusFeedbackForEntry(entry, btn) {
+    if (!entry || entry.feedbackSent) return;
+    entry.feedbackSent = true;
     sendFeedback(
-      lastStatusMeta,
-      /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_status_feedback'))
+      {
+        tone: entry.tone,
+        label: entry.label,
+        detail: entry.detail,
+        ...(entry.error_detail ? { error_detail: entry.error_detail } : {}),
+      },
+      btn
     );
+  }
+
+  function dismissStatusEntry(entry) {
+    const i = statusEntries.indexOf(entry);
+    if (i < 0) return;
+    statusEntries.splice(i, 1);
+    entry.el.remove();
+    refreshStatusContinueButtons();
   }
 
   /**
@@ -928,7 +953,7 @@
     lastResult = {
       query,
       text: extractedText,
-      // pending 可兼作 chunk 级匹配标记（无红色 token 时保留），须随快照
+      // pending 等待线随快照；红线靠 semanticMatchProgress.hasKeywords（keywords 确认有色后才红）
       paintSpecs: paintSpecs.map((s) => ({ ...s })),
       matchedChunks: matchedChunks.map((c) => ({ ...c })),
       semanticMatchProgress: semanticMatchProgress.map((c) => ({ ...c })),
@@ -936,7 +961,13 @@
       matchIndex,
       truncatedAnalyzedCpEnd,
       selectedProgressChunkStart,
-      status: lastStatusMeta ? { ...lastStatusMeta } : null,
+      statuses: statusEntries.map((e) => ({
+        tone: e.tone,
+        label: e.label,
+        detail: e.detail,
+        ...(e.error_detail ? { error_detail: e.error_detail } : {}),
+        ...(e.resumable === false ? { resumable: false } : {}),
+      })),
       searchMeta: lastSearchMeta ? { ...lastSearchMeta } : null,
     };
   }
@@ -960,10 +991,13 @@
     });
     updateNav();
     renderSemanticMatchProgress();
-    if (lastResult.status) {
-      showFindStatus(lastResult.status.label, lastResult.status.detail, {
-        tone: lastResult.status.tone === 'error' ? 'error' : 'info',
-        errorDetail: lastResult.status.error_detail,
+    clearFindStatus();
+    const statuses = lastResult.statuses || (lastResult.status ? [lastResult.status] : []);
+    for (const s of statuses) {
+      showFindStatus(s.label, s.detail, {
+        tone: s.tone === 'error' ? 'error' : 'info',
+        errorDetail: s.error_detail,
+        resumable: s.resumable,
       });
     }
     return true;
@@ -1514,17 +1548,21 @@
   }
 
   /**
-   * 把 token_attention 写入 paintSpecs（仅 score>0），并直接挂上 Highlight（不碰下划线）。
+   * 把 v2 keywords 的无重叠 token_attention 写入 paintSpecs，并直接挂上 Highlight。
+   * Worker 已完成定位与重叠取 max；此处不再 merge / P90。
+   * 上色分 = token.score × matchDegree（degree 现多为 0/1，仍保留中间值路径）。
    * @returns {number} 实际上色的 token 段数；0 表示没有染色
    */
-  function paintChunkTokens(tokenAttention, chunkText, chunkCpStart, degree) {
-    const tokens = prepareChunkTokens(tokenAttention || [], chunkText, degree);
+  function paintChunkTokens(tokenAttention, chunkCpStart, matchDegree) {
     ensureHighlightRegistry();
+    const degree = Number.isFinite(matchDegree) ? matchDegree : 0;
     let n = 0;
-    for (const t of tokens) {
-      if (!t.offset || !(t.score > 0)) continue;
+    for (const t of tokenAttention || []) {
+      if (!t.offset) continue;
+      const score = (t.score > 0 ? t.score : 0) * degree;
+      if (!(score > 0)) continue;
       const [a, b] = t.offset;
-      const level = scoreToLevel(t.score);
+      const level = scoreToLevel(score);
       if (level < 0) continue;
       const cp0 = chunkCpStart + a;
       const cp1 = chunkCpStart + b;
@@ -1692,18 +1730,29 @@
     ui$('semantic_find_prev')?.addEventListener('click', () => navigateMatch(-1));
     ui$('semantic_find_next')?.addEventListener('click', () => navigateMatch(1));
     ui$('semantic_find_close')?.addEventListener('click', () => close());
-    ui$('semantic_find_status_close')?.addEventListener('click', (e) => {
+    ui$('semantic_find_status_list')?.addEventListener('click', (e) => {
+      const btn = e.target instanceof Element ? e.target.closest('button') : null;
+      if (!btn) return;
+      const strip = btn.closest('.semantic-find-status');
+      const entry = statusEntries.find((x) => x.el === strip);
+      if (!entry) return;
       e.stopPropagation();
-      clearFindStatus();
+      if (btn.classList.contains('semantic-find-status-close')) {
+        dismissStatusEntry(entry);
+        return;
+      }
+      if (btn.classList.contains('semantic-find-status-feedback')) {
+        sendStatusFeedbackForEntry(entry, /** @type {HTMLButtonElement} */ (btn));
+        return;
+      }
+      if (btn.classList.contains('semantic-find-status-continue')) {
+        void runSearch({ resume: true });
+      }
     });
     ui$('semantic_find_backend_notice_close')?.addEventListener('click', (e) => {
       e.stopPropagation();
       slowBackendNoticeShown = true;
       clearSlowBackendNotice();
-    });
-    ui$('semantic_find_status_feedback')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      sendStatusFeedback();
     });
     ui$('semantic_find_backend_notice_feedback')?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1711,10 +1760,6 @@
         backendNoticeFeedbackStatus(),
         /** @type {HTMLButtonElement | null} */ (e.currentTarget)
       );
-    });
-    ui$('semantic_find_status_continue')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      void runSearch({ resume: true });
     });
     ui$('semantic_find_clear')?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1765,6 +1810,61 @@
       if (!bar || e.composedPath().includes(bar)) return;
       hideHistoryDropdown();
     });
+    wireBarDrag();
+  }
+
+  /** 拖非可点区域（边距/分隔线等）移动整块 Find UI；不持久化 */
+  function wireBarDrag() {
+    const barEl = uiQuery('.semantic-find-bar');
+    const host = document.getElementById('il-find-root');
+    if (!barEl || !host) return;
+
+    const DRAG_EXEMPT = 'button, input, textarea, select, a, .semantic-search-history-dropdown';
+    /** @type {{ pointerId: number, startX: number, startY: number, originLeft: number, originTop: number, width: number, height: number } | null} */
+    let drag = null;
+
+    barEl.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      if (!(e.target instanceof Element)) return;
+      if (e.target.closest(DRAG_EXEMPT)) return;
+
+      const rect = host.getBoundingClientRect();
+      host.style.right = 'auto';
+      host.style.left = `${rect.left}px`;
+      host.style.top = `${rect.top}px`;
+
+      drag = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        originLeft: rect.left,
+        originTop: rect.top,
+        width: rect.width,
+        height: rect.height,
+      };
+      barEl.classList.add('is-dragging');
+      barEl.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+
+    barEl.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      const maxLeft = Math.max(0, window.innerWidth - drag.width);
+      const maxTop = Math.max(0, window.innerHeight - drag.height);
+      const left = Math.min(maxLeft, Math.max(0, drag.originLeft + (e.clientX - drag.startX)));
+      const top = Math.min(maxTop, Math.max(0, drag.originTop + (e.clientY - drag.startY)));
+      host.style.left = `${left}px`;
+      host.style.top = `${top}px`;
+    });
+
+    const endDrag = (e) => {
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      drag = null;
+      barEl.classList.remove('is-dragging');
+      if (barEl.hasPointerCapture(e.pointerId)) barEl.releasePointerCapture(e.pointerId);
+    };
+    barEl.addEventListener('pointerup', endDrag);
+    barEl.addEventListener('pointercancel', endDrag);
   }
 
   function syncClearButton(searchingOn) {
@@ -1878,8 +1978,8 @@
       return;
     }
 
-    const width = Math.max(100, Math.round(chart.clientWidth));
-    const height = Math.max(42, Math.round(chart.clientHeight));
+    const width = Math.max(1, Math.round(chart.clientWidth));
+    const height = Math.max(1, Math.round(chart.clientHeight));
     chart.setAttribute('viewBox', `0 0 ${width} ${height}`);
     const x0 = 4;
     const x1 = width - 4;
@@ -1935,7 +2035,10 @@
       const line = /** @type {SVGPathElement} */ (group.querySelector('.semantic-match-progress-line'));
       const label = /** @type {SVGTextElement} */ (group.querySelector('.semantic-match-progress-label'));
       const hitArea = /** @type {SVGRectElement} */ (group.querySelector('.semantic-match-progress-hit-area'));
-      line.classList.toggle('is-below-threshold', degree < CFG.matchThreshold);
+      // 红 = 过阈值且 keywords 已确认有可上色段；否则灰（等待 / 无词 / 未过阈值）
+      const showMatchRed =
+        degree >= CFG.matchThreshold && !!chunk.hasKeywords;
+      line.classList.toggle('is-gray', !showMatchRed);
       line.classList.toggle('is-selected', selectedProgressChunkStart === chunk.start);
       line.classList.toggle('is-hovered', hoveredProgressChunkStart === chunk.start);
       const lineStart = start;
@@ -2014,7 +2117,7 @@
     // 重开须在 await 前作废旧 keywords，避免 ensureHistory 窗口内旧任务仍落笔；Continue 保留
     if (!resume) keywordsPool.invalidate();
     setSearching(true);
-    setStatusContinueVisible(false);
+    refreshStatusContinueButtons();
 
     try {
       await ensureHistory();
@@ -2145,25 +2248,44 @@
       };
 
       // --- 段2：keywords（渲染匹配后投递；池内消费，不反压段1）---
-      const enqueueKeywords = (chunk, chunkCpStart, chunkCpEnd, degree) => {
+      const enqueueKeywords = (chunkIndex, chunk, chunkCpStart, chunkCpEnd, degree) => {
         keywordsPool.schedule(async (jobGen) => {
           if (jobGen !== keywordsPool.gen) return;
           try {
-            const r2 = await analyzeSemanticRaw(query, chunk.text, '/api/analyze-semantic-keywords');
+            // 新扩展走 v2（无重叠可上色）；旧扩展仍打 /api/analyze-semantic-keywords，由门面双轨隔离
+            const r2 = await analyzeSemanticRaw(query, chunk.text, '/api/v2/analyze-semantic-keywords');
             if (jobGen !== keywordsPool.gen) return;
             if (!extractRoot?.isConnected) return;
-            // 有红色 token → 拆 pending；否则留下 = chunk 级匹配标记（失败/无色同理）
-            const painted = paintChunkTokens(
-              r2.token_attention,
-              chunk.text,
-              chunkCpStart,
-              degree
-            );
-            if (painted > 0) clearPendingUnderline(chunkCpStart, chunkCpEnd);
+            // 如实上色（可为 0 段）后拆掉等待线；空 token_attention 也走完流程
+            const painted = paintChunkTokens(r2.token_attention, chunkCpStart, degree);
+            clearPendingUnderline(chunkCpStart, chunkCpEnd);
+            // 有可上色段才把进度线染红；此前保持灰。↑↓ 仍跟 relevance，不 demote
+            if (painted > 0) {
+              const row = semanticMatchProgress.find((c) => c.start === chunkCpStart);
+              if (row) row.hasKeywords = true;
+              renderSemanticMatchProgress();
+            }
             snapshotLastResult(query);
           } catch (err) {
-            // 无 token 可画：pending 留下表示本 chunk 已匹配
+            // 失败：pending 留下 + chunk 级 Failed；整轮不中断
             console.error('[InfoLens] keywords', err?.message || err);
+            if (jobGen !== keywordsPool.gen || epoch !== searchEpoch || abortWanted) return;
+            const reason = err?.message != null ? String(err.message).trim() : '';
+            const tech = err?.errorDetail != null ? String(err.errorDetail).trim() : '';
+            // Failed · Keyword analysis on chunk N · <具体原因>
+            const detail = reason
+              ? `Keyword analysis on chunk ${chunkIndex} · ${reason}`
+              : `Keyword analysis on chunk ${chunkIndex}`;
+            showFindError(detail, {
+              errorDetail: formatChunkErrorDetail(
+                'keywords',
+                chunkIndex,
+                chunk,
+                tech || undefined
+              ),
+              resumable: false,
+            });
+            snapshotLastResult(query);
           }
         });
       };
@@ -2181,7 +2303,25 @@
         for (let i = resumeFrom; i < allChunks.length; i++) {
           if (!stillThisSearch()) break;
           const chunk = allChunks[i];
-          const res = await consumeRelevance(i);
+          let res;
+          try {
+            res = await consumeRelevance(i);
+          } catch (err) {
+            const tech =
+              err?.errorDetail != null ? String(err.errorDetail).trim() : '';
+            const wrapped = new Error(
+              err?.message != null && String(err.message).trim()
+                ? `Relevance on chunk ${i} · ${String(err.message).trim()}`
+                : `Relevance on chunk ${i}`
+            );
+            wrapped.errorDetail = formatChunkErrorDetail(
+              'relevance',
+              i,
+              chunk,
+              tech || undefined
+            );
+            throw wrapped;
+          }
           if (!stillThisSearch()) break;
 
           const degree = res.full_match_degree ?? 0;
@@ -2244,7 +2384,7 @@
             if (!stillThisSearch()) break;
           }
 
-          if (matched) enqueueKeywords(chunk, chunkCpStart, chunkCpEnd, degree);
+          if (matched) enqueueKeywords(i, chunk, chunkCpStart, chunkCpEnd, degree);
 
           if (nextIndex < allChunks.length && (followAll || !parkedOnFirstMatch)) {
             const nextChunk = allChunks[nextIndex];
@@ -2377,7 +2517,17 @@
       bar.hidden = true;
       uiQuery('.semantic-find-bar')?.classList.remove('is-input-active', 'is-searching');
     }
+    resetBarPosition();
     setSearching(false);
+  }
+
+  /** 关闭后回到默认右上角；不持久化拖拽位置 */
+  function resetBarPosition() {
+    const host = document.getElementById('il-find-root');
+    if (!host) return;
+    host.style.left = '';
+    host.style.top = '';
+    host.style.right = '';
   }
 
   /** 上次注入已过期（重装扩展未刷新页面）需整个丢弃时调用：close() 之外，摘掉本实例注册在 window 上的监听器 */

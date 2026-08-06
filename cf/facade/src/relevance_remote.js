@@ -1,22 +1,26 @@
 /**
  * 远程 relevance：OpenRouter Chat → full_match_degree。
- * 由 /facade-relevance-switch 控制；默认开（缺 key = 开），显式关则回 HF/Home。
- * 模型 Hy3、clearly_zero 关，写死；与 scripts/eval_semantic_relevance_remote.py 基线对齐。
+ * 始终边缘短路，无 HF/Home 回退。
+ * 模型 Hy3、clearly_zero 关，写死；与 scripts/eval_semantic_relevance_remote.py 基线对齐
+ * （Task/Query 各一行；Text: 上下空行夹正文；文尾 Task Reminder:+Query:）。
  * max_tokens=8；从开头解析：可选空白 + 非负整数字前缀，否则视为本次分析失败。
  */
+import { logRemoteFailure, publicRemoteError } from './remote_log.js';
+
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 const RELEVANCE_MODEL = 'tencent/hy3';
 const RELEVANCE_MAX_TOKENS = 8;
 
-export const REMOTE_RELEVANCE_KEY = 'remote_relevance';
 export const RELEVANCE_PATH = '/api/analyze-semantic-relevance';
 
 export function buildRelevanceUserContent(query, text) {
-  return (
-    `How many words in the text below are related to the query topic (${query})? Text:\n\n` +
-    text +
-    '\n\nReply with a single non-negative integer only, nothing else.'
-  );
+  const task =
+    'How many words in the text are related to the query topic? ' +
+    'Reply with a single non-negative integer only, nothing else.';
+  const queryLine = `Query: ${query}`;
+  const head = `Task: ${task}\n${queryLine}`;
+  const reminder = `Task Reminder: ${task}\n${queryLine}`;
+  return `${head}\nText:\n\n${text}\n\n${reminder}`;
 }
 
 /**
@@ -27,66 +31,6 @@ function parseCount(content) {
   if (!content || typeof content !== 'string') return null;
   const m = content.match(/^\s*(\d+)/);
   return m ? parseInt(m[1], 10) : null;
-}
-
-const ERROR_DETAIL_MAX = 500;
-
-/**
- * 远程 relevance 失败粗分（message 给用户；error_detail 仅日志/反馈，不含 query/text）：
- * - network：Worker↔OpenRouter 传输层（超时、断连、fetch 失败）
- * - inference：推理 API 暂时/服务端错误（408/429/5xx、响应体内 error）
- * - internal：我方未预期（缺密钥、输出不可解析、4xx 鉴权/请求、未知）
- *
- * 扩展本地错误（正文变化、无正文等）不经此函数，见 content.js showFindError。
- * @returns {{ kind: 'network' | 'inference' | 'internal', message: string, error_detail: string }}
- */
-function publicRelevanceError(err) {
-  const raw = err && err.message != null ? String(err.message) : String(err);
-  const error_detail =
-    raw.length <= ERROR_DETAIL_MAX ? raw : raw.slice(0, ERROR_DETAIL_MAX - 1) + '…';
-
-  if (
-    /^network:/i.test(raw) ||
-    (typeof TypeError !== 'undefined' && err instanceof TypeError) ||
-    /network|fetch failed|timed out|timeout|ECONNRESET|connection/i.test(raw)
-  ) {
-    return { kind: 'network', message: 'Network error', error_detail };
-  }
-
-  const http =
-    raw.match(/OpenRouter HTTP (\d+)/) ||
-    raw.match(/OpenRouter non-JSON response: HTTP (\d+)/);
-  if (http) {
-    const code = parseInt(http[1], 10);
-    if (code === 408 || code === 429 || code >= 500) {
-      return {
-        kind: 'inference',
-        message: `Inference API temporarily unavailable (${code})`,
-        error_detail,
-      };
-    }
-    // 4xx（含 401/403/402/404/400）：配置或请求侧，归我方未预期
-    return {
-      kind: 'internal',
-      message: `Unexpected analysis error (${code})`,
-      error_detail,
-    };
-  }
-
-  // HTTP 200 但 body 带 error：视为推理侧
-  if (/^OpenRouter error:/i.test(raw)) {
-    return {
-      kind: 'inference',
-      message: 'Inference API temporarily unavailable',
-      error_detail,
-    };
-  }
-
-  return {
-    kind: 'internal',
-    message: 'Unexpected analysis error',
-    error_detail,
-  };
 }
 
 /**
@@ -202,8 +146,8 @@ export async function handleRemoteRelevance(request, env, json) {
       input_token_count: r.input_token_count,
     });
   } catch (err) {
-    const pub = publicRelevanceError(err);
-    console.error('remote relevance failed', pub.kind, pub.error_detail);
+    const pub = publicRemoteError(err);
+    logRemoteFailure('remote_relevance_failed', err, pub);
     return json(
       request,
       { success: false, message: pub.message, error_detail: pub.error_detail },
