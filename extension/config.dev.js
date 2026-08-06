@@ -17,13 +17,6 @@ var IL_CONFIG = {
   /** SYNC: client/src/shared/core/constants.ts → SEMANTIC_MATCH_THRESHOLD */
   matchThreshold: 0.1,
   /**
-   * SYNC 近似：
-   * - 站内 τ：signalThresholdDetector（失败回退 P90，见 textStatistics.computeP90）
-   * - 站内 pw：visualizationUpdater.ts → pw_score = score×P_pw×matchDegree
-   * 扩展无 signal-fit，用该分位作 τ（默认 0.9 ≈ P90）；见 content.js prepareChunkTokens
-   */
-  pwScorePercentile: 0.9,
-  /**
    * DOM 调试：true = 点击抽正文并下划线；再点取消；
    * false = 正常 Find bar + 语义搜索。
    */

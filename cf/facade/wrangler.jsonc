@@ -3,6 +3,10 @@
   "main": "src/index.js",
   "compatibility_date": "2026-07-26",
   "workers_dev": true,
+  // Free: 3 天保留；Paid: 7 天。Dashboard → Workers → infolens-api → Observability
+  "observability": {
+    "enabled": true
+  },
   "routes": [
     {
       "pattern": "api.info-lens.app",
@@ -14,7 +18,7 @@
     "HOME_ORIGIN": "https://home-server.info-lens.app"
   },
   // 本地：cf/facade/.dev.vars 设 OPENROUTER_API_KEY=...
-  // 线上：wrangler secret put OPENROUTER_API_KEY（远程 relevance 使用）
+  // 线上：wrangler secret put OPENROUTER_API_KEY（远程 relevance + keywords v2）
   "kv_namespaces": [
     {
       "binding": "STATE",

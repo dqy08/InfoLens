@@ -12,7 +12,6 @@ const CONTENT_JS = [
   'articleRoot.js',
   'collectTextMap.js',
   'splitTextToChunks.js',
-  'mergeTokenSpans.js',
   'content.js',
 ];
 

@@ -2,6 +2,8 @@
 """
 远程 Chat API 相关性门控评测（默认 OpenRouter；与门面 Worker 同提示词基线）。
 
+提示词字段为 Query: / Text: 冒号行（与 keywords 远程实验同风格）。
+
 主题：只评 expect_relevant（云端）；不管 expect_keywords / 本地 instruct relevance。
 （磁盘上 query 为数组且真值在项内；加载后展平为 query:str。）
 关键词归因请用 scripts/eval_semantic_keywords.py。
@@ -68,16 +70,17 @@ CLEARLY_ZERO_SENTENCE = (
 
 
 def build_relevance_user_content(query: str, text: str, *, clearly_zero: bool) -> str:
-    """相关性 user 正文。clearly_zero 为唯一提示词变量。"""
-    parts = [
-        f"How many words in the text below are related to the query topic ({query})? Text:\n\n",
-        text,
-        "\n\n",
-    ]
+    """相关性 user 正文。clearly_zero 为唯一提示词变量。
+    版式：Task/Query 各一行；Text: 后空一行接正文，正文后再空一行；
+    文尾 Task Reminder:+Query: 再各一行。"""
+    task = "How many words in the text are related to the query topic?"
     if clearly_zero:
-        parts.append(CLEARLY_ZERO_SENTENCE + " ")
-    parts.append("Reply with a single non-negative integer only, nothing else.")
-    return "".join(parts)
+        task += " " + CLEARLY_ZERO_SENTENCE
+    task += " Reply with a single non-negative integer only, nothing else."
+    query_line = f"Query: {query}"
+    head = f"Task: {task}\n{query_line}"
+    reminder = f"Task Reminder: {task}\n{query_line}"
+    return f"{head}\nText:\n\n{text}\n\n{reminder}"
 
 
 def _load_env_file(path: Path) -> None:

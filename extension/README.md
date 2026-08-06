@@ -34,6 +34,8 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 
 临时目录打 zip（正式图标 + `config.prod.js` → 包内 `config.js`），不改工作树。产出在 `extension/dist/`（gitignore）。
 
+上传与提交审核见 [PUBLISH.md](./PUBLISH.md)（Chrome Web Store API）。
+
 ### 配置字段
 
 | 字段 | 含义 |
@@ -42,7 +44,6 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 | `chunkBytes` | 分块字节上限 |
 | `maxChunks` | demo 最多请求块数 |
 | `matchThreshold` | 计入 ↑↓ 的 match 阈值 |
-| `pwScorePercentile` | 简化 pw 分位 τ（默认 0.9） |
 | `domDebug` | `true` 只划正文范围 |
 | `followSearching` | `true` 全程跟随最新 chunk |
 
@@ -58,12 +59,12 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 manifest.json          # unpacked；图标由 dev-env 在 icons/dev/ ↔ icons/ 间切换
 icons/icon*.png        # 正式图标（prod / 上架）
 icons/dev/icon*.png    # unpack 开发图标
-pack.sh / dev-env.sh
+pack.sh / dev-env.sh / PUBLISH.md
 config.prod.js         # 上架默认 / 官方域名（源头）；pack 打进包
 config.dev.js          # Dev 门面 *.workers.dev（源头）
 config.js              # gitignore；dev-env 生成
 ui/                    # Find bar 权威源
 articleRoot.js         # Readability 定根
-splitTextToChunks.js / mergeTokenSpans.js   # SYNC ← client
+splitTextToChunks.js   # SYNC ← client
 vendor/Readability.js
 ```

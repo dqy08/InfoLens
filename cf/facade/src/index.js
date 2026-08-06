@@ -8,6 +8,10 @@
  *   - mode=full：算力路径 + /demo/* + /api/list_demos → HOME_ORIGIN；其余仍 HF
  * - 远程 relevance（独立粘性 switch，/facade-relevance-switch）：
  *   默认开：/api/analyze-semantic-relevance → OpenRouter（Hy3）；显式关则仍 HF/Home
+ * - keywords 双轨（扩展审核慢于 Worker，过渡期内并存）：
+ *   - 新扩展：/api/v2/analyze-semantic-keywords → OpenRouter（Hy3），只走边缘、无 HF 回退
+ *   - 旧扩展：/api/analyze-semantic-keywords → 仍 HF/Home 梯度归因（COMPUTE_PATHS，勿接到 v2）
+ *   旧扩展升级完后再决定退役旧路径，或把旧入口接到 v2；当前不切
  * - 请求发现 home 不可达（fetch 抛错 / 502·52x·530）→ 写 last_fail_at，本请求改打 HF
  *   冷却期内不再尝试 home；不含源站业务 503/504
  * - /facade-home-probe：始终探 HOME_ORIGIN/api/health；冷却期内若恢复则清 last_fail_at（不通则只观测、不续写）
@@ -17,6 +21,10 @@ import {
   RELEVANCE_PATH,
   handleRemoteRelevance,
 } from './relevance_remote.js';
+import {
+  KEYWORDS_V2_PATH,
+  handleRemoteKeywordsV2,
+} from './keywords_remote_v2.js';
 const HOP_BY_HOP = new Set([
   'connection',
   'keep-alive',
@@ -429,6 +437,18 @@ async function handleRequest(request, env) {
   const path = url.pathname;
   if (!(path === '/api' || path.startsWith('/api/') || path === '/demo' || path.startsWith('/demo/'))) {
     return json(request, { ok: false, error: 'not_found' }, 404);
+  }
+
+  // keywords v2：始终 OpenRouter 短路。旧扩展仍打 /api/analyze-semantic-keywords → 下方 HF/Home，勿合并。
+  if (path === KEYWORDS_V2_PATH) {
+    const resp = await handleRemoteKeywordsV2(request, env, json);
+    const headers = new Headers(resp.headers);
+    headers.set('X-Infolens-Backend', 'remote');
+    return new Response(resp.body, {
+      status: resp.status,
+      statusText: resp.statusText,
+      headers,
+    });
   }
 
   // relevance：先读旁路开关；开则 OpenRouter 短路，不碰 home allow/health
