@@ -1588,6 +1588,9 @@
   right: 12px;
   z-index: 2147483646;
   display: block;
+  /* 与内容同宽，避免 left+right 同时非 auto 时 host 被拉满视口（拖拽测宽也会错） */
+  width: max-content;
+  max-width: calc(100vw - 32px);
   pointer-events: none;
 }
 .semantic-find-bar-host {
@@ -1813,14 +1816,14 @@
     wireBarDrag();
   }
 
-  /** 拖非可点区域（边距/分隔线等）移动整块 Find UI；不持久化 */
+  /** 拖非可点区域（边距/分隔线等）移动整块 Find UI；用 right/top（默认右上角），不持久化 */
   function wireBarDrag() {
     const barEl = uiQuery('.semantic-find-bar');
     const host = document.getElementById('il-find-root');
     if (!barEl || !host) return;
 
     const DRAG_EXEMPT = 'button, input, textarea, select, a, .semantic-search-history-dropdown';
-    /** @type {{ pointerId: number, startX: number, startY: number, originLeft: number, originTop: number, width: number, height: number } | null} */
+    /** @type {{ pointerId: number, startX: number, startY: number, originRight: number, originTop: number, width: number, height: number } | null} */
     let drag = null;
 
     barEl.addEventListener('pointerdown', (e) => {
@@ -1829,15 +1832,16 @@
       if (e.target.closest(DRAG_EXEMPT)) return;
 
       const rect = host.getBoundingClientRect();
-      host.style.right = 'auto';
-      host.style.left = `${rect.left}px`;
+      const right = window.innerWidth - rect.right;
+      host.style.left = '';
+      host.style.right = `${right}px`;
       host.style.top = `${rect.top}px`;
 
       drag = {
         pointerId: e.pointerId,
         startX: e.clientX,
         startY: e.clientY,
-        originLeft: rect.left,
+        originRight: right,
         originTop: rect.top,
         width: rect.width,
         height: rect.height,
@@ -1849,11 +1853,15 @@
 
     barEl.addEventListener('pointermove', (e) => {
       if (!drag || e.pointerId !== drag.pointerId) return;
-      const maxLeft = Math.max(0, window.innerWidth - drag.width);
+      // 右移 → right 减小
+      const maxRight = Math.max(0, window.innerWidth - drag.width);
       const maxTop = Math.max(0, window.innerHeight - drag.height);
-      const left = Math.min(maxLeft, Math.max(0, drag.originLeft + (e.clientX - drag.startX)));
+      const right = Math.min(
+        maxRight,
+        Math.max(0, drag.originRight - (e.clientX - drag.startX)),
+      );
       const top = Math.min(maxTop, Math.max(0, drag.originTop + (e.clientY - drag.startY)));
-      host.style.left = `${left}px`;
+      host.style.right = `${right}px`;
       host.style.top = `${top}px`;
     });
 
@@ -2539,6 +2547,23 @@
     host.style.right = '';
   }
 
+  /** 拖过后是固定 right/top：缩窗时夹回视口（贴右侧收），避免飞出看不见 */
+  function clampBarIntoViewport() {
+    const host = document.getElementById('il-find-root');
+    // 仅拖拽后写过 inline right/top；默认 CSS right/top 不夹
+    if (!host || (!host.style.right && !host.style.top)) return;
+    const rect = host.getBoundingClientRect();
+    const right = window.innerWidth - rect.right;
+    const maxRight = Math.max(0, window.innerWidth - rect.width);
+    const maxTop = Math.max(0, window.innerHeight - rect.height);
+    const nextRight = Math.min(maxRight, Math.max(0, right));
+    const nextTop = Math.min(maxTop, Math.max(0, rect.top));
+    if (nextRight === right && nextTop === rect.top) return;
+    host.style.left = '';
+    host.style.right = `${nextRight}px`;
+    host.style.top = `${nextTop}px`;
+  }
+
   /** 上次注入已过期（重装扩展未刷新页面）需整个丢弃时调用：close() 之外，摘掉本实例注册在 window 上的监听器 */
   function destroy() {
     close();
@@ -2554,6 +2579,7 @@
   window.addEventListener('resize', () => {
     scheduleReflow();
     renderSemanticMatchProgress();
+    clampBarIntoViewport();
   });
   window.visualViewport?.addEventListener('resize', scheduleReflow);
 
