@@ -1,5 +1,5 @@
 /**
- * 工具栏点击 → 注入 content（activeTab 手势）。
+ * 工具栏点击 / 快捷键 / 右键菜单 → 注入 content（activeTab 手势）。
  * API 走 SW fetch：不声明 host_permissions，依赖服务端 CORS（见 run.py CORSMiddleware）。
  */
 
@@ -131,8 +131,13 @@ async function setBadgeError(brief) {
   }
 }
 
-async function activateTab(tab) {
+/**
+ * @param {chrome.tabs.Tab} tab
+ * @param {{ query?: string }} [opts] query：右键选区预填，不自动搜
+ */
+async function activateTab(tab, opts = {}) {
   if (!tab?.id) return;
+  const query = typeof opts.query === 'string' ? opts.query.trim() : '';
 
   // 手势当下立刻读一次 url；无 url 时仍尝试 get（activeTab 授权后）
   try {
@@ -146,6 +151,15 @@ async function activateTab(tab) {
 
     const okTab = await injectWithRetry(tab.id);
     console.info('[InfoLens] injected into', okTab.url);
+    if (query) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, frameIds: [0] },
+        func: (q) => {
+          window.__IL_SEMANTIC_DEMO__?.open(q);
+        },
+        args: [query],
+      });
+    }
     await chrome.action.setBadgeText({ text: '' });
   } catch (err) {
     console.error('[InfoLens] inject failed', err);
@@ -154,7 +168,26 @@ async function activateTab(tab) {
   }
 }
 
-chrome.action.onClicked.addListener(activateTab);
+const CONTEXT_MENU_ID = 'il-semantic-search';
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: CONTEXT_MENU_ID,
+      title: chrome.i18n.getMessage('contextMenuSearch') || 'Search with Semantic Highlight',
+      contexts: ['page', 'selection'],
+    });
+  });
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== CONTEXT_MENU_ID || !tab?.id) return;
+  void activateTab(tab, {
+    query: info.selectionText || '',
+  });
+});
+
+chrome.action.onClicked.addListener((tab) => activateTab(tab));
 
 const ERROR_BODY_SNIPPET = 500;
 

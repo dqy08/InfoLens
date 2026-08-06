@@ -15,7 +15,8 @@ Find bar 权威源在 `extension/ui/`，站内为手工副本。挂 Shadow DOM�
 ```
 
 Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选 `extension/`（`dev` 为绿角标图标）。  
-普通 `https` 页 → 工具栏图标或 `Ctrl+Shift+F`（Mac `⌘⇧F`）→ 输入 query → Enter。
+普通 `https` 页 → 工具栏图标、右键「Search with Semantic Highlight」、或 `Ctrl+Shift+F`（Mac `⌘⇧F`）→ 输入 query → Enter。
+有选区时右键会预填选区文字，不自动搜索。
 
 改配置改源头，再生成（**不要手改** `config.js`；图标路径会改 `manifest.json`，提交前请切回 `dev`）：
 

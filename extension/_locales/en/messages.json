@@ -6,5 +6,9 @@
   "extDescription": {
     "message": "Search and highlight relevant words by meaning, adding a semantic heatmap to webpages — helping you read, not reading for you.",
     "description": "Short extension description in the store listing"
+  },
+  "contextMenuSearch": {
+    "message": "Search with Semantic Highlight",
+    "description": "Right-click context menu item on page / selection"
   }
 }

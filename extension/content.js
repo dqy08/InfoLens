@@ -2469,7 +2469,8 @@
     return info;
   }
 
-  async function open() {
+  /** @param {string} [prefillQuery] 右键选区预填；有值则写入输入框且不自动搜 */
+  async function open(prefillQuery) {
     try {
       if (DOM_DEBUG) {
         // 再次点击：取消下划线
@@ -2485,14 +2486,22 @@
       if (!bar) throw new Error('find bar missing');
       bar.hidden = false;
       const input = /** @type {HTMLInputElement} */ (ui$('semantic_find_input'));
-      // 仅同步 UI（× 按钮可见性），不走 'input' 统一清空路径：reopen 要保留上次渲染结果给下面 tryRestoreLastResult 用
-      syncClearButton(false);
+      const prefill =
+        typeof prefillQuery === 'string' ? prefillQuery.trim() : '';
+      if (prefill && input) {
+        input.value = prefill;
+        // 走 input 路径：清旧结果、同步 ×；不自动搜
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      } else {
+        // 仅同步 UI（× 按钮可见性），不走 'input' 统一清空路径：reopen 要保留上次渲染结果给下面 tryRestoreLastResult 用
+        syncClearButton(false);
+      }
       input?.focus();
       input?.select();
       try {
         refreshExtract();
         renderSemanticMatchProgress();
-        tryRestoreLastResult(input?.value?.trim() || '');
+        if (!prefill) tryRestoreLastResult(input?.value?.trim() || '');
       } catch (err) {
         console.error('[InfoLens] extract aborted:', err?.message || err);
         throw err;

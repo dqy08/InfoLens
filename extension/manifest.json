@@ -10,7 +10,7 @@
     "48": "icons/dev/icon48.png",
     "128": "icons/dev/icon128.png"
   },
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting", "storage", "contextMenus"],
   "background": {
     "service_worker": "background.js"
   },

@@ -6,5 +6,9 @@
   "extDescription": {
     "message": "根据含义搜索并高亮原文中的相关词语，给页面加上一层语义热力图：帮你阅读，而不是替你阅读。",
     "description": "商店列表中的简短介绍"
+  },
+  "contextMenuSearch": {
+    "message": "Search with Semantic Highlight",
+    "description": "网页/选区右键菜单项文案"
   }
 }
