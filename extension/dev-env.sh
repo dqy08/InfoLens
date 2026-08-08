@@ -2,6 +2,7 @@
 # 切换 apiBase + 图标（unpacked 开发版）：
 #   prod  = 官方域名 api.info-lens.app + icons/（正式图标）
 #   dev   = *.workers.dev（同一 Worker）+ icons/dev/
+#   dev prod-icon = dev 配置 + icons/（正式图标）
 # config.js 由本脚本生成（gitignore）；源头为 config.{prod,dev}.js。
 # manifest.json 图标路径随本脚本切换（工作树会脏；提交前请切回 dev）。
 # 上架包由 pack.sh 直接用 config.prod.js + 正式图标，不依赖本脚本状态。
@@ -21,7 +22,7 @@ from pathlib import Path
 mode = sys.argv[1]
 path = Path("manifest.json")
 text = path.read_text(encoding="utf-8")
-if mode == "prod":
+if mode == "prod" or mode == "prod-icon":
     new = text.replace("icons/dev/", "icons/")
 elif mode == "dev":
     new = text if "icons/dev/" in text else text.replace('"icons/', '"icons/dev/')
@@ -41,11 +42,11 @@ case "${1:-}" in
     ;;
   dev)
     cp config.dev.js config.js
-    switch_icons dev
-    echo "已切到 dev：apiBase=infolens-api.xiaoyundqy.workers.dev，图标=icons/dev/。去 chrome://extensions 重新加载生效。"
+    switch_icons "${2:-dev}"
+    echo "已切到 dev：apiBase=infolens-api.xiaoyundqy.workers.dev，图标=$([ "${2:-dev}" = dev ] && echo "icons/dev/" || echo "icons/")。去 chrome://extensions 重新加载生效。"
     ;;
   *)
-    echo "用法: $0 prod|dev" >&2
+    echo "用法: $0 prod|dev [prod-icon]" >&2
     exit 1
     ;;
 esac

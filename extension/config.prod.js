@@ -6,15 +6,6 @@ var IL_CONFIG = {
   apiBase: 'https://api.info-lens.app',
   /** 正式入口：服务端不落 query/text 与明文 IP */
   privacyMode: true,
-  /**
-   * SYNC: client/src/shared/core/constants.ts → SEMANTIC_CHUNK_BYTES；算法见 splitTextToChunks.js
-   * 已知问题：与后端 SEMANTIC_RUNTIME_CONFIGS 的 max_token_length（300~1000 token，按平台）无联动。
-   * 数字/标点/代码等 token 密度高的内容，800 字节可能超出后端 token 限，被静默截断（仅日志提示），
-   * 导致该 chunk 的相关度判断只基于截断后的前缀 —— 后果是漏检，非误报。无法靠调大固定 token 数根治。
-   */
-  chunkBytes: 800,
-  /** demo 最多请求的 chunk 数，避免一页打爆本地推理 */
-  maxChunks: 32,
   /** SYNC: client/src/shared/core/constants.ts → SEMANTIC_MATCH_THRESHOLD */
   matchThreshold: 0.1,
   /**
@@ -22,9 +13,4 @@ var IL_CONFIG = {
    * false = 正常 Find bar + 语义搜索。
    */
   domDebug: false,
-  /**
-   * 扩展侧跟随策略（站内 demo 已无 Follow UI / 搜索中跟随）：
-   * true = 全程跟随最新 chunk；false = 无匹配时跟随，首个匹配后停下并划线。
-   */
-  followSearching: false,
 };

@@ -210,7 +210,8 @@
   stroke-linecap: butt;
 }
 .semantic-match-progress-line.is-gray {
-  stroke: #9aa0a6;
+  stroke: rgba(154, 160, 166, 0.7);
+  stroke-width: 1.5;
 }
 .semantic-match-progress-line.is-selected {
   stroke: #1e6fff;

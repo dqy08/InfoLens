@@ -42,11 +42,8 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 | 字段 | 含义 |
 |------|------|
 | `apiBase` | API 根；prod / dev 由 `dev-env.sh` 切换 |
-| `chunkBytes` | 分块字节上限 |
-| `maxChunks` | demo 最多请求块数 |
 | `matchThreshold` | 计入 ↑↓ 的 match 阈值 |
 | `domDebug` | `true` 只划正文范围 |
-| `followSearching` | `true` 全程跟随最新 chunk |
 
 ### 排查：`Frame with ID 0 was removed`
 

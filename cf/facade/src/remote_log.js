@@ -51,11 +51,15 @@ export function publicRemoteError(err) {
     };
   }
 
-  // 模型输出无法按约定解析：多半是提示词/解析契约问题，重试通常无益（非瞬时推理故障）
-  if (/^unparseable (model output|tool arguments)/i.test(raw) || /^missing tool_calls/i.test(raw)) {
+  // 模型输出无法按约定解析（unparseable / 缺 tool_calls）：多为格式契约问题，重试无益；
+  // 不向用户暴露具体原因，统一提示格式异常；原始输出保留在 error_detail（日志/反馈）用于诊断。
+  if (
+    /^unparseable /i.test(raw) ||
+    /^missing tool_calls/i.test(raw)
+  ) {
     return {
       kind: 'internal',
-      message: 'Unexpected analysis error',
+      message: '输出的格式异常',
       error_detail,
     };
   }

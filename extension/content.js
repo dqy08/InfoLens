@@ -32,13 +32,19 @@
   const CHUNK_HIGHLIGHT_FADE_MS = 1400;
   // SYNC: client/src/shared/vis/GLTR_Text_Box.ts → scrollToUnicodeCharOffset 默认 viewportYRatio
   const CHUNK_JUMP_VIEWPORT_Y_RATIO = 0.2;
-  // 分块语义搜索：最快节奏下限——两次渲染之间至少间隔这么久（无论是否有滚动）
-  const CHUNK_SEARCH_MIN_CYCLE_MS = 250;
-  // 有后续滚动时：染色后先停留一半，另一半留给滚动 settle；无滚动（已 park）时整段都算这里，见下方用法
-  const CHUNK_SEARCH_HOLD_MS = CHUNK_SEARCH_MIN_CYCLE_MS / 2;
-  const CHUNK_SEARCH_FOLLOW_VIEWPORT_Y_RATIO = 0.6;
-  // 自动滚动落点（预滚到下一块 / 首次命中跳转）至少展示这么久，再进入下一块渲染
-  const CHUNK_SEARCH_SCROLL_SETTLE_MS = CHUNK_SEARCH_MIN_CYCLE_MS / 2;
+  /** 流式逐块跟随的跳转节流间隔：跨刷新率统一。 */
+  const CHUNK_SEARCH_FOLLOW_STEP_MS = 66;
+  // SYNC: client/src/shared/core/constants.ts → SEMANTIC_CHUNK_BYTES；算法见 splitTextToChunks.js
+  // 已知问题：与后端 SEMANTIC_RUNTIME_CONFIGS 的 max_token_length（300~1000 token，按平台）无联动。
+  // 数字/标点/代码等 token 密度高的内容，800 字节可能超出后端 token 限，被静默截断（仅日志提示），
+  // 导致该 chunk 的相关度判断只基于截断后的前缀 —— 后果是漏检，非误报。无法靠调大固定 token 数根治。
+  const CHUNK_BYTES = 800;
+  // 语义搜索一次最多覆盖的 chunk 数（超长文章只搜前 N 块）；SYNC: 门面 MULTI_CHUNK_MAX / RELEVANCE_BATCH
+  const MAX_CHUNKS_PER_SEARCH = 32;
+  // 流空闲兜底：门面端挂起（既不回流也不结束）时避免 promise 永久挂起 → 搜索卡死。
+  // 以「空闲」判超时：每次收到流数据 row 都重置计时器（有进展不算超时）；
+  // 只有连续 idle 超过此值（含连接建立后首行迟迟不来）才判死：超过 10s 无新数据即放弃。
+  const STREAM_IDLE_MS = 10000;
 
   /** @type {{ node: Text, start: number, end: number }[]} */
   let pieces = [];
@@ -62,7 +68,7 @@
    * @type {{ start: number, end: number, matchDegree: number, hasKeywords?: boolean }[]}
    */
   let semanticMatchProgress = [];
-  /** 进度条分母（码点数）：maxChunks 截断时用实际搜索覆盖长度，而非全文长度；0 = 未搜索，回退全文 */
+  /** 进度条分母（码点数）：MAX_CHUNKS_PER_SEARCH 截断时用实际搜索覆盖长度，而非全文长度；0 = 未搜索，回退全文 */
   let progressTextLength = 0;
   /** @type {{ tone: string, label: string, detail: string, error_detail?: string, resumable?: boolean, feedbackSent: boolean, el: HTMLElement }[]} */
   let statusEntries = [];
@@ -72,6 +78,8 @@
   let slowBackendNoticeShown = false;
   let selectedProgressChunkStart = null;
   let hoveredProgressChunkStart = null;
+  /** 本轮 runSearch 是否已因首个匹配跳转过（流式首匹配立即跳，结束后避免重复滚动） */
+  let firstMatchJumped = false;
   let matchIndex = -1;
   /**
    * 逻辑区间（去重键）；与 DOM 节点分离。
@@ -121,15 +129,24 @@
   let abortWanted = false;
   /** 每次成功进入搜索 +1；finally 仅当仍是本轮 epoch 时清 searching，防并发误关 */
   let searchEpoch = 0;
+  /**
+   * 本轮搜索的在途流取消句柄（relevance 批量 + keywords 共用）。运行搜索轮次时在 runSearch 开头重建；
+   * Stop/×/giveUp/close 通过 abort() 立即断开 content↔background 的 port → background abort 门面流（终止 OpenRouter），
+   * 不等主循环自然退出（主循环可能挂在 await 上，若只靠 abortWanted 会延迟到下一次结果回流才退出）。
+   */
+  let sessionAbortCtrl = new AbortController();
   let reflowQueued = false;
+  /** 跟手跟随节流的"上次放行时刻"（性能时钟）。循环启动时重置为 0，使首帧必放行。 */
+  let lastFollowFrameAt = 0;
+  /** 待展示的滚动队列（cp + 序号）。数据到达即入队（不影响数据/请求节奏），
+   * 由 RAF 循环每 CHUNK_SEARCH_FOLLOW_STEP_MS 出队一个逐个滚动，保证每块都轮到展示。 */
+  const followQueue = [];
+  /** 消费循环的 RAF id；0 表示循环未在跑。存 id 以便 start/reset 时取消旧循环，
+   * 从根上避免布尔防重入在旧循环未退出时被强制复位导致的并行双循环。 */
+  let followRafId = 0;
   let underlineHoldTimer = 0;
   let underlineFadeTimer = 0;
-  /** @type {(() => void) | null} */
-  let scrollEndCancel = null;
   let underlineFadeGen = 0;
-  let chunkSearchAutoScrollUserCancelled = false;
-  /** @type {(() => void) | undefined} */
-  let chunkSearchAutoScrollCleanup;
 
   /**
    * 在途上限 concurrency 的任务池；多出的在前端短队列等。
@@ -141,6 +158,22 @@
     const queue = [];
     let active = 0;
     let gen = 0;
+    /** 当前 round 的中止控制器；`abort()` 立即中止在途，下一轮 `invalidate()`/`abort()` 重建为新鲜信号 */
+    let abortCtrl = new AbortController();
+    /** 等待池空闲（无排队、无在途）的 resolve 集合 */
+    let idleResolvers = [];
+
+    /** 结束当前 round 的中止信号，为下一轮换新 */
+    function resetAbort() {
+      abortCtrl = new AbortController();
+    }
+
+    function checkIdle() {
+      if (queue.length !== 0 || active !== 0) return;
+      const rs = idleResolvers;
+      idleResolvers = [];
+      for (const r of rs) r();
+    }
 
     function pump() {
       while (active < concurrency && queue.length) {
@@ -151,19 +184,20 @@
           .catch(() => {})
           .finally(() => {
             active--;
+            checkIdle();
             pump();
           });
       }
     }
 
     return {
-      /** @param {(gen: number) => Promise<void>} job */
+      /** @param {(gen: number, signal: AbortSignal) => Promise<void>} job */
       schedule(job) {
         const g = gen;
         queue.push({
           exec: async () => {
             try {
-              await job(g);
+              await job(g, abortCtrl.signal);
             } catch (err) {
               console.error('[InfoLens] pool job', err?.message || err);
             }
@@ -174,7 +208,32 @@
       /** 丢弃未开工；在途跑完但 job 内比对 gen 作废 */
       invalidate() {
         gen += 1;
+        resetAbort();
         queue.length = 0;
+        checkIdle();
+      },
+      /** 立即中止所有在途任务（OpenRouter 断连）；并作废排队。
+       * 不 bump gen：让已中止的在途任务走完正常 clean 路径（renderQueue.release 等收尾），
+       * 仅靠 signal 断流；次轮 `invalidate()` 会 bump gen + 换新信号。 */
+      abort() {
+        abortCtrl.abort();
+        resetAbort();
+        queue.length = 0;
+        checkIdle();
+      },
+      /** 仅换新中止信号（供 Continue 复用同一池时，避免旧已中止信号影响新一批任务不 abort） */
+      resetAbortSignal() {
+        resetAbort();
+      },
+      /** 当前已入队任务全部结束（队列空且无在途）时 resolve；立即空闲则同步 resolve */
+      whenIdle() {
+        return new Promise((resolve) => {
+          if (queue.length === 0 && active === 0) {
+            resolve();
+            return;
+          }
+          idleResolvers.push(resolve);
+        });
       },
       get gen() {
         return gen;
@@ -184,11 +243,8 @@
 
   // 分块搜索两段流水线（渲染身兼两职：上段消费者 + 下段生产者）：
   //   [relevance 生产] ──► [渲染] ──匹配任务──► [keywords 消费]
-  // relevance：在途与存货分计；done 补发，存货满则停发。keywords 自有在途上限。
-  const MAX_RELEVANCE_IN_FLIGHT = 4;
-  // 发送侧门槛：ready 达此则停发；齐回时 ready 可短暂超过。取 > IN_FLIGHT 以便渲染慢时仍能补满在途
-  const MAX_RELEVANCE_BUFFER = 8;
-  const MAX_KEYWORDS_IN_FLIGHT = 2; // keywords 在途（池并发）
+  // relevance：V2 按 ≤32 块成批请求，渲染按序消费每片；keywords 自有在途上限。
+  const MAX_KEYWORDS_IN_FLIGHT = 4; // keywords 在途（池并发）
   /** 与 searchEpoch 分离：Stop/Continue 不该作废已匹配块的 keywords */
   const keywordsPool = createPool(MAX_KEYWORDS_IN_FLIGHT);
 
@@ -615,13 +671,11 @@
       clearTimeout(underlineFadeTimer);
       underlineFadeTimer = 0;
     }
-    scrollEndCancel?.();
-    scrollEndCancel = null;
   }
 
   function clearOverlays() {
     cancelUnderlineFade();
-    endChunkSearchAutoScroll();
+    resetFollowQueue();
     clearTruncatedHighlight();
     clearTokenHighlights();
     clearOverlayEls();
@@ -694,26 +748,16 @@
     if (list) list.replaceChildren();
   }
 
-  /** 进度条下：HF 慢速提示（与 Failed/Note 状态条独立；持续显示，叉掉后本轮不再出现） */
+  /** 进度条下：HF 慢速提示（与 Failed/Note 状态条独立；持续显示，叉掉后本轮不再出现）。
+   * 注：显示入口 noteBackend 已于 v2 化时移除（relevance/keywords v2 均不再回调 hf backend）；
+   * 提示条 UI 与 slowBackendNoticeShown 状态往返保留，供未来接入「慢速备份服务器」提示时复用。 */
   function clearSlowBackendNotice() {
     const el = ui$('semantic_find_backend_notice');
     if (el) el.hidden = true;
   }
 
-  /** @param {string | null | undefined} via X-Infolens-Backend */
-  function noteBackend(via) {
-    if (via !== 'hf' || slowBackendNoticeShown) return;
-    slowBackendNoticeShown = true;
-    const el = ui$('semantic_find_backend_notice');
-    if (!el) return;
-    resetFeedbackButton(
-      /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_backend_notice_feedback'))
-    );
-    el.hidden = false;
-  }
-
   /**
-   * 有未分析 chunk 时可续跑：Failed / Stopped 半截，或 maxChunks 截断后的下一批。
+   * 有未分析 chunk 时可续跑：Failed / Stopped 半截，或 MAX_CHUNKS_PER_SEARCH 截断后的下一批。
    * 需已有进度（n>0）；首块即失败无匹配时用 Enter 重开即可，不必 Continue。
    */
   function canResumeSearch() {
@@ -866,10 +910,8 @@
         || '',
       config: {
         apiBase: CFG.apiBase,
-        chunkBytes: CFG.chunkBytes,
-        maxChunks: CFG.maxChunks,
+        chunkBytes: CHUNK_BYTES,
         matchThreshold: CFG.matchThreshold,
-        followSearching: !!CFG.followSearching,
       },
       progress: {
         content_chunks: lastSearchMeta?.contentChunkCount ?? 0,
@@ -910,6 +952,7 @@
    */
   function resetSearchSession({ clearCache = false } = {}) {
     keywordsPool.invalidate();
+    renderQueue.reset();
     clearOverlays();
     clearFindStatus();
     slowBackendNoticeShown = false;
@@ -920,6 +963,7 @@
     lastSearchMeta = null;
     selectedProgressChunkStart = null;
     hoveredProgressChunkStart = null;
+    firstMatchJumped = false;
     matchIndex = -1;
     if (clearCache) lastResult = null;
     updateNav();
@@ -933,6 +977,9 @@
    */
   function giveUp() {
     abortWanted = true;
+    sessionAbortCtrl.abort();
+    keywordsPool.abort();
+    // 全文重建后旧偏移全作废：清干净并丢弃缓存，下次搜索全量重提
     resetSearchSession({ clearCache: true });
     setSearching(false);
   }
@@ -1043,7 +1090,7 @@
           clearAllCustomHighlights();
           return;
         }
-        const allChunks = splitChunks(extractedText, CFG.chunkBytes).filter(chunkHasContent);
+        const allChunks = splitChunks(extractedText, CHUNK_BYTES).filter(chunkHasContent);
         matchedChunks = allChunks.map((chunk) => ({
           start: utf16ToCp(chunk.start),
           end: utf16ToCp(chunk.end),
@@ -1279,45 +1326,6 @@
   }
 
   /**
-   * SYNC: client/src/shared/core/waitForSmoothScrollEnd.ts
-   * 等到到达 expectedTop，或 scrollend，或超时；已在目标附近则立即结束。
-   */
-  function waitForSmoothScrollEnd(target, expectedTop, onDone, maxWaitMs = 2000) {
-    let settled = false;
-    let timeoutId = 0;
-    const getTop = () => (target === window ? window.scrollY : target.scrollTop);
-
-    const settle = () => {
-      if (settled) return;
-      settled = true;
-      dispose();
-      onDone();
-    };
-
-    const check = () => {
-      if (Math.abs(getTop() - expectedTop) < 1) settle();
-    };
-
-    const onScrollEnd = () => settle();
-
-    const dispose = () => {
-      if (timeoutId) window.clearTimeout(timeoutId);
-      target.removeEventListener('scroll', check);
-      target.removeEventListener('scrollend', onScrollEnd);
-    };
-
-    target.addEventListener('scroll', check, { passive: true });
-    target.addEventListener('scrollend', onScrollEnd, { once: true });
-    check();
-    if (!settled) timeoutId = window.setTimeout(settle, maxWaitMs);
-
-    return () => {
-      settled = true;
-      dispose();
-    };
-  }
-
-  /**
    * 取 cp 附近可用于滚动定位的可视 rect。
    * 正文起点（第一个 chunk）常有前导换行/空白：单码点 Range 的 getClientRects 为空，
    * 若仍用 rangeFromCpOffsets(cp0, cp0+1) 会直接放弃滚动；下划线绘制已用
@@ -1337,43 +1345,44 @@
     return null;
   }
 
+  /** 计算 rect 顶部滚到视角 viewportYRatio 处所需的位置（window/panel 归一）。共用一份滚动数学。 */
+  function computedScrollTop(rect, scrollRoot, viewportYRatio) {
+    if (
+      scrollRoot === document.scrollingElement ||
+      scrollRoot === document.documentElement ||
+      scrollRoot === document.body
+    ) {
+      const ideal = window.scrollY + rect.top - window.innerHeight * viewportYRatio;
+      const maxScroll = Math.max(
+        0,
+        (document.scrollingElement || document.documentElement).scrollHeight - window.innerHeight
+      );
+      return { target: window, top: Math.max(0, Math.min(ideal, maxScroll)) };
+    }
+    const panel = /** @type {HTMLElement} */ (scrollRoot);
+    const panelRect = panel.getBoundingClientRect();
+    const topInPanel = rect.top - panelRect.top + panel.scrollTop;
+    const maxScroll = Math.max(0, panel.scrollHeight - panel.clientHeight);
+    return {
+      target: panel,
+      top: Math.max(0, Math.min(topInPanel - panel.clientHeight * viewportYRatio, maxScroll)),
+    };
+  }
+
   /**
    * SYNC: client/src/shared/vis/GLTR_Text_Box.ts → scrollToUnicodeCharOffset
-   * （宿主页用 findScrollRoot 代替站内 panel）
+   * （宿主页用 findScrollRoot 代替站内 panel）即时定位，滚后回调立即可用。
    */
   function scrollToCpOffset(cp0, onScrollEnd, viewportYRatio = CHUNK_JUMP_VIEWPORT_Y_RATIO) {
-    scrollEndCancel?.();
-    scrollEndCancel = null;
     requestAnimationFrame(() => {
       const rect = clientRectNearCp(cp0);
       if (!rect || !extractRoot) {
         onScrollEnd?.();
         return;
       }
-      const scrollRoot = findScrollRoot(extractRoot);
-      const isWindow =
-        scrollRoot === document.scrollingElement ||
-        scrollRoot === document.documentElement ||
-        scrollRoot === document.body;
-      if (isWindow) {
-        const ideal = window.scrollY + rect.top - window.innerHeight * viewportYRatio;
-        const maxScroll = Math.max(
-          0,
-          (document.scrollingElement || document.documentElement).scrollHeight - window.innerHeight
-        );
-        const y = Math.max(0, Math.min(ideal, maxScroll));
-        window.scrollTo({ top: y, behavior: 'smooth' });
-        if (onScrollEnd) scrollEndCancel = waitForSmoothScrollEnd(window, y, onScrollEnd);
-        return;
-      }
-      const panel = /** @type {HTMLElement} */ (scrollRoot);
-      const panelRect = panel.getBoundingClientRect();
-      const topInPanel = rect.top - panelRect.top + panel.scrollTop;
-      const target = topInPanel - panel.clientHeight * viewportYRatio;
-      const maxScroll = Math.max(0, panel.scrollHeight - panel.clientHeight);
-      const top = Math.max(0, Math.min(target, maxScroll));
-      panel.scrollTo({ top, behavior: 'smooth' });
-      if (onScrollEnd) scrollEndCancel = waitForSmoothScrollEnd(panel, top, onScrollEnd);
+      const { target, top } = computedScrollTop(rect, findScrollRoot(extractRoot), viewportYRatio);
+      target.scrollTo({ top, behavior: 'auto' });
+      onScrollEnd?.();
     });
   }
 
@@ -1382,46 +1391,60 @@
     scrollToCpOffset(cp0, onScrollEnd, CHUNK_JUMP_VIEWPORT_Y_RATIO);
   }
 
-  /** 分块搜索进行中：滚到 chunk 起点（视口 0.6）；站内 demo 已去掉跟随，仅扩展使用 */
-  function followSearchingChunk(cp0) {
-    if (chunkSearchAutoScrollUserCancelled) return;
-    scrollToCpOffset(cp0, undefined, CHUNK_SEARCH_FOLLOW_VIEWPORT_Y_RATIO);
+  /** 按视口 0.2 即时定位滚动到 cp（无动画、无回调）。供跟手跟随循环逐步追赶目标用。 */
+  function applyScrollToCp(cp0, rect) {
+    const { target, top } = computedScrollTop(
+      rect,
+      findScrollRoot(extractRoot),
+      CHUNK_JUMP_VIEWPORT_Y_RATIO
+    );
+    target.scrollTo({ top, behavior: 'auto' });
   }
 
-  /** 分块搜索：wheel/touch 取消自动跟随；站内 demo 已去掉，仅扩展使用 */
-  function beginChunkSearchAutoScroll() {
-    endChunkSearchAutoScroll();
-    chunkSearchAutoScrollUserCancelled = false;
-    if (!extractRoot) return;
-    const scrollRoot = findScrollRoot(extractRoot);
-    const isWindow =
-      scrollRoot === document.scrollingElement ||
-      scrollRoot === document.documentElement ||
-      scrollRoot === document.body;
-    const target = isWindow ? window : scrollRoot;
-    const opts = { passive: true, capture: true };
-    const onUserScroll = () => {
-      if (chunkSearchAutoScrollUserCancelled) return;
-      chunkSearchAutoScrollUserCancelled = true;
-      scrollEndCancel?.();
-      scrollEndCancel = null;
-    };
-    target.addEventListener('wheel', onUserScroll, opts);
-    target.addEventListener('touchstart', onUserScroll, opts);
-    chunkSearchAutoScrollCleanup = () => {
-      target.removeEventListener('wheel', onUserScroll, opts);
-      target.removeEventListener('touchstart', onUserScroll, opts);
-    };
+  /** 清空待展示队列并取消消费循环。start/stop/clear 时调用，避免旧循环残留导致并行双循环。 */
+  function resetFollowQueue() {
+    followQueue.length = 0;
+    if (followRafId) {
+      cancelAnimationFrame(followRafId);
+      followRafId = 0;
+    }
   }
 
-  function endChunkSearchAutoScroll() {
-    chunkSearchAutoScrollCleanup?.();
-    chunkSearchAutoScrollCleanup = undefined;
-    chunkSearchAutoScrollUserCancelled = false;
+  /**
+   * 流式逐块展示：把 chunk 展示动作压入待展示队列。
+   * 不阻塞、不 await —— 数据到达即入队，独立 RAF 循环每 CHUNK_SEARCH_FOLLOW_STEP_MS
+   * 出队一个展示，保证每块逐个滚动，且数据流水线（relevance 消费 / keywords 发起）不受影响。
+   * 队列项：{ cp, reveal }，cp 为待滚动到的 chunk 起点；reveal=true 时该块还附带完整展示
+   * （跳转 + 进度图 + 导航态 + 下划线 show/hold/fade），当前仅首个匹配块用。
+   * 灰字/等待线/keywords 上色均由主循环实时处理，不进本队列。
+   */
+  function enqueueFollow(item) {
+    followQueue.push(item);
+    if (!followRafId) {
+      // 重置为 0：performance.now() 恒 >> 步长，首帧必放行，第一项立即展示
+      lastFollowFrameAt = 0;
+      followLoopTick();
+    }
   }
 
-  function delayMs(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  /** 跟手滚动循环的一帧：距上次放行 ≥ 步长才出队一个展示；队列空则停下。用单一 RAF id 自续，便于取消。 */
+  function followLoopTick() {
+    followRafId = requestAnimationFrame((now) => {
+      if (now - lastFollowFrameAt >= CHUNK_SEARCH_FOLLOW_STEP_MS) {
+        lastFollowFrameAt = now;
+        const item = followQueue.shift();
+        if (item.reveal) {
+          // 首个匹配块：与进度图点击共用 revealChunk 展示（画线/选中态/快照），不需导航更新
+          const m = matchedChunks.find((c) => c.start === item.cp);
+          if (m) revealChunk(m);
+        } else {
+          const rect = clientRectNearCp(item.cp);
+          if (rect && extractRoot) applyScrollToCp(item.cp, rect);
+        }
+      }
+      if (followQueue.length) followLoopTick();
+      else followRafId = 0;
+    });
   }
 
   /**
@@ -1495,48 +1518,171 @@
 
   // ---------- API ----------
 
-  /** 底层 JSON 请求：path 为原生接口路径 */
-  function analyzeSemanticRaw(query, text, path) {
+  /** 用户取消（abort signal）的兜底错误：message 为展示文案，errorDetail 进反馈 */
+  function abortStreamError(label) {
+    const err = new Error('search stopped');
+    err.errorDetail = `${label} stream cancelled by user`;
+    return err;
+  }
+
+  /**
+   * stream port 的兜底收尾：正常 result/error/abort 会 settle 并清定时器；
+   * 通道意外断开（扩展重载 / background 回收 / SW 崩溃）时无 error 事件可收，
+   * 门面持续无进展（连首行都不来）则视为挂起——两种情况都要让 promise 落地，避免主循环 / renderQueue 永久挂起。
+   * 以「空闲」判超时：业务层每收到一条数据 row 就调 touch() 重置计时器，有进展不算超时；
+   * 超时/断线时 reject 的 Error.message 为用户友好文案（直接展示），errorDetail 为诊断信息（仅进反馈）。
+   * 返回 { finish, closePort, touch }（finish 已处理竞态）。
+   * @param {(data?: unknown) => void} reject  兜底（断开/超时）统一走 reject
+   */
+  function guardStreamPromise(port, idleMs, label, reject) {
+    let settled = false;
+    let idleTimer = 0;
+    const finish = (fn, v) => {
+      if (settled) return;
+      settled = true;
+      if (idleTimer) clearTimeout(idleTimer);
+      fn(v);
+    };
+    const closePort = () => {
+      try {
+        port.disconnect();
+      } catch {
+        /* ignore */
+      }
+    };
+    const armIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = window.setTimeout(() => {
+        const err = new Error(`search response stalled — no new data for ${idleMs / 1000}s`);
+        err.errorDetail = `${label} stream: no event within ${idleMs}ms idle window`;
+        finish(reject, err);
+        closePort();
+      }, idleMs);
+    };
+    port.onDisconnect.addListener(() => {
+      const err = new Error(`search connection was interrupted`);
+      err.errorDetail = `${label} stream closed unexpectedly`;
+      finish(reject, err);
+    });
+    armIdle();
+    return { finish, closePort, touch: armIdle };
+  }
+
+  /**
+   * 远程 relevance V2 流式：一次请求整组连续切片（≤32），经 Port 逐行收每片 degree。
+   * SYNC: 门面 /api/v2/analyze-semantic-relevance（SSE：type:row / type:result / type:error）。
+   * 每片结果经 onRow 实时回调（full_match_degree）；type:result 仅作本批收尾信号。
+   * @param {string} query
+   * @param {string[]} texts
+   * @param {(n: number, fullMatchDegree: number) => void} onRow  每收到一片 row 即回调（per-result 及时呈现）
+   * @param {AbortSignal} [signal]  取消则断开 port → background abort 门面流（终止 OpenRouter）
+   * @returns {Promise<void>}  resolve 于 type:result，reject 于 type:error
+   */
+  function analyzeSemanticV2(query, texts, onRow, signal) {
     const body = {
       query,
-      text,
+      texts,
       privacy_mode: CFG.privacyMode !== false,
     };
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(
-        {
-          type: 'il-analyze-semantic',
-          apiBase: CFG.apiBase,
-          path,
-          body,
-        },
-        (resp) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-          if (!resp?.ok) {
-            const err = new Error(resp?.error || 'request failed');
-            if (resp?.error_detail) err.errorDetail = String(resp.error_detail);
-            reject(err);
-            return;
-          }
-          noteBackend(resp.backend);
-          resolve(resp.data);
+      const port = chrome.runtime.connect({ name: 'relevance-stream' });
+      const { finish, closePort, touch } = guardStreamPromise(port, STREAM_IDLE_MS, 'relevance', reject);
+      port.onMessage.addListener((msg) => {
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.type === 'row') {
+          touch(); // 有进展重置空闲计时
+          onRow?.(msg.n, msg.full_match_degree ?? 0);
+        } else if (msg.type === 'result') {
+          finish(resolve);
+          closePort();
+        } else if (msg.type === 'error') {
+          const err = new Error(msg.message || 'request failed');
+          if (msg.error_detail) err.errorDetail = String(msg.error_detail);
+          finish(reject, err);
+          closePort();
         }
-      );
+      });
+      if (signal) {
+        if (signal.aborted) {
+          closePort();
+          finish(reject, abortStreamError('relevance'));
+        } else {
+          signal.addEventListener(
+            'abort',
+            () => {
+              closePort();
+              // 取消 = 流结束，走 reject 让主循环 catch 正常收尾（resolve 会让整片永远 pending）
+              finish(reject, abortStreamError('relevance'));
+            },
+            { once: true }
+          );
+        }
+      }
+      port.postMessage({
+        apiBase: CFG.apiBase,
+        path: '/api/v2/analyze-semantic-relevance',
+        body,
+      });
     });
   }
 
   /**
-   * SYNC: client GLTR_API.analyzeSemantic — 相关度门控；达阈值时由调用方异步 keywords 染色（等待线）。
+   * 远程 keywords V2 流式：一次请求一个 chunk，经 Port 逐条收高亮 run。
+   * SYNC: 门面 /api/v2/analyze-semantic-keywords（SSE：type:row {offset,raw,score} / type:result / type:error）。
+   * 每个 run 经 onRun 实时回调（增量上色）；type:result 仅作本块收尾信号。
+   * @param {string} query
+   * @param {string} text
+   * @param {(run: {offset: [number, number], raw: string, score: number}) => void} onRun
+   * @param {AbortSignal} [signal]  取消则断开 port → background abort 门面流
+   * @returns {Promise<void>}  resolve 于 type:result，reject 于 type:error
    */
-  async function analyzeSemantic(query, text) {
-    const r1 = await analyzeSemanticRaw(query, text, '/api/analyze-semantic-relevance');
-    if (typeof r1?.full_match_degree !== 'number') {
-      throw new Error(r1?.message || r1?.detail || 'Invalid response: missing full_match_degree');
-    }
-    return { ...r1, token_attention: [] };
+  function analyzeKeywordsV2(query, text, onRun, signal) {
+    const body = {
+      query,
+      text,
+      stream: true,
+      privacy_mode: CFG.privacyMode !== false,
+    };
+    return new Promise((resolve, reject) => {
+      const port = chrome.runtime.connect({ name: 'relevance-stream' });
+      const { finish, closePort, touch } = guardStreamPromise(port, STREAM_IDLE_MS, 'keywords', reject);
+      port.onMessage.addListener((msg) => {
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.type === 'row') {
+          touch(); // 有进展重置空闲计时
+          onRun?.({ offset: msg.offset, raw: msg.raw, score: msg.score ?? 0 });
+        } else if (msg.type === 'result') {
+          finish(resolve);
+          closePort();
+        } else if (msg.type === 'error') {
+          const err = new Error(msg.message || 'request failed');
+          if (msg.error_detail) err.errorDetail = String(msg.error_detail);
+          finish(reject, err);
+          closePort();
+        }
+      });
+      if (signal) {
+        if (signal.aborted) {
+          closePort();
+          finish(reject, abortStreamError('keywords'));
+        } else {
+          signal.addEventListener(
+            'abort',
+            () => {
+              closePort();
+              // 取消 = 流结束，走 reject 让 job 的 catch 正常收尾（release + 不落快照）
+              finish(reject, abortStreamError('keywords'));
+            },
+            { once: true }
+          );
+        }
+      }
+      port.postMessage({
+        apiBase: CFG.apiBase,
+        path: '/api/v2/analyze-semantic-keywords',
+        body,
+      });
+    });
   }
 
   /** hybrid：拆掉某 chunk 的等待线（只动 pending overlay） */
@@ -1548,32 +1694,117 @@
   }
 
   /**
-   * 把 v2 keywords 的无重叠 token_attention 写入 paintSpecs，并直接挂上 Highlight。
-   * Worker 已完成定位与重叠取 max；此处不再 merge / P90。
-   * 上色分 = token.score × matchDegree（degree 现多为 0/1，仍保留中间值路径）。
+   * 把单个 v2 keyword 高亮 run 写入 paintSpecs，并即时挂上 Highlight（增量上色）。
+   * Worker 已完成定位 / uniquify 定档 / REPEAT_DIM 压暗；score 为 (0,1]，直接乘 matchDegree。
+   * @param {{offset: [number, number], raw: string, score: number}} t
+   * @param {number} chunkCpStart
+   * @param {number} matchDegree
    * @returns {number} 实际上色的 token 段数；0 表示没有染色
    */
-  function paintChunkTokens(tokenAttention, chunkCpStart, matchDegree) {
+  function paintTokenRun(t, chunkCpStart, matchDegree) {
     ensureHighlightRegistry();
+    if (!keywordRunPaintable(t, chunkCpStart, matchDegree)) return 0;
     const degree = Number.isFinite(matchDegree) ? matchDegree : 0;
-    let n = 0;
-    for (const t of tokenAttention || []) {
-      if (!t.offset) continue;
-      const score = (t.score > 0 ? t.score : 0) * degree;
-      if (!(score > 0)) continue;
-      const [a, b] = t.offset;
-      const level = scoreToLevel(score);
-      if (level < 0) continue;
-      const cp0 = chunkCpStart + a;
-      const cp1 = chunkCpStart + b;
-      paintSpec('token', cp0, cp1, level);
-      const h = CSS.highlights.get(HL_TOKEN_PREFIX + level);
-      if (!h) throw new Error(`highlight missing: ${HL_TOKEN_PREFIX}${level}`);
-      addCpRangeToHighlight(h, cp0, cp1);
-      n += 1;
-    }
-    return n;
+    const [a, b] = t.offset;
+    const level = scoreToLevel((t.score > 0 ? t.score : 0) * degree);
+    const cp0 = chunkCpStart + a;
+    const cp1 = chunkCpStart + b;
+    paintSpec('token', cp0, cp1, level);
+    const h = CSS.highlights.get(HL_TOKEN_PREFIX + level);
+    if (!h) throw new Error(`highlight missing: ${HL_TOKEN_PREFIX}${level}`);
+    addCpRangeToHighlight(h, cp0, cp1);
+    return 1;
   }
+
+  /** 该 keyword run 是否具备可上色性（score 定档后非空） */
+  function keywordRunPaintable(t, chunkCpStart, matchDegree) {
+    if (!t.offset) return false;
+    const degree = Number.isFinite(matchDegree) ? matchDegree : 0;
+    const score = (t.score > 0 ? t.score : 0) * degree;
+    if (!(score > 0)) return false;
+    return scoreToLevel(score) >= 0;
+  }
+
+  // ---------- 顺序渲染队列（仅 UI 层）：chunk 内流式，chunk 间按序 -------------
+  // 底层 keywords 数据流仍完全并发（池在途 4）；此处只决定「run 何时上色」与
+  // 「蓝线何时拆」。同一时刻只渲染队首 chunk，其余 chunk 的 run 先缓冲，轮到刷出；
+  // 蓝线在该 chunk 渲染完成（全部 run 上色完毕、轮到它）时拆，与上色时序一致，
+  // 避免并发返回顺序导致的「线先消失、色后到」。
+  const renderQueue = {
+    /** 按序等待/进行中的 chunk：{start, end, result}；result=undefined 未完、true 成功、false 失败 */
+    items: [],
+    /** 正在上色的 chunk（队首）；null = 队列空 */
+    current: null,
+    /** start → 该块已缓冲 run（{t, chunkCpStart, degree}）；轮到该块时一次性刷出 */
+    buffered: new Map(),
+
+    /** 匹配 chunk 入队并记录区间；队列原为空则立即开始上色 */
+    enqueue(start, end) {
+      this.items.push({ start, end });
+      if (this.current == null) this.advance();
+    },
+
+    /**
+     * 从队首推进上色：循环处理已完成的块。块的「完成」= 数据到齐（result 非空），
+     * 此刻该块全部 run 已拿到，一次刷完即为渲染完成，随即便拆它的蓝线。
+     * 数据未完的块则停在队首等 release：先刷已到手部分、设为 current（流式上色，蓝线保留）。
+     */
+    advance() {
+      while (this.items.length) {
+        const item = this.items[0];
+        const runs = this.buffered.get(item.start) || [];
+        if (runs.length) this.buffered.delete(item.start);
+        if (item.result == null) {
+          // 数据未到齐：刷出已缓冲部分，保持其为 current 流式等待（蓝线暂不拆）
+          for (const r of runs) paintTokenRun(r.t, item.start, r.degree);
+          this.current = item;
+          return;
+        }
+        // 数据齐全：一次上完该块全部 run（=渲染完成），此刻才拆它的蓝线
+        for (const r of runs) paintTokenRun(r.t, item.start, r.degree);
+        if (item.result === true) clearPendingUnderline(item.start, item.end);
+        this.items.shift();
+      }
+      this.current = null;
+    },
+
+    /** 标记某块数据流结束（成功/失败），并尝试推进 */
+    release(start, success) {
+      const item = start === this.current?.start
+        ? this.current
+        : this.items.find((e) => e.start === start);
+      if (!item) return;
+      item.result = success !== false;
+      if (start === this.current?.start) this.advance();
+    },
+
+    /**
+     * run 上色入队：属于当前块则实时上色，否则缓冲等轮到。
+     * 无论走哪条路都返回「是否可上色」，供块内统计染红进度线。
+     * @returns {number} 0|1（可上色即 1）
+     */
+    pushRun(t, chunkCpStart, degree) {
+      if (!keywordRunPaintable(t, chunkCpStart, degree)) return 0;
+      if (this.current?.start === chunkCpStart) {
+        paintTokenRun(t, chunkCpStart, degree);
+      } else {
+        let runs = this.buffered.get(chunkCpStart);
+        if (!runs) {
+          runs = [];
+          this.buffered.set(chunkCpStart, runs);
+        }
+        runs.push({ t, chunkCpStart, degree });
+      }
+      return 1;
+    },
+
+    /** 新搜索/重置：清空队列状态 */
+    reset() {
+      this.items.length = 0;
+      this.current = null;
+      this.buffered.clear();
+    },
+  };
 
   // ---------- UI（同源 HTML/CSS，Shadow DOM 隔离宿主页样式） ----------
 
@@ -1767,8 +1998,13 @@
     ui$('semantic_find_clear')?.addEventListener('click', (e) => {
       e.stopPropagation();
       if (searching) {
-        // 立刻空闲 UI；旧轮靠 abortWanted 退出主循环。不清 keywords：已匹配块继续染色，Continue 可接上
+        // 立刻空闲 UI；旧轮靠 abortWanted 退出主循环。立即断开所有在途流
+        // （relevance+keywords），background abort → 门面取消 OpenRouter，不继续烧
         abortWanted = true;
+        sessionAbortCtrl.abort();
+        keywordsPool.abort();
+        // 中止跟随滚动：清空队列并取消循环，已入队的 chunk/match 项不再出队（含 stop 后才不会触发 jumpToMatch）
+        resetFollowQueue();
         setSearching(false);
         // 不等主循环退出：可续跑时立刻给出 Stopped + Continue（与循环尾部分支同条件）
         if (canResumeSearch()) {
@@ -1979,7 +2215,11 @@
     const lines = ui$('semantic_match_progress_lines');
     if (!(chart instanceof SVGSVGElement) || !(lines instanceof SVGGElement)) return;
 
-    const hidden = semanticMatchProgress.length === 0 || extractedText.length === 0;
+    // 空进度框架只在一个「新搜索请求已发出、本地就绪、等待首个 chunk 回流」的窗口期显示：
+    // 仅当正在搜索(searching)且尚无任何 chunk 结果时亮出；否则隐藏（正文为空、或搜索已结束/未开始）。
+    const hidden =
+      extractedText.length === 0 ||
+      (semanticMatchProgress.length === 0 && !searching);
     chart.toggleAttribute('hidden', hidden);
     if (hidden) {
       lines.replaceChildren();
@@ -2104,6 +2344,8 @@
     syncClearButton(on);
     // 搜索结束时若正文仍脏（例如 debounce 未到期），补一次 sync
     if (!on && contentDirty) scheduleSyncPaintAfterLayout();
+    // 结束/停止时重绘进度图：把「等待首 chunk」的空框架收起（hidden 判据依赖 searching）
+    if (!on) renderSemanticMatchProgress();
   }
 
   /**
@@ -2118,12 +2360,18 @@
     }
     if (resume && !canResumeSearch()) return;
 
+    resetFollowQueue();
+
     // 必须在任何 await 之前占住 searching + epoch，否则连按会 concurrent 多轮：
     // 旧轮 finally 清掉 searching，新轮仍在跑 → 有报错、像在搜、却没有停止按钮。
     const epoch = ++searchEpoch;
     abortWanted = false;
+    // 本轮的流式 cancel 句柄（模块级）：Stop/×/giveUp/close（abortWanted）或本轮收尾时断开 in-flight port →
+    // background abort → 门面取消 OpenRouter。新轮重建，避免旧轮已 abort 的信号影响新一轮。
+    sessionAbortCtrl = new AbortController();
     // 重开须在 await 前作废旧 keywords，避免 ensureHistory 窗口内旧任务仍落笔；Continue 保留
     if (!resume) keywordsPool.invalidate();
+    else keywordsPool.resetAbortSignal(); // Continue 复用池：换新信号，避免沿用上一轮已 abort 的信号
     setSearching(true);
     refreshStatusContinueButtons();
 
@@ -2132,14 +2380,12 @@
       if (epoch !== searchEpoch) return;
       saveHistory(query);
 
-      // 产品决策：扩展保留预取/hold/follow；站内 demo 刻意简化为「上色 → 结束跳首个匹配」（见 semanticSearchController），两边不必对齐。
-      // followSearching=true 全程跟随；false=无 match 前跟随、首个 match 停靠划线
-      const followAll = !!CFG.followSearching;
+      // 流式逐块展示：每块统一入队（滚动定位），由 RAF 循环按 CHUNK_SEARCH_FOLLOW_STEP_MS 节奏播放；
+      // 黑字/等待线/renderQueue/keywords 仍实时处理，遮挡滚动播放的缓冲，不反压。
       /** @type {{ start: number, end: number, text: string }[]} */
       let allChunks;
       let resumeFrom = 0;
       let analyzedCpEnd = 0;
-      let parkedOnFirstMatch = false;
 
       if (resume) {
         clearFindStatus();
@@ -2157,18 +2403,22 @@
           return;
         }
         setPieces(mapped.pieces);
-        const contentChunks = splitChunks(extractedText, CFG.chunkBytes).filter(chunkHasContent);
+        const contentChunks = splitChunks(extractedText, CHUNK_BYTES).filter(chunkHasContent);
+        // Continue 只从「已判定完成的块之后」继续（resumeFrom = semanticMatchProgress.length）。
+        // 关键词分析约定：已完成的保留；stop 时被中止、尚未染完的那一块 keywords 不补染——
+        // 它已进入 semanticMatchProgress，会被这里越过，此处有意跳过（用户取舍：中断小概率，简单优先）。
         resumeFrom = semanticMatchProgress.length;
         if (resumeFrom >= contentChunks.length) return;
+        // 续跑重置首匹配跳转：本轮新分析出首个匹配 chunk 时重新跳转高亮
+        firstMatchJumped = false;
         // 中断续跑沿用旧窗口；截断后续跑再开一批
         const prevEnd = lastSearchMeta.windowEnd ?? 0;
         const windowEnd =
-          resumeFrom < prevEnd ? prevEnd : resumeFrom + CFG.maxChunks;
+          resumeFrom < prevEnd ? prevEnd : resumeFrom + MAX_CHUNKS_PER_SEARCH;
         allChunks = contentChunks.slice(0, windowEnd);
         analyzedCpEnd =
           truncatedAnalyzedCpEnd ??
           (resumeFrom > 0 ? semanticMatchProgress[resumeFrom - 1].end : 0);
-        parkedOnFirstMatch = !followAll && matchedChunks.length > 0;
         lastSearchMeta = {
           query,
           contentChunkCount: contentChunks.length,
@@ -2196,9 +2446,9 @@
           return;
         }
 
-        // 全空白 chunk 不送 API；先滤再截断，避免 maxChunks 被空白占满
-        const contentChunks = splitChunks(extractedText, CFG.chunkBytes).filter(chunkHasContent);
-        allChunks = contentChunks.slice(0, CFG.maxChunks);
+        // 全空白 chunk 不送 API；先滤再截断，避免 MAX_CHUNKS_PER_SEARCH 被空白占满
+        const contentChunks = splitChunks(extractedText, CHUNK_BYTES).filter(chunkHasContent);
+        allChunks = contentChunks.slice(0, MAX_CHUNKS_PER_SEARCH);
         lastSearchMeta = {
           query,
           contentChunkCount: contentChunks.length,
@@ -2213,71 +2463,123 @@
         setTruncatedHighlight(0);
       }
 
-      beginChunkSearchAutoScroll();
-
-      // --- 段1：relevance（在途 / 存货分计；done 补发，consume 降存货后恢复）---
+      // --- 段1：relevance（V2 批量：≤RELEVANCE_BATCH 组成一请求，渲染按序消费每片）---
       const stillThisSearch = () => epoch === searchEpoch && !abortWanted;
-      /** @type {Map<number, Promise>} */
-      const relevanceBuffer = new Map();
-      let relevanceProduceIdx = resumeFrom;
-      let relevanceInFlight = 0;
-      let relevanceReady = 0;
-
-      const tryProduceRelevance = () => {
-        while (
-          stillThisSearch() &&
-          relevanceProduceIdx < allChunks.length &&
-          relevanceInFlight < MAX_RELEVANCE_IN_FLIGHT &&
-          relevanceReady < MAX_RELEVANCE_BUFFER
-        ) {
-          const idx = relevanceProduceIdx++;
-          relevanceInFlight++;
-          const p = analyzeSemantic(query, allChunks[idx].text).finally(() => {
-            relevanceInFlight--;
-            relevanceReady++;
-            tryProduceRelevance();
-          });
-          p.catch(() => {}); // 真正的错误在 consume await 时抛出；此处仅消预取悬空 rejection
-          relevanceBuffer.set(idx, p);
+      const RELEVANCE_BATCH = 32; // SYNC: 门面 MULTI_CHUNK_MAX（texts 上限）
+      /** @type {Map<number, { resolve: Function, reject: Function }>} 每片 settle 句柄（row 到达即 resolve） */
+      const chunkSettle = new Map();
+      /** @type {Map<number, Promise<object>>} 每片就绪 promise（consume 用） */
+      const perChunkReady = new Map();
+      /** @type {Map<number, Promise<object>>} 批起始 idx → 整批 promise（仅错误传播/收尾） */
+      const relevanceBatchPromises = new Map();
+      const batchStart = (idx) =>
+        resumeFrom + Math.floor((idx - resumeFrom) / RELEVANCE_BATCH) * RELEVANCE_BATCH;
+      const deferChunk = (idx) => {
+        const d = {};
+        perChunkReady.set(
+          idx,
+          new Promise((resolve, reject) => {
+            d.resolve = resolve;
+            d.reject = reject;
+          })
+        );
+        chunkSettle.set(idx, d);
+      };
+      const ensureRelevanceBatch = (idx) => {
+        const start = batchStart(idx);
+        if (relevanceBatchPromises.has(start)) return;
+        const end = Math.min(start + RELEVANCE_BATCH, allChunks.length);
+        const texts = [];
+        for (let k = start; k < end; k++) {
+          texts.push(allChunks[k].text);
+          deferChunk(k);
         }
+        const p = analyzeSemanticV2(query, texts, (n, fullMatchDegree) => {
+          const real = start + (n - 1);
+          const d = chunkSettle.get(real);
+          if (d) {
+            chunkSettle.delete(real);
+            d.resolve({ full_match_degree: fullMatchDegree });
+          }
+        }, sessionAbortCtrl.signal);
+        p.catch((err) => {
+          // 整批失败：reject 所有未就绪片（不静默挂起）；透传 Worker 端 errorDetail，
+          // 使反馈落库保留真实失败原因（如 missing count for block [1]）
+          console.error('[InfoLens][relevance] batch error:', err?.message, 'detail=', err?.errorDetail);
+          for (let k = start; k < end; k++) {
+            const d = chunkSettle.get(k);
+            if (d) {
+              chunkSettle.delete(k);
+              const e = new Error(`relevance v2 request failed for chunk ${k}`);
+              if (err?.errorDetail) e.errorDetail = String(err.errorDetail);
+              d.reject(e);
+            }
+          }
+        });
+        relevanceBatchPromises.set(start, p);
       };
 
-      /** 渲染按序取走（未完成则等）；取走后降存货，可能恢复发送 */
-      const consumeRelevance = async (idx) => {
-        const p = relevanceBuffer.get(idx);
-        if (!p) throw new Error(`relevance buffer miss: chunk ${idx}`);
-        try {
-          return await p;
-        } finally {
-          relevanceBuffer.delete(idx);
-          relevanceReady--;
-          tryProduceRelevance();
-        }
+      /** 渲染按序取走（该片 row 就绪即返回，不等待整批） */
+      const consumeRelevance = (idx) => {
+        ensureRelevanceBatch(idx);
+        return perChunkReady.get(idx);
       };
+      // 预热首批：渲染推进前先发请求，与首块渲染等待并行
+      if (stillThisSearch() && resumeFrom < allChunks.length) {
+        ensureRelevanceBatch(resumeFrom);
+        // 搜索开始即即时定位到本批首个待分析 chunk 起点（通常是正文开头），让用户感知「开始了」；
+        // 即时定位，不与逐块跟随互相叠加
+        const chunkStartRect = clientRectNearCp(utf16ToCp(allChunks[resumeFrom].start));
+        if (chunkStartRect && extractRoot) {
+          applyScrollToCp(utf16ToCp(allChunks[resumeFrom].start), chunkStartRect);
+        }
+      }
+      // 本地处理与请求均已发出：此刻起只等对方回流。先亮出空进度图（0 根线）占位，
+      // 表明本地已就绪、不报错，剩下的只是等待首个 chunk 结果；随逐片结果到达实时点亮。
+      renderSemanticMatchProgress();
 
       // --- 段2：keywords（渲染匹配后投递；池内消费，不反压段1）---
-      const enqueueKeywords = (chunkIndex, chunk, chunkCpStart, chunkCpEnd, degree) => {
-        keywordsPool.schedule(async (jobGen) => {
+      const enqueueKeywords = (chunkIndex, chunk, chunkCpStart, degree) => {
+        keywordsPool.schedule(async (jobGen, signal) => {
           if (jobGen !== keywordsPool.gen) return;
+          // 增量上色计数（逐条 run 到达即累计）
+          let painted = 0;
           try {
-            // 新扩展走 v2（无重叠可上色）；旧扩展仍打 /api/analyze-semantic-keywords，由门面双轨隔离
-            const r2 = await analyzeSemanticRaw(query, chunk.text, '/api/v2/analyze-semantic-keywords');
+            // 新扩展走 v2 流式（逐词增量上色）；旧扩展仍打旧 JSON 路径由门面双轨隔离
+            await analyzeKeywordsV2(
+              query,
+              chunk.text,
+              (run) => {
+                if (jobGen !== keywordsPool.gen) return;
+                if (!extractRoot?.isConnected) return;
+                painted += renderQueue.pushRun(run, chunkCpStart, degree);
+              },
+              signal
+            );
             if (jobGen !== keywordsPool.gen) return;
             if (!extractRoot?.isConnected) return;
-            // 如实上色（可为 0 段）后拆掉等待线；空 token_attention 也走完流程
-            const painted = paintChunkTokens(r2.token_attention, chunkCpStart, degree);
-            clearPendingUnderline(chunkCpStart, chunkCpEnd);
-            // 有可上色段才把进度线染红；此前保持灰。↑↓ 仍跟 relevance，不 demote
+            if (abortWanted) {
+              // 被中止的流最终落地：只做收尾 release，不渲染/不落快照，避免残留本轮中途态
+              renderQueue.release(chunkCpStart, false);
+              return;
+            }
+            // 有可上色段才把进度线染红（此前保持灰）。↑↓ 仍跟 relevance，不 demote。
+            // 蓝线由 renderQueue.advance（该块数据齐全、真正上色完毕）时拆，见顺序渲染队列。
             if (painted > 0) {
               const row = semanticMatchProgress.find((c) => c.start === chunkCpStart);
               if (row) row.hasKeywords = true;
               renderSemanticMatchProgress();
             }
+            // 标记数据流成功结束并推进队列（见 renderQueue.release）
+            renderQueue.release(chunkCpStart, true);
             snapshotLastResult(query);
           } catch (err) {
             // 失败：pending 留下 + chunk 级 Failed；整轮不中断
             console.error('[InfoLens] keywords', err?.message || err);
+            // 收尾清理：无论如何先 release，避免 renderQueue 卡在 current 上（abort/giveUp 也走这里）
+            renderQueue.release(chunkCpStart, false);
             if (jobGen !== keywordsPool.gen || epoch !== searchEpoch || abortWanted) return;
+            // 失败：保留蓝线（pending），但标记 done 避免队列卡住
             const reason = err?.message != null ? String(err.message).trim() : '';
             const tech = err?.errorDetail != null ? String(err.errorDetail).trim() : '';
             // Failed · Keyword analysis on chunk N · <具体原因>
@@ -2298,124 +2600,87 @@
         });
       };
 
-      tryProduceRelevance();
+      for (let i = resumeFrom; i < allChunks.length; i++) {
+        if (!stillThisSearch()) break;
+        const chunk = allChunks[i];
+        let res;
+        try {
+          res = await consumeRelevance(i);
+        } catch (err) {
+          const tech =
+            err?.errorDetail != null ? String(err.errorDetail).trim() : '';
+          const wrapped = new Error(
+            err?.message != null && String(err.message).trim()
+              ? `Relevance on chunk ${i} · ${String(err.message).trim()}`
+              : `Relevance on chunk ${i}`
+          );
+          wrapped.errorDetail = formatChunkErrorDetail(
+            'relevance',
+            i,
+            chunk,
+            tech || undefined
+          );
+          throw wrapped;
+        }
+        if (!stillThisSearch()) break;
 
-      try {
-        // 第 0 块（或续跑起点）没有「上一块结束时的预滚」；若不先滚到位，本块 hold 后会立刻
-        // 被预滚下一块打断，表现为「第一个 chunk 跳转不行」（匹配与否都一样）。
-        if (stillThisSearch() && resumeFrom < allChunks.length && (followAll || !parkedOnFirstMatch)) {
-          followSearchingChunk(utf16ToCp(allChunks[resumeFrom].start));
-          await delayMs(CHUNK_SEARCH_SCROLL_SETTLE_MS);
+        const degree = res.full_match_degree ?? 0;
+        // SYNC: semanticSearchController — matched = degree >= threshold；未匹配块不上色
+        const matched = degree >= CFG.matchThreshold;
+        const chunkCpStart = utf16ToCp(chunk.start);
+        const chunkCpEnd = utf16ToCp(chunk.end);
+        analyzedCpEnd = Math.max(analyzedCpEnd, chunkCpEnd);
+        semanticMatchProgress.push({
+          start: chunkCpStart,
+          end: chunkCpEnd,
+          matchDegree: degree,
+        });
+        renderSemanticMatchProgress();
+        // 灰字（已分析边界）随数据到达实时推进
+        setTruncatedHighlight(analyzedCpEnd);
+
+        // 流式逐块展示：首匹配之前的块逐个入队跟随；遇到首个匹配块则入队一个 reveal 项
+        // （自带定位 + 完整展示）并停止入队——之后不再入任何项，视口停留首匹配，后续块不滚动跟随
+        if (!firstMatchJumped) {
+          if (matched) {
+            firstMatchJumped = true;
+            enqueueFollow({ cp: chunkCpStart, reveal: true });
+          } else {
+            enqueueFollow({ cp: chunkCpStart });
+          }
         }
 
-        for (let i = resumeFrom; i < allChunks.length; i++) {
-          if (!stillThisSearch()) break;
-          const chunk = allChunks[i];
-          let res;
-          try {
-            res = await consumeRelevance(i);
-          } catch (err) {
-            const tech =
-              err?.errorDetail != null ? String(err.errorDetail).trim() : '';
-            const wrapped = new Error(
-              err?.message != null && String(err.message).trim()
-                ? `Relevance on chunk ${i} · ${String(err.message).trim()}`
-                : `Relevance on chunk ${i}`
-            );
-            wrapped.errorDetail = formatChunkErrorDetail(
-              'relevance',
-              i,
-              chunk,
-              tech || undefined
-            );
-            throw wrapped;
-          }
-          if (!stillThisSearch()) break;
-
-          const degree = res.full_match_degree ?? 0;
-          // SYNC: semanticSearchController — matched = degree >= threshold；未匹配块不上色
-          const matched = degree >= CFG.matchThreshold;
-          const chunkCpStart = utf16ToCp(chunk.start);
-          const chunkCpEnd = utf16ToCp(chunk.end);
-          analyzedCpEnd = Math.max(analyzedCpEnd, chunkCpEnd);
-          semanticMatchProgress.push({
+        if (matched) {
+          matchedChunks.push({
             start: chunkCpStart,
             end: chunkCpEnd,
             matchDegree: degree,
           });
-          renderSemanticMatchProgress();
-
-          // 跟随判定用「本块入列前」是否已有匹配
-          const hadMatchBefore = matchedChunks.length > 0;
-          // 未勾选 Follow：首个匹配处停下并划线；勾选则全程跟随，结束再跳首个匹配
-          const willJump = !followAll && matched && !parkedOnFirstMatch;
-
-          if (matched) {
-            matchedChunks.push({
-              start: chunkCpStart,
-              end: chunkCpEnd,
-              matchDegree: degree,
-            });
-          }
-
-          // 匹配：先画等待线；keywords 在 hold 后 enqueue（不挡本段渲染节奏）
-          if (matched) {
-            upsertSpec({ kind: 'pending-underline', cp0: chunkCpStart, cp1: chunkCpEnd });
-            renderUnderlinesOfKind('pending-underline');
-          }
-          // 段1 消费完即恢复灰字/画等待线
-          setTruncatedHighlight(analyzedCpEnd);
-
-          // followThis = followAll || !hadMatchBefore；willJump 块滚动延后到 hold 后（扩展节奏，非站内）
-          if ((followAll || !hadMatchBefore) && !willJump) {
-            followSearchingChunk(chunkCpStart);
-          }
-          // 每块后快照：close 中途清高亮时仍保留上一版
-          snapshotLastResult(query);
-
-          // 首个匹配块也要先经过与其它块一致的 hold，再触发自动滚动，
-          // 避免着色刚出现就被立刻滚走——即使命中的正好是最后一块
-          const nextIndex = i + 1;
-          // shouldFollow = followAll || !hasMatch；park 后不再滚动/settle，hold 撑满 MIN_CYCLE（扩展节奏）
-          const willSettleAfterHold =
-            willJump || (nextIndex < allChunks.length && (followAll || !parkedOnFirstMatch));
-          const holdMs = willSettleAfterHold ? CHUNK_SEARCH_HOLD_MS : CHUNK_SEARCH_MIN_CYCLE_MS;
-          if (willJump || nextIndex < allChunks.length) {
-            await delayMs(holdMs);
-            if (!stillThisSearch()) break;
-          }
-          if (willJump) {
-            jumpToMatch(0);
-            parkedOnFirstMatch = true;
-            // 跳转落点同样要停留够 CHUNK_SEARCH_SCROLL_SETTLE_MS，避免划线刚定位就被下一块的渲染打断
-            await delayMs(CHUNK_SEARCH_SCROLL_SETTLE_MS);
-            if (!stillThisSearch()) break;
-          }
-
-          if (matched) enqueueKeywords(i, chunk, chunkCpStart, chunkCpEnd, degree);
-
-          if (nextIndex < allChunks.length && (followAll || !parkedOnFirstMatch)) {
-            const nextChunk = allChunks[nextIndex];
-            followSearchingChunk(utf16ToCp(nextChunk.start));
-            // 滚动后的新位置也要停留够 CHUNK_SEARCH_SCROLL_SETTLE_MS，
-            // 否则分析过快时会出现「刚滚过去就立刻变色」的突变感；relevance 在途由 done 补发维持
-            await delayMs(CHUNK_SEARCH_SCROLL_SETTLE_MS);
-            if (!stillThisSearch()) break;
-          }
+          // 匹配：先画等待线；keywords 异步返回后拆线并上色（不反压段1渲染节奏）
+          upsertSpec({ kind: 'pending-underline', cp0: chunkCpStart, cp1: chunkCpEnd });
+          renderUnderlinesOfKind('pending-underline');
+          // 顺序渲染：匹配 chunk 入队（首块即出队开始上色，红按块顺序推进）
+          renderQueue.enqueue(chunkCpStart, chunkCpEnd);
+          // keywords 请求立即发出（不进队列）：利用逐块展示的缓冲期掩饰首个匹配的关键词延迟
+          enqueueKeywords(i, chunk, chunkCpStart, degree);
         }
-      } finally {
-        endChunkSearchAutoScroll();
-        // 停段1生产：tryProduceRelevance 见 stillThisSearch 为假即停；在途自然结束
+        // 每块后快照：close 中途清高亮时仍保留上一版
+        snapshotLastResult(query);
       }
 
       if (epoch !== searchEpoch) return;
 
       if (extractRoot != null) {
-        setTruncatedHighlight(analyzedCpEnd);
         if (!abortWanted) {
-          if (matchedChunks.length && !parkedOnFirstMatch) jumpToMatch(0);
+          // 首匹配已在流式阶段立即跳转过；结束仅当全程无匹配时收尾导航态
+          if (matchedChunks.length && !firstMatchJumped) jumpToMatch(0);
           else updateNav();
           if (lastSearchMeta?.truncated) {
+            // 本轮完成以 keywords 全部落地（含染色）为准，不能提前到 relevance 完成时提示：
+            // 提前提示会让用户立刻 Continue，而旧 keywords 仍在池内排队，renderQueue 按块
+            // 顺序推进，新匹配块的等待线→红染会被旧块拖住延迟暴露。故提醒等 whenIdle 之后。
+            await keywordsPool.whenIdle();
+            if (epoch !== searchEpoch || abortWanted) return;
             showFindStatus(
               'Note',
               `Text too long; analyzing first ${allChunks.length} of ${lastSearchMeta.contentChunkCount} chunks`
@@ -2436,6 +2701,9 @@
       showFindError(err?.message || err, { errorDetail: err?.errorDetail });
       snapshotLastResult(query);
     } finally {
+      // 仍处本轮：把本轮的流收尾断掉。epoch 不匹配时（新轮已重建 sessionAbortCtrl），
+      // 不得误 abort 新一轮的在途流，只清旧轮的 port（它们已在 reset/keywordsPool.invalidate 时断开）。
+      if (epoch === searchEpoch) sessionAbortCtrl.abort();
       // 仅本轮结束时清 searching；过期轮次不能关掉仍在跑的新一轮
       if (epoch === searchEpoch) {
         setSearching(false);
@@ -2462,7 +2730,7 @@
       console.error('[InfoLens] extract aborted: empty article text');
       return info;
     }
-    const allChunks = splitChunks(extractedText, CFG.chunkBytes).filter(chunkHasContent);
+    const allChunks = splitChunks(extractedText, CHUNK_BYTES).filter(chunkHasContent);
     matchedChunks = allChunks.map((chunk) => ({
       start: utf16ToCp(chunk.start),
       end: utf16ToCp(chunk.end),
@@ -2523,6 +2791,8 @@
 
   function close() {
     abortWanted = true;
+    // 立即断开在途流（relevance+keywords），background abort → 门面取消 OpenRouter
+    sessionAbortCtrl.abort();
     // 先冻结输入对应的结果+状态条，再清 live；reopen 走 tryRestoreLastResult
     const query =
       /** @type {HTMLInputElement | null} */ (ui$('semantic_find_input'))?.value?.trim() || '';

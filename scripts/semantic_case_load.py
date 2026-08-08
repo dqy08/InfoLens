@@ -181,6 +181,34 @@ def load_case_file(path: Path) -> List[Dict[str, Any]]:
     )
 
 
+def load_articles(cases_dir: Path) -> List[Dict[str, Any]]:
+    """按文章（Article）聚合完整用例，供 multi-chunk 上下文的切片拼接。
+
+    返回 list[文章]；每篇文章：
+      { "file": 用例文件名, "source": source 字段, "chunks": [按 chunk_index 升序的原始 chunk, ...] }
+
+    以「用例文件 × source」为一篇文章的标识来隔离，避免不同文件里 source 重名
+    （如 synthetic 系列 source 都是 "inline"）彼此串号。chunk 序号跳号不影响——
+    上下文切组只按「排序后的实际 chunk 列表」每 MULTI_CHUNK_MAX 切一段，而非序号跨度。
+    """
+    from collections import defaultdict
+
+    articles: List[Dict[str, Any]] = []
+    for p in sorted(Path(cases_dir).glob("*.json")):
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        if not _is_chunk_corpus(raw):
+            continue
+        by_source: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for c in raw:
+            if not isinstance(c, dict) or "source" not in c or "chunk_index" not in c or "text" not in c:
+                continue
+            by_source[c["source"]].append(c)
+        for source, chunks in by_source.items():
+            ordered = sorted(chunks, key=lambda x: x.get("chunk_index", 0))
+            articles.append({"file": p.name, "source": source, "chunks": ordered})
+    return articles
+
+
 def load_all_cases(path: Path) -> List[Dict[str, Any]]:
     """相关性评测：全部（chunk×query）用例。"""
     return load_case_file(path)

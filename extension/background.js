@@ -251,6 +251,109 @@ async function postJsonApi(url, body) {
   return { data, backend: backend || null };
 }
 
+/**
+ * 逐行消费 SSE 流：每 `data: {json}` 行回调一次事件对象。
+ * 支持任意字节分块、帧跨块、残留冲刷、[DONE]。
+ * @param {Response} res
+ * @param {(ev: object) => void} onEvent
+ * @param {AbortSignal} [signal]
+ */
+async function streamSse(res, onEvent, signal) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const processLine = (line) => {
+    const s = line.trim();
+    if (!s.startsWith('data:')) return;
+    const payload = s.slice(5).trim();
+    if (payload === '[DONE]') return;
+    let parsed;
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      return;
+    }
+    if (parsed && typeof parsed === 'object') onEvent(parsed);
+  };
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const l of lines) processLine(l);
+  }
+  if (buffer.trim()) processLine(buffer);
+}
+
+/**
+ * 流式 relevance v2 通道：content 用 chrome.runtime.connect('relevance-stream') 建长连接，
+ * 先 postMessage 请求；background fetch SSE，逐条事件（type:row/type:result/type:error）
+ * 经 port.postMessage 推送，结束/出错时 disconnect。
+ */
+chrome.runtime.onConnect.addListener((port) => {
+  if (port?.name !== 'relevance-stream') return;
+  const ac = new AbortController();
+  let started = false;
+  port.onMessage.addListener((msg) => {
+    if (started) return;
+    started = true;
+    (async () => {
+      try {
+        const apiBase = msg?.apiBase || (typeof IL_CONFIG !== 'undefined' ? IL_CONFIG.apiBase : undefined);
+        const path = msg?.path || '/api/v2/analyze-semantic-relevance';
+        const res = await fetch(`${String(apiBase).replace(/\/$/, '')}${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(msg?.body || {}),
+          signal: ac.signal,
+        });
+        if (!res.ok || !res.body) {
+          const detail = await res.text().catch(() => '');
+          port.postMessage({
+            type: 'error',
+            success: false,
+            message: `HTTP ${res.status}`,
+            error_detail: detail.slice(0, 500),
+          });
+          port.disconnect();
+          return;
+        }
+        await streamSse(
+          res,
+          (ev) => {
+            try {
+              port.postMessage(ev);
+            } catch {
+              /* port 已断 */
+            }
+          },
+          ac.signal
+        );
+        try {
+          port.disconnect();
+        } catch {
+          /* ignore */
+        }
+      } catch (err) {
+        if (ac.signal.aborted) return;
+        console.error('[InfoLens][bg] relevance stream error:', err?.message, err);
+        try {
+          port.postMessage({
+            type: 'error',
+            success: false,
+            message: String(err?.message || err),
+          });
+          port.disconnect();
+        } catch {
+          /* ignore */
+        }
+      }
+    })();
+  });
+  port.onDisconnect.addListener(() => ac.abort());
+});
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'il-analyze-semantic') {
     (async () => {

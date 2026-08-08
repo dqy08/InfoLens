@@ -1,0 +1,315 @@
+/**
+ * 远程 relevance v2：OpenRouter Chat（Hy3）→ 隐含多切片 whole-article 单次请求 → 每片 degree。
+ * 路径 /api/v2/analyze-semantic-relevance；只走边缘远程，无本地/HF 回退（与 keywords v2 同轨）。
+ *
+ * 流式：向 OpenRouter 开 stream:true，边读边按 '\n' 切行，每出完整一行 [N] count
+ * 即 emit 结构化 SSE 事件（type:row）；流结束 emit type:result（汇总）/ type:error。
+ * 契约变更为 SSE（原 JSON 不再返回），旧消费者已无（v1 单 text 仍供旧扩展）。
+ *
+ * CPU 开销：本处理器同步计算只有 JSON 解析 + 提示词拼接 + 逐行切分；远低于 Free 10ms 上限。
+ */
+import { logRemoteFailure, publicRemoteError } from './remote_log.js';
+
+const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
+const RELEVANCE_MODEL = 'tencent/hy3';
+/** 多切片：一个上下文最多容纳的 chunk 数（整篇不足则全载）。结论见 eval 脚本。 */
+const MULTI_CHUNK_MAX = 32;
+/** 单切片字节上限。SYNC: 前端 config chunkBytes=800（splitTextToChunks 按此切，主线上每块 ≤800B） */
+const CHUNK_BYTE_MAX = 800;
+/** 多行输出：每 chunk 约 8 token（[N] 数），与上下文组上限对应。SYNC 脚本 DEFAULT_MULTI_CHUNK_MAX_TOKENS */
+const MAX_TOKENS_PER_CHUNK = 8;
+
+export const RELEVANCE_V2_PATH = '/api/v2/analyze-semantic-relevance';
+
+/** SYNC: scripts/eval_semantic_relevance_remote.py → build_multi_chunk_user_content（正式版，格式两次）。
+ * 基线 task；曾尝试追加全文判定句（"A word's relevance ... in the whole article"）但实测增误放行、
+ * 对真相关零增益，故回退不再采用（详见 eval 脚本注释）。 */
+export function buildMultiChunkUserContent(query, chunks) {
+  const task =
+    'The passages are consecutive slices of one complete article, in reading order. ' +
+    'How many words in each passage are related to the query topic?';
+  const outputFormat =
+    'Output Format: each passage on its own line ' +
+    'as [N] <count, 0 if not related>, where N is the passage index. Nothing else.\n' +
+    'Example reply for 3 passages:\n' +
+    '[1] 0\n[2] 0\n[3] 3';
+  const queryLine = `Query: ${query}`;
+  const head = `Task: ${task}\n${outputFormat}\n${queryLine}`;
+  const reminder = `Task Reminder: ${task}\n${queryLine}`;
+  const passages = chunks.map((text, i) => `[${i + 1}] ${text}`).join('\n');
+  return `${head}\nArticle:\n\n${passages}\n\n${reminder}\n\n${outputFormat}`;
+}
+
+/**
+ * 独立单行解析：`[N] 数字` → {n, count}，失败返回 null。
+ * 供逐行流式与 parseMultiChunkCounts 复用同一正则（DRY）。
+ * @returns {{ n: number, count: number } | null}
+ */
+function parseSingleCount(line) {
+  if (!line) return null;
+  const re = /^\[(\d+)\]\s*(\d+)/;
+  const m = line.trim().match(re);
+  if (!m) return null;
+  return { n: parseInt(m[1], 10), count: parseInt(m[2], 10) };
+}
+
+/**
+ * 从整段解析 `[N] 数字`（整块非流式场景的基线版）。SYNC: parse_multi_chunk_counts
+ * 流式主线上已改为逐行连续校验（emitRow），本函数保持宽松 Map 解析供对照/供评测基线。
+ * @returns {{counts: Map<number, number>, raw: string} | null}
+ */
+export function parseMultiChunkCounts(content) {
+  if (!content || typeof content !== 'string') return null;
+  const counts = new Map();
+  for (const line of content.split('\n')) {
+    const p = parseSingleCount(line);
+    if (p) counts.set(p.n, p.count);
+  }
+  return { counts, raw: content };
+}
+
+/**
+ * 对流式输出做按行切分：把增量文本按 '\n' 切出完整行，每切出完整一行即回调。
+ * 行末断开的残留留在 buffer，等后续 chunk 补齐。
+ *
+ * 返回的 push 函数带一个 falsy 申明：传空串表示"冲刷"，把残留的最后一段也 emit。
+ * @param {(line: string) => void} onLine
+ * @returns {(chunk: string) => void}
+ */
+export function makeLineSplitter(onLine) {
+  let buffer = '';
+  return (chunk) => {
+    buffer += chunk;
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) onLine(line);
+    if (!chunk && buffer.length) {
+      // 空串冲刷：最后一段没有换行的残留也算一整行
+      onLine(buffer);
+      buffer = '';
+    }
+  };
+}
+
+/**
+ * 流式版本：向 OpenRouter stream:true，读 SSE，边收 delta.content 边按行切，
+ * 每出完整 `[N] count` 行就 emit 一次。
+ *
+ * @param {object} env
+ * @param {string} query
+ * @param {string[]} chunks
+ * @param {(event: object) => void} emit  结构化事件回调（type:row / type:result / type:error）
+ * @param {AbortSignal} [signal]  客户端取消 → 中止 OpenRouter 流，停止继续生成
+ * @returns {Promise<void>}
+ */
+export async function streamRelevanceV2(env, query, chunks, emit, signal) {
+  const token = (env.OPENROUTER_API_KEY || '').trim();
+  if (!token) {
+    throw new Error('OPENROUTER_API_KEY secret is not set');
+  }
+
+  let resp;
+  try {
+    resp = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://info-lens.app',
+        'X-Title': 'infolens-relevance-v2',
+      },
+      body: JSON.stringify({
+        model: RELEVANCE_MODEL,
+        messages: [{ role: 'user', content: buildMultiChunkUserContent(query, chunks) }],
+        temperature: 0,
+        max_tokens: Math.max(MULTI_CHUNK_MAX * MAX_TOKENS_PER_CHUNK, 16 * chunks.length),
+        stream: true,
+        reasoning: { effort: 'none' },
+      }),
+      signal,
+    });
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw e;
+    const m = e && e.message != null ? String(e.message) : String(e);
+    throw new Error(`network: ${m}`);
+  }
+
+  const readErrBody = async () => {
+    try {
+      const text = await resp.text();
+      return text.slice(0, 500);
+    } catch {
+      return '';
+    }
+  };
+
+  if (resp.status >= 400 || !resp.body) {
+    const detail = await readErrBody();
+    throw new Error(`OpenRouter HTTP ${resp.status}: ${detail}`);
+  }
+
+  const decoder = new TextDecoder();
+  const counts = new Map();
+  const rawLines = [];
+  // 连续校验游标：契约要求「Nothing else」——模型必须从 [1] 起逐块连续输出 `[N] <count>` 行。
+  // 任何非契约行（跳号/乱序/重复/说明文字）都视为格式异常（优先报错，不猜、不跳过）。
+  let expectedN = 1;
+  const emitRow = (line) => {
+    // 收集模型原始输出行：解析可靠时仍留档，失败时用于诊断（随错误记录）
+    const s = line.trim();
+    if (s) rawLines.push(s);
+    const p = parseSingleCount(line);
+    if (!p || p.n !== expectedN) {
+      const rawSuffix = rawLines.length ? `\n--- raw output ---\n${rawLines.join('\n')}` : '';
+      throw new Error(`unparseable multi-chunk output: expected [${expectedN}] count, got ${JSON.stringify(line)}${rawSuffix}`);
+    }
+    expectedN++;
+    counts.set(p.n, p.count);
+    emit({ type: 'row', n: p.n, count: p.count });
+  };
+  const split = makeLineSplitter(emitRow);
+
+  const reader = resp.body.getReader();
+  const sseFeeder = makeSseDeltaFeeder(split);
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    sseFeeder(decoder.decode(value, { stream: true }));
+  }
+  // 冲刷残留：先冲刷 SSE 帧层（把残留 delta 喂进内容层），再冲刷内容层（emit 最后一整行）
+  sseFeeder('');
+  split('');
+
+  // 收尾校验：若正常应已恰好覆盖 1..chunks.length（游标走满）；未走满 = 中途断流致末尾缺行
+  if (expectedN - 1 < chunks.length) {
+    const rawSuffix = rawLines.length ? `\n--- raw output ---\n${rawLines.join('\n')}` : '';
+    throw new Error(`unparseable multi-chunk output${rawSuffix}`);
+  }
+}
+
+/**
+ * SSE 帧级解码：把 OpenRouter streaming 的 `data: {json}` 行切出来，
+ * 取每条帧的增量文本交给内容层（onDelta）。跨 chunk 累积：SSE 帧可能被
+ * 任意字节边界切开，需 buffer 到完整行再处理。
+ *
+ * @param {(delta: string) => void} onDelta
+ * @param {{ toolArgs?: boolean }} [opts]  toolArgs=true 时取 `delta.tool_calls[0].function.arguments`
+ *   而非 `delta.content`（keywords 走 tool_call 流式的 arguments 增量）
+ * @returns {(text: string) => void}
+ */
+export function makeSseDeltaFeeder(onDelta, opts) {
+  const useToolArgs = opts?.toolArgs === true;
+  let buffer = '';
+  const flushLine = (line) => {
+    const s = line.trim();
+    if (!s.startsWith('data:')) return;
+    const payload = s.slice(5).trim();
+    if (payload === '[DONE]') return;
+    let parsed;
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      return;
+    }
+    const choice = (parsed.choices && parsed.choices[0]) || {};
+    const delta = choice.delta || {};
+    let d;
+    if (useToolArgs) {
+      const toolCalls = delta.tool_calls || [];
+      d = ((toolCalls[0] || {}).function || {}).arguments;
+    } else {
+      d = delta.content;
+    }
+    if (typeof d === 'string' && d) {
+      onDelta(d);
+    }
+  };
+  return (text) => {
+    buffer += text;
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) flushLine(line);
+    if (!text && buffer.length) {
+      // 冲刷：SSE 残留帧行（未以换行结束）
+      flushLine(buffer);
+      buffer = '';
+    }
+  };
+}
+
+/** @param {(req: Request, body: object, status?: number) => Response} json */
+export async function handleRemoteRelevanceV2(request, env, json) {
+  if (request.method !== 'POST') {
+    return json(request, { success: false, message: 'method_not_allowed' }, 405);
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json(request, { success: false, message: 'invalid json' }, 400);
+  }
+
+  const query = (body && body.query) || '';
+  if (!query) {
+    return json(request, { success: false, message: 'Missing query' }, 400);
+  }
+
+  const texts = body && body.texts;
+  if (!Array.isArray(texts) || texts.length === 0) {
+    return json(request, { success: false, message: 'Missing texts array' }, 400);
+  }
+  if (texts.length > MULTI_CHUNK_MAX) {
+    return json(
+      request,
+      { success: false, message: `texts length must be <= ${MULTI_CHUNK_MAX}` },
+      400,
+    );
+  }
+  const enc = new TextEncoder();
+  for (let i = 0; i < texts.length; i++) {
+    const t = texts[i];
+    if (typeof t !== 'string' || !t) {
+      return json(request, { success: false, message: `texts[${i}] must be a non-empty string` }, 400);
+    }
+    if (enc.encode(t).length > CHUNK_BYTE_MAX) {
+      return json(request, { success: false, message: `texts[${i}] must be <= ${CHUNK_BYTE_MAX} bytes` }, 400);
+    }
+  }
+
+  // 流式响应：SSE（text/event-stream）。逐行出 type:row（每片 full_match_degree），结束 type:result / 失败 type:error。
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const sse = (obj) => {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify(obj)}\n\n`)
+        );
+      };
+      try {
+        await streamRelevanceV2(env, query, texts, (ev) => {
+          if (ev.type === 'row') {
+            sse({ type: 'row', n: ev.n, full_match_degree: ev.count > 0 ? 1.0 : 0.0 });
+          }
+        }, request.signal);
+        sse({ type: 'result', success: true });
+      } catch (err) {
+        // 用户取消（客户端断连）不应视为失败：不发 error、不记失败日志，静默收尾
+        if (err && err.name === 'AbortError') return;
+        const pub = publicRemoteError(err);
+        logRemoteFailure('remote_relevance_v2_failed', err, pub);
+        sse({ type: 'error', success: false, message: pub.message, error_detail: pub.error_detail });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  });
+}

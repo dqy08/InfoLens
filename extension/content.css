@@ -41,55 +41,56 @@
 /*
  * token：16 档 background-color。
  * SYNC: SurprisalColorConfig → SURPRISAL_RED_RGB / SURPRISAL_MAX_ALPHA(0.7)
- * alpha = ((level+1)/16) * 0.7
+ * alpha = ((level+1)/16) * 0.6
+ * 注：终点 alpha 用 0.6（介于网页端默认 0.7 与弱化 0.5 之间）；如需调整改最后一项。
  */
 ::highlight(il-token-0) {
-  background-color: rgba(255, 71, 64, 0.04375);
+  background-color: rgba(255, 71, 64, 0.0375);
 }
 ::highlight(il-token-1) {
-  background-color: rgba(255, 71, 64, 0.0875);
+  background-color: rgba(255, 71, 64, 0.075);
 }
 ::highlight(il-token-2) {
-  background-color: rgba(255, 71, 64, 0.13125);
+  background-color: rgba(255, 71, 64, 0.1125);
 }
 ::highlight(il-token-3) {
-  background-color: rgba(255, 71, 64, 0.175);
+  background-color: rgba(255, 71, 64, 0.15);
 }
 ::highlight(il-token-4) {
-  background-color: rgba(255, 71, 64, 0.21875);
+  background-color: rgba(255, 71, 64, 0.1875);
 }
 ::highlight(il-token-5) {
-  background-color: rgba(255, 71, 64, 0.2625);
+  background-color: rgba(255, 71, 64, 0.225);
 }
 ::highlight(il-token-6) {
-  background-color: rgba(255, 71, 64, 0.30625);
+  background-color: rgba(255, 71, 64, 0.2625);
 }
 ::highlight(il-token-7) {
-  background-color: rgba(255, 71, 64, 0.35);
+  background-color: rgba(255, 71, 64, 0.3);
 }
 ::highlight(il-token-8) {
-  background-color: rgba(255, 71, 64, 0.39375);
+  background-color: rgba(255, 71, 64, 0.3375);
 }
 ::highlight(il-token-9) {
-  background-color: rgba(255, 71, 64, 0.4375);
+  background-color: rgba(255, 71, 64, 0.375);
 }
 ::highlight(il-token-10) {
-  background-color: rgba(255, 71, 64, 0.48125);
+  background-color: rgba(255, 71, 64, 0.4125);
 }
 ::highlight(il-token-11) {
-  background-color: rgba(255, 71, 64, 0.525);
+  background-color: rgba(255, 71, 64, 0.45);
 }
 ::highlight(il-token-12) {
-  background-color: rgba(255, 71, 64, 0.56875);
+  background-color: rgba(255, 71, 64, 0.4875);
 }
 ::highlight(il-token-13) {
-  background-color: rgba(255, 71, 64, 0.6125);
+  background-color: rgba(255, 71, 64, 0.525);
 }
 ::highlight(il-token-14) {
-  background-color: rgba(255, 71, 64, 0.65625);
+  background-color: rgba(255, 71, 64, 0.5625);
 }
 ::highlight(il-token-15) {
-  background-color: rgba(255, 71, 64, 0.7);
+  background-color: rgba(255, 71, 64, 0.6);
 }
 
 /*

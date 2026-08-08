@@ -1,5 +1,7 @@
 {
   "name": "infolens-api",
+  // 部署前本地验证：npm test（node:test 跑 test/*.test.js，需 Node 18+；零外部依赖）。
+  // 覆盖纯函数/流式解析逻辑；改门面代码后先跑通再 wrangler deploy/执行部署脚本。
   "main": "src/index.js",
   "compatibility_date": "2026-07-26",
   "workers_dev": true,

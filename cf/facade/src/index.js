@@ -7,7 +7,8 @@
  *   - mode=accelerate（默认）：仅算力路径 → HOME_ORIGIN；其余仍 HF
  *   - mode=full：算力路径 + /demo/* + /api/list_demos → HOME_ORIGIN；其余仍 HF
  * - 边缘远程（始终 OpenRouter，无 HF/Home 回退、无旁路开关）：
- *   - /api/analyze-semantic-relevance → Hy3
+ *   - /api/analyze-semantic-relevance → Hy3（旧扩展，单 text）
+ *   - /api/v2/analyze-semantic-relevance → Hy3 多切片（新扩展/新前端，texts 数组，新版本主力）
  *   - /api/v2/analyze-semantic-keywords → Hy3（新扩展）
  * - keywords 双轨（扩展审核慢于 Worker，过渡期内并存）：
  *   - 旧扩展：/api/analyze-semantic-keywords → 仍 HF/Home 梯度归因（COMPUTE_PATHS，勿接到 v2）
@@ -20,6 +21,10 @@ import {
   RELEVANCE_PATH,
   handleRemoteRelevance,
 } from './relevance_remote.js';
+import {
+  RELEVANCE_V2_PATH,
+  handleRemoteRelevanceV2,
+} from './relevance_remote_v2.js';
 import {
   KEYWORDS_V2_PATH,
   handleRemoteKeywordsV2,
@@ -380,14 +385,25 @@ async function handleRequest(request, env) {
     return json(request, { ok: false, error: 'not_found' }, 404);
   }
 
-  // 边缘远程：始终 OpenRouter，不碰 home allow/health。旧 keywords 仍走下方 HF/Home，勿合并。
-  if (path === RELEVANCE_PATH || path === KEYWORDS_V2_PATH) {
+  // 边缘远程：始终 OpenRouter，不碰 home allow/health。
+  // relevance v1 / relevance v2 / keywords v2 并列；旧 keywords 仍走下方 HF/Home，勿合并。
+  if (
+    path === RELEVANCE_PATH ||
+    path === RELEVANCE_V2_PATH ||
+    path === KEYWORDS_V2_PATH
+  ) {
     const resp =
       path === RELEVANCE_PATH
         ? await handleRemoteRelevance(request, env, json)
-        : await handleRemoteKeywordsV2(request, env, json);
+        : path === RELEVANCE_V2_PATH
+          ? await handleRemoteRelevanceV2(request, env, json)
+          : await handleRemoteKeywordsV2(request, env, json);
     const headers = new Headers(resp.headers);
     headers.set('X-Infolens-Backend', 'remote');
+    // 远程 SSE/JSON 均需 CORS 头，否则扩展 background fetch 读流报 "Failed to fetch"。
+    for (const [k, v] of Object.entries(corsHeaders(request))) {
+      headers.set(k, v);
+    }
     return new Response(resp.body, {
       status: resp.status,
       statusText: resp.statusText,
