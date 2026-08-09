@@ -85,7 +85,8 @@ globalThis.IL_splitTextToChunks = (function () {
             const lineEnd = nextLineEnd(text, chunkEnd);
             const lineBytes = getUtf8ByteLength(text.slice(chunkEnd, lineEnd), encodeBuf);
             if (lineBytes > bytesPerChunk) {
-              const maxEnd = charIndexForByteLimit(text, chunkEnd, bytesPerChunk);
+              // 本 chunk 可能已累计 chunkBytes，超长行只能占剩余额度，否则整块超限
+              const maxEnd = charIndexForByteLimit(text, chunkEnd, bytesPerChunk - chunkBytes);
               chunkEnd = findSplitPoint(text, chunkEnd, maxEnd);
               break outer;
             }

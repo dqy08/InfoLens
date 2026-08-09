@@ -24,5 +24,5 @@ test('publicRemoteError: 流式中断 400 → 归 inference', () => {
 test('publicRemoteError: 普通 unparseable → 仍归 internal（契约问题）', () => {
   const r = publicRemoteError(new Error('unparseable multi-chunk output'));
   assert.equal(r.kind, 'internal');
-  assert.equal(r.message, '输出的格式异常');
+  assert.equal(r.message, 'Unparsable model output');
 });

@@ -82,7 +82,7 @@ export function publicRemoteError(err) {
   ) {
     return {
       kind: 'internal',
-      message: '输出的格式异常',
+      message: 'Unparsable model output',
       error_detail,
     };
   }
