@@ -123,3 +123,34 @@ test('streamKeywordsV2: 非空但无效输出 → 仍报 unparseable', async () 
     /unparseable tool arguments output/
   );
 });
+
+test('streamKeywordsV2: 流式中断带顶层 error → 抛真实错误', async () => {
+  const enc = new TextEncoder();
+  const data = [
+    `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ function: { arguments: '{"key' } }] } }] })}\n\n`,
+    `data: ${JSON.stringify({
+      error: { code: 502, message: 'Overloaded' },
+      choices: [{ index: 0, delta: { content: '' }, finish_reason: 'error' }],
+    })}\n\n`,
+  ].join('');
+  globalThis.fetch = async () => ({
+    status: 200,
+    body: new ReadableStream({
+      start(ctl) {
+        ctl.enqueue(enc.encode(data));
+        ctl.close();
+      },
+    }),
+  });
+  await assert.rejects(
+    () =>
+      streamKeywordsV2(
+        { OPENROUTER_API_KEY: 'test' },
+        '查询',
+        '正文',
+        () => {},
+        undefined
+      ),
+    /OpenRouter stream error: code=502 message="Overloaded"/
+  );
+});

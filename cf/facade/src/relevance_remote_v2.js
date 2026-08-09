@@ -170,7 +170,13 @@ export async function streamRelevanceV2(env, query, chunks, emit, signal) {
   const split = makeLineSplitter(emitRow);
 
   const reader = resp.body.getReader();
-  const sseFeeder = makeSseDeltaFeeder(split);
+  // 流式中断（HTTP 200 内嵌 error 事件）：显式抛出真实原因，不再静默等到收尾误报 unparseable
+  const sseFeeder = makeSseDeltaFeeder(split, {
+    onError: (err) => {
+      const rawSuffix = rawLines.length ? `\n--- raw output ---\n${rawLines.join('\n')}` : '';
+      throw new Error(`${err}${rawSuffix}`);
+    },
+  });
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -192,13 +198,21 @@ export async function streamRelevanceV2(env, query, chunks, emit, signal) {
  * 取每条帧的增量文本交给内容层（onDelta）。跨 chunk 累积：SSE 帧可能被
  * 任意字节边界切开，需 buffer 到完整行再处理。
  *
+ * OpenRouter 流式中断（HTTP 200 已承诺）的错误以 SSE 事件内嵌返回：
+ * 顶层 `error` 字段、或 `choices[0].finish_reason === 'error'`。这类事件
+ * 无增量文本，必须显式上报 onError，否则只会被静默跳过，最终被收尾校验
+ * 误报成 unparseable（丢失真实原因）。
+ *
  * @param {(delta: string) => void} onDelta
- * @param {{ toolArgs?: boolean }} [opts]  toolArgs=true 时取 `delta.tool_calls[0].function.arguments`
- *   而非 `delta.content`（keywords 走 tool_call 流式的 arguments 增量）
+ * @param {{ toolArgs?: boolean, onError?: (err: string) => void }} [opts]
+ *   toolArgs=true 时取 `delta.tool_calls[0].function.arguments`
+ *     而非 `delta.content`（keywords 走 tool_call 流式的 arguments 增量）
+ *   onError(err) 收到流式错误事件时回调（OpenRouter 的 code/message 摘要）
  * @returns {(text: string) => void}
  */
 export function makeSseDeltaFeeder(onDelta, opts) {
   const useToolArgs = opts?.toolArgs === true;
+  const onError = opts?.onError;
   let buffer = '';
   const flushLine = (line) => {
     const s = line.trim();
@@ -211,7 +225,22 @@ export function makeSseDeltaFeeder(onDelta, opts) {
     } catch {
       return;
     }
+    // 流式中断的错误事件：OpenRouter 顶层 error + finish_reason=error；显式上抛而非静默忽略
+    if (parsed && parsed.error) {
+      const e = parsed.error;
+      const detail =
+        typeof e.message === 'string'
+          ? `code=${JSON.stringify(e.code ?? '')} message=${JSON.stringify(e.message)}`
+          : JSON.stringify(e);
+      onError?.(`OpenRouter stream error: ${detail}`);
+      return;
+    }
     const choice = (parsed.choices && parsed.choices[0]) || {};
+    if (choice.finish_reason === 'error') {
+      const fr = choice.native_finish_reason ? ` native_finish_reason=${JSON.stringify(choice.native_finish_reason)}` : '';
+      onError?.(`OpenRouter stream error: finish_reason=error${fr}`);
+      return;
+    }
     const delta = choice.delta || {};
     let d;
     if (useToolArgs) {
@@ -298,7 +327,13 @@ export async function handleRemoteRelevanceV2(request, env, json) {
         if (err && err.name === 'AbortError') return;
         const pub = publicRemoteError(err);
         logRemoteFailure('remote_relevance_v2_failed', err, pub);
-        sse({ type: 'error', success: false, message: pub.message, error_detail: pub.error_detail });
+        sse({
+          type: 'error',
+          success: false,
+          kind: pub.kind,
+          message: pub.message,
+          error_detail: pub.error_detail,
+        });
       } finally {
         controller.close();
       }

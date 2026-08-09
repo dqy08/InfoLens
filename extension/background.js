@@ -342,6 +342,7 @@ chrome.runtime.onConnect.addListener((port) => {
           port.postMessage({
             type: 'error',
             success: false,
+            kind: 'network',
             message: String(err?.message || err),
           });
           port.disconnect();

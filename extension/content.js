@@ -43,8 +43,8 @@
   const MAX_CHUNKS_PER_SEARCH = 32;
   // 流空闲兜底：门面端挂起（既不回流也不结束）时避免 promise 永久挂起 → 搜索卡死。
   // 以「空闲」判超时：每次收到流数据 row 都重置计时器（有进展不算超时）；
-  // 只有连续 idle 超过此值（含连接建立后首行迟迟不来）才判死：超过 10s 无新数据即放弃。
-  const STREAM_IDLE_MS = 10000;
+  // 只有连续 idle 超过此值（含连接建立后首行迟迟不来）才判死：超过 20s 无新数据即放弃。
+  const STREAM_IDLE_MS = 20000;
 
   /** @type {{ node: Text, start: number, end: number }[]} */
   let pieces = [];
@@ -1597,6 +1597,7 @@
           closePort();
         } else if (msg.type === 'error') {
           const err = new Error(msg.message || 'request failed');
+          if (msg.kind) err.kind = String(msg.kind);
           if (msg.error_detail) err.errorDetail = String(msg.error_detail);
           finish(reject, err);
           closePort();
@@ -2503,14 +2504,23 @@
           }
         }, sessionAbortCtrl.signal);
         p.catch((err) => {
-          // 整批失败：reject 所有未就绪片（不静默挂起）；透传 Worker 端 errorDetail，
-          // 使反馈落库保留真实失败原因（如 missing count for block [1]）
+          // 整批失败：reject 所有未就绪片（不静默挂起）。
+          // network/inference（网络/上游不可用）是用户该知道的，透传门面用户文案；
+          // internal（我方未预期/格式异常）屏蔽具体原因，落中性文案。
           console.error('[InfoLens][relevance] batch error:', err?.message, 'detail=', err?.errorDetail);
+          const userMessage =
+            (err?.kind === 'network' || err?.kind === 'inference') &&
+            err?.message != null &&
+            String(err.message).trim()
+              ? String(err.message).trim()
+              : null;
           for (let k = start; k < end; k++) {
             const d = chunkSettle.get(k);
             if (d) {
               chunkSettle.delete(k);
-              const e = new Error(`relevance v2 request failed for chunk ${k}`);
+              const e = new Error(
+                userMessage != null ? userMessage : `relevance v2 request failed for chunk ${k}`
+              );
               if (err?.errorDetail) e.errorDetail = String(err.errorDetail);
               d.reject(e);
             }

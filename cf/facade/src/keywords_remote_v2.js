@@ -450,7 +450,12 @@ export async function streamKeywordsV2(env, query, text, emit, signal) {
   };
 
   const decoder = new TextDecoder();
-  const sseFeeder = makeSseDeltaFeeder(onDelta, { toolArgs: true });
+  const sseFeeder = makeSseDeltaFeeder(onDelta, {
+    toolArgs: true,
+    onError: (err) => {
+      throw new Error(err);
+    },
+  });
   const reader = resp.body.getReader();
   while (true) {
     const { done, value } = await reader.read();

@@ -42,6 +42,29 @@ export function publicRemoteError(err) {
     };
   }
 
+  // 流式中断内嵌错误（HTTP 200 后的 SSE error 事件）：携带上游 code；5xx/429/408 归一时性
+  const streamErr =
+    raw.match(/OpenRouter stream error:/);
+  if (streamErr) {
+    const se = raw.match(/code=(\d+)/);
+    if (se) {
+      const code = parseInt(se[1], 10);
+      if (code === 408 || code === 429 || code >= 500) {
+        return {
+          kind: 'inference',
+          message: `Inference API temporarily unavailable (${code})`,
+          error_detail,
+        };
+      }
+    }
+    // 无 code 或 4xx 属模型/provider 侧异常，仍是推理过程问题（非我方契约错误）
+    return {
+      kind: 'inference',
+      message: 'Inference API temporarily unavailable',
+      error_detail,
+    };
+  }
+
   // HTTP 200 但 body 带 error：视为推理侧
   if (/^OpenRouter error:/i.test(raw)) {
     return {

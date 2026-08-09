@@ -86,6 +86,72 @@ test('streamRelevanceV2: 末尾缺行（只有 [1]）→ 抛 unparseable（收�
   );
 });
 
+test('streamRelevanceV2: 流式中断带顶层 error 事件 → 抛真实错误而非 unparseable', async () => {
+  const enc = new TextEncoder();
+  const data = [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: '[1] 0\n' } }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: { content: '[2] 1\n' } }] })}\n\n`,
+    `data: ${JSON.stringify({
+      error: { code: 502, message: 'Provider disconnected unexpectedly' },
+      choices: [{ index: 0, delta: { content: '' }, finish_reason: 'error' }],
+    })}\n\n`,
+  ].join('');
+  globalThis.fetch = async () => ({
+    status: 200,
+    body: new ReadableStream({
+      start(ctl) {
+        ctl.enqueue(enc.encode(data));
+        ctl.close();
+      },
+    }),
+  });
+  await assert.rejects(
+    () =>
+      streamRelevanceV2(
+        { OPENROUTER_API_KEY: 'test' },
+        '查询',
+        ['红色', '蓝色'],
+        () => {},
+        undefined
+      ),
+    (err) =>
+      err.message.includes('OpenRouter stream error') &&
+      err.message.includes('Provider disconnected') &&
+      err.message.includes('[2] 1')
+  );
+});
+
+test('streamRelevanceV2: 流式中断仅 finish_reason=error → 抛真实错误', async () => {
+  const enc = new TextEncoder();
+  const data = [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: '[1] 0\n' } }] })}\n\n`,
+    `data: ${JSON.stringify({
+      choices: [{ index: 0, delta: { content: '' }, finish_reason: 'error', native_finish_reason: 'server_error' }],
+    })}\n\n`,
+  ].join('');
+  globalThis.fetch = async () => ({
+    status: 200,
+    body: new ReadableStream({
+      start(ctl) {
+        ctl.enqueue(enc.encode(data));
+        ctl.close();
+      },
+    }),
+  });
+  await assert.rejects(
+    () =>
+      streamRelevanceV2(
+        { OPENROUTER_API_KEY: 'test' },
+        '查询',
+        ['红色', '蓝色'],
+        () => {},
+        undefined
+      ),
+    (err) =>
+      err.message.includes('finish_reason=error') && err.message.includes('server_error')
+  );
+});
+
 test('makeSseDeltaFeeder: SSE 帧可被任意字节边界切开，仍正确累积', () => {
   const out = [];
   const feed = makeSseDeltaFeeder((delta) => out.push(delta));
