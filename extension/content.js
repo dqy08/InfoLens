@@ -2682,9 +2682,8 @@
 
       if (extractRoot != null) {
         if (!abortWanted) {
-          // 首匹配已在流式阶段立即跳转过；结束仅当全程无匹配时收尾导航态
-          if (matchedChunks.length && !firstMatchJumped) jumpToMatch(0);
-          else updateNav();
+          // 首匹配已在流式阶段立即跳转过，此处只收尾导航态
+          updateNav();
           if (lastSearchMeta?.truncated) {
             // 本轮完成以 keywords 全部落地（含染色）为准，不能提前到 relevance 完成时提示：
             // 提前提示会让用户立刻 Continue，而旧 keywords 仍在池内排队，renderQueue 按块
