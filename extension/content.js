@@ -194,10 +194,13 @@
       /** @param {(gen: number, signal: AbortSignal) => Promise<void>} job */
       schedule(job) {
         const g = gen;
+        // 入队时捕获 signal：abort() 会立刻 resetAbort 换新控制器；若 exec 时再读
+        // abortCtrl.signal，已出队的微任务会拿到未中止的新信号，Stop 后仍继续打上游。
+        const signal = abortCtrl.signal;
         queue.push({
           exec: async () => {
             try {
-              await job(g, abortCtrl.signal);
+              await job(g, signal);
             } catch (err) {
               console.error('[InfoLens] pool job', err?.message || err);
             }
@@ -1657,6 +1660,7 @@
           closePort();
         } else if (msg.type === 'error') {
           const err = new Error(msg.message || 'request failed');
+          if (msg.kind) err.kind = String(msg.kind);
           if (msg.error_detail) err.errorDetail = String(msg.error_detail);
           finish(reject, err);
           closePort();

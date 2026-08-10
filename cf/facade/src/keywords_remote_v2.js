@@ -517,7 +517,13 @@ export async function handleRemoteKeywordsV2(request, env, json) {
           if (err && err.name === 'AbortError') return;
           const pub = publicRemoteError(err);
           logRemoteFailure('remote_keywords_v2_failed', err, pub);
-          sse({ type: 'error', success: false, message: pub.message, error_detail: pub.error_detail });
+          sse({
+            type: 'error',
+            success: false,
+            kind: pub.kind,
+            message: pub.message,
+            error_detail: pub.error_detail,
+          });
         } finally {
           controller.close();
         }

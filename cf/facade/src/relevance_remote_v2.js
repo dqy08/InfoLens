@@ -3,8 +3,8 @@
  * 路径 /api/v2/analyze-semantic-relevance；只走边缘远程，无本地/HF 回退（与 keywords v2 同轨）。
  *
  * 流式：向 OpenRouter 开 stream:true，边读边按 '\n' 切行，每出完整一行 [N] count
- * 即 emit 结构化 SSE 事件（type:row）；流结束 emit type:result（汇总）/ type:error。
- * 契约变更为 SSE（原 JSON 不再返回），旧消费者已无（v1 单 text 仍供旧扩展）。
+ * 即 emit 结构化 SSE 事件（type:row）；凑齐 texts.length 后 abort 上游（忽略尾部多余行）；
+ * 正常收尾 emit type:result / 失败 type:error。契约为 SSE（v1 单 text 仍供旧扩展）。
  *
  * CPU 开销：本处理器同步计算只有 JSON 解析 + 提示词拼接 + 逐行切分；远低于 Free 10ms 上限。
  */
@@ -108,6 +108,17 @@ export async function streamRelevanceV2(env, query, chunks, emit, signal) {
     throw new Error('OPENROUTER_API_KEY secret is not set');
   }
 
+  // 本地控制器：客户端 signal 与「凑齐后主动停流」共用，避免凑齐后仍等模型把多余行吐完。
+  const localAc = new AbortController();
+  if (signal) {
+    if (signal.aborted) {
+      const e = new Error('search stopped');
+      e.name = 'AbortError';
+      throw e;
+    }
+    signal.addEventListener('abort', () => localAc.abort(), { once: true });
+  }
+
   let resp;
   try {
     resp = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
@@ -126,7 +137,7 @@ export async function streamRelevanceV2(env, query, chunks, emit, signal) {
         stream: true,
         reasoning: { effort: 'none' },
       }),
-      signal,
+      signal: localAc.signal,
     });
   } catch (e) {
     if (e && e.name === 'AbortError') throw e;
@@ -151,10 +162,12 @@ export async function streamRelevanceV2(env, query, chunks, emit, signal) {
   const decoder = new TextDecoder();
   const counts = new Map();
   const rawLines = [];
-  // 连续校验游标：契约要求「Nothing else」——模型必须从 [1] 起逐块连续输出 `[N] <count>` 行。
-  // 任何非契约行（跳号/乱序/重复/说明文字）都视为格式异常（优先报错，不猜、不跳过）。
+  // 连续校验游标：契约要求从 [1] 起逐块连续输出 `[N] <count>`，直到凑齐 texts.length。
+  // 凑齐前：跳号/乱序/重复/说明文字 → 格式异常（优先报错）。
+  // 凑齐后：任务完成——忽略尾部多行，并 abort 上游停止继续生成。
   let expectedN = 1;
   const emitRow = (line) => {
+    if (expectedN > chunks.length) return;
     // 收集模型原始输出行：解析可靠时仍留档，失败时用于诊断（随错误记录）
     const s = line.trim();
     if (s) rawLines.push(s);
@@ -166,6 +179,7 @@ export async function streamRelevanceV2(env, query, chunks, emit, signal) {
     expectedN++;
     counts.set(p.n, p.count);
     emit({ type: 'row', n: p.n, count: p.count });
+    if (expectedN > chunks.length) localAc.abort();
   };
   const split = makeLineSplitter(emitRow);
 
@@ -177,16 +191,24 @@ export async function streamRelevanceV2(env, query, chunks, emit, signal) {
       throw new Error(`${err}${rawSuffix}`);
     },
   });
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    sseFeeder(decoder.decode(value, { stream: true }));
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      sseFeeder(decoder.decode(value, { stream: true }));
+      if (expectedN > chunks.length) break;
+    }
+    // 未凑齐才冲刷：凑齐后可能已 abort，buffer 里即便有尾部垃圾也不再解析
+    if (expectedN - 1 < chunks.length) {
+      sseFeeder('');
+      split('');
+    }
+  } catch (e) {
+    // 凑齐后主动 abort 会让 read 抛 AbortError：属正常收尾，不外抛（否则门面会静默不发 result）
+    if (!(e && e.name === 'AbortError' && expectedN - 1 >= chunks.length)) throw e;
   }
-  // 冲刷残留：先冲刷 SSE 帧层（把残留 delta 喂进内容层），再冲刷内容层（emit 最后一整行）
-  sseFeeder('');
-  split('');
 
-  // 收尾校验：若正常应已恰好覆盖 1..chunks.length（游标走满）；未走满 = 中途断流致末尾缺行
+  // 收尾校验：未走满 = 中途断流致末尾缺行
   if (expectedN - 1 < chunks.length) {
     const rawSuffix = rawLines.length ? `\n--- raw output ---\n${rawLines.join('\n')}` : '';
     throw new Error(`unparseable multi-chunk output${rawSuffix}`);
@@ -207,12 +229,17 @@ export async function streamRelevanceV2(env, query, chunks, emit, signal) {
  * @param {{ toolArgs?: boolean, onError?: (err: string) => void }} [opts]
  *   toolArgs=true 时取 `delta.tool_calls[0].function.arguments`
  *     而非 `delta.content`（keywords 走 tool_call 流式的 arguments 增量）
- *   onError(err) 收到流式错误事件时回调（OpenRouter 的 code/message 摘要）
+ *   onError(err) 收到流式错误事件时回调；省略则直接 throw（禁止静默跳过）
  * @returns {(text: string) => void}
  */
 export function makeSseDeltaFeeder(onDelta, opts) {
   const useToolArgs = opts?.toolArgs === true;
   const onError = opts?.onError;
+  /** 未传 onError 时直接抛：避免再静默跳过错误帧（本函数曾因此把上游故障误报成 unparseable） */
+  const reportStreamError = (msg) => {
+    if (onError) onError(msg);
+    else throw new Error(msg);
+  };
   let buffer = '';
   const flushLine = (line) => {
     const s = line.trim();
@@ -230,15 +257,16 @@ export function makeSseDeltaFeeder(onDelta, opts) {
       const e = parsed.error;
       const detail =
         typeof e.message === 'string'
-          ? `code=${JSON.stringify(e.code ?? '')} message=${JSON.stringify(e.message)}`
+          ? // code 裸写（勿 JSON.stringify）：字符串 "502" 否则变成 code="502"，publicRemoteError 的 /code=(\d+)/ 抽不出
+            `code=${e.code != null && e.code !== '' ? String(e.code) : ''} message=${JSON.stringify(e.message)}`
           : JSON.stringify(e);
-      onError?.(`OpenRouter stream error: ${detail}`);
+      reportStreamError(`OpenRouter stream error: ${detail}`);
       return;
     }
     const choice = (parsed.choices && parsed.choices[0]) || {};
     if (choice.finish_reason === 'error') {
       const fr = choice.native_finish_reason ? ` native_finish_reason=${JSON.stringify(choice.native_finish_reason)}` : '';
-      onError?.(`OpenRouter stream error: finish_reason=error${fr}`);
+      reportStreamError(`OpenRouter stream error: finish_reason=error${fr}`);
       return;
     }
     const delta = choice.delta || {};

@@ -65,9 +65,9 @@ test('streamRelevanceV2: 跳号（[1] 后直接 [3]）→ 抛 unparseable', asyn
   );
 });
 
-test('streamRelevanceV2: 重复同一 N（[1][2][2]）→ 抛 unparseable', async () => {
+test('streamRelevanceV2: 凑齐前重复 N（[1][1]）→ 抛 unparseable', async () => {
   await assert.rejects(
-    () => runStream(['[1] 0\n[2] 1\n[2] 2\n']),
+    () => runStream(['[1] 0\n[1] 1\n[2] 2\n']),
     /unparseable multi-chunk output/
   );
 });
@@ -84,6 +84,14 @@ test('streamRelevanceV2: 末尾缺行（只有 [1]）→ 抛 unparseable（收�
     () => runStream(['[1] 2\n']),
     /unparseable multi-chunk output/
   );
+});
+
+test('streamRelevanceV2: 凑齐后多余行（含重复 N / 说明）→ 忽略且成功', async () => {
+  const rows = await runStream(['[1] 2\n[2] 0\n[2] 9\nTokens: 8\n']);
+  assert.deepEqual(rows, [
+    { n: 1, count: 2 },
+    { n: 2, count: 0 },
+  ]);
 });
 
 test('streamRelevanceV2: 流式中断带顶层 error 事件 → 抛真实错误而非 unparseable', async () => {
@@ -161,6 +169,21 @@ test('makeSseDeltaFeeder: SSE 帧可被任意字节边界切开，仍正确累�
   feed(`data: ${d1}\n`);
   feed(`data: ${d2}\n\n`);
   assert.deepEqual(out, ['[1', '] 2']);
+});
+
+test('makeSseDeltaFeeder: 字符串 code 裸写且未传 onError 时直接 throw', () => {
+  const feed = makeSseDeltaFeeder(() => {});
+  const frame = JSON.stringify({
+    error: { code: '502', message: 'Overloaded' },
+    choices: [{ delta: {}, finish_reason: 'error' }],
+  });
+  assert.throws(
+    () => feed(`data: ${frame}\n\n`),
+    (err) =>
+      err.message.includes('OpenRouter stream error:') &&
+      err.message.includes('code=502') &&
+      !err.message.includes('code="502"')
+  );
 });
 
 test('makeLineSplitter: 按换行切分，冲刷时把残留尾段也 emit', () => {

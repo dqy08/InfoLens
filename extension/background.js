@@ -313,6 +313,7 @@ chrome.runtime.onConnect.addListener((port) => {
           port.postMessage({
             type: 'error',
             success: false,
+            kind: 'network',
             message: `HTTP ${res.status}`,
             error_detail: detail.slice(0, 500),
           });
