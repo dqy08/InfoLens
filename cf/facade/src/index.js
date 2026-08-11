@@ -6,17 +6,29 @@
  * - home-server 允许访问（粘性 switch，无 TTL）：
  *   - mode=accelerate（默认）：仅算力路径 → HOME_ORIGIN；其余仍 HF
  *   - mode=full：算力路径 + /demo/* + /api/list_demos → HOME_ORIGIN；其余仍 HF
- * - 远程 relevance（独立粘性 switch，/facade-relevance-switch）：
- *   默认开：/api/analyze-semantic-relevance → OpenRouter（Hy3）；显式关则仍 HF/Home
+ * - 边缘远程（始终 OpenRouter，无 HF/Home 回退、无旁路开关）：
+ *   - /api/analyze-semantic-relevance → Hy3（旧扩展，单 text）
+ *   - /api/v2/analyze-semantic-relevance → Hy3 多切片（新扩展/新前端，texts 数组，新版本主力）
+ *   - /api/v2/analyze-semantic-keywords → Hy3（新扩展）
+ * - keywords 双轨（扩展审核慢于 Worker，过渡期内并存）：
+ *   - 旧扩展：/api/analyze-semantic-keywords → 仍 HF/Home 梯度归因（COMPUTE_PATHS，勿接到 v2）
+ *   旧扩展升级完后再决定退役旧路径，或把旧入口接到 v2；当前不切
  * - 请求发现 home 不可达（fetch 抛错 / 502·52x·530）→ 写 last_fail_at，本请求改打 HF
  *   冷却期内不再尝试 home；不含源站业务 503/504
  * - /facade-home-probe：始终探 HOME_ORIGIN/api/health；冷却期内若恢复则清 last_fail_at（不通则只观测、不续写）
  */
 import {
-  REMOTE_RELEVANCE_KEY,
   RELEVANCE_PATH,
   handleRemoteRelevance,
 } from './relevance_remote.js';
+import {
+  RELEVANCE_V2_PATH,
+  handleRemoteRelevanceV2,
+} from './relevance_remote_v2.js';
+import {
+  KEYWORDS_V2_PATH,
+  handleRemoteKeywordsV2,
+} from './keywords_remote_v2.js';
 const HOP_BY_HOP = new Set([
   'connection',
   'keep-alive',
@@ -38,13 +50,12 @@ const ALLOW_KEY = 'home_allow';
 const HEALTH_KEY = 'home_health';
 const COOLDOWN_SEC = 60;
 
-/** 两模式均走 home 的算力路径 */
+/** 两模式均走 home 的算力路径（不含已边缘短路的 relevance / keywords v2） */
 const COMPUTE_PATHS = new Set([
   '/api/analyze',
   '/api/tokenize',
   '/api/prediction-attribute',
   '/api/analyze-semantic',
-  '/api/analyze-semantic-relevance',
   '/api/analyze-semantic-keywords',
 ]);
 
@@ -177,60 +188,6 @@ async function setLastFailAt(env, ts) {
 
 async function clearHealth(env) {
   return kvDelete(env, HEALTH_KEY);
-}
-
-/** @returns {Promise<boolean>} 缺省开；仅显式 allowed:false 关 */
-async function getRemoteRelevanceAllow(env) {
-  if (!env.STATE) return true;
-  const raw = await env.STATE.get(REMOTE_RELEVANCE_KEY);
-  if (!raw) return true;
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return true;
-  }
-  return !(parsed && parsed.allowed === false);
-}
-
-async function setRemoteRelevanceAllow(env, allowed) {
-  if (allowed) {
-    return kvDelete(env, REMOTE_RELEVANCE_KEY);
-  }
-  return kvPut(env, REMOTE_RELEVANCE_KEY, JSON.stringify({ allowed: false }));
-}
-
-async function handleRelevanceSwitchAdmin(request, env) {
-  const denied = requireAdmin(request, env);
-  if (denied) return json(request, { ok: false, error: denied }, 403);
-
-  if (request.method === 'GET') {
-    let allowed;
-    try {
-      allowed = await getRemoteRelevanceAllow(env);
-    } catch (err) {
-      const msg = err && err.message ? String(err.message) : String(err);
-      return json(request, { ok: false, error: msg || 'STATE KV read failed' }, 503);
-    }
-    return json(request, { ok: true, allowed });
-  }
-
-  if (request.method === 'PUT') {
-    let body;
-    try {
-      body = await request.json();
-    } catch {
-      return json(request, { ok: false, error: 'invalid json' }, 400);
-    }
-    if (!body || typeof body.allowed !== 'boolean') {
-      return json(request, { ok: false, error: 'missing allowed boolean' }, 400);
-    }
-    const saved = await setRemoteRelevanceAllow(env, body.allowed);
-    if (!saved.ok) return json(request, { ok: false, error: saved.error }, 503);
-    return json(request, { ok: true, allowed: body.allowed });
-  }
-
-  return json(request, { ok: false, error: 'method_not_allowed' }, 405);
 }
 
 async function handleSwitchAdmin(request, env) {
@@ -416,9 +373,6 @@ async function handleRequest(request, env) {
   if (url.pathname === '/facade-switch') {
     return handleSwitchAdmin(request, env);
   }
-  if (url.pathname === '/facade-relevance-switch') {
-    return handleRelevanceSwitchAdmin(request, env);
-  }
   if (url.pathname === '/facade-home-probe') {
     return handleHomeProbe(request, env);
   }
@@ -431,25 +385,30 @@ async function handleRequest(request, env) {
     return json(request, { ok: false, error: 'not_found' }, 404);
   }
 
-  // relevance：先读旁路开关；开则 OpenRouter 短路，不碰 home allow/health
-  if (path === RELEVANCE_PATH) {
-    let remoteRelevance;
-    try {
-      remoteRelevance = await getRemoteRelevanceAllow(env);
-    } catch (err) {
-      const msg = err && err.message ? String(err.message) : String(err);
-      return json(request, { ok: false, error: msg || 'STATE KV read failed' }, 503);
+  // 边缘远程：始终 OpenRouter，不碰 home allow/health。
+  // relevance v1 / relevance v2 / keywords v2 并列；旧 keywords 仍走下方 HF/Home，勿合并。
+  if (
+    path === RELEVANCE_PATH ||
+    path === RELEVANCE_V2_PATH ||
+    path === KEYWORDS_V2_PATH
+  ) {
+    const resp =
+      path === RELEVANCE_PATH
+        ? await handleRemoteRelevance(request, env, json)
+        : path === RELEVANCE_V2_PATH
+          ? await handleRemoteRelevanceV2(request, env, json)
+          : await handleRemoteKeywordsV2(request, env, json);
+    const headers = new Headers(resp.headers);
+    headers.set('X-Infolens-Backend', 'remote');
+    // 远程 SSE/JSON 均需 CORS 头，否则扩展 background fetch 读流报 "Failed to fetch"。
+    for (const [k, v] of Object.entries(corsHeaders(request))) {
+      headers.set(k, v);
     }
-    if (remoteRelevance) {
-      const resp = await handleRemoteRelevance(request, env, json);
-      const headers = new Headers(resp.headers);
-      headers.set('X-Infolens-Backend', 'remote');
-      return new Response(resp.body, {
-        status: resp.status,
-        statusText: resp.statusText,
-        headers,
-      });
-    }
+    return new Response(resp.body, {
+      status: resp.status,
+      statusText: resp.statusText,
+      headers,
+    });
   }
 
   // HF/Home 分流才需要 allow + health

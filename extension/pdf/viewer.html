@@ -1,0 +1,58 @@
+<!--
+InfoLens PDF viewer：pdf/entry 读字节 → SW 写入 IndexedDB → 本页 ?id= 读取。
+语义搜索/分析载体页（非完备阅读器）。右侧窄工具条；缩放/fit 对齐 Chrome 内置 PDF 习惯。
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InfoLens PDF</title>
+<link rel="stylesheet" href="../content.css">
+<link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+  <main>
+    <div id="il-pv-scroll">
+      <div id="il-pv-pages" aria-live="polite"></div>
+    </div>
+  </main>
+  <aside id="il-pv-toolbar">
+    <span class="il-pv-spacer"></span>
+    <span class="il-pv-page-label" aria-live="polite" title="Current page">
+      <span id="il-pv-page">—</span>
+      <span class="il-pv-gray" id="il-pv-total"></span>
+    </span>
+    <span class="il-pv-sep" aria-hidden="true"></span>
+    <div class="il-pv-controls" role="toolbar" aria-label="View" aria-orientation="vertical">
+      <!-- 图标 path 来自 Chromium PDF viewer icons.html（Material Symbols，Apache-2.0） -->
+      <button type="button" id="il-pv-zoom-out" class="il-pv-btn" title="Zoom out" aria-label="Zoom out" disabled>
+        <svg class="il-pv-icon" viewBox="0 -960 960 960" aria-hidden="true"><path d="M232-444v-72h496v72H232Z"/></svg>
+      </button>
+      <span id="il-pv-zoom-label" class="il-pv-zoom-label" aria-live="polite">—</span>
+      <button type="button" id="il-pv-zoom-in" class="il-pv-btn" title="Zoom in" aria-label="Zoom in" disabled>
+        <svg class="il-pv-icon" viewBox="0 -960 960 960" aria-hidden="true"><path d="M444-444H240v-72h204v-204h72v204h204v72H516v204h-72v-204Z"/></svg>
+      </button>
+      <span class="il-pv-sep" aria-hidden="true"></span>
+      <!-- Chrome：单按钮在 Fit to page / Fit to width 间切换；图标表示下一次点击的动作 -->
+      <button type="button" id="il-pv-fit" class="il-pv-btn" title="Fit to page" aria-label="Fit to page" disabled>
+        <svg class="il-pv-icon" viewBox="0 -960 960 960" aria-hidden="true"><path id="il-pv-fit-path" d="M263.72-96Q234-96 213-117.15T192-168v-624q0-29.7 21.16-50.85Q234.32-864 264.04-864h432.24Q726-864 747-842.85T768-792v624q0 29.7-21.16 50.85Q725.68-96 695.96-96H263.72ZM696-168v-624H264v624h432Zm0-624H264h432ZM360-600h240L480-720 360-600Zm120 360 120-120H360l120 120Z"/></svg>
+      </button>
+      <span class="il-pv-sep" aria-hidden="true"></span>
+      <button type="button" id="il-pv-fullscreen" class="il-pv-btn" title="Full screen" aria-label="Full screen" disabled>
+        <svg class="il-pv-icon" viewBox="0 -960 960 960" aria-hidden="true"><path id="il-pv-fs-path" d="M120-120v-200h80v120h120v80H120Zm520 0v-80h120v-120h80v200H640ZM120-640v-200h200v80H200v120h-80Zm640 0v-120H640v-80h200v200h-80Z"/></svg>
+      </button>
+    </div>
+    <span class="il-pv-spacer"></span>
+    <span id="il-pv-status" role="status" hidden></span>
+  </aside>
+  <script src="../vendor/pdfjs/pdf.min.js"></script>
+  <script src="../config.js"></script>
+  <script src="../splitTextToChunks.js"></script>
+  <script src="stash-db.js"></script>
+  <script src="viewer.js"></script>
+  <script src="../semantic/pdf-document.js"></script>
+  <script src="../semantic/find.js"></script>
+  <script src="search.js"></script>
+</body>
+</html>

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "default_locale": "en",
   "name": "__MSG_extName__",
-  "version": "0.4.2",
+  "version": "0.6.1",
   "description": "__MSG_extDescription__",
   "icons": {
     "16": "icons/icon16.png",
@@ -10,7 +10,8 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting", "storage", "contextMenus"],
+  "optional_host_permissions": ["file:///*"],
   "background": {
     "service_worker": "background.js"
   },
@@ -34,7 +35,7 @@
   "web_accessible_resources": [
     {
       "resources": ["ui/*"],
-      "matches": ["http://*/*", "https://*/*", "file://*/*"]
+      "matches": ["http://*/*", "https://*/*", "file:///*"]
     }
   ]
 }

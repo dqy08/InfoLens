@@ -1,8 +1,15 @@
 /* Extension-only: underline overlay + Custom Highlight.
  * Find bar lives in Shadow DOM (see content.js).
  *
- * token / truncated：CSS Custom Highlight API（不改 DOM、不垫字下）
- * underline（导航）/ pending-underline：#il-overlay-host 盖层，可叠画；统一蓝
+ * 性能：网页一律 ::highlight（绑 Range，浏览器绘）；PDF 才用 #il-overlay-host
+ * （getClientRects → 绝对定位条）。勿在网页上为「好对齐」改回 overlay——复杂页上
+ * 整段 getClientRects 可达秒级。PDF canvas 含字形，红底会蒙字，故 token/蓝线仍 overlay。
+ *
+ * token（网页）：::highlight(il-token-*) 底色在真实字下
+ * token（PDF）：.il-token-underline 红下划线
+ * gray：::highlight(il-gray)，统一灰 = CanvasText×Canvas
+ * underline / pending-underline（网页）：::highlight 蓝下划线
+ * underline / pending-underline（PDF）：#il-overlay-host 盖层，可叠画；统一蓝
  * pending：等待染色；若最终无红色 token，则留下作 chunk 级匹配标记
  */
 
@@ -32,6 +39,7 @@
   height: 2px;
   border-radius: 2px;
   background: #1e6fff;
+  z-index: 1;
 }
 /* 相对导航线下移 2px（=线高），同位叠画时紧贴、不被盖住 */
 .il-chunk-underline-pending {
@@ -39,63 +47,118 @@
 }
 
 /*
- * token：16 档 background-color。
+ * token 色阶：16 档。
  * SYNC: SurprisalColorConfig → SURPRISAL_RED_RGB / SURPRISAL_MAX_ALPHA(0.7)
- * alpha = ((level+1)/16) * 0.7
+ * alpha = ((level+1)/16) * 0.6
+ * 注：终点 alpha 用 0.6（介于网页端默认 0.7 与弱化 0.5 之间）；如需调整改最后一项。
+ * 网页 ::highlight 底色（终点 alpha 0.6）/ PDF 红下划线（终点不透明）分用色阶。
  */
-::highlight(il-token-0) {
-  background-color: rgba(255, 71, 64, 0.04375);
+:root {
+  --il-token-0: rgba(255, 71, 64, 0.0375);
+  --il-token-1: rgba(255, 71, 64, 0.075);
+  --il-token-2: rgba(255, 71, 64, 0.1125);
+  --il-token-3: rgba(255, 71, 64, 0.15);
+  --il-token-4: rgba(255, 71, 64, 0.1875);
+  --il-token-5: rgba(255, 71, 64, 0.225);
+  --il-token-6: rgba(255, 71, 64, 0.2625);
+  --il-token-7: rgba(255, 71, 64, 0.3);
+  --il-token-8: rgba(255, 71, 64, 0.3375);
+  --il-token-9: rgba(255, 71, 64, 0.375);
+  --il-token-10: rgba(255, 71, 64, 0.4125);
+  --il-token-11: rgba(255, 71, 64, 0.45);
+  --il-token-12: rgba(255, 71, 64, 0.4875);
+  --il-token-13: rgba(255, 71, 64, 0.525);
+  --il-token-14: rgba(255, 71, 64, 0.5625);
+  --il-token-15: rgba(255, 71, 64, 0.6);
 }
-::highlight(il-token-1) {
-  background-color: rgba(255, 71, 64, 0.0875);
+
+::highlight(il-token-0) { background-color: var(--il-token-0); }
+::highlight(il-token-1) { background-color: var(--il-token-1); }
+::highlight(il-token-2) { background-color: var(--il-token-2); }
+::highlight(il-token-3) { background-color: var(--il-token-3); }
+::highlight(il-token-4) { background-color: var(--il-token-4); }
+::highlight(il-token-5) { background-color: var(--il-token-5); }
+::highlight(il-token-6) { background-color: var(--il-token-6); }
+::highlight(il-token-7) { background-color: var(--il-token-7); }
+::highlight(il-token-8) { background-color: var(--il-token-8); }
+::highlight(il-token-9) { background-color: var(--il-token-9); }
+::highlight(il-token-10) { background-color: var(--il-token-10); }
+::highlight(il-token-11) { background-color: var(--il-token-11); }
+::highlight(il-token-12) { background-color: var(--il-token-12); }
+::highlight(il-token-13) { background-color: var(--il-token-13); }
+::highlight(il-token-14) { background-color: var(--il-token-14); }
+::highlight(il-token-15) { background-color: var(--il-token-15); }
+
+/* PDF token：3px；上移 1px，与蓝线叠画时略偏上（z-index 仍压在蓝线之上）。
+ * 线比色块更细，色阶终点 alpha=1（网页 ::highlight 仍用 --il-token-* 的 0.6）。
+ * alpha = (level+1)/16 */
+.il-token-underline {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  height: 3px;
+  border-radius: 2px;
+  transform: translateY(-1px);
+  z-index: 2;
 }
-::highlight(il-token-2) {
-  background-color: rgba(255, 71, 64, 0.13125);
-}
-::highlight(il-token-3) {
-  background-color: rgba(255, 71, 64, 0.175);
-}
-::highlight(il-token-4) {
-  background-color: rgba(255, 71, 64, 0.21875);
-}
-::highlight(il-token-5) {
-  background-color: rgba(255, 71, 64, 0.2625);
-}
-::highlight(il-token-6) {
-  background-color: rgba(255, 71, 64, 0.30625);
-}
-::highlight(il-token-7) {
-  background-color: rgba(255, 71, 64, 0.35);
-}
-::highlight(il-token-8) {
-  background-color: rgba(255, 71, 64, 0.39375);
-}
-::highlight(il-token-9) {
-  background-color: rgba(255, 71, 64, 0.4375);
-}
-::highlight(il-token-10) {
-  background-color: rgba(255, 71, 64, 0.48125);
-}
-::highlight(il-token-11) {
-  background-color: rgba(255, 71, 64, 0.525);
-}
-::highlight(il-token-12) {
-  background-color: rgba(255, 71, 64, 0.56875);
-}
-::highlight(il-token-13) {
-  background-color: rgba(255, 71, 64, 0.6125);
-}
-::highlight(il-token-14) {
-  background-color: rgba(255, 71, 64, 0.65625);
-}
-::highlight(il-token-15) {
-  background-color: rgba(255, 71, 64, 0.7);
-}
+.il-token-underline[data-il-token-level="0"] { background-color: rgba(255, 71, 64, 0.0625); }
+.il-token-underline[data-il-token-level="1"] { background-color: rgba(255, 71, 64, 0.125); }
+.il-token-underline[data-il-token-level="2"] { background-color: rgba(255, 71, 64, 0.1875); }
+.il-token-underline[data-il-token-level="3"] { background-color: rgba(255, 71, 64, 0.25); }
+.il-token-underline[data-il-token-level="4"] { background-color: rgba(255, 71, 64, 0.3125); }
+.il-token-underline[data-il-token-level="5"] { background-color: rgba(255, 71, 64, 0.375); }
+.il-token-underline[data-il-token-level="6"] { background-color: rgba(255, 71, 64, 0.4375); }
+.il-token-underline[data-il-token-level="7"] { background-color: rgba(255, 71, 64, 0.5); }
+.il-token-underline[data-il-token-level="8"] { background-color: rgba(255, 71, 64, 0.5625); }
+.il-token-underline[data-il-token-level="9"] { background-color: rgba(255, 71, 64, 0.625); }
+.il-token-underline[data-il-token-level="10"] { background-color: rgba(255, 71, 64, 0.6875); }
+.il-token-underline[data-il-token-level="11"] { background-color: rgba(255, 71, 64, 0.75); }
+.il-token-underline[data-il-token-level="12"] { background-color: rgba(255, 71, 64, 0.8125); }
+.il-token-underline[data-il-token-level="13"] { background-color: rgba(255, 71, 64, 0.875); }
+.il-token-underline[data-il-token-level="14"] { background-color: rgba(255, 71, 64, 0.9375); }
+.il-token-underline[data-il-token-level="15"] { background-color: rgba(255, 71, 64, 1); }
 
 /*
  * 未分析后缀置灰：统一灰（不跟链接/标题各自字色）。
  * CanvasText / Canvas 随色彩方案变，深浅色均可读。
  */
-::highlight(il-truncated) {
+::highlight(il-gray) {
   color: color-mix(in srgb, CanvasText 40%, Canvas 60%);
+}
+
+/* 网页导航/等待蓝线：原生 text-decoration，不走 overlay getClientRects */
+::highlight(il-underline) {
+  text-decoration-line: underline;
+  text-decoration-style: solid;
+  text-decoration-color: #1e6fff;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+::highlight(il-pending-underline) {
+  text-decoration-line: underline;
+  text-decoration-style: solid;
+  text-decoration-color: #1e6fff;
+  text-decoration-thickness: 2px;
+  /* 相对导航线下移，同位叠画时仍可见 */
+  text-underline-offset: 4px;
+}
+
+/*
+ * 正文根以外（永远不会进语义分析）：fixed 四块遮罩拼出开洞（不用 999vmax box-shadow，避免小洞时巨影拖垮 layout）。
+ * 色走向 Canvas，与上方 gray 字色灰同一套「往画布色靠」的观感；不挡点击。
+ */
+#il-out-of-scope-mask {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  pointer-events: none;
+  z-index: 2147483645;
+  overflow: hidden;
+}
+#il-out-of-scope-mask > span {
+  position: absolute;
+  background: color-mix(in srgb, Canvas 60%, transparent);
 }

@@ -5,6 +5,12 @@ export const LS_SKIP_CHAT_TEMPLATE = 'chat_skip_chat_template';
 export const CHAT_MODEL_VARIANT_STORAGE_KEY = 'info_radar_chat_model_variant';
 export const CHAT_MAX_NEW_TOKENS_STORAGE_KEY = 'info_radar_chat_max_new_tokens';
 
+/** Chat 页 OpenRouter 实验旁路（仅管理员；localStorage） */
+export const CHAT_OPENROUTER_ENABLED_STORAGE_KEY = 'info_radar_chat_openrouter_enabled';
+export const CHAT_OPENROUTER_MODEL_ID_STORAGE_KEY = 'info_radar_chat_openrouter_model_id';
+export const CHAT_OPENROUTER_API_KEY_STORAGE_KEY = 'info_radar_chat_openrouter_api_key';
+export const CHAT_OPENROUTER_SELECT_VALUE = 'openrouter';
+
 /** Causal Flow 页 Model / Max new tokens */
 export const GEN_ATTR_MODEL_VARIANT_STORAGE_KEY = 'info_radar_gen_attr_model_variant';
 export const GEN_ATTR_MAX_NEW_TOKENS_STORAGE_KEY = 'info_radar_gen_attr_max_tokens';

@@ -39,6 +39,25 @@ def runtime_files() -> list[str]:
     return sorted(set(content_js + content_css + ["background.js"]))
 
 
+# 扩展页 / PDF 入口随包发布（不在 CONTENT_JS 推导链上，须显式列入）。
+# pdf/viewer.html 还通过 <script> 引用 config.js / splitTextToChunks.js（已在 CONTENT_JS，会随 runtime 打包）。
+PDF_VIEWER_FILES = [
+    "pdf/entry.js",
+    "pdf/stash-db.js",
+    "pdf/viewer.html",
+    "pdf/viewer.css",
+    "pdf/viewer.js",
+    "pdf/search.js",
+    "pdf/file-access.html",
+    "pdf/file-access.js",
+    "semantic/pdf-document.js",
+    "semantic/find.js",
+    "vendor/pdfjs/pdf.min.js",
+    "vendor/pdfjs/pdf.worker.min.js",
+    "vendor/pdfjs/LICENSE",
+]
+
+
 def source_path(runtime_path: str) -> Path:
     """工作区里 CONTENT_JS 的 config.js 对应 config.prod.js。"""
     if runtime_path == "config.js":
@@ -61,8 +80,8 @@ def store_manifest_text() -> str:
 
 KNOWN_TOP_KEYS = {
     "manifest_version", "default_locale", "name", "version", "description",
-    "icons", "permissions", "background", "commands", "action",
-    "web_accessible_resources",
+    "icons", "permissions", "host_permissions", "optional_host_permissions", "background", "commands",
+    "action", "web_accessible_resources",
 }
 KNOWN_BACKGROUND_KEYS = {"service_worker", "type"}
 KNOWN_ACTION_KEYS = {"default_title", "default_icon"}
@@ -146,6 +165,9 @@ def package_destinations() -> dict[str, Path]:
     for rel in locale_files():
         mapping[rel] = ROOT / rel
 
+    for rel in PDF_VIEWER_FILES:
+        mapping[rel] = ROOT / rel
+
     dev_manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
     for rel in manifest_asset_paths(dev_manifest):
         dest = rel.replace("icons/dev/", "icons/", 1) if rel.startswith("icons/dev/") else rel
@@ -172,25 +194,37 @@ def line_at(text: str, index: int) -> int:
     return text.count("\n", 0, index) + 1
 
 
+def iter_pack_js_sources() -> list[Path]:
+    """扩展源码里的 .js（含 semantic/）；排除 vendor 与打包产物。"""
+    skip_parts = {"vendor", "dist", "node_modules"}
+    out: list[Path] = []
+    for path in sorted(ROOT.rglob("*.js")):
+        if any(part in skip_parts for part in path.parts):
+            continue
+        out.append(path)
+    return out
+
+
 def find_source_calls() -> tuple[list[tuple[str, str, str]], list[tuple[str, str, int]]]:
-    """扫 extension/*.js 里的 getURL()/importScripts() 调用。
+    """扫扩展源码 .js 里的 getURL()/importScripts() 调用（含 semantic/）。
     返回 (能识别为纯字面量的引用, 无法识别参数形式的调用位置)。
     调用总数（不管参数形式）与字面量命中数不一致，说明有非字面量参数（拼接/变量），需人工确认。
     """
     literal_refs: list[tuple[str, str, str]] = []
     unresolved: list[tuple[str, str, int]] = []
-    for js_file in sorted(ROOT.glob("*.js")):
+    for js_file in iter_pack_js_sources():
+        rel = js_file.relative_to(ROOT).as_posix()
         text = js_file.read_text(encoding="utf-8")
         for kind, opener in CALL_OPENERS:
             total = len(opener.findall(text))
             literal_matches = list(LITERAL_CALL_PATTERNS[kind].finditer(text))
             for m in literal_matches:
-                literal_refs.append((js_file.name, kind, m.group(1)))
+                literal_refs.append((rel, kind, m.group(1)))
             if len(literal_matches) < total:
                 literal_starts = {m.start() for m in literal_matches}
                 for m in opener.finditer(text):
                     if m.start() not in literal_starts:
-                        unresolved.append((js_file.name, kind, line_at(text, m.start())))
+                        unresolved.append((rel, kind, line_at(text, m.start())))
     return literal_refs, unresolved
 
 
@@ -199,8 +233,10 @@ def verify_source_references(
     literal_refs: list[tuple[str, str, str]],
     unresolved: list[tuple[str, str, int]],
 ) -> None:
-    """importScripts 的路径必须在打包名单里；getURL 的路径必须被 web_accessible_resources 的 glob 覆盖。
-    参数不是纯字符串字面量（拼接/变量）时无法静态判断覆盖范围，直接报错要求人工确认，而非放过。
+    """importScripts 的路径必须在打包名单里。
+    getURL：网页上下文可读的资源须被 web_accessible_resources 覆盖；
+    仅扩展上下文使用的包内资源（如 pdf/viewer.html）只需已列入打包名单，不必进 WAR。
+    参数不是纯字符串字面量时无法静态判断，直接报错要求人工确认。
     """
     errors: list[str] = []
     for js_file, kind, line in unresolved:
@@ -219,10 +255,15 @@ def verify_source_references(
             if ref not in packaged:
                 errors.append(f"{js_file}: importScripts('{ref}') 未列入打包名单（检查 CONTENT_JS/CONTENT_CSS）")
         elif kind == "getURL":
-            if not any(fnmatch(ref, pattern) for pattern in war_patterns):
-                errors.append(
-                    f"{js_file}: chrome.runtime.getURL('{ref}') 未被 manifest.web_accessible_resources 覆盖"
-                )
+            in_war = any(fnmatch(ref, pattern) for pattern in war_patterns)
+            if in_war:
+                continue
+            if ref in packaged:
+                # 扩展页 / 后台用 getURL 打开包内文件，不经过网页，无需 WAR
+                continue
+            errors.append(
+                f"{js_file}: chrome.runtime.getURL('{ref}') 既未列入打包名单，也不在 web_accessible_resources"
+            )
 
     if errors:
         print("pack: 发现未覆盖 / 无法校验的资源引用：", file=sys.stderr)

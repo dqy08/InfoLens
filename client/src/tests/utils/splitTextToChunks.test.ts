@@ -178,6 +178,38 @@ test("纯 emoji 序列按 4B 边界切分", () => {
 // ── 11. 综合：超长行与正常行混合 ─────────────────────────────────────────────
 console.log("11. 综合场景");
 
+test("超长行出现前已有累计字节时，chunk 总字节不超过 limit（回归：texts[1] 超限）", () => {
+    // "a"×600 + "\n" + "z"×900：首行 600B 已入 chunk，超长行 900B 只能占剩余 200B
+    const text = "a".repeat(600) + "\n" + "z".repeat(900);
+    const limit = 800;
+    const chunks = splitTextToChunks(text, limit);
+    assert.strictEqual(chunks.map(c => c.text).join(""), text, "拼接后与原文不一致");
+    for (const c of chunks) {
+        assert.ok(enc.encode(c.text).byteLength <= limit,
+            `chunk 字节数 ${enc.encode(c.text).byteLength} 超过 limit ${limit}`);
+    }
+});
+
+test("多行累计后遇到超长行，总字节不超 limit", () => {
+    // 400B + "\n" + 400B + "\n" + 900B
+    const text = "a".repeat(400) + "\n" + "b".repeat(400) + "\n" + "z".repeat(900);
+    const limit = 800;
+    const chunks = splitTextToChunks(text, limit);
+    assert.strictEqual(chunks.map(c => c.text).join(""), text);
+    for (const c of chunks) {
+        assert.ok(enc.encode(c.text).byteLength <= limit);
+    }
+});
+
+test("超长行作为首行（chunkBytes=0）时行为不变", () => {
+    const text = "z".repeat(900);
+    const chunks = splitTextToChunks(text, 800);
+    assert.strictEqual(chunks.map(c => c.text).join(""), text);
+    for (const c of chunks) {
+        assert.ok(enc.encode(c.text).byteLength <= 800);
+    }
+});
+
 test("超长行被多次切分后，正常行继续正常累积", () => {
     // "ABCDEFGH\n" limit=4：
     //   pos=0: 行="ABCDEFGH\n"(9B)>4，maxEnd=4，无分隔符→"ABCD"，pos=4

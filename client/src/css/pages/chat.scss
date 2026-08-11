@@ -50,13 +50,57 @@
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--token-truncated-color);
+  color: var(--token-gray-color);
   white-space: pre-wrap;
   word-break: break-word;
   font-family: inherit;
 
   &.tool-calling-pending-text {
     @include tcp.tool-calling-pending-text;
+  }
+}
+
+.chat-segment-output-text {
+  @include lmf.lmf-readout-text;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-color);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+}
+
+.chat-segment-meta-json {
+  @include lmf.lmf-readout-text;
+  margin: 1rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.35));
+  border-radius: 4px;
+  background: var(--panel-bg, transparent);
+  color: var(--text-muted, var(--text-color));
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.chat-openrouter-creds-row {
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  width: 100%;
+
+  .chat-openrouter-field {
+    flex: 1 1 12rem;
+    min-width: 10rem;
+  }
+
+  .chat-openrouter-input {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    padding: 0.25rem 0.4rem;
   }
 }
 
@@ -85,6 +129,8 @@
 
 :root[data-theme='dark'] {
   .chat-segment-input-text,
+  .chat-segment-output-text,
+  .chat-segment-meta-json,
   .chat-streaming-preview {
     font-weight: 300;
   }

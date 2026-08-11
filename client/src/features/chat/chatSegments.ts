@@ -14,6 +14,8 @@ export type ChatOutputSegment = {
     promptUsed?: string;
     response: OpenAICompletionsResponse;
     modelName: string;
+    /** 实验旁路：追加在正文后的 API 元数据（usage 等），不参与 GLTR */
+    metaJson?: unknown;
 };
 
 export type ChatDisplaySegment = ChatInputSegment | ChatOutputSegment;

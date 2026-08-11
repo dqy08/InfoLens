@@ -115,28 +115,43 @@ export class ChatTurnsView {
                 const block = this.container
                     .append('div')
                     .attr('class', 'chat-segment chat-segment-output');
-                const outHost = block.append('div').attr('class', 'chat-segment-output-host');
-                const box = new GLTR_Text_Box(outHost, this.eventHandler);
-                box.updateOptions(GLTR_OPTIONS, true);
-                const display = buildCompletionDisplayResult(
-                    seg.text,
-                    seg.modelName,
-                    seg.response.info_radar?.bpe_strings ?? null
-                );
-                box.update(display);
-                const capturedIndex = outputIndex;
-                block.node()?.addEventListener(
-                    'click',
-                    () => {
+                const bpe = seg.response.info_radar?.bpe_strings;
+                // OpenRouter 等旁路无 token 级数据：纯文本展示，不走 GLTR
+                if (!bpe || bpe.length === 0) {
+                    block
+                        .append('pre')
+                        .attr('class', 'chat-segment-output-text')
+                        .text(seg.text);
+                    if (seg.metaJson !== undefined) {
+                        block
+                            .append('pre')
+                            .attr('class', 'chat-segment-meta-json')
+                            .text(JSON.stringify(seg.metaJson, null, 2));
+                    }
+                } else {
+                    const outHost = block.append('div').attr('class', 'chat-segment-output-host');
+                    const box = new GLTR_Text_Box(outHost, this.eventHandler);
+                    box.updateOptions(GLTR_OPTIONS, true);
+                    const display = buildCompletionDisplayResult(
+                        seg.text,
+                        seg.modelName,
+                        bpe
+                    );
+                    box.update(display);
+                    const capturedIndex = outputIndex;
+                    block.node()?.addEventListener(
+                        'click',
+                        () => {
+                            this.activeOutputIndex = capturedIndex;
+                        },
+                        true
+                    );
+                    if (capturedIndex === prevActive) {
                         this.activeOutputIndex = capturedIndex;
-                    },
-                    true
-                );
-                if (capturedIndex === prevActive) {
-                    this.activeOutputIndex = capturedIndex;
+                    }
+                    this.gltrBoxes.push(box);
+                    outputIndex++;
                 }
-                this.gltrBoxes.push(box);
-                outputIndex++;
             }
             prev = seg;
         }

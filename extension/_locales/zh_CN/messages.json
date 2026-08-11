@@ -4,7 +4,76 @@
     "description": "商店与扩展管理页显示的扩展名称"
   },
   "extDescription": {
-    "message": "根据含义搜索并高亮原文中的相关词语，给页面加上一层 AI 阅读滤镜：帮你阅读，而不是替你阅读。",
+    "message": "根据含义搜索并高亮原文中的相关词语，给页面加上一层语义热力图：帮你阅读，而不是替你阅读。",
     "description": "商店列表中的简短介绍"
+  },
+  "contextMenuSearch": {
+    "message": "Search with Semantic Highlight",
+    "description": "网页/选区右键菜单项文案"
+  },
+  "fileAccessPageTitle": {
+    "message": "InfoLens — 允许访问文件网址",
+    "description": "本地文件权限说明页的标签标题"
+  },
+  "fileAccessTitle": {
+    "message": "请开启「允许访问文件网址」",
+    "description": "文件网址开关未开时的说明页标题"
+  },
+  "fileAccessLead": {
+    "message": "当前是本地文件（file://）。请先打开下面这个开关。",
+    "description": "说明页导语"
+  },
+  "fileAccessStep1": {
+    "message": "点击下方的<strong>打开扩展详情</strong>。",
+    "description": "步骤 1；可含简单 HTML strong"
+  },
+  "fileAccessStep2": {
+    "message": "打开<strong>允许访问文件网址</strong>。",
+    "description": "步骤 2；可含简单 HTML strong"
+  },
+  "fileAccessStep3": {
+    "message": "回到本地文件标签页，再点一次 InfoLens 工具栏图标。",
+    "description": "步骤 3"
+  },
+  "fileAccessOpenDetails": {
+    "message": "打开扩展详情",
+    "description": "打开 chrome://extensions 详情页的按钮"
+  },
+  "fileAccessReadyTitle": {
+    "message": "「允许访问文件网址」已开启",
+    "description": "开关已开时的标题"
+  },
+  "fileAccessReadyLead": {
+    "message": "可关闭本页，回到本地 PDF，再点 InfoLens 工具栏图标。",
+    "description": "开关已开时的导语"
+  },
+  "fileAccessReadyStep": {
+    "message": "PDF 标签 → InfoLens 图标 → Open with InfoLens PDF viewer。",
+    "description": "开关已开时的单步说明"
+  },
+  "fileAccessDone": {
+    "message": "已完成",
+    "description": "开关已开时禁用按钮文案"
+  },
+  "fileAccessPermissionTitle": {
+    "message": "未获得自动文件访问授权",
+    "description": "文件 host 权限请求失败时的说明页标题"
+  },
+  "fileAccessPermissionLead": {
+    "message": "Chrome 未向 InfoLens 授予 file:///* 的自动访问权限。",
+    "description": "文件 host 权限请求失败时的说明页导语"
+  },
+  "fileAccessPermissionStep": {
+    "message": "打开扩展详情，在自动允许访问的网站中开启 <strong>file:///*</strong>，然后回到 PDF 标签页，再点一次 InfoLens 工具栏图标。",
+    "description": "文件 host 权限请求失败时的重试步骤；可含简单 HTML strong"
+  },
+  "fileAccessPermissionDetail": {
+    "message": "Chrome：$1",
+    "description": "请求文件 host 权限时 Chrome 返回的技术错误",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
   }
 }

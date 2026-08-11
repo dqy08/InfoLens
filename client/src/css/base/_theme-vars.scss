@@ -92,7 +92,7 @@
   --bin-highlight-outline: var(--accent-color);
   --bin-highlight-shadow: var(--accent-shadow);
   --avg-line-color: #8c8c8c;
-  --token-truncated-color: #888;
+  --token-gray-color: #888;
 }
 
 :root[data-theme='dark'] {
@@ -152,7 +152,7 @@
   --tooltip-text-selected: #ff6666;
   --tooltip-text-detail: #888;
   --tooltip-text-value: var(--text-color-light);
-  --token-truncated-color: #888;
+  --token-gray-color: #888;
   --token-hover-shadow: var(--accent-glow);
   --token-hover-outline: var(--accent-color);
   --dag-normal-line-color: #333;
