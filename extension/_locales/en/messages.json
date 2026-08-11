@@ -10,5 +10,70 @@
   "contextMenuSearch": {
     "message": "Search with Semantic Highlight",
     "description": "Right-click context menu item on page / selection"
+  },
+  "fileAccessPageTitle": {
+    "message": "InfoLens — Allow access to file URLs",
+    "description": "Browser tab title for the local-file access help page"
+  },
+  "fileAccessTitle": {
+    "message": "Turn on “Allow access to file URLs”",
+    "description": "Help page heading when the file URL toggle is off"
+  },
+  "fileAccessLead": {
+    "message": "This is a local file (file://). Chrome requires one toggle before InfoLens can use it.",
+    "description": "Help page lead paragraph"
+  },
+  "fileAccessStep1": {
+    "message": "Click <strong>Open extension details</strong> below.",
+    "description": "Help step 1; may contain simple HTML strong"
+  },
+  "fileAccessStep2": {
+    "message": "Turn on <strong>Allow access to file URLs</strong>.",
+    "description": "Help step 2; may contain simple HTML strong"
+  },
+  "fileAccessStep3": {
+    "message": "Return to the local file tab and click the InfoLens toolbar icon again.",
+    "description": "Help step 3"
+  },
+  "fileAccessOpenDetails": {
+    "message": "Open extension details",
+    "description": "Button that opens chrome://extensions details"
+  },
+  "fileAccessReadyTitle": {
+    "message": "File URL access is on",
+    "description": "Heading when the toggle is already enabled"
+  },
+  "fileAccessReadyLead": {
+    "message": "Close this tab, go back to the local PDF, and click the InfoLens toolbar icon.",
+    "description": "Lead when toggle is on"
+  },
+  "fileAccessReadyStep": {
+    "message": "PDF tab → InfoLens icon → Open with InfoLens PDF viewer.",
+    "description": "Single step when toggle is on"
+  },
+  "fileAccessDone": {
+    "message": "All set",
+    "description": "Disabled button label when toggle is on"
+  },
+  "fileAccessPermissionTitle": {
+    "message": "Automatic file access was not granted",
+    "description": "Help page heading when the file host permission request failed"
+  },
+  "fileAccessPermissionLead": {
+    "message": "Chrome did not grant InfoLens automatic access to file:///*.",
+    "description": "Help page lead when the file host permission request failed"
+  },
+  "fileAccessPermissionStep": {
+    "message": "Open extension details and enable <strong>file:///*</strong> under automatic site access, then return to the PDF tab and click the InfoLens toolbar icon again.",
+    "description": "Retry step when the file host permission request failed; may contain simple HTML strong"
+  },
+  "fileAccessPermissionDetail": {
+    "message": "Chrome: $1",
+    "description": "Technical Chrome error when requesting file host permission",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
   }
 }

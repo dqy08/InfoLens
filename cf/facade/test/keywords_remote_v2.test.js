@@ -95,6 +95,14 @@ test('streamKeywordsV2: 模型返回合法空数组 → 不抛错（回归修复
   assert.deepEqual(rows, []);
 });
 
+test('streamKeywordsV2: 有词但原文全对不上 → 与空数组一样成功（零行）', async () => {
+  const rows = await runStream(
+    [JSON.stringify({ keywords: [{ keyword: 'Final words', score: 5 }] })],
+    '正文里没有这个短语'
+  );
+  assert.deepEqual(rows, []);
+});
+
 test('streamKeywordsV2: 碎片增量仍能捞到完整 keyword', async () => {
   const chunks = ['{"keywo', 'rds":[{"keyword":"测试","score":5}]}'];
   const rows = await runStream(chunks, '这是测试正文');

@@ -1,9 +1,14 @@
 /**
  * 工具栏点击 / 快捷键 / 右键菜单 → 注入 content（activeTab 手势）。
- * API 走 SW fetch：不声明 host_permissions，依赖服务端 CORS（见 run.py CORSMiddleware）。
+ * 语义 API：SW fetch，依赖服务端 CORS（见 run.py CORSMiddleware）。
+ * PDF：http(s) 页内读字节；file://：详情页开「允许访问文件网址」后，在点图标手势里
+ * 静默 permissions.request(optional file://)（Chrome 对 file:// 不弹系统窗）→ SW fetch → IndexedDB → 查看器。
  */
 
 importScripts('config.js');
+importScripts('pdf/stash-db.js');
+
+const FILE_ORIGIN = 'file:///*';
 
 const CONTENT_CSS = ['content.css'];
 const CONTENT_JS = [
@@ -12,6 +17,8 @@ const CONTENT_JS = [
   'articleRoot.js',
   'collectTextMap.js',
   'splitTextToChunks.js',
+  'semantic/page-document.js',
+  'semantic/find.js',
   'content.js',
 ];
 
@@ -36,12 +43,115 @@ function isRestrictedUrl(url) {
   ) {
     return true;
   }
-  // Chrome PDF viewer / Web Store：主 frame 常无法注入
-  if (proto === 'file:' && /\.pdf$/i.test(u.pathname)) return true;
-  if (/\.pdf$/i.test(u.pathname)) return true;
+  // Web Store：主 frame 常无法注入
   if (u.hostname === 'chrome.google.com' && u.pathname.startsWith('/webstore')) return true;
   if (u.hostname === 'chromewebstore.google.com') return true;
   return false;
+}
+
+/** URL 路径以 .pdf 结尾（含 file:）；无后缀 PDF 靠「网页注入失败 → 再试 pdf-entry」 */
+function isPdfUrl(url) {
+  if (!url) return false;
+  try {
+    return /\.pdf$/i.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isFileUrl(url) {
+  if (!url) return false;
+  try {
+    return new URL(url).protocol === 'file:';
+  } catch {
+    return false;
+  }
+}
+
+async function openFileAccessHelp(reason, detail) {
+  const url = new URL(chrome.runtime.getURL('pdf/file-access.html'));
+  if (reason) url.searchParams.set('reason', reason);
+  if (detail) url.searchParams.set('detail', detail);
+  await chrome.tabs.create({ url: url.href });
+}
+
+/** 「允许访问文件网址」是否已开；API 异常视为未开（优先走说明页，勿静默当已授权） */
+async function hasFileToggle() {
+  try {
+    return await chrome.extension.isAllowedFileSchemeAccess();
+  } catch (err) {
+    console.warn('[InfoLens] isAllowedFileSchemeAccess failed', err);
+    return false;
+  }
+}
+
+/**
+ * optional file:// 须在用户手势同步栈里 request（任何 await 之前），否则直接 false。
+ * 对 file:// Chrome 不会弹系统授权窗：开关已开则常静默成功；未开则失败。
+ * @returns {Promise<{ granted: boolean, detail?: string }>}
+ */
+function requestFileHostFromGesture() {
+  return chrome.permissions
+    .request({ origins: [FILE_ORIGIN] })
+    .then((granted) => ({ granted }))
+    .catch((err) => {
+      const detail = String(err?.message || err);
+      console.warn('[InfoLens] permissions.request failed', detail);
+      return { granted: false, detail };
+    });
+}
+
+/**
+ * file:// 注入前：未开开关 → 说明页；已开则等待手势里启动的静默 optional request。
+ * @param {string} url
+ * @param {Promise<{ granted: boolean, detail?: string }>|null} fileHostPromise 点击瞬间启动的 request；为 null 则只认已授权
+ */
+async function ensureFileUrlAccess(url, fileHostPromise) {
+  if (!isFileUrl(url)) return true;
+
+  if (!(await hasFileToggle())) {
+    console.warn('[InfoLens] file:// needs Allow access to file URLs');
+    await setBadgeError('file access');
+    try {
+      await openFileAccessHelp();
+    } catch (err) {
+      console.error('[InfoLens] open file-access help failed', err);
+    }
+    return false;
+  }
+
+  let granted = false;
+  let detail = '';
+  if (fileHostPromise) {
+    const result = await fileHostPromise;
+    granted = result.granted;
+    detail = result.detail || '';
+  } else {
+    try {
+      granted = await chrome.permissions.contains({ origins: [FILE_ORIGIN] });
+    } catch {
+      granted = false;
+    }
+  }
+  if (!granted) {
+    console.warn('[InfoLens] optional file:// permission not granted');
+    await setBadgeError('file permission');
+    try {
+      await openFileAccessHelp('permission', detail);
+    } catch (err) {
+      console.error('[InfoLens] open file-access help failed', err);
+    }
+    return false;
+  }
+  return true;
+}
+
+/** 是否自家 PDF 查看器扩展页（chrome-extension://<自身id>/pdf/viewer.html） */
+function isOwnPdfViewerUrl(url) {
+  if (!url) return false;
+  const selfUrl = chrome.runtime.getURL('pdf/viewer.html');
+  // 精确前缀匹配：避免误判同域下其它扩展页
+  return url === selfUrl || url.startsWith(selfUrl + '?') || url.startsWith(selfUrl + '#');
 }
 
 function sleep(ms) {
@@ -92,6 +202,31 @@ async function injectOnce(tabId) {
   });
 }
 
+/**
+ * PDF 页：注入入口脚本（浮出「打开 InfoLens PDF 查看器」按钮）。
+ * 与语义管线不同——PDF 顶层是 Chrome viewer 宿主页，不注入 content.js。
+ */
+async function injectPdfEntry(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId, frameIds: [0] },
+    files: ['pdf/entry.js'],
+  });
+}
+
+/** 注入并等待页内探测：是否真的挂上入口（非 PDF 页为 false，勿当成成功） */
+async function injectPdfEntryAndOffered(tabId) {
+  await injectPdfEntry(tabId);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId, frameIds: [0] },
+    func: async () => {
+      const p = window.__IL_PDF_ENTRY_RESULT__;
+      if (p != null && typeof p.then === 'function') return !!(await p);
+      return !!document.getElementById('il-pdf-entry');
+    },
+  });
+  return !!results?.[0]?.result;
+}
+
 async function injectWithRetry(tabId) {
   let lastErr;
   for (let attempt = 1; attempt <= 4; attempt++) {
@@ -137,15 +272,45 @@ async function setBadgeError(brief) {
  */
 async function activateTab(tab, opts = {}) {
   if (!tab?.id) return;
+  // query：普通网页 / 自家 PDF viewer 预填浮条；Chrome PDF 宿主页只出入口按钮（无浮条）
   const query = typeof opts.query === 'string' ? opts.query.trim() : '';
+  let freshUrl = tab.url || '';
+
+  // optional file:// request 必须在手势同步阶段启动；前面不能有 await
+  const fileHostPromise = isFileUrl(freshUrl) ? requestFileHostFromGesture() : null;
 
   // 手势当下立刻读一次 url；无 url 时仍尝试 get（activeTab 授权后）
   try {
     const fresh = await chrome.tabs.get(tab.id);
-    if (isRestrictedUrl(fresh.url || tab.url)) {
-      const url = fresh.url || tab.url || '(empty)';
-      console.warn('[InfoLens] cannot run on this page:', url);
+    freshUrl = fresh.url || tab.url || '';
+
+    // 自家 PDF 查看器：与网页一样 open 浮条（有选区则预填）；关靠条内 × / Esc
+    if (isOwnPdfViewerUrl(freshUrl)) {
+      await chrome.tabs
+        .sendMessage(tab.id, { type: 'il-pdf-open-bar', query })
+        .catch(() => {
+          /* 查看器页未加载完/未监听则忽略 */
+        });
+      await chrome.action.setBadgeText({ text: '' });
+      return;
+    }
+
+    if (isRestrictedUrl(freshUrl)) {
+      console.warn('[InfoLens] cannot run on this page:', freshUrl);
       await setBadgeError('bad page');
+      return;
+    }
+    if (!(await ensureFileUrlAccess(freshUrl, isFileUrl(freshUrl) ? fileHostPromise : null))) return;
+    if (isPdfUrl(freshUrl)) {
+      await injectPdfEntry(tab.id);
+      await chrome.action.setBadgeText({ text: '' });
+      return;
+    }
+
+    // 无 .pdf 后缀时，先由页内按 Content-Type / 魔数确认；不能等普通注入失败，
+    // 因为 Chrome 的 PDF 宿主页在部分版本仍允许注入 content.js，届时会误开搜索条。
+    if (await injectPdfEntryAndOffered(tab.id)) {
+      await chrome.action.setBadgeText({ text: '' });
       return;
     }
 
@@ -162,6 +327,15 @@ async function activateTab(tab, opts = {}) {
     }
     await chrome.action.setBadgeText({ text: '' });
   } catch (err) {
+    // 无 .pdf 后缀的 PDF（如 arxiv）：content 注入常失败；仅当页内确认是 PDF 并挂上入口才算成功
+    try {
+      if (await injectPdfEntryAndOffered(tab.id)) {
+        await chrome.action.setBadgeText({ text: '' });
+        return;
+      }
+    } catch (pdfErr) {
+      console.error('[InfoLens] pdf-entry inject failed', pdfErr);
+    }
     console.error('[InfoLens] inject failed', err);
     console.error('[InfoLens] tip: use a normal http(s) article tab (not chrome://, PDF, Web Store); reload extension, then click again after the page finishes loading.');
     await setBadgeError('inject');
@@ -356,7 +530,7 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onDisconnect.addListener(() => ac.abort());
 });
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'il-analyze-semantic') {
     (async () => {
       try {
@@ -390,6 +564,114 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         );
         sendResponse({ ok: true, data });
       } catch (err) {
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (
+    msg?.type === 'il-pdf-upload-start' ||
+    msg?.type === 'il-pdf-upload-chunk' ||
+    msg?.type === 'il-pdf-upload-finish'
+  ) {
+    (async () => {
+      try {
+        const id = typeof msg.id === 'string' ? msg.id : '';
+        if (!id) throw new Error('PDF upload id missing');
+        if (msg.type === 'il-pdf-upload-start') {
+          if (typeof globalThis.IL_pdfStashStartUpload !== 'function') {
+            throw new Error('PDF stash upload API missing');
+          }
+          await globalThis.IL_pdfStashStartUpload({ id, fileName: msg.fileName });
+        } else if (msg.type === 'il-pdf-upload-chunk') {
+          if (typeof globalThis.IL_pdfStashAppendUploadChunk !== 'function') {
+            throw new Error('PDF stash upload API missing');
+          }
+          await globalThis.IL_pdfStashAppendUploadChunk({
+            id,
+            index: msg.index,
+            base64: msg.base64,
+            byteLength: msg.byteLength,
+          });
+        } else {
+          if (typeof globalThis.IL_pdfStashFinishUpload !== 'function') {
+            throw new Error('PDF stash upload API missing');
+          }
+          await globalThis.IL_pdfStashFinishUpload({
+            id,
+            chunkCount: msg.chunkCount,
+            byteLength: msg.byteLength,
+          });
+          const viewer = chrome.runtime.getURL('pdf/viewer.html');
+          await chrome.tabs.create({ url: `${viewer}?id=${encodeURIComponent(id)}` });
+        }
+        sendResponse({ ok: true });
+      } catch (err) {
+        console.error('[InfoLens] pdf upload failed', err);
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg?.type === 'il-open-pdf-viewer') {
+    // file://：页内无法 fetch，SW 读 sender.tab.url（点图标时已 request optional file://
+    // +「允许访问文件网址」）；本地只多这一类 optional，与 http 路径不对称是刻意的。
+    let data = msg.data;
+    if (ArrayBuffer.isView(data)) {
+      data = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+    }
+    const fileName = typeof msg.fileName === 'string' && msg.fileName.trim() ? msg.fileName.trim() : 'document.pdf';
+    const id = crypto.randomUUID();
+    (async () => {
+      try {
+        if (!(data instanceof ArrayBuffer) || data.byteLength < 5) {
+          const tabUrl = sender.tab?.url || '';
+          if (!isFileUrl(tabUrl)) {
+            throw new Error('missing pdf data');
+          }
+          if (!(await hasFileToggle())) {
+            try {
+              await openFileAccessHelp();
+            } catch {
+              /* ignore */
+            }
+            throw new Error('Allow access to file URLs is off — enable it in chrome://extensions');
+          }
+          const hasHost = await chrome.permissions.contains({ origins: [FILE_ORIGIN] });
+          if (!hasHost) {
+            // 打开按钮手势到不了 SW 的 request；再点工具栏图标走静默 optional grant
+            throw new Error('Local file permission missing — click the InfoLens toolbar icon once, then retry');
+          }
+          let res;
+          try {
+            res = await fetch(tabUrl);
+          } catch (err) {
+            throw new Error(`Cannot read local PDF (${String(err?.message || err)})`);
+          }
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          data = await res.arrayBuffer();
+          const head = new Uint8Array(data, 0, Math.min(4, data.byteLength));
+          if (
+            head.byteLength < 4 ||
+            head[0] !== 0x25 ||
+            head[1] !== 0x50 ||
+            head[2] !== 0x44 ||
+            head[3] !== 0x46
+          ) {
+            throw new Error('not a PDF');
+          }
+        }
+        if (typeof globalThis.IL_pdfStashPut !== 'function') {
+          throw new Error('PDF stash API missing');
+        }
+        await globalThis.IL_pdfStashPut({ id, data, fileName });
+        const viewer = chrome.runtime.getURL('pdf/viewer.html');
+        await chrome.tabs.create({ url: `${viewer}?id=${encodeURIComponent(id)}` });
+        sendResponse({ ok: true, id });
+      } catch (err) {
+        console.error('[InfoLens] pdf stash failed', err);
         sendResponse({ ok: false, error: String(err?.message || err) });
       }
     })();

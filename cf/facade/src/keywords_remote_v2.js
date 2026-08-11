@@ -465,10 +465,10 @@ export async function streamKeywordsV2(env, query, text, emit, signal) {
   sseFeeder(''); // 冲刷 SSE 残留帧行
 
   if (emittedRows === 0) {
-    // 合法零词（模型返回空数组）与解析失败要区分：parseSubmitKeywordsArguments
-    // 对空数组返回 []，非空却 0 条有效返回 null。整块路径已按此对齐。
+    // 零行 emit：合法零词（空数组，或有词但原文全对不上——与「找不到则跳过」同）→ 成功；
+    // 解析失败（null，含非空却 0 条有效）→ 仍报错。与非流式 keywordsToTokenAttention 对齐。
     const parsed = parseSubmitKeywordsArguments(argsBuffer.trim());
-    if (parsed !== null && parsed.length === 0) return;
+    if (parsed !== null) return;
     throw new Error('unparseable tool arguments output: no keyword rows emitted');
   }
 }

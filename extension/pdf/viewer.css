@@ -1,0 +1,256 @@
+/* InfoLens PDF viewer（最小 MVP）— 配套 viewer.html */
+:root {
+  color-scheme: light dark;
+  --pv-toolbar-bg: #2d2e30;
+  --pv-toolbar-border: #1d1d1f;
+  --pv-text: #e8eaed;
+  --pv-dim: #9aa0a6;
+  --pv-accent: #1e6fff;
+  --pv-page-bg: #b8c4ce;
+  --pv-page-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --pv-toolbar-bg: #f1f3f4;
+    --pv-toolbar-border: #dadce0;
+    --pv-text: #202124;
+    --pv-dim: #5f6368;
+    --pv-page-bg: #7d8c94;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+html {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
+body {
+  display: flex;
+  flex-direction: row;
+  background: var(--pv-toolbar-bg);
+}
+
+#il-pv-toolbar {
+  flex: 0 0 40px;
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0 10px;
+  border-left: 1px solid var(--pv-toolbar-border);
+  background: var(--pv-toolbar-bg);
+  color: var(--pv-text);
+  font-size: 11px;
+}
+
+#il-pv-status {
+  max-width: 36px;
+  padding: 0 2px;
+  color: var(--pv-dim);
+  font-size: 9px;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+#il-pv-status[hidden] {
+  display: none;
+}
+
+#il-pv-status.is-error {
+  display: block;
+  color: #f28b82;
+}
+
+@media (prefers-color-scheme: light) {
+  #il-pv-status.is-error {
+    color: #d93025;
+  }
+}
+
+.il-pv-spacer {
+  flex: 1 1 auto;
+  min-height: 8px;
+}
+
+.il-pv-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.il-pv-sep {
+  width: 16px;
+  height: 1px;
+  margin: 14px 0;
+  background: var(--pv-toolbar-border);
+}
+
+.il-pv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--pv-text);
+  cursor: pointer;
+}
+
+.il-pv-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--pv-text) 10%, transparent);
+}
+
+.il-pv-btn:disabled {
+  color: var(--pv-dim);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.il-pv-icon {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.il-pv-zoom-label {
+  min-height: 1.1em;
+  padding: 1px 0;
+  color: var(--pv-text);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  text-align: center;
+  user-select: none;
+}
+
+.il-pv-page-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  color: var(--pv-text);
+  user-select: none;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.il-pv-gray {
+  color: var(--pv-dim);
+}
+
+#il-pv-page {
+  font-weight: 500;
+  font-size: 12px;
+}
+
+#il-pv-total {
+  font-size: 10px;
+}
+
+main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+#il-pv-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 10px 32px;
+  background: var(--pv-toolbar-bg);
+}
+
+#il-pv-pages {
+  position: relative; /* underline overlay (#il-overlay-host) 挂在此，覆盖多页 */
+  margin: 0 auto;
+  width: -moz-fit-content;
+  width: fit-content;
+  /* 与 viewport.scale 同步，供下划线粗细随缩放变化（viewer.js 写入） */
+  --il-pdf-scale: 1;
+}
+
+/* content.css 里线粗为屏像素常量；PDF 下随 --il-pdf-scale 放大/缩小 */
+#il-pv-pages .il-chunk-underline,
+#il-pv-pages .il-chunk-underline-pending {
+  height: calc(2px * var(--il-pdf-scale));
+  border-radius: calc(2px * var(--il-pdf-scale));
+}
+#il-pv-pages .il-chunk-underline-pending {
+  transform: translateY(calc(2px * var(--il-pdf-scale)));
+}
+#il-pv-pages .il-token-underline {
+  height: calc(3px * var(--il-pdf-scale));
+  border-radius: calc(2px * var(--il-pdf-scale));
+  transform: translateY(calc(-1px * var(--il-pdf-scale)));
+}
+
+.il-pv-page {
+  position: relative;
+  width: fit-content;
+  margin: 0 auto 16px;
+  background: var(--pv-page-bg);
+  box-shadow: var(--pv-page-shadow);
+}
+
+/* textLayer 盖在 canvas 之上：文字 color:transparent，仅承载选中/复制/Range 坐标。
+ * 位置/字号由 pdfjs renderTextLayer 生成，用 calc(var(--scale-factor) * …px) 定位，
+ * --scale-factor 由 viewer.js 在容器上注入（=== viewport.scale）。
+ * token 不走本层 ::highlight（会蒙字），见 content.css .il-token-underline。 */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 1;
+  line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 2;
+  --scale-factor: 1;
+}
+
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+/* 语义高亮：网页 ::highlight；PDF .il-token-underline（见 content.css） */
+
+/*
+ * truncated：网页用改字色；PDF textLayer 字本透明，若设 color 会露出第二层字（与 canvas 双影）。
+ * 这里强制 color:transparent，改用半透明白底压暗未分析区（PDF 页多为白纸）。
+ */
+::highlight(il-truncated) {
+  color: transparent;
+  background-color: rgba(255, 255, 255, 0.55);
+}
+
+.textLayer span::selection {
+  background: rgba(30, 111, 255, 0.32);
+  color: transparent;
+}
+
+/* Chrome：多行选区时绝对定位 br 会在行左侧画出色条（pdf.js#13840） */
+.textLayer br::selection {
+  background: transparent;
+}

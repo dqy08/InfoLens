@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>InfoLens — file access</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fg: #1a1a1a;
+      --muted: #555;
+      --bg: #f7f7f5;
+      --btn: #1a1a1a;
+      --btn-fg: #fff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #f2f2f0;
+        --muted: #aaa;
+        --bg: #161616;
+        --btn: #eee;
+        --btn-fg: #111;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      font: 16px/1.5 system-ui, sans-serif;
+      color: var(--fg);
+      background: var(--bg);
+    }
+    main { max-width: 34rem; }
+    h1 { font-size: 1.35rem; font-weight: 650; margin: 0 0 0.75rem; }
+    p { margin: 0 0 0.85rem; color: var(--muted); }
+    ol { margin: 0 0 1.25rem; padding-left: 1.25rem; color: var(--muted); }
+    li { margin: 0.35rem 0; }
+    strong { color: var(--fg); font-weight: 600; }
+    button {
+      font: inherit;
+      font-weight: 600;
+      padding: 0.65rem 1rem;
+      border: 0;
+      border-radius: 8px;
+      background: var(--btn);
+      color: var(--btn-fg);
+      cursor: pointer;
+    }
+    button:hover:not(:disabled) { filter: brightness(1.08); }
+    button:disabled { opacity: 0.55; cursor: default; }
+    #status { margin: 0.85rem 0 0; min-height: 1.5em; color: var(--muted); font-size: 0.95rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="title"></h1>
+    <p id="lead"></p>
+    <ol id="steps"></ol>
+    <button type="button" id="primary-btn"></button>
+    <p id="status"></p>
+  </main>
+  <script src="file-access.js"></script>
+</body>
+</html>
