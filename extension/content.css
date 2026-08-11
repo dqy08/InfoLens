@@ -7,7 +7,7 @@
  *
  * token（网页）：::highlight(il-token-*) 底色在真实字下
  * token（PDF）：.il-token-underline 红下划线
- * gray：::highlight(il-gray)，统一灰 = CanvasText×Canvas
+ * gray：::highlight(il-gray)，统一灰 = CanvasText×Canvas（仅根内未分析后缀）
  * underline / pending-underline（网页）：::highlight 蓝下划线
  * underline / pending-underline（PDF）：#il-overlay-host 盖层，可叠画；统一蓝
  * pending：等待染色；若最终无红色 token，则留下作 chunk 级匹配标记
@@ -142,23 +142,4 @@
   text-decoration-thickness: 2px;
   /* 相对导航线下移，同位叠画时仍可见 */
   text-underline-offset: 4px;
-}
-
-/*
- * 正文根以外（永远不会进语义分析）：fixed 四块遮罩拼出开洞（不用 999vmax box-shadow，避免小洞时巨影拖垮 layout）。
- * 色走向 Canvas，与上方 gray 字色灰同一套「往画布色靠」的观感；不挡点击。
- */
-#il-out-of-scope-mask {
-  position: fixed;
-  inset: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  pointer-events: none;
-  z-index: 2147483645;
-  overflow: hidden;
-}
-#il-out-of-scope-mask > span {
-  position: absolute;
-  background: color-mix(in srgb, Canvas 60%, transparent);
 }

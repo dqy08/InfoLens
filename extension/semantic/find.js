@@ -9,8 +9,8 @@
  *   不宜用字下 Highlight 红底；几何测量在 text layer 上仍有成本，重测须克制（增量、勿无谓全量）。
  *
  * token：网页 = ::highlight(il-token-*)；PDF = 红下划线（doc.tokenPaintMode）。
- * gray：网页 = ::highlight(il-gray) 根内未分析后缀 + #il-out-of-scope-mask 根外；
- *   PDF = #il-gray-mask 带状遮罩（避免上万 Range）。
+ * gray：网页 = ::highlight(il-gray) 根内未分析后缀；PDF = #il-gray-mask 带状遮罩（避免上万 Range）。
+ *   根外不置灰。另：输入聚焦且无搜索结果时短暂预览灰（blur / 开搜即撤）。
  * underline（导航）/ pending-underline：网页 = ::highlight 蓝下划线；PDF = overlay 蓝条。
  * pending：fill 前是「等待染色」；keywords 成功（含空 token_attention）后拆掉；失败则留下。
  * keywords：新扩展打 /api/v2/analyze-semantic-keywords（边缘远程，无重叠可上色）；旧路径留给旧扩展。
@@ -88,6 +88,8 @@
   let overlayEls = [];
   /** 置灰起点（码点）：从此到文末为 gray；null = 无置灰 */
   let grayFromCp = null;
+  /** 当前灰是否为「输入激活、尚无结果」时的范围预览（非搜索进度灰） */
+  let scopePreviewActive = false;
   /**
    * 长度 1 的搜索结果缓存（含 Stop 半成品）。close 清高亮但保留；
    * open 时若输入与正文未变则还原，避免重复请求。
@@ -408,7 +410,6 @@
     if (usesTokenOverlay()) {
       // PDF：全文 Highlight 每块重建上万 Range（实测占 chunk UI ~90%）；改为单层遮罩 O(1)
       CSS.highlights?.get(HL_GRAY)?.clear();
-      removeOutOfScopeMask();
       applyGrayMaskPdf();
       return;
     }
@@ -416,15 +417,10 @@
     const h = CSS.highlights.get(HL_GRAY);
     if (!h) throw new Error('highlight missing: il-gray');
     h.clear();
-    if (grayFromCp == null || !doc.getText() || !doc.isConnected()) {
-      removeOutOfScopeMask();
-      return;
-    }
+    if (grayFromCp == null || !doc.getText() || !doc.isConnected()) return;
     const fullCp = doc.getPaintLength();
     const cp0 = Math.max(0, Math.min(grayFromCp, fullCp));
     if (cp0 < fullCp) addCpRangeToHighlight(h, cp0, fullCp);
-    // 根外永不分析：开洞蒙层（与 gray 同系灰）
-    applyOutOfScopeMask();
   }
 
   /** PDF 未分析区：一块绝对定位半透明遮罩，随 analyzedCpEnd 只改 top/height */
@@ -469,68 +465,6 @@
     doc.getPaintMount()?.querySelector('#il-gray-mask')?.remove();
   }
 
-  /**
-   * 网页：正文根以外永不分析 → fixed 四块遮罩（上/下/左/右）压暗根外。
-   * 洞随 getBoundingClientRect 更新（滚动用 rAF）；PDF 不用（整页即根）。
-   */
-  function applyOutOfScopeMask() {
-    if (usesTokenOverlay()) {
-      removeOutOfScopeMask();
-      return;
-    }
-    if (grayFromCp == null || !doc.isConnected()) {
-      removeOutOfScopeMask();
-      return;
-    }
-    const root = doc.getRoot();
-    if (!root?.isConnected) {
-      removeOutOfScopeMask();
-      return;
-    }
-    const r = root.getBoundingClientRect();
-    if (r.width < 1 || r.height < 1) {
-      removeOutOfScopeMask();
-      return;
-    }
-    let el = document.getElementById('il-out-of-scope-mask');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'il-out-of-scope-mask';
-      el.setAttribute('aria-hidden', 'true');
-      for (let i = 0; i < 4; i++) el.appendChild(document.createElement('span'));
-      document.documentElement.appendChild(el);
-    }
-    const parts = el.children;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const top = Math.max(0, r.top);
-    const bottom = Math.min(vh, r.bottom);
-    const left = Math.max(0, r.left);
-    const right = Math.min(vw, r.right);
-    // 上
-    parts[0].style.cssText = `left:0;top:0;width:${vw}px;height:${top}px`;
-    // 下
-    parts[1].style.cssText = `left:0;top:${bottom}px;width:${vw}px;height:${Math.max(0, vh - bottom)}px`;
-    // 左（夹在上下之间，避免与上下重叠多画）
-    parts[2].style.cssText = `left:0;top:${top}px;width:${left}px;height:${Math.max(0, bottom - top)}px`;
-    // 右
-    parts[3].style.cssText = `left:${right}px;top:${top}px;width:${Math.max(0, vw - right)}px;height:${Math.max(0, bottom - top)}px`;
-  }
-
-  function removeOutOfScopeMask() {
-    document.getElementById('il-out-of-scope-mask')?.remove();
-  }
-
-  let outOfScopeMaskRaf = 0;
-  function scheduleOutOfScopeMask() {
-    if (usesTokenOverlay() || grayFromCp == null) return;
-    if (outOfScopeMaskRaf) return;
-    outOfScopeMaskRaf = requestAnimationFrame(() => {
-      outOfScopeMaskRaf = 0;
-      applyOutOfScopeMask();
-    });
-  }
-
   /** 取消蓝线 hold 计时（换 chunk / 清高亮时） */
   function cancelUnderlineHold() {
     if (underlineHoldTimer) {
@@ -539,15 +473,21 @@
     }
   }
 
-  function clearOverlays() {
+  /**
+   * @param {{ releaseDoc?: boolean }} [options] releaseDoc=false：保留 extract（输入中清结果后仍要示意待搜范围）
+   */
+  function clearOverlays({ releaseDoc = true } = {}) {
     revealGeneration += 1;
     cancelUnderlineHold();
     resetFollowQueue();
     clearGrayHighlight();
     clearTokenHighlights();
+    // 网页蓝线走 CSS Highlight，不在 overlayEls / token 清理里
+    CSS.highlights?.get(HL_UNDERLINE)?.clear();
+    CSS.highlights?.get(HL_PENDING_UNDERLINE)?.clear();
     clearOverlayEls();
     paintSpecs = [];
-    doc.release();
+    if (releaseDoc) doc.release();
   }
 
   const STATUS_FEEDBACK_ICON =
@@ -814,12 +754,14 @@
 
   /**
    * 清当前会话的渲染与搜索进度。
-   * @param {{ clearCache?: boolean }} [options] clearCache=true 时连 lastResult 一并丢弃（改 query / giveUp）
+   * @param {{ clearCache?: boolean, releaseDoc?: boolean }} [options]
+   *   clearCache=true 时连 lastResult 一并丢弃（改 query / giveUp）
+   *   releaseDoc=false：保留 extract（仅输入中清结果后立刻重画范围预览）
    */
-  function resetSearchSession({ clearCache = false } = {}) {
+  function resetSearchSession({ clearCache = false, releaseDoc = true } = {}) {
     keywordsPool.invalidate();
     renderQueue.reset();
-    clearOverlays();
+    clearOverlays({ releaseDoc });
     clearFindStatus();
     slowBackendNoticeShown = false;
     clearSlowBackendNotice();
@@ -834,6 +776,32 @@
     if (clearCache) lastResult = null;
     updateNav();
     renderSemanticMatchProgress();
+  }
+
+  /** 是否已有搜索结果 UI（预览灰不算） */
+  function hasSearchResultUi() {
+    return (
+      paintSpecs.length > 0 ||
+      matchedChunks.length > 0 ||
+      semanticMatchProgress.length > 0 ||
+      (grayFromCp != null && !scopePreviewActive)
+    );
+  }
+
+  /** 仅：输入聚焦 + 未在搜 + 无结果 → 正文置灰示意范围（不负责 extract；由 open / 保留 extract 的 input 路径保证） */
+  function applyScopePreviewIfIdle() {
+    const input = /** @type {HTMLInputElement | null} */ (ui$('semantic_find_input'));
+    if (!input || uiShadow?.activeElement !== input || searching || hasSearchResultUi()) return;
+    if (!doc.isConnected() || !doc.getText().trim()) return;
+    scopePreviewActive = true;
+    grayFromCp = 0;
+    applyGrayHighlight();
+  }
+
+  /** 仅撤范围预览灰，不动真实搜索灰/高亮；开搜后 blur 不撤（由搜索路径接管） */
+  function clearScopePreview() {
+    if (!scopePreviewActive || searching) return;
+    clearGrayHighlight();
   }
 
   /**
@@ -941,10 +909,7 @@
       remeasureUnderlines({
         preserveUnderline: paintSpecs.some((s) => s.kind === 'underline'),
       });
-      if (grayFromCp != null) {
-        if (usesTokenOverlay()) applyGrayMaskPdf();
-        else applyOutOfScopeMask();
-      }
+      if (grayFromCp != null && usesTokenOverlay()) applyGrayMaskPdf();
       return;
     }
 
@@ -986,10 +951,8 @@
    * 滚动专用：overlay 与正文同层时，相对坐标不随滚动变。
    * 仅当 mutation（dirty）或节点摘挂（stale）时才落入 syncPaintAfterLayout。
    * 纯滚动跳过 remesure，避免长文/多 pending 时主线程空转。
-   * 根外 fixed 蒙层洞口随视口变，须每帧更新。
    */
   function syncPaintAfterScroll() {
-    applyOutOfScopeMask();
     if (!doc.isConnected()) {
       if (
         paintSpecs.length > 0 ||
@@ -1008,7 +971,6 @@
 
   let scrollPaintTimer = 0;
   function scheduleSyncPaintAfterScroll() {
-    scheduleOutOfScopeMask();
     if (scrollPaintTimer) clearTimeout(scrollPaintTimer);
     scrollPaintTimer = window.setTimeout(() => {
       scrollPaintTimer = 0;
@@ -1140,10 +1102,10 @@
   }
 
   function clearGrayHighlight() {
+    scopePreviewActive = false;
     grayFromCp = null;
     CSS.highlights?.get(HL_GRAY)?.clear();
     removeGrayMaskPdf();
-    removeOutOfScopeMask();
   }
 
   /**
@@ -1151,6 +1113,7 @@
    * 扩展：::highlight(il-gray)，统一灰 = CanvasText × Canvas（不跟各段自身字色）。
    */
   function setGrayHighlight(analyzedCpEnd) {
+    scopePreviewActive = false;
     grayFromCp = analyzedCpEnd;
     applyGrayHighlight();
   }
@@ -1164,11 +1127,8 @@
       remeasureUnderlines({
         preserveUnderline: paintSpecs.some((s) => s.kind === 'underline'),
       });
-      // gray / 根外蒙层随布局重定位
-      if (grayFromCp != null) {
-        if (usesTokenOverlay()) applyGrayMaskPdf();
-        else applyOutOfScopeMask();
-      }
+      // PDF gray 遮罩随布局重定位
+      if (grayFromCp != null && usesTokenOverlay()) applyGrayMaskPdf();
     });
   }
 
@@ -1919,13 +1879,19 @@
     });
     findInput.addEventListener('focus', () => {
       void ensureHistory().then(renderHistoryDropdown);
+      applyScopePreviewIfIdle();
+    });
+    findInput.addEventListener('blur', () => {
+      clearScopePreview();
     });
     findInput.addEventListener('input', () => {
       if (searching) return;
       // 输入框内容一变（无论是手改还是点 × 清空），旧的渲染状态即视为过期，统一清掉
-      resetSearchSession({ clearCache: true });
+      // releaseDoc=false：仍聚焦时要立刻重画范围预览，避免每键 Readability
+      resetSearchSession({ clearCache: true, releaseDoc: false });
       syncClearButton(false);
       if (uiShadow?.activeElement === findInput) renderHistoryDropdown();
+      applyScopePreviewIfIdle();
     });
     findInput.addEventListener('keydown', (e) => {
       // 输入框 Enter：与上次搜索 query 一致 → 上下翻匹配（无匹配则空操作）；
@@ -2709,6 +2675,8 @@
         refreshExtract();
         renderSemanticMatchProgress();
         if (!prefill) tryRestoreLastResult(input?.value?.trim() || '');
+        // extract/还原之后再决定：仅输入仍聚焦且无结果时示意范围
+        applyScopePreviewIfIdle();
       } catch (err) {
         console.error('[InfoLens] extract aborted:', err?.message || err);
         if (isPdfNoTextError(err)) {
@@ -2777,11 +2745,6 @@
       clearTimeout(scrollPaintTimer);
       scrollPaintTimer = 0;
     }
-    if (outOfScopeMaskRaf) {
-      cancelAnimationFrame(outOfScopeMaskRaf);
-      outOfScopeMaskRaf = 0;
-    }
-    removeOutOfScopeMask();
     window.removeEventListener('scroll', scheduleSyncPaintAfterScroll, true);
     window.removeEventListener('scrollend', syncPaintAfterScroll, true);
     window.removeEventListener('resize', scheduleReflow);
