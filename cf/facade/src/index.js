@@ -10,6 +10,7 @@
  *   - /api/analyze-semantic-relevance → Hy3（旧扩展，单 text）
  *   - /api/v2/analyze-semantic-relevance → Hy3 多切片（新扩展/新前端，texts 数组，新版本主力）
  *   - /api/v2/analyze-semantic-keywords → Hy3（新扩展）
+ * - /api/extension-feedback → STATE KV（单向黑箱；TTL 90 天）；读：GET /facade-extension-feedback
  * - keywords 双轨（扩展审核慢于 Worker，过渡期内并存）：
  *   - 旧扩展：/api/analyze-semantic-keywords → 仍 HF/Home 梯度归因（COMPUTE_PATHS，勿接到 v2）
  *   旧扩展升级完后再决定退役旧路径，或把旧入口接到 v2；当前不切
@@ -29,6 +30,12 @@ import {
   KEYWORDS_V2_PATH,
   handleRemoteKeywordsV2,
 } from './keywords_remote_v2.js';
+import {
+  FEEDBACK_PATH,
+  FEEDBACK_ADMIN_PATH,
+  handlePostExtensionFeedback,
+  handleListExtensionFeedback,
+} from './extension_feedback.js';
 const HOP_BY_HOP = new Set([
   'connection',
   'keep-alive',
@@ -376,6 +383,9 @@ async function handleRequest(request, env) {
   if (url.pathname === '/facade-home-probe') {
     return handleHomeProbe(request, env);
   }
+  if (url.pathname === FEEDBACK_ADMIN_PATH) {
+    return handleListExtensionFeedback(request, env, json, requireAdmin);
+  }
   if (url.pathname === '/' || url.pathname === '/facade-health') {
     return json(request, { ok: true, facade: true });
   }
@@ -383,6 +393,11 @@ async function handleRequest(request, env) {
   const path = url.pathname;
   if (!(path === '/api' || path.startsWith('/api/') || path === '/demo' || path.startsWith('/demo/'))) {
     return json(request, { ok: false, error: 'not_found' }, 404);
+  }
+
+  // 扩展反馈：边缘写 KV，不碰 HF/Home
+  if (path === FEEDBACK_PATH) {
+    return handlePostExtensionFeedback(request, env, json);
   }
 
   // 边缘远程：始终 OpenRouter，不碰 home allow/health。
