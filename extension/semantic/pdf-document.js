@@ -293,7 +293,10 @@
       ensurePaintMount,
       getPaintMount: () => paintMount,
       clientRectToMountPos,
-      /** PDF canvas 含字形，红底会蒙字；改用与导航线同几何的红下划线。 */
+      /**
+       * PDF canvas 含字形，红底会蒙字；token/蓝线用 overlay（getClientRects → div）。
+       * 比网页 Highlight 贵：重测须增量、避免无谓全量；与 find.js usesTokenOverlay 对应。
+       */
       tokenPaintMode: () => 'token-underline',
       findScrollRoot,
       startLayoutWatch,

@@ -389,7 +389,7 @@
       ensurePaintMount,
       getPaintMount: () => paintMount,
       clientRectToMountPos,
-      /** 网页：真实 DOM 字在上，CSS Highlight 底色在字下，观感正确 */
+      /** 网页：真实 DOM 字在上，CSS Highlight 底色/下划线在字下；勿改 overlay（getClientRects 在重页上极贵） */
       tokenPaintMode: () => 'highlight',
       findScrollRoot,
       startLayoutWatch,

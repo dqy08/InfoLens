@@ -2,9 +2,16 @@
  * InfoLens semantic find core — shared by webpage + PDF.
  * Document model via DocumentAdapter (`doc`); paint/search/UI live here.
  *
- * token：网页 = CSS Custom Highlight；PDF = 红下划线（见 doc.tokenPaintMode）。
- * truncated：CSS Custom Highlight（CanvasText×Canvas 统一灰）。
- * underline（导航）/ pending-underline：#il-overlay-host 盖层，可叠画；统一蓝。
+ * 画线/染色两条实现（性能差一个数量级以上，勿混用）：
+ * - 网页：CSS Custom Highlight（只绑 Range，浏览器绘底色/下划线；不做 getClientRects、不插 overlay DOM）。
+ *   复杂宿主页（如 ChatGPT）上整段 Range.getClientRects 可达秒级；Highlight 通常亚毫秒～数毫秒。
+ * - PDF：#il-overlay-host 盖层（Range → getClientRects → 绝对定位 div）。canvas 含字形，
+ *   不宜用字下 Highlight 红底；几何测量在 text layer 上仍有成本，重测须克制（增量、勿无谓全量）。
+ *
+ * token：网页 = ::highlight(il-token-*)；PDF = 红下划线（doc.tokenPaintMode）。
+ * gray：网页 = ::highlight(il-gray) 根内未分析后缀 + #il-out-of-scope-mask 根外；
+ *   PDF = #il-gray-mask 带状遮罩（避免上万 Range）。
+ * underline（导航）/ pending-underline：网页 = ::highlight 蓝下划线；PDF = overlay 蓝条。
  * pending：fill 前是「等待染色」；keywords 成功（含空 token_attention）后拆掉；失败则留下。
  * keywords：新扩展打 /api/v2/analyze-semantic-keywords（边缘远程，无重叠可上色）；旧路径留给旧扩展。
  *
@@ -29,10 +36,11 @@
   /** token 背景量化档数（il-token-0..15） */
   const TOKEN_LEVELS = 16;
   const HL_TOKEN_PREFIX = 'il-token-';
-  const HL_TRUNCATED = 'il-truncated';
-  // SYNC: client/src/shared/vis/constants.ts → HIGHLIGHT_CONSTANTS
-  const CHUNK_HIGHLIGHT_HOLD_MS = 200;
-  const CHUNK_HIGHLIGHT_FADE_MS = 1400;
+  const HL_GRAY = 'il-gray';
+  const HL_UNDERLINE = 'il-underline';
+  const HL_PENDING_UNDERLINE = 'il-pending-underline';
+  // 扩展：蓝线只有一段可见时长（无站内 hold→fade 两段；网页 Highlight / PDF overlay 一致）
+  const CHUNK_HIGHLIGHT_HOLD_MS = 1000;
   // SYNC: client/src/shared/vis/GLTR_Text_Box.ts → scrollToUnicodeCharOffset 默认 viewportYRatio
   const CHUNK_JUMP_VIEWPORT_Y_RATIO = 0.2;
   /** 流式逐块跟随的跳转节流间隔：跨刷新率统一。 */
@@ -72,14 +80,14 @@
   let matchIndex = -1;
   /**
    * 逻辑区间（去重键）；与 DOM 节点分离。
-   * token：CSS Highlight 或红下划线（PDF）；underline / pending-underline：蓝 overlay。
+   * token：CSS Highlight 或红下划线（PDF）；underline / pending-underline：网页 Highlight / PDF overlay。
    * @type {{ kind: 'token' | 'underline' | 'pending-underline', cp0: number, cp1: number, level?: number }[]}
    */
   let paintSpecs = [];
   /** @type {HTMLElement[]} token / underline / pending-underline DOM */
   let overlayEls = [];
-  /** 未分析后缀置灰：已分析码点终点；null = 无置灰 */
-  let truncatedAnalyzedCpEnd = null;
+  /** 置灰起点（码点）：从此到文末为 gray；null = 无置灰 */
+  let grayFromCp = null;
   /**
    * 长度 1 的搜索结果缓存（含 Stop 半成品）。close 清高亮但保留；
    * open 时若输入与正文未变则还原，避免重复请求。
@@ -91,7 +99,7 @@
    *   semanticMatchProgress: typeof semanticMatchProgress,
    *   progressTextLength: number,
    *   matchIndex: number,
-   *   truncatedAnalyzedCpEnd: number | null,
+   *   grayFromCp: number | null,
    *   selectedProgressChunkStart: number | null,
   *   statuses: Array<{ tone: string, label: string, detail: string, error_detail?: string, resumable?: boolean }>,
   *   searchMeta: typeof lastSearchMeta,
@@ -118,8 +126,8 @@
    * 从根上避免布尔防重入在旧循环未退出时被强制复位导致的并行双循环。 */
   let followRafId = 0;
   let underlineHoldTimer = 0;
-  let underlineFadeTimer = 0;
-  let underlineFadeGen = 0;
+  /** 每次跳转或清理递增，使已排队的滚动回调失效。 */
+  let revealGeneration = 0;
 
   /**
    * 在途上限 concurrency 的任务池；多出的在前端短队列等。
@@ -255,11 +263,19 @@
     return /\S/.test(chunk.text);
   }
 
-  // ---------- paint：token = Highlight 或红下划线；truncated = Highlight；underline = overlay ----------
+  // ---------- paint：token / gray / underline（网页 Highlight；PDF overlay） ----------
 
-  /** PDF：canvas 含字形，用红下划线；网页：CSS Highlight */
+  /** PDF：canvas 含字形，用红下划线 overlay；网页：CSS Highlight（无几何测量） */
   function usesTokenOverlay() {
     return doc.tokenPaintMode?.() === 'token-underline';
+  }
+
+  /**
+   * 是否用 overlay 画蓝线。与 usesTokenOverlay 同判据：PDF 是，网页否。
+   * 网页必须走 ::highlight——整 chunk 的 getClientRects 在重 DOM 上可至秒级；Highlight 只绑 Range。
+   */
+  function usesUnderlineOverlay() {
+    return usesTokenOverlay();
   }
 
   /** score∈(0,1] → 0..TOKEN_LEVELS-1；≤0 不画 */
@@ -275,7 +291,7 @@
     }
   }
 
-  /** 注册 il-token-0..15 / il-truncated；已存在则复用（PDF token 走下划线时仍注册 truncated） */
+  /** 注册 il-token-0..15 / il-gray / 蓝线；已存在则复用（PDF token 走下划线时仍注册 gray） */
   function ensureHighlightRegistry() {
     requireHighlightApi();
     if (!usesTokenOverlay()) {
@@ -287,11 +303,21 @@
           CSS.highlights.set(name, h);
         }
       }
+      if (!CSS.highlights.has(HL_UNDERLINE)) {
+        const h = new Highlight();
+        h.priority = TOKEN_LEVELS + 2;
+        CSS.highlights.set(HL_UNDERLINE, h);
+      }
+      if (!CSS.highlights.has(HL_PENDING_UNDERLINE)) {
+        const h = new Highlight();
+        h.priority = TOKEN_LEVELS + 3;
+        CSS.highlights.set(HL_PENDING_UNDERLINE, h);
+      }
     }
-    if (!CSS.highlights.has(HL_TRUNCATED)) {
+    if (!CSS.highlights.has(HL_GRAY)) {
       const h = new Highlight();
       h.priority = TOKEN_LEVELS + 1;
-      CSS.highlights.set(HL_TRUNCATED, h);
+      CSS.highlights.set(HL_GRAY, h);
     }
   }
 
@@ -313,7 +339,9 @@
 
   function clearAllCustomHighlights() {
     clearTokenHighlights();
-    CSS.highlights?.get(HL_TRUNCATED)?.clear();
+    CSS.highlights?.get(HL_GRAY)?.clear();
+    CSS.highlights?.get(HL_UNDERLINE)?.clear();
+    CSS.highlights?.get(HL_PENDING_UNDERLINE)?.clear();
   }
 
   /** 把 cp 区间加到指定 Highlight（按块切开，跳过纯空白） */
@@ -376,35 +404,146 @@
     }
   }
 
-  function applyTruncatedHighlight() {
+  function applyGrayHighlight() {
+    if (usesTokenOverlay()) {
+      // PDF：全文 Highlight 每块重建上万 Range（实测占 chunk UI ~90%）；改为单层遮罩 O(1)
+      CSS.highlights?.get(HL_GRAY)?.clear();
+      removeOutOfScopeMask();
+      applyGrayMaskPdf();
+      return;
+    }
     ensureHighlightRegistry();
-    const h = CSS.highlights.get(HL_TRUNCATED);
-    if (!h) throw new Error('highlight missing: il-truncated');
+    const h = CSS.highlights.get(HL_GRAY);
+    if (!h) throw new Error('highlight missing: il-gray');
     h.clear();
-    if (truncatedAnalyzedCpEnd == null || !doc.getText() || !doc.isConnected()) return;
+    if (grayFromCp == null || !doc.getText() || !doc.isConnected()) {
+      removeOutOfScopeMask();
+      return;
+    }
     const fullCp = doc.getPaintLength();
-    const cp0 = Math.max(0, Math.min(truncatedAnalyzedCpEnd, fullCp));
-    if (cp0 >= fullCp) return;
-    addCpRangeToHighlight(h, cp0, fullCp);
+    const cp0 = Math.max(0, Math.min(grayFromCp, fullCp));
+    if (cp0 < fullCp) addCpRangeToHighlight(h, cp0, fullCp);
+    // 根外永不分析：开洞蒙层（与 gray 同系灰）
+    applyOutOfScopeMask();
   }
 
-  /** SYNC: client/src/shared/vis/GLTR_Text_Box.ts → cancelChunkHighlightFade */
-  function cancelUnderlineFade() {
-    underlineFadeGen += 1;
+  /** PDF 未分析区：一块绝对定位半透明遮罩，随 analyzedCpEnd 只改 top/height */
+  function applyGrayMaskPdf() {
+    if (!doc.isConnected()) {
+      removeGrayMaskPdf();
+      return;
+    }
+    doc.ensurePaintMount();
+    const mount = doc.getPaintMount();
+    const root = doc.getRoot();
+    if (!mount || !root) {
+      removeGrayMaskPdf();
+      return;
+    }
+    if (grayFromCp == null || !doc.getText()) {
+      removeGrayMaskPdf();
+      return;
+    }
+    const fullCp = doc.getPaintLength();
+    const cp0 = Math.max(0, Math.min(grayFromCp, fullCp));
+    if (cp0 >= fullCp) {
+      removeGrayMaskPdf();
+      return;
+    }
+    let mask = mount.querySelector('#il-gray-mask');
+    if (!mask) {
+      mask = document.createElement('div');
+      mask.id = 'il-gray-mask';
+      mount.insertBefore(mask, mount.firstChild);
+    }
+    const mountRect = mount.getBoundingClientRect();
+    const rootRect = root.getBoundingClientRect();
+    const startRect = clientRectNearCp(cp0);
+    const top = startRect ? startRect.top - mountRect.top : 0;
+    const height = Math.max(0, rootRect.bottom - mountRect.top - top);
+    mask.style.top = `${top}px`;
+    mask.style.height = `${height}px`;
+  }
+
+  function removeGrayMaskPdf() {
+    doc.getPaintMount()?.querySelector('#il-gray-mask')?.remove();
+  }
+
+  /**
+   * 网页：正文根以外永不分析 → fixed 四块遮罩（上/下/左/右）压暗根外。
+   * 洞随 getBoundingClientRect 更新（滚动用 rAF）；PDF 不用（整页即根）。
+   */
+  function applyOutOfScopeMask() {
+    if (usesTokenOverlay()) {
+      removeOutOfScopeMask();
+      return;
+    }
+    if (grayFromCp == null || !doc.isConnected()) {
+      removeOutOfScopeMask();
+      return;
+    }
+    const root = doc.getRoot();
+    if (!root?.isConnected) {
+      removeOutOfScopeMask();
+      return;
+    }
+    const r = root.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) {
+      removeOutOfScopeMask();
+      return;
+    }
+    let el = document.getElementById('il-out-of-scope-mask');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'il-out-of-scope-mask';
+      el.setAttribute('aria-hidden', 'true');
+      for (let i = 0; i < 4; i++) el.appendChild(document.createElement('span'));
+      document.documentElement.appendChild(el);
+    }
+    const parts = el.children;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const top = Math.max(0, r.top);
+    const bottom = Math.min(vh, r.bottom);
+    const left = Math.max(0, r.left);
+    const right = Math.min(vw, r.right);
+    // 上
+    parts[0].style.cssText = `left:0;top:0;width:${vw}px;height:${top}px`;
+    // 下
+    parts[1].style.cssText = `left:0;top:${bottom}px;width:${vw}px;height:${Math.max(0, vh - bottom)}px`;
+    // 左（夹在上下之间，避免与上下重叠多画）
+    parts[2].style.cssText = `left:0;top:${top}px;width:${left}px;height:${Math.max(0, bottom - top)}px`;
+    // 右
+    parts[3].style.cssText = `left:${right}px;top:${top}px;width:${Math.max(0, vw - right)}px;height:${Math.max(0, bottom - top)}px`;
+  }
+
+  function removeOutOfScopeMask() {
+    document.getElementById('il-out-of-scope-mask')?.remove();
+  }
+
+  let outOfScopeMaskRaf = 0;
+  function scheduleOutOfScopeMask() {
+    if (usesTokenOverlay() || grayFromCp == null) return;
+    if (outOfScopeMaskRaf) return;
+    outOfScopeMaskRaf = requestAnimationFrame(() => {
+      outOfScopeMaskRaf = 0;
+      applyOutOfScopeMask();
+    });
+  }
+
+  /** 取消蓝线 hold 计时（换 chunk / 清高亮时） */
+  function cancelUnderlineHold() {
     if (underlineHoldTimer) {
       clearTimeout(underlineHoldTimer);
       underlineHoldTimer = 0;
     }
-    if (underlineFadeTimer) {
-      clearTimeout(underlineFadeTimer);
-      underlineFadeTimer = 0;
-    }
   }
 
   function clearOverlays() {
-    cancelUnderlineFade();
+    revealGeneration += 1;
+    cancelUnderlineHold();
     resetFollowQueue();
-    clearTruncatedHighlight();
+    clearGrayHighlight();
     clearTokenHighlights();
     clearOverlayEls();
     paintSpecs = [];
@@ -714,13 +853,13 @@
   /** 覆盖写入长度 1 结果缓存（含状态条；specs 浅拷贝，避免后续 clear 连带清空） */
   function snapshotLastResult(query) {
     if (!query) return;
-    // 无结果（含「只有错误」）：不更新缓存。注意搜索开头会 setTruncatedHighlight(0)，
+    // 无结果（含「只有错误」）：不更新缓存。注意搜索开头会 setGrayHighlight(0)，
     // 0 不是 null，不能当「已有分析进度」。
     if (
       paintSpecs.length === 0 &&
       matchedChunks.length === 0 &&
       semanticMatchProgress.length === 0 &&
-      !(truncatedAnalyzedCpEnd > 0)
+      !(grayFromCp > 0)
     ) {
       return;
     }
@@ -733,7 +872,7 @@
       semanticMatchProgress: semanticMatchProgress.map((c) => ({ ...c })),
       progressTextLength,
       matchIndex,
-      truncatedAnalyzedCpEnd,
+      grayFromCp,
       selectedProgressChunkStart,
       statuses: statusEntries.map((e) => ({
         tone: e.tone,
@@ -757,8 +896,8 @@
     matchIndex = lastResult.matchIndex;
     selectedProgressChunkStart = lastResult.selectedProgressChunkStart ?? null;
     lastSearchMeta = lastResult.searchMeta ? { ...lastResult.searchMeta } : null;
-    if (lastResult.truncatedAnalyzedCpEnd != null) {
-      setTruncatedHighlight(lastResult.truncatedAnalyzedCpEnd);
+    if (lastResult.grayFromCp != null) {
+      setGrayHighlight(lastResult.grayFromCp);
     }
     renderAllSpecs({
       preserveUnderline: paintSpecs.some((s) => s.kind === 'underline'),
@@ -778,7 +917,7 @@
   }
 
   /**
-   * ChatGPT 等会在滚动时改布局/换节点；滚动停稳或尺寸变化后按需重绑 Range / 重测 underline。
+   * 布局变化后同步高亮：ChatGPT 等会在滚动时改 DOM；尺寸变化也会改几何。
    * 无 mutation 且 pieces 仍 connected 时跳过 collectTextMap，且不重绑 CSS Highlight（只重测线）。
    */
   function syncPaintAfterLayout() {
@@ -786,7 +925,7 @@
       // 提取根本身被换掉/摘除（如翻译插件重建了整个容器）：有残留结果才需要放弃，否则什么都没画，无需处理
       if (
         paintSpecs.length > 0 ||
-        truncatedAnalyzedCpEnd != null ||
+        grayFromCp != null ||
         matchedChunks.length > 0 ||
         semanticMatchProgress.length > 0
       ) {
@@ -794,7 +933,7 @@
       }
       return;
     }
-    if (paintSpecs.length === 0 && truncatedAnalyzedCpEnd == null) return;
+    if (paintSpecs.length === 0 && grayFromCp == null) return;
 
     const stale = doc.piecesStale();
     // 无 mutation 且节点仍在：Highlight Range 仍有效；overlay（PDF 红线 / 蓝线）重测
@@ -802,6 +941,10 @@
       remeasureUnderlines({
         preserveUnderline: paintSpecs.some((s) => s.kind === 'underline'),
       });
+      if (grayFromCp != null) {
+        if (usesTokenOverlay()) applyGrayMaskPdf();
+        else applyOutOfScopeMask();
+      }
       return;
     }
 
@@ -839,8 +982,38 @@
     });
   }
 
-  function scheduleSyncPaintAfterLayout() {
-    doc.scheduleLayoutSync();
+  /**
+   * 滚动专用：overlay 与正文同层时，相对坐标不随滚动变。
+   * 仅当 mutation（dirty）或节点摘挂（stale）时才落入 syncPaintAfterLayout。
+   * 纯滚动跳过 remesure，避免长文/多 pending 时主线程空转。
+   * 根外 fixed 蒙层洞口随视口变，须每帧更新。
+   */
+  function syncPaintAfterScroll() {
+    applyOutOfScopeMask();
+    if (!doc.isConnected()) {
+      if (
+        paintSpecs.length > 0 ||
+        grayFromCp != null ||
+        matchedChunks.length > 0 ||
+        semanticMatchProgress.length > 0
+      ) {
+        giveUp();
+      }
+      return;
+    }
+    if (paintSpecs.length === 0 && grayFromCp == null) return;
+    if (!doc.isContentDirty() && !doc.piecesStale()) return;
+    syncPaintAfterLayout();
+  }
+
+  let scrollPaintTimer = 0;
+  function scheduleSyncPaintAfterScroll() {
+    scheduleOutOfScopeMask();
+    if (scrollPaintTimer) clearTimeout(scrollPaintTimer);
+    scrollPaintTimer = window.setTimeout(() => {
+      scrollPaintTimer = 0;
+      syncPaintAfterScroll();
+    }, 120);
   }
 
   function specKey(s) {
@@ -855,12 +1028,15 @@
   }
 
   /** underline 盖层：data-il-underline=nav|pending，供 preserve/fade 识别（不依赖 className 全等） */
-  function appendUnderlineRect(rect, kind) {
+  function appendUnderlineRect(rect, kind, cp0, cp1) {
     if (!doc.getPaintMount()) throw new Error('paint mount missing');
     const el = document.createElement('div');
     const pending = kind === 'pending-underline';
     el.className = pending ? 'il-chunk-underline-pending' : 'il-chunk-underline';
     el.dataset.ilUnderline = pending ? 'pending' : 'nav';
+    // 按 chunk 区间标记，便于增量拆除（避免全量重画剩余 pending）
+    el.dataset.ilCp0 = String(cp0);
+    el.dataset.ilCp1 = String(cp1);
     const { x, y } = doc.clientRectToMountPos(rect);
     el.style.left = `${x}px`;
     el.style.top = `${y}px`;
@@ -885,7 +1061,7 @@
       overlayEls = [];
       return;
     }
-    // SYNC: GLTR_Text_Box.clearHighlight({ preserveChunkInterval: true }) — 留蓝导航线 DOM（含 fade）
+    // SYNC: GLTR_Text_Box.clearHighlight({ preserveChunkInterval: true }) — 留蓝导航线 DOM（hold 中）
     clearOverlayRole('pending');
   }
 
@@ -894,16 +1070,30 @@
       if (!/\S/.test(range.toString())) continue;
       for (const r of range.getClientRects()) {
         if (r.width < 1 || r.height < 1) continue;
-        appendUnderlineRect(r, spec.kind);
+        appendUnderlineRect(r, spec.kind, spec.cp0, spec.cp1);
       }
     }
   }
 
   /**
-   * 只重画一类下划线（不动 token / truncated / 另一类线）。
+   * 只重画一类下划线（不动 token / gray / 另一类线）。
+   * 网页：CSS Highlight（无 getClientRects）；PDF：overlay。
    * @param {'underline' | 'pending-underline'} kind
    */
   function renderUnderlinesOfKind(kind) {
+    if (!usesUnderlineOverlay()) {
+      ensureHighlightRegistry();
+      const name = kind === 'pending-underline' ? HL_PENDING_UNDERLINE : HL_UNDERLINE;
+      const h = CSS.highlights.get(name);
+      if (!h) throw new Error(`highlight missing: ${name}`);
+      h.clear();
+      if (!doc.isConnected()) return;
+      for (const s of paintSpecs) {
+        if (s.kind !== kind) continue;
+        addCpRangeToHighlight(h, s.cp0, s.cp1);
+      }
+      return;
+    }
     const role = kind === 'pending-underline' ? 'pending' : 'nav';
     if (!doc.isConnected()) {
       clearOverlayRole(role);
@@ -920,7 +1110,7 @@
    * 只重测依赖 getClientRects 的 overlay（PDF 红下划线 + 蓝线）。
    * CSS Highlight 的 Range 随节点走，几何变时不必重绑。
    * @param {{ preserveUnderline?: boolean }} [options]
-   *   preserveUnderline：不拆蓝导航线 DOM（hold/fade 不被流式更新打断）
+   *   preserveUnderline：不拆蓝导航线 DOM（hold 不被流式更新打断）
    */
   function remeasureUnderlines(options) {
     if (usesTokenOverlay()) renderTokenHighlights();
@@ -929,7 +1119,7 @@
   }
 
   /**
-   * 全量：token + truncated + 下划线。仅用于节点重绑 / 还原等必须整表一致的场景。
+   * 全量：token + gray + 下划线。仅用于节点重绑 / 还原等必须整表一致的场景。
    * 网页 token 在此画；PDF token 由 remeasureUnderlines 画（避免与之重复清+重绘）。
    * @param {{ preserveUnderline?: boolean }} [options]
    */
@@ -937,7 +1127,7 @@
     if (!doc.isConnected()) return 0;
     doc.ensurePaintMount();
     if (!usesTokenOverlay()) renderTokenHighlights();
-    applyTruncatedHighlight();
+    applyGrayHighlight();
     remeasureUnderlines(options);
     return overlayEls.length;
   }
@@ -949,18 +1139,20 @@
     return paintSpecs.length > before ? 1 : 0;
   }
 
-  function clearTruncatedHighlight() {
-    truncatedAnalyzedCpEnd = null;
-    CSS.highlights?.get(HL_TRUNCATED)?.clear();
+  function clearGrayHighlight() {
+    grayFromCp = null;
+    CSS.highlights?.get(HL_GRAY)?.clear();
+    removeGrayMaskPdf();
+    removeOutOfScopeMask();
   }
 
   /**
-   * SYNC：站内 truncated-text 只改字色。
-   * 扩展：::highlight(il-truncated)，统一灰 = CanvasText × Canvas（不跟各段自身字色）。
+   * SYNC：站内 .gray-text 只改字色。
+   * 扩展：::highlight(il-gray)，统一灰 = CanvasText × Canvas（不跟各段自身字色）。
    */
-  function setTruncatedHighlight(analyzedCpEnd) {
-    truncatedAnalyzedCpEnd = analyzedCpEnd;
-    applyTruncatedHighlight();
+  function setGrayHighlight(analyzedCpEnd) {
+    grayFromCp = analyzedCpEnd;
+    applyGrayHighlight();
   }
 
   function scheduleReflow() {
@@ -972,12 +1164,17 @@
       remeasureUnderlines({
         preserveUnderline: paintSpecs.some((s) => s.kind === 'underline'),
       });
+      // gray / 根外蒙层随布局重定位
+      if (grayFromCp != null) {
+        if (usesTokenOverlay()) applyGrayMaskPdf();
+        else applyOutOfScopeMask();
+      }
     });
   }
 
   /** DOM 调试：画出全部提取 chunk 下划线（非语义 match 导航） */
   function paintAllUnderlines() {
-    cancelUnderlineFade();
+    cancelUnderlineHold();
     paintSpecs = paintSpecs.filter((s) => s.kind !== 'underline');
     matchedChunks.forEach((c) => {
       upsertSpec({ kind: 'underline', cp0: c.start, cp1: c.end });
@@ -990,7 +1187,7 @@
    * 语义导航只画当前 match 一条下划线（paintAllUnderlines 仅 DOM 调试，非站内语义行为）
    */
   function setCurrentUnderline(chunk) {
-    cancelUnderlineFade();
+    cancelUnderlineHold();
     paintSpecs = paintSpecs.filter((s) => s.kind !== 'underline');
     if (chunk) {
       upsertSpec({ kind: 'underline', cp0: chunk.start, cp1: chunk.end });
@@ -998,38 +1195,13 @@
     renderUnderlinesOfKind('underline');
   }
 
-  /**
-   * SYNC: client/src/shared/vis/HighlightManager.ts → fadeOutCharIntervalUnderlines
-   * + GLTR_Text_Box.fadeCurrentChunkHighlight
-   */
-  function fadeCurrentUnderline() {
-    const gen = ++underlineFadeGen;
-    // 只 fade 导航线；等待线独立，不在此列。当前 chunk 状态不随正文下划线淡出。
-    const lines = overlayEls.filter((el) => el.dataset.ilUnderline === 'nav');
-    if (!lines.length) {
-      paintSpecs = paintSpecs.filter((s) => s.kind !== 'underline');
-      if (lastResult) snapshotLastResult(lastResult.query);
-      return;
-    }
-    for (const el of lines) {
-      el.style.transition = '';
-      el.style.opacity = '1';
-    }
-    requestAnimationFrame(() => {
-      if (gen !== underlineFadeGen) return;
-      for (const el of lines) {
-        el.style.transition = `opacity ${CHUNK_HIGHLIGHT_FADE_MS}ms ease-out`;
-        el.style.opacity = '0';
-      }
-      underlineFadeTimer = window.setTimeout(() => {
-        underlineFadeTimer = 0;
-        if (gen !== underlineFadeGen) return;
-        paintSpecs = paintSpecs.filter((s) => s.kind !== 'underline');
-        clearOverlayRole('nav');
-        // 下划线已淡出，但当前 chunk 仍由进度图蓝线和导航逻辑保留。
-        if (lastResult) snapshotLastResult(lastResult.query);
-      }, CHUNK_HIGHLIGHT_FADE_MS);
-    });
+  /** hold 到期：清导航蓝线（网页 Highlight / PDF overlay 同效，无渐隐） */
+  function clearCurrentUnderline() {
+    paintSpecs = paintSpecs.filter((s) => s.kind !== 'underline');
+    if (usesUnderlineOverlay()) clearOverlayRole('nav');
+    else CSS.highlights?.get(HL_UNDERLINE)?.clear();
+    // 下划线已清，但当前 chunk 仍由进度图蓝线和导航逻辑保留。
+    if (lastResult) snapshotLastResult(lastResult.query);
   }
 
   /**
@@ -1122,7 +1294,7 @@
    * 不阻塞、不 await —— 数据到达即入队，独立 RAF 循环每 CHUNK_SEARCH_FOLLOW_STEP_MS
    * 出队一个展示，保证每块逐个滚动，且数据流水线（relevance 消费 / keywords 发起）不受影响。
    * 队列项：{ cp, reveal }，cp 为待滚动到的 chunk 起点；reveal=true 时该块还附带完整展示
-   * （跳转 + 进度图 + 导航态 + 下划线 show/hold/fade），当前仅首个匹配块用。
+   * （跳转 + 进度图 + 导航态 + 下划线 hold），当前仅首个匹配块用。
    * 灰字/等待线/keywords 上色均由主循环实时处理，不进本队列。
    */
   function enqueueFollow(item) {
@@ -1157,7 +1329,7 @@
   /**
    * SYNC: client/src/shared/vis/GLTR_Text_Box.ts → jumpToChunkHighlight
    * + client/src/features/analysis/semanticFindBar.ts → jumpTo
-   * 下划线 → 滚到起点 → hold → fade
+   * 下划线 → 滚到起点 → hold 后清除
    */
   function jumpToMatch(index) {
     if (!matchedChunks.length) return;
@@ -1202,23 +1374,25 @@
   }
 
   /**
-   * 选中并展示一个 chunk：进度图线变蓝 + 下划线 → 滚到起点 → hold → 下划线 fade。
+   * 选中并展示一个 chunk：进度图线变蓝 + 下划线 → 滚到起点 → hold 后清除。
    * 当前 chunk 状态持续保留，进度图点击与上下按钮共用。
    * 由「点击进度线」（selectProgressChunk）和「上下按钮跳转」（jumpToMatch）共用，
    * 保证两者对进度图选中态的表现始终一致。
    */
   function revealChunk(chunk) {
-    setCurrentUnderline(chunk);
+    const generation = ++revealGeneration;
+    cancelUnderlineHold();
     selectedProgressChunkStart = chunk.start;
     matchIndex = matchedChunks.findIndex((item) => item.start === chunk.start);
     renderSemanticMatchProgress();
-    // 导航态需要跟着刷新快照，否则关闭再打开搜索栏时，下划线（回退到旧快照）
-    // 会和进度图选中线（读实时变量）错位
-    if (lastResult) snapshotLastResult(lastResult.query);
+    // 清旧导航线并快照（新选中态、无导航线）；滚完再画，避免旧 timer/旧线与新跳转打架
+    clearCurrentUnderline();
     scrollToChunkStart(chunk.start, () => {
+      if (generation !== revealGeneration || !doc.isConnected()) return;
+      setCurrentUnderline(chunk);
       underlineHoldTimer = window.setTimeout(() => {
         underlineHoldTimer = 0;
-        fadeCurrentUnderline();
+        clearCurrentUnderline();
       }, CHUNK_HIGHLIGHT_HOLD_MS);
     });
   }
@@ -1394,12 +1568,23 @@
     });
   }
 
-  /** hybrid：拆掉某 chunk 的等待线（只动 pending overlay） */
+  /** hybrid：拆掉某 chunk 的等待线（只动该区间 pending；网页 Highlight 整表重绑仍很便宜） */
   function clearPendingUnderline(cp0, cp1) {
     paintSpecs = paintSpecs.filter(
       (s) => !(s.kind === 'pending-underline' && s.cp0 === cp0 && s.cp1 === cp1)
     );
-    renderUnderlinesOfKind('pending-underline');
+    if (!usesUnderlineOverlay()) {
+      renderUnderlinesOfKind('pending-underline');
+      return;
+    }
+    const key0 = String(cp0);
+    const key1 = String(cp1);
+    overlayEls = overlayEls.filter((el) => {
+      if (el.dataset.ilUnderline !== 'pending') return true;
+      if (el.dataset.ilCp0 !== key0 || el.dataset.ilCp1 !== key1) return true;
+      el.remove();
+      return false;
+    });
   }
 
   /**
@@ -2070,7 +2255,7 @@
     chromeBar?.classList.remove('is-input-active');
     syncClearButton(on);
     // 搜索结束时若正文仍脏（例如 debounce 未到期），补一次 sync
-    if (!on && doc.isContentDirty()) scheduleSyncPaintAfterLayout();
+    if (!on && doc.isContentDirty()) doc.scheduleLayoutSync();
     // 结束/停止时重绘进度图：把「等待首 chunk」的空框架收起（hidden 判据依赖 searching）
     if (!on) renderSemanticMatchProgress();
   }
@@ -2141,7 +2326,7 @@
           resumeFrom < prevEnd ? prevEnd : resumeFrom + MAX_CHUNKS_PER_SEARCH;
         allChunks = contentChunks.slice(0, windowEnd);
         analyzedCpEnd =
-          truncatedAnalyzedCpEnd ??
+          grayFromCp ??
           (resumeFrom > 0 ? semanticMatchProgress[resumeFrom - 1].end : 0);
         lastSearchMeta = {
           query,
@@ -2186,8 +2371,8 @@
           ? doc.toPaintOffset(allChunks[allChunks.length - 1].end)
           : 0;
 
-        // SYNC：站内 truncated-text — 搜索开始全文置灰，随已分析边界后移恢复原色
-        setTruncatedHighlight(0);
+        // SYNC：站内 .gray-text — 搜索开始全文置灰，随已分析边界后移恢复原色
+        setGrayHighlight(0);
       }
 
       // --- 段1：relevance（V2 批量：≤RELEVANCE_BATCH 组成一请求，渲染按序消费每片）---
@@ -2373,7 +2558,7 @@
         });
         renderSemanticMatchProgress();
         // 灰字（已分析边界）随数据到达实时推进
-        setTruncatedHighlight(analyzedCpEnd);
+        setGrayHighlight(analyzedCpEnd);
 
         // 流式逐块展示：首匹配之前的块逐个入队跟随；遇到首个匹配块则入队一个 reveal 项
         // （自带定位 + 完整展示）并停止入队——之后不再入任何项，视口停留首匹配，后续块不滚动跟随
@@ -2393,8 +2578,20 @@
             matchDegree: degree,
           });
           // 匹配：先画等待线；keywords 异步返回后拆线并上色（不反压段1渲染节奏）
-          upsertSpec({ kind: 'pending-underline', cp0: chunkCpStart, cp1: chunkCpEnd });
-          renderUnderlinesOfKind('pending-underline');
+          // 增量只画本块，避免每次全量重画全部 pending（大 PDF 上会随匹配数线性变慢）
+          const pendingSpec = { kind: 'pending-underline', cp0: chunkCpStart, cp1: chunkCpEnd };
+          upsertSpec(pendingSpec);
+          if (doc.isConnected()) {
+            if (usesUnderlineOverlay()) {
+              doc.ensurePaintMount();
+              paintUnderlineSpec(pendingSpec);
+            } else {
+              ensureHighlightRegistry();
+              const h = CSS.highlights.get(HL_PENDING_UNDERLINE);
+              if (!h) throw new Error('highlight missing: il-pending-underline');
+              addCpRangeToHighlight(h, pendingSpec.cp0, pendingSpec.cp1);
+            }
+          }
           // 顺序渲染：匹配 chunk 入队（首块即出队开始上色，红按块顺序推进）
           renderQueue.enqueue(chunkCpStart, chunkCpEnd);
           // keywords 请求立即发出（不进队列）：利用逐块展示的缓冲期掩饰首个匹配的关键词延迟
@@ -2576,19 +2773,29 @@
   function destroy() {
     close();
     doc.stopLayoutWatch();
-    window.removeEventListener('scroll', scheduleSyncPaintAfterLayout, true);
-    window.removeEventListener('scrollend', syncPaintAfterLayout, true);
+    if (scrollPaintTimer) {
+      clearTimeout(scrollPaintTimer);
+      scrollPaintTimer = 0;
+    }
+    if (outOfScopeMaskRaf) {
+      cancelAnimationFrame(outOfScopeMaskRaf);
+      outOfScopeMaskRaf = 0;
+    }
+    removeOutOfScopeMask();
+    window.removeEventListener('scroll', scheduleSyncPaintAfterScroll, true);
+    window.removeEventListener('scrollend', syncPaintAfterScroll, true);
     window.removeEventListener('resize', scheduleReflow);
     window.visualViewport?.removeEventListener('resize', scheduleReflow);
   }
 
-  // underline 与正文同层滚动；token/truncated 为 CSS Highlight。布局漂移时重绑 Range / 重测 underline。
-  // 布局 hooks：adapter 内 debounce 后回调 sync；window scroll 走同一 schedule。
+  // underline 与正文同层滚动；token/gray 为 CSS Highlight。布局漂移时重绑 Range / 重测 underline。
+  // ResizeObserver → syncPaintAfterLayout（含稳定布局下的 remesure）。
+  // scroll：仅 dirty/stale 时同步；纯滚动跳过 remesure（网页长文与 PDF 同理）。
   doc.startLayoutWatch({
     onContentMaybeChanged: syncPaintAfterLayout,
   });
-  window.addEventListener('scroll', scheduleSyncPaintAfterLayout, true);
-  window.addEventListener('scrollend', syncPaintAfterLayout, true);
+  window.addEventListener('scroll', scheduleSyncPaintAfterScroll, true);
+  window.addEventListener('scrollend', syncPaintAfterScroll, true);
   window.addEventListener('resize', () => {
     scheduleReflow();
     renderSemanticMatchProgress();

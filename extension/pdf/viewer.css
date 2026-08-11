@@ -237,11 +237,20 @@ main {
 /* 语义高亮：网页 ::highlight；PDF .il-token-underline（见 content.css） */
 
 /*
- * truncated：网页用改字色；PDF textLayer 字本透明，若设 color 会露出第二层字（与 canvas 双影）。
- * 这里强制 color:transparent，改用半透明白底压暗未分析区（PDF 页多为白纸）。
+ * gray：网页用改字色；PDF textLayer 字本透明，若设 color 会露出第二层字（与 canvas 双影）。
+ * 网页仍走 ::highlight(il-gray)；PDF 用 #il-gray-mask 单层遮罩（避免每块重建上万 Range）。
  */
-::highlight(il-truncated) {
+::highlight(il-gray) {
   color: transparent;
+  background-color: rgba(255, 255, 255, 0.55);
+}
+
+#il-gray-mask {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+  z-index: 1;
   background-color: rgba(255, 255, 255, 0.55);
 }
 

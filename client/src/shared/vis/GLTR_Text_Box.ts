@@ -341,7 +341,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
 
         if (canIncremental) {
             // Step 1: 更新置灰边界（cheap DOM 操作，color 不影响布局）
-            this.updateTruncatedBoundary(rd);
+            this.updateGrayBoundary(rd);
             // 置灰边界变化会改变 textNode/span 内容，导致 TokenPositionCalculator 的 textNodeIndex 失效，必须重置
             this.positionCalculator?.resetIndex();
 
@@ -519,7 +519,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
      * 计算已分析文本的截断边界，超出部分将灰显。
      * 优先级：语义分析 chunkInfos > 语义分析 rawScores > 信息密度 tokens
      */
-    private computeTruncatedLength(
+    private computeGrayBoundaryLength(
         tokens: Array<{ offset: [number, number] }>,
         rawScores?: (number | undefined)[],
         chunkInfos?: Array<{ startOffset: number; endOffset: number }>
@@ -544,10 +544,10 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
     }
 
     /**
-     * 仅更新置灰边界（truncated-text span 的起止位置），不重建 text-layer。
-     * truncated-text 只改变 color，不影响布局，SVG positions 仍然有效。
+     * 仅更新置灰边界（gray-text span 的起止位置），不重建 text-layer。
+     * gray-text 只改变 color，不影响布局，SVG positions 仍然有效。
      */
-    private updateTruncatedBoundary(rd: FrontendAnalyzeResult): void {
+    private updateGrayBoundary(rd: FrontendAnalyzeResult): void {
         const baseNode = this.base.node();
         if (!baseNode) return;
         const textLayer = baseNode.querySelector('.text-layer') as HTMLElement | null;
@@ -557,24 +557,24 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
             rawScoresNormed?: (number | undefined)[];
             chunkInfos?: Array<{ startOffset: number; endOffset: number }>;
         };
-        const truncatedLength = this.computeTruncatedLength(rd.bpe_strings, rdExt.rawScoresNormed, rdExt.chunkInfos);
+        const grayFrom = this.computeGrayBoundaryLength(rd.bpe_strings, rdExt.rawScoresNormed, rdExt.chunkInfos);
         const fullText = rd.originalText;
-        const isTruncated = truncatedLength < fullText.length;
+        const hasGray = grayFrom < fullText.length;
 
         const textNode = textLayer.firstChild;
         if (textNode && textNode.nodeType === Node.TEXT_NODE) {
-            const expected = isTruncated ? fullText.slice(0, truncatedLength) : fullText;
+            const expected = hasGray ? fullText.slice(0, grayFrom) : fullText;
             if (textNode.textContent !== expected) textNode.textContent = expected;
         }
 
-        const span = textLayer.querySelector('.truncated-text') as HTMLElement | null;
-        const remaining = isTruncated ? fullText.slice(truncatedLength) : '';
+        const span = textLayer.querySelector('.gray-text') as HTMLElement | null;
+        const remaining = hasGray ? fullText.slice(grayFrom) : '';
         if (remaining) {
             if (span) {
                 if (span.textContent !== remaining) span.textContent = remaining;
             } else {
                 const newSpan = document.createElement('span');
-                newSpan.className = 'truncated-text';
+                newSpan.className = 'gray-text';
                 newSpan.textContent = remaining;
                 textLayer.appendChild(newSpan);
             }
@@ -621,14 +621,14 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
             }
         ).rawScoresNormed;
         const chunkInfos = (rd as FrontendAnalyzeResult & { chunkInfos?: Array<{ startOffset: number; endOffset: number }> }).chunkInfos;
-        const truncatedLength = this.computeTruncatedLength(tokens, rawScores, chunkInfos);
-        const isTruncated = truncatedLength < fullText.length;
+        const grayFrom = this.computeGrayBoundaryLength(tokens, rawScores, chunkInfos);
+        const hasGray = grayFrom < fullText.length;
 
-        if (isTruncated) {
-            textContainer.appendChild(document.createTextNode(fullText.slice(0, truncatedLength)));
+        if (hasGray) {
+            textContainer.appendChild(document.createTextNode(fullText.slice(0, grayFrom)));
             const span = document.createElement('span');
-            span.className = 'truncated-text';
-            span.textContent = fullText.slice(truncatedLength);
+            span.className = 'gray-text';
+            span.textContent = fullText.slice(grayFrom);
             textContainer.appendChild(span);
         } else {
             textContainer.appendChild(document.createTextNode(fullText));

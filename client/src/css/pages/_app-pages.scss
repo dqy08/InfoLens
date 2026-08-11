@@ -327,10 +327,10 @@ select {
 }
 
 // 截断后的文本（被丢弃部分）灰色文字
-.truncated-text {
+.gray-text {
   display: inline;
   font-size: inherit;
-  color: var(--token-truncated-color);
+  color: var(--token-gray-color);
 }
 
 .token {

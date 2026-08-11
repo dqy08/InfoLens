@@ -412,7 +412,7 @@ $gen-attr-cached-demos-panel-width: 21em;
   // mock tool 占位：与 .gen-attr-dag-node-text 同源字号，italic 色见 _tool-calling-pending
   #results.gen-attr-results-surface.LMF .gen-attr-dag-svg .gen-attr-dag-node-text.tool-calling-pending-text {
     @include tcp.tool-calling-pending-text;
-    fill: var(--token-truncated-color);
+    fill: var(--token-gray-color);
   }
 
   #results.gen-attr-results-surface.LMF .gen-attr-dag-svg {

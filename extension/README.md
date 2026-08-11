@@ -3,6 +3,8 @@
 Chrome MV3 扩展：对当前网页做语义检索，叠层高亮（chunk 下划线 + token 染色）。  
 与 `backend/`、`client/` 同仓并列；只消费 API + 操作 DOM。
 
+高亮实现：网页用 CSS Custom Highlight（绑 Range，不做 `getClientRects`）；PDF 因 canvas 字形改 overlay 几何画线（更贵，重测须克制）。详见 `semantic/find.js` 文件头。
+
 Find bar 权威源在 `extension/ui/`，站内为手工副本。挂 Shadow DOM；主题跟系统 `prefers-color-scheme`。  
 正文：Readability 定根 + DOM 映回；失败即放弃。网页注入：`activeTab` + 手势后再注入。  
 PDF：http(s) 页内读字节；`file:` 由 SW 读 tab URL（`optional_host_permissions: file:///*`：先开「允许访问文件网址」，再点图标时静默 `permissions.request`——Chrome 对 `file://` 不弹系统窗；无宽 http(s)）→ IndexedDB → 查看器。
