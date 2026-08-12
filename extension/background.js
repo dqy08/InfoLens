@@ -14,6 +14,7 @@ const CONTENT_CSS = ['content.css'];
 const CONTENT_JS = [
   'config.js',
   'vendor/Readability.js',
+  'extractRootPatches.js',
   'articleRoot.js',
   'collectTextMap.js',
   'splitTextToChunks.js',

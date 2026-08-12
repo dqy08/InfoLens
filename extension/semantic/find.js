@@ -1918,14 +1918,33 @@
     wireBarDrag();
   }
 
-  /** 拖非可点区域（边距/分隔线等）移动整块 Find UI；用 right/top（默认右上角），不持久化 */
+  /**
+   * 实测 position:fixed 的含块（与 left/right/top/bottom:0 的探针同坐标系）。
+   * 不能用 documentElement.clientWidth：页面给 html 设 margin 时它会偏小（如 marxists.org），
+   * 拖拽夹紧会出现右侧死区。
+   */
+  function measureFixedViewport() {
+    const probe = document.createElement('div');
+    probe.style.cssText =
+      'position:fixed;left:0;top:0;right:0;bottom:0;visibility:hidden;pointer-events:none;margin:0;border:0;padding:0;';
+    document.documentElement.appendChild(probe);
+    const r = probe.getBoundingClientRect();
+    probe.remove();
+    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  }
+
+  /**
+   * 拖非可点区域移动整块 Find UI；不持久化。
+   * 默认 CSS 是 right/top；按下后改用 left/top 承接当前视觉位置（rect 恒等，无 viewport 反推）。
+   * 必须写 right:'auto' 盖掉 :host 的 right，否则 left+right 同时生效会把 host 拉宽。
+   */
   function wireBarDrag() {
     const barEl = uiQuery('.semantic-find-bar');
     const host = document.getElementById('il-find-root');
     if (!barEl || !host) return;
 
     const DRAG_EXEMPT = 'button, input, textarea, select, a, .semantic-search-history-dropdown';
-    /** @type {{ pointerId: number, startX: number, startY: number, originRight: number, originTop: number, width: number, height: number } | null} */
+    /** @type {{ pointerId: number, startX: number, startY: number, originLeft: number, originTop: number, width: number, height: number, vpLeft: number, vpTop: number, vpRight: number, vpBottom: number } | null} */
     let drag = null;
 
     barEl.addEventListener('pointerdown', (e) => {
@@ -1934,19 +1953,24 @@
       if (e.target.closest(DRAG_EXEMPT)) return;
 
       const rect = host.getBoundingClientRect();
-      const right = window.innerWidth - rect.right;
-      host.style.left = '';
-      host.style.right = `${right}px`;
+      const vp = measureFixedViewport();
+      host.style.position = 'fixed';
+      host.style.right = 'auto';
+      host.style.left = `${rect.left}px`;
       host.style.top = `${rect.top}px`;
 
       drag = {
         pointerId: e.pointerId,
         startX: e.clientX,
         startY: e.clientY,
-        originRight: right,
+        originLeft: rect.left,
         originTop: rect.top,
         width: rect.width,
         height: rect.height,
+        vpLeft: vp.left,
+        vpTop: vp.top,
+        vpRight: vp.right,
+        vpBottom: vp.bottom,
       };
       barEl.classList.add('is-dragging');
       barEl.setPointerCapture(e.pointerId);
@@ -1955,15 +1979,11 @@
 
     barEl.addEventListener('pointermove', (e) => {
       if (!drag || e.pointerId !== drag.pointerId) return;
-      // 右移 → right 减小
-      const maxRight = Math.max(0, window.innerWidth - drag.width);
-      const maxTop = Math.max(0, window.innerHeight - drag.height);
-      const right = Math.min(
-        maxRight,
-        Math.max(0, drag.originRight - (e.clientX - drag.startX)),
-      );
-      const top = Math.min(maxTop, Math.max(0, drag.originTop + (e.clientY - drag.startY)));
-      host.style.right = `${right}px`;
+      const maxLeft = Math.max(drag.vpLeft, drag.vpRight - drag.width);
+      const maxTop = Math.max(drag.vpTop, drag.vpBottom - drag.height);
+      const left = Math.min(maxLeft, Math.max(drag.vpLeft, drag.originLeft + (e.clientX - drag.startX)));
+      const top = Math.min(maxTop, Math.max(drag.vpTop, drag.originTop + (e.clientY - drag.startY)));
+      host.style.left = `${left}px`;
       host.style.top = `${top}px`;
     });
 
@@ -2720,20 +2740,20 @@
     host.style.right = '';
   }
 
-  /** 拖过后是固定 right/top：缩窗时夹回视口（贴右侧收），避免飞出看不见 */
+  /** 拖过后是 inline left/top：缩窗时夹回 fixed 含块，避免飞出看不见 */
   function clampBarIntoViewport() {
     const host = document.getElementById('il-find-root');
-    // 仅拖拽后写过 inline right/top；默认 CSS right/top 不夹
-    if (!host || (!host.style.right && !host.style.top)) return;
+    // 仅拖拽后写过 inline left（right 为 auto）；默认 CSS right/top 不夹
+    if (!host || !host.style.left) return;
     const rect = host.getBoundingClientRect();
-    const right = window.innerWidth - rect.right;
-    const maxRight = Math.max(0, window.innerWidth - rect.width);
-    const maxTop = Math.max(0, window.innerHeight - rect.height);
-    const nextRight = Math.min(maxRight, Math.max(0, right));
-    const nextTop = Math.min(maxTop, Math.max(0, rect.top));
-    if (nextRight === right && nextTop === rect.top) return;
-    host.style.left = '';
-    host.style.right = `${nextRight}px`;
+    const vp = measureFixedViewport();
+    const maxLeft = Math.max(vp.left, vp.right - rect.width);
+    const maxTop = Math.max(vp.top, vp.bottom - rect.height);
+    const nextLeft = Math.min(maxLeft, Math.max(vp.left, rect.left));
+    const nextTop = Math.min(maxTop, Math.max(vp.top, rect.top));
+    if (nextLeft === rect.left && nextTop === rect.top) return;
+    host.style.right = 'auto';
+    host.style.left = `${nextLeft}px`;
     host.style.top = `${nextTop}px`;
   }
 

@@ -1,6 +1,6 @@
 /**
- * 定根：text/plain 整页即正文；其余走 Readability（预打标 → clone → data-il-rid 映回）。
- * Readability 失败抛错，不回退启发式。
+ * 定根：text/plain 整页即正文；其余走 Readability（预打标 → clone → data-il-rid 映回），
+ * 再经 extractRootPatches 手动修补。Readability 失败抛错，不回退启发式。
  */
 (() => {
   const ATTR = 'data-il-rid';
@@ -34,6 +34,15 @@
     }
   }
 
+  /** @param {Element} root @param {Document} doc */
+  function applyPatches(root, doc) {
+    const apply = globalThis.IL_applyExtractRootPatches;
+    if (typeof apply !== 'function') {
+      throw new Error('IL_applyExtractRootPatches missing — inject extractRootPatches.js first');
+    }
+    return apply(root, doc);
+  }
+
   /**
    * @param {Document} doc
    * @returns {Element}
@@ -44,7 +53,7 @@
     }
 
     const plain = findPlainTextRoot(doc);
-    if (plain) return plain;
+    if (plain) return applyPatches(plain, doc);
 
     if (typeof Readability !== 'function') {
       throw new Error('Readability missing — inject vendor/Readability.js first');
@@ -66,7 +75,7 @@
       if (!root) {
         throw new Error(`Readability: live root not found (rid=${rid})`);
       }
-      return root;
+      return applyPatches(root, doc);
     } finally {
       unmark(doc);
     }
