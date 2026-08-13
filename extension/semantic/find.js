@@ -5,7 +5,7 @@
  * 范围 / Enter / 灰区：
  *   Enter = 开火并离开输入；翻匹配只用上下按钮（不绑键：留在输入则预览与结果灰打架）
  *   灰：聚焦未搜 = 预览（全文整篇 / 从当前位置则窗前灰+虚线）；开搜或失焦 = 窗前∪前沿后
- *   同 query 省请求：IL_enterSearchPlan（skip / resume / fresh）；0 匹配自动续批，有匹配停本批
+ *   Enter 每次开窗只画这一火（同窗已有匹配则只跳转）；搜索优先级见 runSearch
  *   进度图横轴 = 文档 Y；跳转目标 Y @ 焦点线，高亮块顶不高于 CHUNK_START_MAX_Y_RATIO
  *
  * 绘制（性能差一个数量级以上，勿混用）：
@@ -35,8 +35,8 @@
   if (!globalThis.IL_CONFIG) {
     throw new Error('IL_CONFIG missing — inject config.js before semantic/find.js');
   }
-  if (!globalThis.IL_enterSearchPlan) {
-    throw new Error('IL_enterSearchPlan missing — inject semantic/enterSearchPlan.js before find.js');
+  if (!globalThis.IL_analyzeCache) {
+    throw new Error('IL_analyzeCache missing — inject semantic/analyzeCache.js before find.js');
   }
   if (typeof doc.paintOffsetFromCaret !== 'function') {
     throw new Error('paintOffsetFromCaret missing on document adapter');
@@ -59,14 +59,12 @@
   const CHUNK_START_MAX_Y_RATIO = 0.2;
   /** 进度图水平跨度下限（块线 / 热区 / 视口带；极短段略放大）。 */
   const PROGRESS_MIN_WIDTH_PX = 2;
-  /** 流式逐块跟随的跳转节流间隔：跨刷新率统一。 */
-  const CHUNK_SEARCH_FOLLOW_STEP_MS = 66;
   // SYNC: client/src/shared/core/constants.ts → SEMANTIC_CHUNK_BYTES；算法见 splitTextToChunks.js
   // 已知问题：与后端 SEMANTIC_RUNTIME_CONFIGS 的 max_token_length（300~1000 token，按平台）无联动。
   // 数字/标点/代码等 token 密度高的内容，800 字节可能超出后端 token 限，被静默截断（仅日志提示），
   // 导致该 chunk 的相关度判断只基于截断后的前缀 —— 后果是漏检，非误报。无法靠调大固定 token 数根治。
   const CHUNK_BYTES = 800;
-  // 一批的大小（门面一次 texts 上限）；不是一次开火的完成条件。SYNC: 门面 MULTI_CHUNK_MAX / RELEVANCE_BATCH
+  // 一次请求的 texts 上限。SYNC: 门面 MULTI_CHUNK_MAX
   const MAX_CHUNKS_PER_SEARCH = 32;
   // 无匹配时自动续批上限（含 Enter/Continue 的第一批）。以后可做成 IL_CONFIG。
   const MAX_AUTO_CONTINUE_BATCHES = 8;
@@ -91,10 +89,12 @@
   let contentChunksCache = null;
   /** @type {{ tone: string, label: string, detail: string, error_detail?: string, resumable?: boolean, feedbackSent: boolean, el: HTMLElement }[]} */
   let statusEntries = [];
-  /** @type {{ query: string, contentChunkCount: number, truncated: boolean, windowStart: number, windowEnd: number } | null} */
+  /** @type {{ query: string, contentChunkCount: number, truncated: boolean, windowStart: number } | null} */
   let lastSearchMeta = null;
   /** true = 从视口焦点线附近最近块边界起搜；false = 全文从首块 */
   let searchFromCurrent = false;
+  /** 焦点线最近一次命中的码点；未命中时沿用，避免预览闪成整篇全亮 */
+  let lastFocusPaintCp = null;
   /** 本轮搜索是否已处理过 HF 慢速提示（展示或叉掉后均不再弹出） */
   let slowBackendNoticeShown = false;
   /** 进度图跳转高亮：覆盖当前跳转 Y 的块；hold 结束或未跳转为空 */
@@ -117,6 +117,12 @@
   let grayPrefixEndCp = null;
   /** 画出的灰后缀起点：[graySuffixStartCp, end)；null = 无后缀灰 */
   let graySuffixStartCp = null;
+  /** 网页灰后缀已加入 Highlight 的 Range；suffix 只前移时收缩，不重建剩余全文 */
+  let graySuffixRanges = [];
+  /** @type {number | null} */
+  let graySuffixPaintedAt = null;
+  /** @type {number | null} */
+  let grayPrefixPaintedAt = null;
   /**
    * 长度 1 的搜索结果缓存（含 Stop 半成品）。close 清高亮但保留；
    * open 时若输入与正文未变则还原，避免重复请求。
@@ -146,14 +152,6 @@
    */
   let sessionAbortCtrl = new AbortController();
   let reflowQueued = false;
-  /** 跟手跟随节流的"上次放行时刻"（性能时钟）。循环启动时重置为 0，使首帧必放行。 */
-  let lastFollowFrameAt = 0;
-  /** 待展示的滚动队列（{ start, end, reveal }）。数据到达即入队（不影响数据/请求节奏），
-   * 由 RAF 循环每 CHUNK_SEARCH_FOLLOW_STEP_MS 出队一个逐个滚动，保证每块都轮到展示。 */
-  const followQueue = [];
-  /** 消费循环的 RAF id；0 表示循环未在跑。存 id 以便 start/reset 时取消旧循环，
-   * 从根上避免布尔防重入在旧循环未退出时被强制复位导致的并行双循环。 */
-  let followRafId = 0;
   let underlineHoldTimer = 0;
   /** 每次跳转或清理递增，使已排队的滚动回调失效。 */
   let revealGeneration = 0;
@@ -212,6 +210,7 @@
             try {
               await job(g, signal);
             } catch (err) {
+              if (isAbortErr(err)) return;
               console.error('[InfoLens] pool job', err?.message || err);
             }
           },
@@ -256,7 +255,7 @@
 
   // 分块搜索两段流水线（渲染身兼两职：上段消费者 + 下段生产者）：
   //   [relevance 生产] ──► [渲染] ──匹配任务──► [keywords 消费]
-  // relevance：V2 按 ≤32 块成批请求，渲染按序消费每片；keywords 自有在途上限。
+  // relevance：本窗一次（缓存前缀本地回放，send 仅未缓存后缀 ≤32）；keywords 自有在途上限。
   const MAX_KEYWORDS_IN_FLIGHT = 4; // keywords 在途（池并发）
   /** 与 searchEpoch 分离：Stop/Continue 不该作废已匹配块的 keywords */
   const keywordsPool = createPool(MAX_KEYWORDS_IN_FLIGHT);
@@ -271,6 +270,7 @@
     selectedProgressChunkStarts = new Set();
     matchIndex = -1;
     progressChunkContentY = new Map();
+    lastFocusPaintCp = null;
     return { root: info.root, length: info.length };
   }
 
@@ -467,20 +467,94 @@
     return out;
   }
 
+  function resetGraySuffixRanges() {
+    graySuffixRanges = [];
+    graySuffixPaintedAt = null;
+    grayPrefixPaintedAt = null;
+  }
+
+  /** 灰后缀起点前移：丢掉已分析段上的 Range，其余 setStart。失败则 false，由调用方全量重建。 */
+  function tryShrinkGraySuffix(h, toCp) {
+    const full = doc.getPaintLength();
+    if (toCp >= full) {
+      for (const r of graySuffixRanges) h.delete(r);
+      graySuffixRanges = [];
+      return true;
+    }
+    if (!graySuffixRanges.length) return false;
+    const probe = doc.rangesFromOffsets(toCp, Math.min(full, toCp + 128));
+    if (!probe.length) return false;
+    const node = probe[0].startContainer;
+    const offset = probe[0].startOffset;
+    const keep = [];
+    let i = 0;
+    for (; i < graySuffixRanges.length; i++) {
+      const r = graySuffixRanges[i];
+      let cmp;
+      try {
+        cmp = r.comparePoint(node, offset);
+      } catch {
+        return false;
+      }
+      if (cmp > 0) {
+        h.delete(r);
+        continue;
+      }
+      if (cmp === 0) {
+        try {
+          r.setStart(node, offset);
+        } catch {
+          return false;
+        }
+        if (r.collapsed) h.delete(r);
+        else keep.push(r);
+        i += 1;
+        break;
+      }
+      break;
+    }
+    for (; i < graySuffixRanges.length; i++) keep.push(graySuffixRanges[i]);
+    graySuffixRanges = keep;
+    return true;
+  }
+
   function applyGrayHighlight() {
     if (usesTokenOverlay()) {
       // PDF：全文 Highlight 每块重建上万 Range（实测占 chunk UI ~90%）；改为遮罩 O(段数)
       CSS.highlights?.get(HL_GRAY)?.clear();
+      resetGraySuffixRanges();
       applyGrayMaskPdf();
       return;
     }
     ensureHighlightRegistry();
     const h = CSS.highlights.get(HL_GRAY);
     if (!h) throw new Error('highlight missing: il-gray');
-    h.clear();
-    for (const [cp0, cp1] of grayPaintRanges()) {
-      addCpRangeToHighlight(h, cp0, cp1);
+    if (
+      grayPrefixPaintedAt === grayPrefixEndCp &&
+      graySuffixPaintedAt != null &&
+      graySuffixStartCp != null &&
+      graySuffixStartCp > graySuffixPaintedAt &&
+      tryShrinkGraySuffix(h, graySuffixStartCp)
+    ) {
+      graySuffixPaintedAt = graySuffixStartCp;
+      return;
     }
+    h.clear();
+    resetGraySuffixRanges();
+    const fullCp = doc.getPaintLength();
+    for (const [cp0, cp1] of grayPaintRanges()) {
+      const added = [];
+      for (const range of doc.rangesFromOffsets(cp0, cp1)) {
+        if (!/\S/.test(range.toString())) continue;
+        h.add(range);
+        added.push(range);
+      }
+      if (graySuffixStartCp != null && cp1 === fullCp) {
+        graySuffixRanges = added;
+        graySuffixPaintedAt = graySuffixStartCp;
+      }
+    }
+    grayPrefixPaintedAt = grayPrefixEndCp;
   }
 
   /** PDF 未搜区：每段一块绝对定位半透明遮罩（前缀 + 后缀） */
@@ -603,10 +677,12 @@
   function clearOverlays({ releaseDoc = true } = {}) {
     revealGeneration += 1;
     cancelUnderlineHold();
-    resetFollowQueue();
     analyzedGrayCp = null;
     grayPrefixEndCp = null;
     graySuffixStartCp = null;
+    graySuffixRanges = [];
+    graySuffixPaintedAt = null;
+    grayPrefixPaintedAt = null;
     CSS.highlights?.get(HL_GRAY)?.clear();
     removeGrayMaskPdf();
     clearScopeDivider();
@@ -1003,11 +1079,12 @@
     return null;
   }
 
-  /** 焦点线上命中的 paint 码点；未命中正文则 null */
+  /** 焦点线上的 paint 码点；未命中则沿用上次，避免整篇闪亮 */
   function paintOffsetAtFocusLine() {
     const caret = caretAt(focusHitX(), viewportFocusY());
-    if (!caret) return null;
-    return doc.paintOffsetFromCaret(caret.node, caret.offset);
+    const cp = caret && doc.paintOffsetFromCaret(caret.node, caret.offset);
+    if (cp != null) return (lastFocusPaintCp = cp);
+    return lastFocusPaintCp;
   }
 
   function contentChunkToPaint(c) {
@@ -1223,7 +1300,7 @@
     abortWanted = true;
     sessionAbortCtrl.abort();
     keywordsPool.abort();
-    // 全文重建后旧偏移全作废：清干净并丢弃缓存，下次搜索全量重提
+    // 全文重建后旧偏移全作废：清 UI 快照。请求缓存按文本哈希，正文变了自然 miss，不必清。
     resetSearchSession({ clearCache: true });
     progressChunkContentY = new Map();
     contentChunksCache = null;
@@ -1265,7 +1342,7 @@
     };
   }
 
-  /** @returns {boolean} 是否已还原 */
+  /** 还原上次结果。不等门面 epoch，与开搜一样用当时已有的版本信息。 @returns {boolean} 是否已还原 */
   function tryRestoreLastResult(query) {
     if (!lastResult || !query) return false;
     if (query !== lastResult.query || doc.getText() !== lastResult.text) return false;
@@ -1703,57 +1780,29 @@
     focus.target.scrollTo({ top, behavior: 'auto' });
   }
 
-  function resetFollowQueue() {
-    followQueue.length = 0;
-    if (followRafId) {
-      cancelAnimationFrame(followRafId);
-      followRafId = 0;
-    }
-  }
-
   /**
-   * 流式逐块展示：把 chunk 展示动作压入待展示队列。
-   * 不阻塞、不 await —— 数据到达即入队，独立 RAF 循环每 CHUNK_SEARCH_FOLLOW_STEP_MS
-   * 出队一个展示，保证每块逐个滚动，且数据流水线（relevance 消费 / keywords 发起）不受影响。
-   * 队列项：{ start, end, reveal }，起止为 paint 码点；reveal=true 时该块还附带完整展示
+   * 流式逐块展示：数据到达即滚动定位。
+   * 项：{ start, end, reveal }，起止为 paint 码点；reveal=true 时该块还附带完整展示
    * （跳转 + 进度图 + 导航态 + 下划线 hold），当前仅首个匹配块用。
-   * 灰字/等待线/keywords 上色均由主循环实时处理，不进本队列。
+   * 灰字/等待线/keywords 上色均由主循环实时处理，不进本路径。
    */
   function enqueueFollow(item) {
-    followQueue.push(item);
-    if (!followRafId) {
-      // 重置为 0：performance.now() 恒 >> 步长，首帧必放行，第一项立即展示
-      lastFollowFrameAt = 0;
-      followLoopTick();
-    }
-  }
-
-  /** 跟手滚动循环的一帧：距上次放行 ≥ 步长才出队一个展示；队列空则停下。用单一 RAF id 自续，便于取消。 */
-  function followLoopTick() {
-    followRafId = requestAnimationFrame((now) => {
-      if (now - lastFollowFrameAt >= CHUNK_SEARCH_FOLLOW_STEP_MS) {
-        lastFollowFrameAt = now;
-        const item = followQueue.shift();
-        if (item.reveal) {
-          const m = matchedChunks.find((c) => c.start === item.start);
-          if (m) revealChunk(m);
-        } else {
-          const scrollRoot = doc.findScrollRoot();
-          const nextRect = clientRectNearCp(item.end);
-          if (nextRect) {
-            scrollToContentY(contentYFromClientY(nextRect.top, scrollRoot));
-          } else {
-            const cy = measureChunkContentY(
-              { start: item.start, end: item.end },
-              scrollRoot
-            );
-            if (cy) scrollToContentY(cy.y1);
-          }
-        }
+    if (item.reveal) {
+      const m = matchedChunks.find((c) => c.start === item.start);
+      if (m) revealChunk(m);
+    } else {
+      const scrollRoot = doc.findScrollRoot();
+      const nextRect = clientRectNearCp(item.end);
+      if (nextRect) {
+        scrollToContentY(contentYFromClientY(nextRect.top, scrollRoot));
+      } else {
+        const cy = measureChunkContentY(
+          { start: item.start, end: item.end },
+          scrollRoot
+        );
+        if (cy) scrollToContentY(cy.y1);
       }
-      if (followQueue.length) followLoopTick();
-      else followRafId = 0;
-    });
+    }
   }
 
   /**
@@ -1777,57 +1826,16 @@
     return doc.toPaintOffset(contentChunks[0].start);
   }
 
-  function analyzedEndCp() {
-    if (analyzedGrayCp != null) return analyzedGrayCp;
-    const last = semanticMatchProgress[semanticMatchProgress.length - 1];
-    return last ? last.end : progressOriginCp;
-  }
-
-  /** @returns {'skip' | 'resume' | 'fresh'} */
-  function enterPlan(startCp) {
+  /** 同 query、同窗、已有从该起点的匹配：只跳转，避免清空再画闪一下。 */
+  function sameWindowHasMatch(startCp) {
     const query =
       /** @type {HTMLInputElement | null} */ (ui$('semantic_find_input'))?.value?.trim() || '';
-    return globalThis.IL_enterSearchPlan.plan({
-      sameQuery: !!query && lastSearchMeta?.query === query,
-      hasProgress: semanticMatchProgress.length > 0,
-      connected: doc.isConnected(),
-      startCp,
-      originCp: progressOriginCp,
-      analyzedEndCp: analyzedEndCp(),
-      paintLength: doc.getPaintLength(),
-      hasMatchFromStart: matchedChunks.some((c) => c.start >= startCp),
-      canResume: canResumeSearch(),
-    });
-  }
-
-  /**
-   * 窗口收到本次起点：丢掉起点前的进度，避免旧匹配挡住「找到首个匹配才停」。
-   * 前沿（startCp === analyzedEnd）不裁，整段留下接着 Continue。
-   */
-  function trimAnalyzedBefore(startCp) {
-    if (!globalThis.IL_enterSearchPlan.shouldTrim(startCp, progressOriginCp, analyzedEndCp())) {
-      return;
-    }
-    let drop = 0;
-    while (drop < semanticMatchProgress.length && semanticMatchProgress[drop].start < startCp) {
-      drop += 1;
-    }
-    if (drop === 0) return;
-    semanticMatchProgress = semanticMatchProgress.slice(drop);
-    matchedChunks = matchedChunks.filter((c) => c.start >= startCp);
-    paintSpecs = paintSpecs.filter((s) => s.cp0 >= startCp);
-    progressOriginCp = startCp;
-    if (lastSearchMeta) lastSearchMeta.windowStart = (lastSearchMeta.windowStart ?? 0) + drop;
-    matchIndex = -1;
-    selectedProgressChunkStarts = new Set();
-    clearTokenHighlights();
-    CSS.highlights?.get(HL_UNDERLINE)?.clear();
-    CSS.highlights?.get(HL_PENDING_UNDERLINE)?.clear();
-    if (usesUnderlineOverlay()) clearOverlayEls();
-    renderAllSpecs();
-    setGrayHighlight(analyzedGrayCp);
-    renderSemanticMatchProgress();
-    updateNav();
+    if (!query || lastSearchMeta?.query !== query) return false;
+    if (!doc.isConnected()) return false;
+    const contentChunks = splitContentChunks();
+    const windowStart = searchFromCurrent ? scopeWindowStartFromViewport(contentChunks) : 0;
+    if (windowStart !== (lastSearchMeta.windowStart ?? 0)) return false;
+    return matchedChunks.some((c) => c.start >= startCp);
   }
 
   /**
@@ -1906,8 +1914,13 @@
   /** 用户取消（abort signal）的兜底错误：message 为展示文案，errorDetail 进反馈 */
   function abortStreamError(label) {
     const err = new Error('search stopped');
+    err.name = 'AbortError';
     err.errorDetail = `${label} stream cancelled by user`;
     return err;
+  }
+
+  function isAbortErr(err) {
+    return err != null && (err.name === 'AbortError' || err.message === 'search stopped');
   }
 
   /**
@@ -1990,15 +2003,15 @@
       });
       if (signal) {
         if (signal.aborted) {
-          closePort();
+          // 先 settle 再 disconnect：否则 onDisconnect 会抢先 reject 成「连接中断」
           finish(reject, abortStreamError('relevance'));
+          closePort();
         } else {
           signal.addEventListener(
             'abort',
             () => {
-              closePort();
-              // 取消 = 流结束，走 reject 让主循环 catch 正常收尾（resolve 会让整片永远 pending）
               finish(reject, abortStreamError('relevance'));
+              closePort();
             },
             { once: true }
           );
@@ -2050,15 +2063,14 @@
       });
       if (signal) {
         if (signal.aborted) {
-          closePort();
           finish(reject, abortStreamError('keywords'));
+          closePort();
         } else {
           signal.addEventListener(
             'abort',
             () => {
-              closePort();
-              // 取消 = 流结束，走 reject 让 job 的 catch 正常收尾（release + 不落快照）
               finish(reject, abortStreamError('keywords'));
+              closePort();
             },
             { once: true }
           );
@@ -2416,8 +2428,6 @@
         abortWanted = true;
         sessionAbortCtrl.abort();
         keywordsPool.abort();
-        // 中止跟随滚动：清空队列并取消循环，已入队的 chunk/match 项不再出队（含 stop 后才不会触发 jumpToMatch）
-        resetFollowQueue();
         setSearching(false);
         // 不等主循环退出：可续跑时立刻给出 Stopped + Continue（与循环尾部分支同条件）
         if (canResumeSearch()) {
@@ -2465,13 +2475,11 @@
         const startCp = intendedSearchStartCp();
         if (startCp >= doc.getPaintLength()) return;
         hideHistoryDropdown();
-        const mode = enterPlan(startCp);
-        if (mode === 'skip') {
+        if (sameWindowHasMatch(startCp)) {
           const idx = matchedChunks.findIndex((c) => c.start >= startCp);
           if (idx >= 0) jumpToMatch(idx);
         } else if (!searching) {
-          if (mode === 'resume') trimAnalyzedBefore(startCp);
-          void runSearch({ resume: mode === 'resume' });
+          void runSearch();
         }
         findInput.blur();
       } else if (e.key === 'Escape') {
@@ -2689,6 +2697,69 @@
     if (next) next.disabled = disabled;
   }
 
+  function progressChartLayout(chart) {
+    const width = Math.max(1, Math.round(chart.clientWidth));
+    const height = Math.max(1, Math.round(chart.clientHeight));
+    chart.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    return {
+      x0: 4,
+      x1: width - 4,
+      y0: height - 7,
+      y1: 4,
+      axis: progressAxisYRange(),
+    };
+  }
+
+  function upsertProgressLine(lines, layout, chunk, cy, nextCy, group) {
+    const { x0, x1, y0, y1, axis } = layout;
+    const degree = Math.max(0, Math.min(1, Number(chunk.matchDegree) || 0));
+    const abut = !!(nextCy && nextCy.y0 > cy.y0);
+    const yStart = Math.max(axis.y0, Math.min(axis.y1, cy.y0));
+    const yEnd = Math.max(axis.y0, Math.min(axis.y1, abut ? nextCy.y0 : cy.y1));
+    const start = progressXFromContentY(yStart, x0, x1, axis);
+    const end = progressXFromContentY(yEnd, x0, x1, axis);
+    const y = y0 - (y0 - y1) * degree;
+    if (!group) {
+      group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      group.dataset.progressStart = String(chunk.start);
+      const lineEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      lineEl.classList.add('semantic-match-progress-line');
+      group.appendChild(lineEl);
+      const labelEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      labelEl.classList.add('semantic-match-progress-label');
+      labelEl.setAttribute('text-anchor', 'middle');
+      labelEl.setAttribute('hidden', '');
+      group.appendChild(labelEl);
+      const hitEl = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      hitEl.classList.add('semantic-match-progress-hit-area');
+      hitEl.addEventListener('mouseenter', () => {
+        setHoveredProgressChunk(chunk.start);
+      });
+      hitEl.addEventListener('mouseleave', () => {
+        if (hoveredProgressChunkStart === chunk.start) setHoveredProgressChunk(null);
+      });
+      group.appendChild(hitEl);
+      lines.appendChild(group);
+    }
+    const line = /** @type {SVGPathElement} */ (group.querySelector('.semantic-match-progress-line'));
+    const label = /** @type {SVGTextElement} */ (group.querySelector('.semantic-match-progress-label'));
+    const hitArea = /** @type {SVGRectElement} */ (group.querySelector('.semantic-match-progress-hit-area'));
+    const showMatchRed = degree >= CFG.matchThreshold && !!chunk.hasKeywords;
+    line.classList.toggle('is-gray', !showMatchRed);
+    line.classList.toggle('is-selected', selectedProgressChunkStarts.has(chunk.start));
+    line.classList.toggle('is-hovered', hoveredProgressChunkStart === chunk.start);
+    const lineEnd = abut ? Math.max(start, end) : Math.max(start + PROGRESS_MIN_WIDTH_PX, end);
+    line.setAttribute('d', `M${start} ${y}H${lineEnd}`);
+    label.setAttribute('x', String((start + lineEnd) / 2));
+    label.setAttribute('y', String(Math.max(y1 + 10, y - 4)));
+    label.textContent = `Match: ${Math.round(degree * 100)}%`;
+    label.toggleAttribute('hidden', hoveredProgressChunkStart !== chunk.start);
+    hitArea.setAttribute('x', String(start));
+    hitArea.setAttribute('y', String(y1));
+    hitArea.setAttribute('width', String(lineEnd - start));
+    hitArea.setAttribute('height', String(y0 - y1));
+  }
+
   /** 简版 semantic match progress：文档 Y × chunk 匹配度。 */
   function renderSemanticMatchProgress() {
     const chart = ui$('semantic_match_progress');
@@ -2708,91 +2779,65 @@
       return;
     }
 
-    const width = Math.max(1, Math.round(chart.clientWidth));
-    const height = Math.max(1, Math.round(chart.clientHeight));
-    chart.setAttribute('viewBox', `0 0 ${width} ${height}`);
-    const x0 = 4;
-    const x1 = width - 4;
-    const y0 = height - 7;
-    const y1 = 4;
-    const axis = progressAxisYRange();
+    const layout = progressChartLayout(chart);
     const groupsByStart = new Map(
       [...lines.children]
         .filter((el) => el instanceof SVGGElement && el.dataset.progressStart != null)
         .map((el) => [Number(el.dataset.progressStart), el])
     );
     const liveStarts = new Set();
-
-    for (const chunk of semanticMatchProgress) {
-      if (!axis) break;
-      const cy = measureChunkContentY(chunk, axis.scrollRoot);
-      if (!cy) continue;
-      const degree = Math.max(0, Math.min(1, Number(chunk.matchDegree) || 0));
-      const start = progressXFromContentY(
-        Math.max(axis.y0, Math.min(axis.y1, cy.y0)),
-        x0,
-        x1,
-        axis
-      );
-      const end = progressXFromContentY(
-        Math.max(axis.y0, Math.min(axis.y1, cy.y1)),
-        x0,
-        x1,
-        axis
-      );
-      const y = y0 - (y0 - y1) * degree;
-      liveStarts.add(chunk.start);
-      let group = groupsByStart.get(chunk.start);
-      if (!group) {
-        group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        group.dataset.progressStart = String(chunk.start);
-
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        line.classList.add('semantic-match-progress-line');
-        group.appendChild(line);
-
-        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        label.classList.add('semantic-match-progress-label');
-        label.setAttribute('text-anchor', 'middle');
-        label.setAttribute('hidden', '');
-        group.appendChild(label);
-
-        const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        hitArea.classList.add('semantic-match-progress-hit-area');
-        hitArea.addEventListener('mouseenter', () => {
-          setHoveredProgressChunk(chunk.start);
-        });
-        hitArea.addEventListener('mouseleave', () => {
-          if (hoveredProgressChunkStart === chunk.start) setHoveredProgressChunk(null);
-        });
-        group.appendChild(hitArea);
-        lines.appendChild(group);
+    const rows = [];
+    if (layout.axis) {
+      for (const chunk of semanticMatchProgress) {
+        const cy = measureChunkContentY(chunk, layout.axis.scrollRoot);
+        if (cy) rows.push({ chunk, cy });
       }
+    }
 
-      const line = /** @type {SVGPathElement} */ (group.querySelector('.semantic-match-progress-line'));
-      const label = /** @type {SVGTextElement} */ (group.querySelector('.semantic-match-progress-label'));
-      const hitArea = /** @type {SVGRectElement} */ (group.querySelector('.semantic-match-progress-hit-area'));
-      // 红 = 过阈值且 keywords 已确认有可上色段；否则灰（等待 / 无词 / 未过阈值）
-      const showMatchRed =
-        degree >= CFG.matchThreshold && !!chunk.hasKeywords;
-      line.classList.toggle('is-gray', !showMatchRed);
-      line.classList.toggle('is-selected', selectedProgressChunkStarts.has(chunk.start));
-      line.classList.toggle('is-hovered', hoveredProgressChunkStart === chunk.start);
-      const lineEnd = Math.max(start + PROGRESS_MIN_WIDTH_PX, end);
-      line.setAttribute('d', `M${start} ${y}H${lineEnd}`);
-      label.setAttribute('x', String((start + lineEnd) / 2));
-      label.setAttribute('y', String(Math.max(y1 + 10, y - 4)));
-      label.textContent = `Match: ${Math.round(degree * 100)}%`;
-      label.toggleAttribute('hidden', hoveredProgressChunkStart !== chunk.start);
-      hitArea.setAttribute('x', String(start));
-      hitArea.setAttribute('y', String(y1));
-      hitArea.setAttribute('width', String(lineEnd - start));
-      hitArea.setAttribute('height', String(y0 - y1));
+    for (let i = 0; i < rows.length; i++) {
+      const { chunk, cy } = rows[i];
+      liveStarts.add(chunk.start);
+      upsertProgressLine(lines, layout, chunk, cy, rows[i + 1]?.cy, groupsByStart.get(chunk.start));
     }
     for (const [start, group] of groupsByStart) {
       if (!liveStarts.has(start)) group.remove();
     }
     updateViewportFollowScrollBinding();
+    applyProgressViewportBand();
+  }
+
+  /** 流式追加最后一根线，并按邻接补上一根。量不到几何则退回全量。 */
+  function appendSemanticMatchProgress() {
+    const chart = ui$('semantic_match_progress');
+    const lines = ui$('semantic_match_progress_lines');
+    if (!(chart instanceof SVGSVGElement) || !(lines instanceof SVGGElement)) return;
+    const n = semanticMatchProgress.length;
+    if (n === 0 || chart.hasAttribute('hidden')) {
+      renderSemanticMatchProgress();
+      return;
+    }
+    const layout = progressChartLayout(chart);
+    if (!layout.axis) {
+      renderSemanticMatchProgress();
+      return;
+    }
+    const last = semanticMatchProgress[n - 1];
+    const cy = measureChunkContentY(last, layout.axis.scrollRoot);
+    if (!cy) {
+      renderSemanticMatchProgress();
+      return;
+    }
+    if (n > 1) {
+      const prev = semanticMatchProgress[n - 2];
+      const prevCy = measureChunkContentY(prev, layout.axis.scrollRoot);
+      if (prevCy) {
+        const prevGroup = [...lines.children].find(
+          (el) => el instanceof SVGGElement && el.dataset.progressStart === String(prev.start)
+        );
+        upsertProgressLine(lines, layout, prev, prevCy, cy, prevGroup);
+      }
+    }
+    upsertProgressLine(lines, layout, last, cy, null, null);
     applyProgressViewportBand();
   }
 
@@ -2833,6 +2878,27 @@
   }
 
   /**
+   * 从起点按缓存规则一次定窗：已缓存前缀本地回放，从第一个洞起最多 MAX_CHUNKS_PER_SEARCH 块。
+   * @param {string} query
+   * @param {{ start: number, end: number, text: string }[]} fromStart
+   * @returns {Promise<{ chunks: { start: number, end: number, text: string }[], degrees: (number | undefined)[] }>}
+   */
+  async function takeSearchWindow(query, fromStart) {
+    const { n, degrees } = await globalThis.IL_analyzeCache.windowPlan(
+      query,
+      fromStart.map((c) => c.text),
+      CFG.matchThreshold,
+      MAX_CHUNKS_PER_SEARCH
+    );
+    return { chunks: fromStart.slice(0, n), degrees };
+  }
+
+  /**
+   * 多目标优化之字典序目标优化（目标之间存在硬优先级）：
+   * 一次搜索。字典序目标（先比上一条，打平才比下一条）：
+   * 1. 至少找到一个匹配；除非真的没有，或已经打满 8 次网络请求
+   * 2. 少发起网络请求；除非还没有找到匹配
+   * 3. 窗口尽量宽；除非需要发起更多的网络请求
    * @param {{ resume?: boolean }} [opts] resume=true：保留已有进度，从下一未分析 chunk 继续
    */
   async function runSearch(opts) {
@@ -2843,8 +2909,6 @@
       return;
     }
     if (resume && !canResumeSearch()) return;
-
-    resetFollowQueue();
 
     // 必须在任何 await 之前占住 searching + epoch，否则连按会 concurrent 多轮：
     // 旧轮 finally 清掉 searching，新轮仍在跑 → 有报错、像在搜、却没有停止按钮。
@@ -2864,8 +2928,6 @@
       if (epoch !== searchEpoch) return;
       saveHistory(query);
 
-      // 流式逐块展示：每块统一入队（滚动定位），由 RAF 循环按 CHUNK_SEARCH_FOLLOW_STEP_MS 节奏播放；
-      // 黑字/等待线/renderQueue/keywords 仍实时处理，遮挡滚动播放的缓冲，不反压。
       /** @type {{ start: number, end: number, text: string }[]} */
       let allChunks;
       let resumeFrom = 0;
@@ -2875,7 +2937,6 @@
 
       while (batchesDone < MAX_AUTO_CONTINUE_BATCHES) {
         batchesDone += 1;
-        if (batchesDone > 1) resetFollowQueue();
 
         if (batchResume) {
           clearFindStatus();
@@ -2890,37 +2951,8 @@
             if (epoch === searchEpoch) showFindError('Page content changed; start a new search');
             return;
           }
-          const contentChunks = splitContentChunks();
-          // Continue 只从「已判定完成的块之后」继续（相对窗口：resumeFrom = semanticMatchProgress.length）。
-          // 关键词分析约定：已完成的保留；stop 时被中止、尚未染完的那一块 keywords 不补染——
-          // 它已进入 semanticMatchProgress，会被这里越过，此处有意跳过（用户取舍：中断小概率，简单优先）。
-          const windowStart = lastSearchMeta?.windowStart ?? 0;
-          resumeFrom = semanticMatchProgress.length;
-          const absResume = windowStart + resumeFrom;
-          if (absResume >= contentChunks.length) return;
-          // 续跑重置首匹配跳转：本轮新分析出首个匹配 chunk 时重新跳转高亮
-          firstMatchJumped = false;
-          // 中断续跑沿用旧窗口；截断后续跑再开一批
-          const prevEnd = lastSearchMeta.windowEnd ?? absResume;
-          const windowEnd =
-            absResume < prevEnd ? prevEnd : absResume + MAX_CHUNKS_PER_SEARCH;
-          allChunks = contentChunks.slice(windowStart, windowEnd);
-          analyzedCpEnd =
-            analyzedGrayCp ??
-            (resumeFrom > 0 ? semanticMatchProgress[resumeFrom - 1].end : progressOriginCp);
-          lastSearchMeta = {
-            query,
-            contentChunkCount: contentChunks.length,
-            truncated: contentChunks.length > windowEnd,
-            windowStart,
-            windowEnd,
-          };
-          progressOriginCp = allChunks.length
-            ? doc.toPaintOffset(allChunks[0].start)
-            : 0;
         } else {
           resetSearchSession();
-
           try {
             refreshExtract();
           } catch (err) {
@@ -2936,76 +2968,92 @@
             if (epoch === searchEpoch) showFindError('No article text found');
             return;
           }
+        }
 
-          // 全空白 chunk 不送 API；先滤再截断，避免 MAX_CHUNKS_PER_SEARCH 被空白占满
-          const contentChunks = splitContentChunks();
-          const windowStart = searchFromCurrent ? scopeWindowStartFromViewport(contentChunks) : 0;
-          const windowEnd = Math.min(
-            contentChunks.length,
-            windowStart + MAX_CHUNKS_PER_SEARCH
-          );
-          allChunks = contentChunks.slice(windowStart, windowEnd);
-          resumeFrom = 0;
-          lastSearchMeta = {
-            query,
-            contentChunkCount: contentChunks.length,
-            truncated: contentChunks.length > windowEnd,
-            windowStart,
-            windowEnd,
-          };
-          progressOriginCp = allChunks.length
-            ? doc.toPaintOffset(allChunks[0].start)
+        const contentChunks = splitContentChunks();
+        const startAbs = batchResume
+          ? (lastSearchMeta?.windowStart ?? 0) + semanticMatchProgress.length
+          : searchFromCurrent
+            ? scopeWindowStartFromViewport(contentChunks)
             : 0;
+        if (startAbs >= contentChunks.length) return;
 
-          // SYNC：站内 .gray-text — 搜索开始从窗口起点置灰，随已分析边界后移恢复原色
+        const taken = await takeSearchWindow(query, contentChunks.slice(startAbs));
+        if (epoch !== searchEpoch || abortWanted) break;
+        allChunks = taken.chunks;
+        if (!allChunks.length) return;
+
+        const originAbs = batchResume ? (lastSearchMeta.windowStart ?? startAbs) : startAbs;
+        lastSearchMeta = {
+          query,
+          contentChunkCount: contentChunks.length,
+          truncated: startAbs + allChunks.length < contentChunks.length,
+          windowStart: originAbs,
+        };
+        if (batchResume) {
+          firstMatchJumped = false;
+          analyzedCpEnd =
+            analyzedGrayCp ??
+            (semanticMatchProgress.length > 0
+              ? semanticMatchProgress[semanticMatchProgress.length - 1].end
+              : progressOriginCp);
+        } else {
+          progressOriginCp = doc.toPaintOffset(allChunks[0].start);
           analyzedCpEnd = progressOriginCp;
           setGrayHighlight(progressOriginCp);
         }
 
-        // --- 段1：relevance（V2 批量：≤RELEVANCE_BATCH 组成一请求，渲染按序消费每片）---
+        // --- 段1：relevance（本窗一次；缓存前缀本地回放，send 仅未缓存后缀 ≤32）---
         const stillThisSearch = () => epoch === searchEpoch && !abortWanted;
-        const RELEVANCE_BATCH = 32; // SYNC: 门面 MULTI_CHUNK_MAX（texts 上限）
         /** @type {Map<number, { resolve: Function, reject: Function }>} 每片 settle 句柄（row 到达即 resolve） */
         const chunkSettle = new Map();
         /** @type {Map<number, Promise<object>>} 每片就绪 promise（consume 用） */
         const perChunkReady = new Map();
-        /** @type {Map<number, Promise<object>>} 批起始 idx → 整批 promise（仅错误传播/收尾） */
-        const relevanceBatchPromises = new Map();
-        const batchStart = (idx) =>
-          resumeFrom + Math.floor((idx - resumeFrom) / RELEVANCE_BATCH) * RELEVANCE_BATCH;
+        let relevanceStarted = false;
         const deferChunk = (idx) => {
           const d = {};
-          perChunkReady.set(
-            idx,
-            new Promise((resolve, reject) => {
-              d.resolve = resolve;
-              d.reject = reject;
-            })
-          );
+          const p = new Promise((resolve, reject) => {
+            d.resolve = resolve;
+            d.reject = reject;
+          });
+          // 主循环只 await 当前片；整批失败会 reject 其余片，出生即接住避免 Uncaught
+          p.catch(() => {});
+          perChunkReady.set(idx, p);
           chunkSettle.set(idx, d);
         };
-        const ensureRelevanceBatch = (idx) => {
-          const start = batchStart(idx);
-          if (relevanceBatchPromises.has(start)) return;
-          const end = Math.min(start + RELEVANCE_BATCH, allChunks.length);
+        const ensureRelevance = () => {
+          if (relevanceStarted) return;
+          relevanceStarted = true;
+          const start = resumeFrom;
+          const end = allChunks.length;
           const texts = [];
           for (let k = start; k < end; k++) {
             texts.push(allChunks[k].text);
             deferChunk(k);
           }
-          const p = analyzeSemanticV2(query, texts, (n, fullMatchDegree) => {
-            const real = start + (n - 1);
-            const d = chunkSettle.get(real);
-            if (d) {
-              chunkSettle.delete(real);
-              d.resolve({ full_match_degree: fullMatchDegree });
-            }
-          }, sessionAbortCtrl.signal);
+          const p = globalThis.IL_analyzeCache.relevance(
+            query,
+            texts,
+            (n, fullMatchDegree) => {
+              const real = start + (n - 1);
+              const d = chunkSettle.get(real);
+              if (d) {
+                chunkSettle.delete(real);
+                d.resolve({ full_match_degree: fullMatchDegree });
+              }
+            },
+            sessionAbortCtrl.signal,
+            analyzeSemanticV2
+          );
           p.catch((err) => {
             // 整批失败：reject 所有未就绪片（不静默挂起）。
             // network/inference（网络/上游不可用）是用户该知道的，透传门面用户文案；
             // internal（我方未预期/格式异常）屏蔽具体原因，落中性文案。
-            console.error('[InfoLens][relevance] batch error:', err?.message, 'detail=', err?.errorDetail);
+            // 用户停止 / 流取消：reject 只为解开未就绪片，不是失败。
+            const stopped = abortWanted || isAbortErr(err);
+            if (!stopped) {
+              console.error('[InfoLens][relevance] batch error:', err?.message, 'detail=', err?.errorDetail);
+            }
             const userMessage =
               (err?.kind === 'network' || err?.kind === 'inference') &&
               err?.message != null &&
@@ -3016,6 +3064,10 @@
               const d = chunkSettle.get(k);
               if (d) {
                 chunkSettle.delete(k);
+                if (stopped) {
+                  d.reject(err);
+                  continue;
+                }
                 const e = new Error(
                   userMessage != null ? userMessage : `relevance v2 request failed for chunk ${k}`
                 );
@@ -3024,29 +3076,13 @@
               }
             }
           });
-          relevanceBatchPromises.set(start, p);
         };
 
         /** 渲染按序取走（该片 row 就绪即返回，不等待整批） */
         const consumeRelevance = (idx) => {
-          ensureRelevanceBatch(idx);
+          ensureRelevance();
           return perChunkReady.get(idx);
         };
-        // 预热首批：渲染推进前先发请求，与首块渲染等待并行
-        if (stillThisSearch() && resumeFrom < allChunks.length) {
-          ensureRelevanceBatch(resumeFrom);
-          // 搜索开始即即时定位到本批首个待分析 chunk（通常是正文开头），让用户感知「开始了」；
-          // 即时定位，不与逐块跟随互相叠加
-          const first = allChunks[resumeFrom];
-          const cy = measureChunkContentY(
-            { start: doc.toPaintOffset(first.start), end: doc.toPaintOffset(first.end) },
-            doc.findScrollRoot()
-          );
-          if (cy) scrollToContentY(cy.y0);
-        }
-        // 本地处理与请求均已发出：此刻起只等对方回流。先亮出空进度图（0 根线）占位，
-        // 表明本地已就绪、不报错，剩下的只是等待首个 chunk 结果；随逐片结果到达实时点亮。
-        renderSemanticMatchProgress();
 
         // --- 段2：keywords（渲染匹配后投递；池内消费，不反压段1）---
         const enqueueKeywords = (chunkIndex, chunk, chunkCpStart, degree) => {
@@ -3056,7 +3092,7 @@
             let painted = 0;
             try {
               // 新扩展走 v2 流式（逐词增量上色）；旧扩展仍打旧 JSON 路径由门面双轨隔离
-              await analyzeKeywordsV2(
+              await globalThis.IL_analyzeCache.keywords(
                 query,
                 chunk.text,
                 (run) => {
@@ -3064,7 +3100,8 @@
                   if (!doc.isConnected()) return;
                   painted += renderQueue.pushRun(run, chunkCpStart, degree);
                 },
-                signal
+                signal,
+                analyzeKeywordsV2
               );
               if (jobGen !== keywordsPool.gen) return;
               if (!doc.isConnected()) return;
@@ -3084,11 +3121,18 @@
               renderQueue.release(chunkCpStart, true);
               snapshotLastResult(query);
             } catch (err) {
-              // 失败：pending 留下 + chunk 级 Failed；整轮不中断
-              console.error('[InfoLens] keywords', err?.message || err);
               // 收尾清理：无论如何先 release，避免 renderQueue 卡在 current 上（abort/giveUp 也走这里）
               renderQueue.release(chunkCpStart, false);
-              if (jobGen !== keywordsPool.gen || epoch !== searchEpoch || abortWanted) return;
+              // 用户停止 / 过期轮次：reject 只为收尾，不是失败
+              if (
+                jobGen !== keywordsPool.gen ||
+                epoch !== searchEpoch ||
+                abortWanted ||
+                isAbortErr(err)
+              )
+                return;
+              // 失败：pending 留下 + chunk 级 Failed；整轮不中断
+              console.error('[InfoLens] keywords', err?.message || err);
               // 失败：保留蓝线（pending），但标记 done 避免队列卡住
               const reason = err?.message != null ? String(err.message).trim() : '';
               const tech = err?.errorDetail != null ? String(err.errorDetail).trim() : '';
@@ -3110,6 +3154,89 @@
           });
         };
 
+        let deferredFollow = null;
+        const absorbRelevanceRow = (i, chunk, degree, deferPaint) => {
+          // SYNC: semanticSearchController — matched = degree >= threshold；未匹配块不上色
+          const matched = degree >= CFG.matchThreshold;
+          const chunkCpStart = doc.toPaintOffset(chunk.start);
+          const chunkCpEnd = doc.toPaintOffset(chunk.end);
+          analyzedCpEnd = Math.max(analyzedCpEnd, chunkCpEnd);
+          semanticMatchProgress.push({
+            start: chunkCpStart,
+            end: chunkCpEnd,
+            matchDegree: degree,
+          });
+          if (!deferPaint) {
+            appendSemanticMatchProgress();
+            setGrayHighlight(analyzedCpEnd);
+          }
+
+          if (matched) {
+            matchedChunks.push({
+              start: chunkCpStart,
+              end: chunkCpEnd,
+              matchDegree: degree,
+            });
+            const pendingSpec = { kind: 'pending-underline', cp0: chunkCpStart, cp1: chunkCpEnd };
+            upsertSpec(pendingSpec);
+            if (doc.isConnected()) {
+              if (usesUnderlineOverlay()) {
+                doc.ensurePaintMount();
+                paintUnderlineSpec(pendingSpec);
+              } else {
+                ensureHighlightRegistry();
+                const h = CSS.highlights.get(HL_PENDING_UNDERLINE);
+                if (!h) throw new Error('highlight missing: il-pending-underline');
+                addCpRangeToHighlight(h, pendingSpec.cp0, pendingSpec.cp1);
+              }
+            }
+            renderQueue.enqueue(chunkCpStart, chunkCpEnd);
+            enqueueKeywords(i, chunk, chunkCpStart, degree);
+          }
+          if (!firstMatchJumped) {
+            if (matched) firstMatchJumped = true;
+            const item = matched
+              ? { start: chunkCpStart, end: chunkCpEnd, reveal: true }
+              : { start: chunkCpStart, end: chunkCpEnd };
+            if (deferPaint) deferredFollow = item;
+            else enqueueFollow(item);
+          }
+          if (!deferPaint) snapshotLastResult(query);
+        };
+
+        let prefixLen = 0;
+        while (
+          prefixLen < taken.degrees.length &&
+          Number.isFinite(taken.degrees[prefixLen])
+        ) {
+          prefixLen += 1;
+        }
+        for (let i = 0; i < prefixLen; i++) {
+          if (!stillThisSearch()) break;
+          absorbRelevanceRow(i, allChunks[i], taken.degrees[i], true);
+        }
+        if (prefixLen > 0 && stillThisSearch()) {
+          renderSemanticMatchProgress();
+          setGrayHighlight(analyzedCpEnd);
+          if (deferredFollow) enqueueFollow(deferredFollow);
+          snapshotLastResult(query);
+        }
+        if (epoch !== searchEpoch || abortWanted) break;
+
+        resumeFrom = prefixLen;
+        if (stillThisSearch() && resumeFrom < allChunks.length) {
+          ensureRelevance();
+        }
+        if (prefixLen === 0 && stillThisSearch() && allChunks.length) {
+          const first = allChunks[0];
+          const cy = measureChunkContentY(
+            { start: doc.toPaintOffset(first.start), end: doc.toPaintOffset(first.end) },
+            doc.findScrollRoot()
+          );
+          if (cy) scrollToContentY(cy.y0);
+          renderSemanticMatchProgress();
+        }
+
         for (let i = resumeFrom; i < allChunks.length; i++) {
           if (!stillThisSearch()) break;
           const chunk = allChunks[i];
@@ -3117,6 +3244,7 @@
           try {
             res = await consumeRelevance(i);
           } catch (err) {
+            if (abortWanted || isAbortErr(err)) break;
             const tech =
               err?.errorDetail != null ? String(err.errorDetail).trim() : '';
             const wrapped = new Error(
@@ -3133,61 +3261,7 @@
             throw wrapped;
           }
           if (!stillThisSearch()) break;
-
-          const degree = res.full_match_degree ?? 0;
-          // SYNC: semanticSearchController — matched = degree >= threshold；未匹配块不上色
-          const matched = degree >= CFG.matchThreshold;
-          const chunkCpStart = doc.toPaintOffset(chunk.start);
-          const chunkCpEnd = doc.toPaintOffset(chunk.end);
-          analyzedCpEnd = Math.max(analyzedCpEnd, chunkCpEnd);
-          semanticMatchProgress.push({
-            start: chunkCpStart,
-            end: chunkCpEnd,
-            matchDegree: degree,
-          });
-          renderSemanticMatchProgress();
-          // 灰字（已分析边界）随数据到达实时推进
-          setGrayHighlight(analyzedCpEnd);
-
-          // 流式逐块展示：首匹配之前的块逐个入队跟随；遇到首个匹配块则入队一个 reveal 项
-          // （自带定位 + 完整展示）并停止入队——之后不再入任何项，视口停留首匹配，后续块不滚动跟随
-          if (!firstMatchJumped) {
-            if (matched) {
-              firstMatchJumped = true;
-              enqueueFollow({ start: chunkCpStart, end: chunkCpEnd, reveal: true });
-            } else {
-              enqueueFollow({ start: chunkCpStart, end: chunkCpEnd });
-            }
-          }
-
-          if (matched) {
-            matchedChunks.push({
-              start: chunkCpStart,
-              end: chunkCpEnd,
-              matchDegree: degree,
-            });
-            // 匹配：先画等待线；keywords 异步返回后拆线并上色（不反压段1渲染节奏）
-            // 增量只画本块，避免每次全量重画全部 pending（大 PDF 上会随匹配数线性变慢）
-            const pendingSpec = { kind: 'pending-underline', cp0: chunkCpStart, cp1: chunkCpEnd };
-            upsertSpec(pendingSpec);
-            if (doc.isConnected()) {
-              if (usesUnderlineOverlay()) {
-                doc.ensurePaintMount();
-                paintUnderlineSpec(pendingSpec);
-              } else {
-                ensureHighlightRegistry();
-                const h = CSS.highlights.get(HL_PENDING_UNDERLINE);
-                if (!h) throw new Error('highlight missing: il-pending-underline');
-                addCpRangeToHighlight(h, pendingSpec.cp0, pendingSpec.cp1);
-              }
-            }
-            // 顺序渲染：匹配 chunk 入队（首块即出队开始上色，红按块顺序推进）
-            renderQueue.enqueue(chunkCpStart, chunkCpEnd);
-            // keywords 请求立即发出（不进队列）：利用逐块展示的缓冲期掩饰首个匹配的关键词延迟
-            enqueueKeywords(i, chunk, chunkCpStart, degree);
-          }
-          // 每块后快照：close 中途清高亮时仍保留上一版
-          snapshotLastResult(query);
+          absorbRelevanceRow(i, chunk, res.full_match_degree ?? 0);
         }
 
         if (epoch !== searchEpoch || abortWanted) break;
@@ -3208,18 +3282,15 @@
             // 顺序推进，新匹配块的等待线→红染会被旧块拖住延迟暴露。故提醒等 whenIdle 之后。
             await keywordsPool.whenIdle();
             if (epoch !== searchEpoch || abortWanted) return;
-            showFindStatus('Note', 'Text too long; Continue to analyze more');
+            showFindStatus('Note', 'paused by single-search limit');
           }
         }
         // abort：Stopped/Continue 已在 Stop 点击时展示，此处只收尾 truncated + 下方 snapshot
       }
       snapshotLastResult(query);
     } catch (err) {
-      // 过期轮次 / 用户主动停止：失败不得打到当前 UI（否则会出现「一边报错一边新搜索在跑」）
-      if (epoch !== searchEpoch || abortWanted) {
-        console.error('[InfoLens]', err?.message || err);
-        return;
-      }
+      // 过期轮次 / 用户主动停止：reject 只为收尾，不得打到当前 UI / 控制台
+      if (epoch !== searchEpoch || abortWanted || isAbortErr(err)) return;
       console.error('[InfoLens]', err?.message || err);
       updateNav();
       showFindError(err?.message || err, { errorDetail: err?.errorDetail });
@@ -3268,6 +3339,34 @@
     return info;
   }
 
+  /** 打开栏时问门面缓存 epoch；失败沿用上次 */
+  function fetchCacheVersion() {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        { type: 'il-analyze-semantic-version', apiBase: CFG.apiBase },
+        (resp) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          if (!resp?.ok) {
+            reject(new Error(resp?.error || 'cache version check failed'));
+            return;
+          }
+          resolve({ relevance: resp.relevance, keywords: resp.keywords });
+        }
+      );
+    });
+  }
+
+  async function syncAnalyzeCacheModel() {
+    try {
+      await globalThis.IL_analyzeCache.syncRemoteModel(fetchCacheVersion);
+    } catch (err) {
+      console.error('[InfoLens] cache version check:', err?.message || err);
+    }
+  }
+
   /** @param {string} [prefillQuery] 右键选区预填；有值则写入输入框且不自动搜 */
   async function open(prefillQuery) {
     try {
@@ -3281,6 +3380,8 @@
         previewExtractUnderlines();
         return;
       }
+      // 不等待：还原上次结果、随后开搜都只用当时已有的 epoch 决定是否走缓存
+      void syncAnalyzeCacheModel();
       const bar = await ensureBar();
       if (!bar) throw new Error('find bar missing');
       bar.hidden = false;

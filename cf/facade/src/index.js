@@ -10,6 +10,7 @@
  *   - /api/analyze-semantic-relevance → Hy3（旧扩展，单 text）
  *   - /api/v2/analyze-semantic-relevance → Hy3 多切片（新扩展/新前端，texts 数组，新版本主力）
  *   - /api/v2/analyze-semantic-keywords → Hy3（新扩展）
+ *   - GET /api/v2/analyze-semantic-version → 相关度 / keywords 缓存 epoch（扩展打开栏时问；不打上游）
  * - /api/extension-feedback → STATE KV（单向黑箱；TTL 90 天）；读：GET /facade-extension-feedback
  * - keywords 双轨（扩展审核慢于 Worker，过渡期内并存）：
  *   - 旧扩展：/api/analyze-semantic-keywords → 仍 HF/Home 梯度归因（COMPUTE_PATHS，勿接到 v2）
@@ -24,10 +25,12 @@ import {
 } from './relevance_remote.js';
 import {
   RELEVANCE_V2_PATH,
+  RELEVANCE_CACHE_VERSION,
   handleRemoteRelevanceV2,
 } from './relevance_remote_v2.js';
 import {
   KEYWORDS_V2_PATH,
+  KEYWORDS_CACHE_VERSION,
   handleRemoteKeywordsV2,
 } from './keywords_remote_v2.js';
 import {
@@ -398,6 +401,17 @@ async function handleRequest(request, env) {
   // 扩展反馈：边缘写 KV，不碰 HF/Home
   if (path === FEEDBACK_PATH) {
     return handlePostExtensionFeedback(request, env, json);
+  }
+
+  if (path === '/api/v2/analyze-semantic-version') {
+    if (request.method !== 'GET') {
+      return json(request, { success: false, message: 'method not allowed' }, 405);
+    }
+    return json(request, {
+      success: true,
+      relevance: RELEVANCE_CACHE_VERSION,
+      keywords: KEYWORDS_CACHE_VERSION,
+    });
   }
 
   // 边缘远程：始终 OpenRouter，不碰 home allow/health。

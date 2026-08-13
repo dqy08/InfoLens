@@ -20,6 +20,8 @@ const CHUNK_BYTE_MAX = 800;
 const MAX_TOKENS_PER_CHUNK = 8;
 
 export const RELEVANCE_V2_PATH = '/api/v2/analyze-semantic-relevance';
+/** 提示词/模型/解析变了、影响缓存准确性时加一。 */
+export const RELEVANCE_CACHE_VERSION = 1;
 
 /** SYNC: scripts/eval_semantic_relevance_remote.py → build_multi_chunk_user_content（正式版，格式两次）。
  * 基线 task；曾尝试追加全文判定句（"A word's relevance ... in the whole article"）但实测增误放行、

@@ -51,7 +51,7 @@ PDF_VIEWER_FILES = [
     "pdf/file-access.html",
     "pdf/file-access.js",
     "semantic/pdf-document.js",
-    "semantic/enterSearchPlan.js",
+    "semantic/analyzeCache.js",
     "semantic/find.js",
     "vendor/pdfjs/pdf.min.js",
     "vendor/pdfjs/pdf.worker.min.js",

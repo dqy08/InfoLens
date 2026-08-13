@@ -26,6 +26,8 @@ const SCORE_NORMALIZE = 5;
 const REPEAT_DIM_FACTOR = 5;
 
 export const KEYWORDS_V2_PATH = '/api/v2/analyze-semantic-keywords';
+/** 提示词/模型/解析变了、影响缓存准确性时加一。 */
+export const KEYWORDS_CACHE_VERSION = 1;
 
 /** SYNC: scripts/eval_semantic_keywords_remote.py → KEYWORDS_TASK / build_keywords_user_content */
 const KEYWORDS_TASK =
