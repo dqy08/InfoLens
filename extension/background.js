@@ -19,6 +19,7 @@ const CONTENT_JS = [
   'collectTextMap.js',
   'splitTextToChunks.js',
   'semantic/page-document.js',
+  'semantic/enterSearchPlan.js',
   'semantic/find.js',
   'content.js',
 ];

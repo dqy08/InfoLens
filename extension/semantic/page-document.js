@@ -383,6 +383,21 @@
       getText: () => extractedText,
       getPaintLength: () => extractedCpLength,
       toPaintOffset: utf16ToCp,
+      /**
+       * 命中文本节点 → 码点。非正文 Text 则 null。
+       * @param {Node} node
+       * @param {number} offset
+       * @returns {number | null}
+       */
+      paintOffsetFromCaret(node, offset) {
+        if (node.nodeType !== Node.TEXT_NODE) return null;
+        for (const p of pieces) {
+          if (p.node !== node) continue;
+          const u = p.start + Math.max(0, Math.min(offset, p.end - p.start));
+          return utf16ToCp(u);
+        }
+        return null;
+      },
       rangesFromOffsets,
       isConnected: () => !!extractRoot?.isConnected,
       getRoot: () => extractRoot,
