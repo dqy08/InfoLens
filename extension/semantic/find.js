@@ -3,9 +3,9 @@
  * Document model via DocumentAdapter (`doc`); paint/search/UI live here.
  *
  * 范围 / Enter / 灰区：
- *   Enter = 开火并离开输入；翻匹配只用上下按钮（不绑键：留在输入则预览与结果灰打架）
+ *   Enter 每次开窗开火并离开输入；翻匹配只用上下按钮（不绑键：留在输入则预览与结果灰打架）
  *   灰：聚焦未搜 = 预览（全文整篇 / 从当前位置则窗前灰+虚线）；开搜或失焦 = 窗前∪前沿后
- *   Enter 每次开窗只画这一火（同窗已有匹配则只跳转）；搜索优先级见 runSearch
+ *   搜索优先级见 runSearch
  *   进度图横轴 = 文档 Y；范围 / 跳转 / 翻匹配均用焦点线 Y，高亮块顶不高于 CHUNK_START_MAX_Y_RATIO
  *
  * 绘制（性能差一个数量级以上，勿混用）：
@@ -1773,18 +1773,6 @@
     return doc.toPaintOffset(contentChunks[0].start);
   }
 
-  /** 同 query、同窗、已有从该起点的匹配：只跳转，避免清空再画闪一下。 */
-  function sameWindowHasMatch(startCp) {
-    const query =
-      /** @type {HTMLInputElement | null} */ (ui$('semantic_find_input'))?.value?.trim() || '';
-    if (!query || lastSearchMeta?.query !== query) return false;
-    if (!doc.isConnected()) return false;
-    const contentChunks = splitContentChunks();
-    const windowStart = searchFromCurrent ? scopeWindowStartFromViewport(contentChunks) : 0;
-    if (windowStart !== (lastSearchMeta.windowStart ?? 0)) return false;
-    return matchedChunks.some((c) => c.start >= startCp);
-  }
-
   /**
    * 按焦点线所在块现算上下导航。
    * 首块前循环；落在匹配上则 ±1，落在灰块上则按插入点。
@@ -2418,12 +2406,7 @@
         const startCp = intendedSearchStartCp();
         if (startCp >= doc.getPaintLength()) return;
         hideHistoryDropdown();
-        if (sameWindowHasMatch(startCp)) {
-          const idx = matchedChunks.findIndex((c) => c.start >= startCp);
-          if (idx >= 0) jumpToMatch(idx);
-        } else if (!searching) {
-          void runSearch();
-        }
+        if (!searching) void runSearch();
         findInput.blur();
       } else if (e.key === 'Escape') {
         e.preventDefault();
