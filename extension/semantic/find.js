@@ -61,9 +61,9 @@
   // 数字/标点/代码等 token 密度高的内容，800 字节可能超出后端 token 限，被静默截断（仅日志提示），
   // 导致该 chunk 的相关度判断只基于截断后的前缀 —— 后果是漏检，非误报。无法靠调大固定 token 数根治。
   const CHUNK_BYTES = 800;
-  // 一次请求的 texts 上限。SYNC: 门面 MULTI_CHUNK_MAX
+  // 原则 2：一火最多新打这么多块。SYNC: 门面 MULTI_CHUNK_MAX
   const MAX_CHUNKS_PER_SEARCH = 32;
-  // 无匹配时自动续批上限（含 Enter/Continue 的第一批）。以后可做成 IL_CONFIG。
+  // 原则 1 的硬上限：无匹配时最多打 8 次网（含第一批）。纯缓存回放不占。以后可做成 IL_CONFIG。
   const MAX_AUTO_CONTINUE_BATCHES = 8;
   // 流空闲兜底：门面端挂起（既不回流也不结束）时避免 promise 永久挂起 → 搜索卡死。
   // 以「空闲」判超时：每次收到流数据 row 都重置计时器（有进展不算超时）；
@@ -1178,6 +1178,16 @@
     const row = { y0, y1 };
     progressChunkContentY.set(chunk.start, row);
     return row;
+  }
+
+  /** 文档序下一块的 Y（未分析也量）；没有下一块则 null */
+  function measureNextContentChunkY(chunk, scrollRoot) {
+    for (const c of splitContentChunks()) {
+      if (doc.toPaintOffset(c.start) > chunk.start) {
+        return measureChunkContentY(contentChunkToPaint(c), scrollRoot);
+      }
+    }
+    return null;
   }
 
   /** 视口顶/底 → 进度图浅灰底（文档 Y 交集）；不相交则隐藏。只改 rect，不重画竖线。 */
@@ -2645,6 +2655,7 @@
 
   function upsertProgressLine(lines, layout, chunk, cy, nextCy, group) {
     const { x0, x1, y0, y1, axis } = layout;
+    if (!nextCy) nextCy = measureNextContentChunkY(chunk, axis.scrollRoot);
     const degree = Math.max(0, Math.min(1, Number(chunk.matchDegree) || 0));
     const abut = !!(nextCy && nextCy.y0 > cy.y0);
     const yStart = Math.max(axis.y0, Math.min(axis.y1, cy.y0));
@@ -2739,7 +2750,7 @@
     applyProgressViewportBand();
   }
 
-  /** 流式追加最后一根线，并按邻接补上一根。量不到几何则退回全量。 */
+  /** 流式追加最后一根线。量不到几何则退回全量。 */
   function appendSemanticMatchProgress() {
     const chart = ui$('semantic_match_progress');
     const lines = ui$('semantic_match_progress_lines');
@@ -2759,16 +2770,6 @@
     if (!cy) {
       renderSemanticMatchProgress();
       return;
-    }
-    if (n > 1) {
-      const prev = semanticMatchProgress[n - 2];
-      const prevCy = measureChunkContentY(prev, layout.axis.scrollRoot);
-      if (prevCy) {
-        const prevGroup = [...lines.children].find(
-          (el) => el instanceof SVGGElement && el.dataset.progressStart === String(prev.start)
-        );
-        upsertProgressLine(lines, layout, prev, prevCy, cy, prevGroup);
-      }
     }
     upsertProgressLine(lines, layout, last, cy, null, null);
     applyProgressViewportBand();
@@ -2811,7 +2812,7 @@
   }
 
   /**
-   * 从起点按缓存规则一次定窗：已缓存前缀本地回放，从第一个洞起最多 MAX_CHUNKS_PER_SEARCH 块。
+   * 一火定窗（字典序见 cachedWindowLength）。
    * @param {string} query
    * @param {{ start: number, end: number, text: string }[]} fromStart
    * @returns {Promise<{ chunks: { start: number, end: number, text: string }[], degrees: (number | undefined)[] }>}
@@ -2826,9 +2827,19 @@
     return { chunks: fromStart.slice(0, n), degrees };
   }
 
+  /** 这一火是否打相关度网：循环用它分开原则 2（要打网）和 3（纯缓存可加宽）。 */
+  function plannedWindowNeedsSend(taken) {
+    const n = taken.chunks.length;
+    const degrees = taken.degrees;
+    if (n > degrees.length) return true;
+    for (let i = 0; i < n; i++) {
+      if (!Number.isFinite(degrees[i])) return true;
+    }
+    return false;
+  }
+
   /**
-   * 多目标优化之字典序目标优化（目标之间存在硬优先级）：
-   * 一次搜索。字典序目标（先比上一条，打平才比下一条）：
+   * 一次搜索。字典序目标（先比上一条，打平才比下一条）；定窗与续火两处都从此头检查：
    * 1. 至少找到一个匹配；除非真的没有，或已经打满 8 次网络请求
    * 2. 少发起网络请求；除非还没有找到匹配
    * 3. 窗口尽量宽；除非需要发起更多的网络请求
@@ -2853,6 +2864,8 @@
     // 重开须在 await 前作废旧 keywords，避免 ensureHistory 窗口内旧任务仍落笔；Continue 保留
     if (!resume) keywordsPool.invalidate();
     else keywordsPool.resetAbortSignal(); // Continue 复用池：换新信号，避免沿用上一轮已 abort 的信号
+    // Continue 首火要跳到本批新匹配；同一次搜索里后续纯缓存续批不得再清，以免抢走视口。
+    if (resume) firstMatchJumped = false;
     setSearching(true);
     refreshStatusContinueButtons();
 
@@ -2866,11 +2879,9 @@
       let resumeFrom = 0;
       let analyzedCpEnd = 0;
       let batchResume = resume;
-      let batchesDone = 0;
+      let networkBatches = 0;
 
-      while (batchesDone < MAX_AUTO_CONTINUE_BATCHES) {
-        batchesDone += 1;
-
+      while (true) {
         if (batchResume) {
           clearFindStatus();
           if (!doc.isConnected()) {
@@ -2924,7 +2935,6 @@
           windowStart: originAbs,
         };
         if (batchResume) {
-          firstMatchJumped = false;
           analyzedCpEnd =
             analyzedGrayCp ??
             (semanticMatchProgress.length > 0
@@ -3198,8 +3208,19 @@
         }
 
         if (epoch !== searchEpoch || abortWanted) break;
-        // 有匹配或范围已尽：停在本批。0 匹配且未尽：自动下一批（while 上限 MAX_AUTO_CONTINUE_BATCHES）。
-        if (matchedChunks.length > 0 || !canResumeSearch()) break;
+        if (plannedWindowNeedsSend(taken)) networkBatches += 1;
+        // 续火：1→2→3。搜尽则 1 已尽。下一火不打网 → 1、2 打平，3 续。
+        // 下一火要打网：无匹配且未满 8 → 1 续；否则停（2，或 1 的 8 次上限）。
+        if (!canResumeSearch()) break;
+        const nextTaken = await takeSearchWindow(
+          query,
+          contentChunks.slice(startAbs + allChunks.length)
+        );
+        if (epoch !== searchEpoch || abortWanted) break;
+        const nextSend = plannedWindowNeedsSend(nextTaken);
+        if (nextSend && (matchedChunks.length > 0 || networkBatches >= MAX_AUTO_CONTINUE_BATCHES)) {
+          break;
+        }
         batchResume = true;
       }
 

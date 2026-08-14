@@ -354,12 +354,12 @@
   color: #e8eaed;
   background: rgba(255, 255, 255, 0.1);
 }
-.semantic-find-bar .semantic-find-scope-toggle.is-from-current {
-  color: #8ab4f8;
-}
 .semantic-find-bar .semantic-find-scope-toggle svg {
   display: block;
   flex-shrink: 0;
+}
+.semantic-find-bar .semantic-find-scope-toggle .semantic-find-scope-below {
+  color: #8ab4f8;
 }
 .semantic-find-bar .semantic-find-scope-toggle .semantic-find-scope-icon-from {
   display: none;
@@ -620,8 +620,8 @@
   color: #202124;
   background: rgba(60, 64, 67, 0.08);
 }
-:root[data-theme=light] .semantic-find-bar .semantic-find-scope-toggle.is-from-current,
-.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-find-scope-toggle.is-from-current {
+:root[data-theme=light] .semantic-find-bar .semantic-find-scope-toggle .semantic-find-scope-below,
+.semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-find-scope-toggle .semantic-find-scope-below {
   color: #1a73e8;
 }
 :root[data-theme=light] .semantic-find-bar .semantic-find-bar-sep,

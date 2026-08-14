@@ -210,6 +210,23 @@ test('windowPlan：遇洞即停，不扫完全部剩余', async () => {
   assert.ok(maxKeys > 0 && maxKeys <= 32);
 });
 
+function planNeedsSend(plan) {
+  if (plan.n > plan.degrees.length) return true;
+  for (let i = 0; i < plan.n; i++) {
+    if (!Number.isFinite(plan.degrees[i])) return true;
+  }
+  return false;
+}
+
+test('定窗是否打网：全缓存 / 有匹配前缀停在洞前 → 否；从洞起 → 是', async () => {
+  await cache.relevance('q', ['a', 'b', 'c'], () => {}, undefined, async (_q, ts, onRow) => {
+    ts.forEach((t, i) => onRow(i + 1, t === 'b' ? 0.2 : 0.05));
+  });
+  assert.equal(planNeedsSend(await cache.windowPlan('q', ['a', 'b', 'c'], 0.1)), false);
+  assert.equal(planNeedsSend(await cache.windowPlan('q', ['a', 'b', 'c', 'd'], 0.1)), false);
+  assert.equal(planNeedsSend(await cache.windowPlan('q', ['d', 'e'], 0.1, 32)), true);
+});
+
 test('一次 send 的多行只改一次占用表', async () => {
   mockLocal();
   const api = globalThis.chrome.storage.local;

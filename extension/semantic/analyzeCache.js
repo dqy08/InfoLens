@@ -141,8 +141,10 @@ globalThis.IL_analyzeCache ||= (function () {
   }
 
   /**
-   * 一火定窗。前缀已缓存且已有匹配：收到连续缓存末。
-   * 前缀已缓存尚无匹配：从第一个洞起再取 maxSend 块（缓存前缀不占请求配额）。
+   * 一火定窗。字典序 1→2→3（8 次不在这一层）：
+   * 遇洞且前缀已有匹配 → 1 已满足，2 停在连续缓存末、不打洞；
+   * 遇洞且前缀尚无匹配 → 1 未满足，2 从洞起最多 maxSend（缓存前缀不占配额）；
+   * 无洞 → 1、2 打平，3 收到已扫连续缓存末。
    * @param {(number | undefined)[]} degrees  与待分析窗同序；undefined = 未缓存
    * @param {number} threshold
    * @param {number} [maxSend]  从第一个未缓存块起最多取几块；默认 degrees.length
@@ -164,7 +166,7 @@ globalThis.IL_analyzeCache ||= (function () {
   }
 
   /**
-   * 按缓存规则一次定出要用几块（含本地回放的前缀）。
+   * 按缓存扫完再定窗。无洞则 3 收尽剩余；遇洞交给 cachedWindowLength。
    * degrees 与已扫到的 texts 同序；长度可能短于 n（洞后未扫的未知块）。
    * @param {string} query
    * @param {string[]} texts  起点之后的全部剩余块，不要先截到 maxSend
