@@ -6,7 +6,7 @@
  *   Enter = 开火并离开输入；翻匹配只用上下按钮（不绑键：留在输入则预览与结果灰打架）
  *   灰：聚焦未搜 = 预览（全文整篇 / 从当前位置则窗前灰+虚线）；开搜或失焦 = 窗前∪前沿后
  *   Enter 每次开窗只画这一火（同窗已有匹配则只跳转）；搜索优先级见 runSearch
- *   进度图横轴 = 文档 Y；跳转目标 Y @ 焦点线，高亮块顶不高于 CHUNK_START_MAX_Y_RATIO
+ *   进度图横轴 = 文档 Y；范围 / 跳转 / 翻匹配均用焦点线 Y，高亮块顶不高于 CHUNK_START_MAX_Y_RATIO
  *
  * 绘制（性能差一个数量级以上，勿混用）：
  * - 网页：CSS Custom Highlight（只绑 Range；不做 getClientRects、不插 overlay DOM）。
@@ -37,9 +37,6 @@
   }
   if (!globalThis.IL_analyzeCache) {
     throw new Error('IL_analyzeCache missing — inject semantic/analyzeCache.js before find.js');
-  }
-  if (typeof doc.paintOffsetFromCaret !== 'function') {
-    throw new Error('paintOffsetFromCaret missing on document adapter');
   }
   const CFG = globalThis.IL_CONFIG;
   const DOM_DEBUG = !!CFG.domDebug;
@@ -93,8 +90,6 @@
   let lastSearchMeta = null;
   /** true = 从视口焦点线附近最近块边界起搜；false = 全文从首块 */
   let searchFromCurrent = false;
-  /** 焦点线最近一次命中的码点；未命中时沿用，避免预览闪成整篇全亮 */
-  let lastFocusPaintCp = null;
   /** 本轮搜索是否已处理过 HF 慢速提示（展示或叉掉后均不再弹出） */
   let slowBackendNoticeShown = false;
   /** 进度图跳转高亮：覆盖当前跳转 Y 的块；hold 结束或未跳转为空 */
@@ -270,7 +265,6 @@
     selectedProgressChunkStarts = new Set();
     matchIndex = -1;
     progressChunkContentY = new Map();
-    lastFocusPaintCp = null;
     return { root: info.root, length: info.length };
   }
 
@@ -1047,107 +1041,50 @@
     return viewportYAtRatio(VIEWPORT_FOCUS_Y_RATIO);
   }
 
-  /** 焦点线与提取根相交段的中点 X（viewport client） */
-  function focusHitX() {
-    const root = doc.getRoot();
-    if (!root) return window.innerWidth / 2;
-    const r = root.getBoundingClientRect();
-    const scrollRoot = doc.findScrollRoot();
-    let left = r.left;
-    let right = r.right;
-    if (isWindowScrollRoot(scrollRoot)) {
-      left = Math.max(left, 0);
-      right = Math.min(right, window.innerWidth);
-    } else {
-      const panel = /** @type {HTMLElement} */ (scrollRoot).getBoundingClientRect();
-      left = Math.max(left, panel.left);
-      right = Math.min(right, panel.right);
-    }
-    if (right < left) return (r.left + r.right) / 2;
-    return (left + right) / 2;
-  }
-
-  function caretAt(x, y) {
-    if (typeof document.caretPositionFromPoint === 'function') {
-      const p = document.caretPositionFromPoint(x, y);
-      if (p?.offsetNode) return { node: p.offsetNode, offset: p.offset };
-    }
-    if (typeof document.caretRangeFromPoint === 'function') {
-      const r = document.caretRangeFromPoint(x, y);
-      if (r?.startContainer) return { node: r.startContainer, offset: r.startOffset };
-    }
-    return null;
-  }
-
-  /** 焦点线上的 paint 码点；未命中则沿用上次，避免整篇闪亮 */
-  function paintOffsetAtFocusLine() {
-    const caret = caretAt(focusHitX(), viewportFocusY());
-    const cp = caret && doc.paintOffsetFromCaret(caret.node, caret.offset);
-    if (cp != null) return (lastFocusPaintCp = cp);
-    return lastFocusPaintCp;
-  }
-
   function contentChunkToPaint(c) {
     return { start: doc.toPaintOffset(c.start), end: doc.toPaintOffset(c.end) };
   }
 
-  /** 最后一个 start ≤ cp 的块下标；没有则 -1。块按文档序。 */
-  function lastChunkIndexAtOrBefore(chunks, cp, toPaint = (c) => c) {
-    let lo = 0;
-    let hi = chunks.length - 1;
+  /**
+   * 块区间 = 本块顶 → 下一块顶（末块一直到文末）。焦点线落在其间则属本块。
+   * @returns {number} 下标；线在首块顶之上为 -1
+   */
+  function chunkIndexAtFocusY(chunks, scrollRoot, toPaint = (c) => c) {
+    const focusY = contentYFromClientY(viewportFocusY(), scrollRoot);
     let landed = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (toPaint(chunks[mid]).start <= cp) {
-        landed = mid;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
-      }
+    for (let i = 0; i < chunks.length; i++) {
+      const cy = measureChunkContentY(toPaint(chunks[i]), scrollRoot);
+      if (!cy) continue;
+      if (cy.y0 > focusY) break;
+      landed = i;
     }
     return landed;
   }
 
-  /**
-   * 开搜窗口起点：焦点线命中处附近最近块边界对应的 contentChunks 下标（0..length）。
-   * 候选为所落块头 vs 下一块头；末块后 → length。
-   */
+  /** 从当前位置开搜：焦点线所在块（线在全部块之上则从首块） */
   function scopeWindowStartFromViewport(contentChunks) {
     if (contentChunks.length === 0) return 0;
-    const cp = paintOffsetAtFocusLine();
-    if (cp == null) return 0;
-    const landed = lastChunkIndexAtOrBefore(contentChunks, cp, contentChunkToPaint);
-    if (landed < 0) return 0;
-    const a = contentChunkToPaint(contentChunks[landed]);
-    if (landed === contentChunks.length - 1) {
-      return cp >= a.end ? contentChunks.length : landed;
-    }
-    const b = contentChunkToPaint(contentChunks[landed + 1]);
-    return Math.abs(a.start - cp) <= Math.abs(b.start - cp) ? landed : landed + 1;
+    const i = chunkIndexAtFocusY(contentChunks, doc.findScrollRoot(), contentChunkToPaint);
+    return i < 0 ? 0 : i;
   }
 
-  /** 当前视口开搜收口（码点）；无块或已过文末时为全文长（待搜区空，整篇前缀灰） */
+  /** 当前视口开搜收口（码点）：焦点线所在块的起点 */
   function scopeStartCpFromViewport() {
     const contentChunks = splitContentChunks();
     if (contentChunks.length === 0) return 0;
     const i = scopeWindowStartFromViewport(contentChunks);
-    if (i >= contentChunks.length) return doc.getPaintLength();
     return doc.toPaintOffset(contentChunks[i].start);
   }
 
   /**
-   * ↑↓ 锚点：焦点线相对已分析块的位置。
-   * @returns {null | 'before' | 'after' | number} null=无进度；number=区内块 start
+   * ↑↓ 锚点：焦点线所在已分析块（本块顶 → 下一块顶）。
+   * @returns {null | 'before' | number} null=无进度；number=该块 start
    */
   function progressAnchorFromViewport() {
-    const n = semanticMatchProgress.length;
-    if (n === 0) return null;
-    const cp = paintOffsetAtFocusLine();
-    if (cp == null) return 'before';
-    const landed = lastChunkIndexAtOrBefore(semanticMatchProgress, cp);
-    if (landed < 0) return 'before';
-    if (landed === n - 1 && cp >= semanticMatchProgress[landed].end) return 'after';
-    return semanticMatchProgress[landed].start;
+    if (semanticMatchProgress.length === 0) return null;
+    const i = chunkIndexAtFocusY(semanticMatchProgress, doc.findScrollRoot());
+    if (i < 0) return 'before';
+    return semanticMatchProgress[i].start;
   }
 
   /**
@@ -1839,8 +1776,8 @@
   }
 
   /**
-   * 按焦点线现算上下导航目标。
-   * 区外：首块前 / 末块后循环；区内：落在匹配上则 ±1，落在灰块上则按插入点。
+   * 按焦点线所在块现算上下导航。
+   * 首块前循环；落在匹配上则 ±1，落在灰块上则按插入点。
    */
   function navigateMatch(delta) {
     if (!matchedChunks.length) return;
@@ -1850,10 +1787,6 @@
 
     if (anchor === 'before') {
       jumpToMatch(delta < 0 ? -1 : 0);
-      return;
-    }
-    if (anchor === 'after') {
-      jumpToMatch(delta < 0 ? matchedChunks.length - 1 : matchedChunks.length);
       return;
     }
     if (typeof anchor !== 'number') {

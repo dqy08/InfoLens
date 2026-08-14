@@ -287,22 +287,6 @@
       getText: () => pageText,
       getPaintLength: () => pageText.length,
       toPaintOffset: (u) => u,
-      /**
-       * textLayer 命中 → pageText 下标。未命中则 null。
-       * @param {Node} node
-       * @param {number} offset
-       * @returns {number | null}
-       */
-      paintOffsetFromCaret(node, offset) {
-        const div =
-          node.nodeType === Node.TEXT_NODE ? node.parentElement : node instanceof Element ? node : null;
-        if (!div) return null;
-        const i = textDivs.indexOf(div);
-        if (i < 0) return null;
-        const o = itemOffsets[i];
-        const local = node.nodeType === Node.TEXT_NODE ? offset : 0;
-        return Math.max(o.start, Math.min(o.end, o.start + local));
-      },
       rangesFromOffsets,
       isConnected: () => !!extractRoot?.isConnected,
       getRoot: () => extractRoot,
