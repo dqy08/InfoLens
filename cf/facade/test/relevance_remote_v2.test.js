@@ -198,11 +198,23 @@ test('makeLineSplitter: 按换行切分，冲刷时把残留尾段也 emit', () 
 test('parseMultiChunkCounts: 宽松解析所有 [N] count 行（基线）', () => {
   const r = parseMultiChunkCounts('[1] 2\n[2] 0');
   assert.deepEqual([...r.counts], [[1, 2], [2, 0]]);
+  const compact = parseMultiChunkCounts('[1]2\n[2]0');
+  assert.deepEqual([...compact.counts], [[1, 2], [2, 0]]);
 });
 
 test('buildMultiChunkUserContent: 三明治包含 task/query/输出格式/ok pass', () => {
   const s = buildMultiChunkUserContent('查询', ['红']);
   assert.ok(s.includes('Query: 查询'));
   assert.ok(s.includes('Task Reminder'));
-  assert.ok(s.includes('[1] 红'));
+  assert.ok(s.includes('Passage 1: 红'));
+  assert.ok(s.includes('[1]0'));
+  const iTask = s.indexOf('Task: ');
+  const iFmt1 = s.indexOf('Output Format:');
+  const iQuery1 = s.indexOf('Query: 查询');
+  const iArt = s.indexOf('Article:');
+  const iRem = s.indexOf('Task Reminder:');
+  const iFmt2 = s.lastIndexOf('Output Format:');
+  const iQuery2 = s.lastIndexOf('Query: 查询');
+  assert.ok(iTask < iQuery1 && iQuery1 < iFmt1 && iFmt1 < iArt);
+  assert.ok(iArt < iRem && iRem < iQuery2 && iQuery2 < iFmt2);
 });

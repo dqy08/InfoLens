@@ -1,32 +1,18 @@
 #!/usr/bin/env python3
 """
-远程 Chat API 相关性门控评测（默认 OpenRouter；与门面 Worker 同提示词基线）。
+远程 Chat API 相关性门控评测（默认 OpenRouter；与门面 Worker v2 同提示词基线）。
 
-提示词字段为 Query: / Text: 冒号行（与 keywords 远程实验同风格）。
+默认 multi-chunk：以文章切片 Context 为单位请求，一次对多块各报 count
+（与线上 /api/v2/analyze-semantic-relevance 一致）。单 chunk 已废弃，仅 --single-chunk。
 
 主题：只评 expect_relevant（云端）；不管 expect_keywords / 本地 instruct relevance。
 （磁盘上 query 为数组且真值在项内；加载后展平为 query:str。）
 关键词归因请用 scripts/eval_semantic_keywords.py。
 
-提示词相对基线只保留一个变量：是否追加
-  "If the text is not clearly related to the query topic, reply 0."
-
 用法（项目根目录）:
   python scripts/eval_semantic_relevance_remote.py \\
     -c scripts/cases/红楼-第3回.json \\
     -o scripts/results/红楼-第3回_hy3_rel.jsonl
-
-  # 并发（用例彼此独立；默认 jobs=1）
-  python scripts/eval_semantic_relevance_remote.py \\
-    -c scripts/cases/论文.json \\
-    -o scripts/results/论文_rel.jsonl \\
-    -j 8
-
-  # 开启 clearly→0
-  python scripts/eval_semantic_relevance_remote.py \\
-    -c scripts/cases/红楼-第3回.json \\
-    -o scripts/results/红楼-第3回_hy3_clearly_rel.jsonl \\
-    --clearly-zero
 """
 
 from __future__ import annotations
@@ -88,19 +74,30 @@ def build_relevance_user_content(query: str, text: str, *, clearly_zero: bool) -
     return f"{head}\nText:\n\n{text}\n\n{reminder}"
 
 
+# 回复行格式。曾试 N:<count>，论文上偶发整组写崩；现为 [N]<count>（无空格）。
+MULTI_CHUNK_OUTPUT_FORMAT = (
+    "Output Format: each passage on its own line "
+    "as [N]<count, 0 if not related>, where N is the passage index. Nothing else.\n"
+    "Example reply for 3 passages:\n"
+    "[1]0\n[2]0\n[3]3"
+)
+
+
 def build_multi_chunk_user_content(query: str, chunks: List[str]) -> str:
     """multi-chunk 相关性 user 正文。Task 与 Output Format 分离且格式出现两次：
-    - Task 用「三明治」版式：头 Task/Query → 正文（[N] 分块切片）→ 文尾 Task Reminder/Query；
-    - Output Format（格式约束 + 0 示例）独立成段，在头部 Task 后与末尾各出现一次（紧贴上下文两端）。
+    - 三明治头尾同序：Task(Reminder) → Query → Output Format，正文夹在中间。
+      Hy3 对这段顺序敏感、会影响门控精度：Query 若顶在生成口会更积极认相关、错检升；
+      本序（Format 在最后）与旧「尾段单独贴 Format」精度相当。不要改成 Task→Format→Query。
+    - Output Format（格式约束 + 0 示例）独立成段，头尾各一次。
 
     强调 chunks 是同一篇文章的连续切片（非平行独立 Text），按阅读顺序排列，
-    在正文用 [N] 序号标注每个 passage。模型回复按 [N] 逐行给数
-    （与 parse_multi_chunk_counts 对应，SYNC）。
+    正文前缀 Passage N:（不用 [N]，避免与文中 [N] 冲突）；回复仍为 [N]<count>
+    （与 parse_multi_chunk_counts 对应）。
 
     task 为基线版。曾尝试追加全文判定句
     ［"A word's relevance is determined by its meaning in the whole article, not just in its own passage."］，
     实测增误放行显著（全集 acc 95.45%→88.11%，FP +21）且对真相关零增益，故不采用。
-    SYNC: cf/facade/src/relevance_remote_v2.js buildMultiChunkUserContent。
+    SYNC：cf/facade/src/relevance_remote_v2.js buildMultiChunkUserContent。
 
     实验结论（Hy3，2026-08-07，回归+hard+all）：Output Format 出现一次（仅尾部）相比
     两次（头部 Task 后 + 尾部）误报率偏高（hard 13.8% vs 9.6%；all 5.6% vs 4.4%），
@@ -109,29 +106,27 @@ def build_multi_chunk_user_content(query: str, chunks: List[str]) -> str:
         "The passages are consecutive slices of one complete article, in reading order. "
         "How many words in each passage are related to the query topic?"
     )
-    output_format = (
-        "Output Format: each passage on its own line "
-        "as [N] <count, 0 if not related>, where N is the passage index. Nothing else.\n"
-        "Example reply for 3 passages:\n"
-        "[1] 0\n[2] 0\n[3] 3"
-    )
     query_line = f"Query: {query}"
-    head = f"Task: {task}\n{output_format}\n{query_line}"
-    reminder = f"Task Reminder: {task}\n{query_line}"
-    passages = "\n".join(f"[{i}] {text}" for i, text in enumerate(chunks, 1))
-    return f"{head}\nArticle:\n\n{passages}\n\n{reminder}\n\n{output_format}"
+    mid = f"{query_line}\n{MULTI_CHUNK_OUTPUT_FORMAT}"
+    head = f"Task: {task}\n{mid}"
+    reminder = f"Task Reminder: {task}\n{mid}"
+    passages = "\n".join(f"Passage {i}: {text}" for i, text in enumerate(chunks, 1))
+    return f"{head}\nArticle:\n\n{passages}\n\n{reminder}"
+
+
+_RE_BRACKET_COUNT = re.compile(r"\[(\d+)\]\s*(\d+)")
 
 
 def parse_multi_chunk_counts(content: Optional[str]) -> Optional[Dict[int, int]]:
-    """从每行解析 `[N] 数字`，返回 {N: count}（N 从 1 起）。
+    """从每行解析 count，返回 {N: count}（N 从 1 起）。
 
-    N 缺失/无法解析的那一行的 chunk 视为失败（None），不猜。SYNC: 与提示词 [N] 序号对应。"""
+    `[N]数字` / `[N] 数字` 均可（空格可选）。对不上的行跳过，不猜。
+    SYNC：与提示词 [N] 序号 / 门面 parseMultiChunkCounts 对应。"""
     if not content or not isinstance(content, str):
         return None
     out: Dict[int, int] = {}
     for line in content.splitlines():
-        line = line.strip()
-        m = re.match(r"\[(\d+)\]\s*(\d+)", line)
+        m = _RE_BRACKET_COUNT.match(line.strip())
         if not m:
             continue
         out[int(m.group(1))] = int(m.group(2))
@@ -250,7 +245,7 @@ def chat_relevance_multi_chunk(
     token: str,
     timeout: int,
 ) -> dict:
-    """multi-chunk：一次请求让模型对整组连续切片各报 count（`[N] 数字` 每行）。
+    """multi-chunk：一次请求让模型对整组连续切片各报 count。
 
     返回 {"counts": {N: count}, "content": 原文, "finish_reason", "usage", "raw_model"}。
     输出解析失败（目标行缺 或 完全不可 parse）时抛错，由调用方按重试处理。"""
@@ -501,6 +496,8 @@ def _run_multi_chunk_main(
             "gate_passed": degree >= SEMANTIC_MATCH_THRESHOLD,
             "count": count,
             "content": r.get("content"),
+            "finish_reason": r.get("finish_reason"),
+            "usage": r.get("usage"),
         }
         if case.get("disputed"):
             record["disputed"] = True
@@ -526,7 +523,9 @@ def _run_multi_chunk_main(
                 _emit(group["ctx_id"], case, n, r)
 
 
-def write_review_markdown(results: List[dict], path: Path, clearly_zero: bool) -> None:
+def write_review_markdown(
+    results: List[dict], path: Path, clearly_zero: bool
+) -> None:
     tn = tp = fp = fn = 0
     lines = [
         "# 远程 relevance 对照表",
@@ -577,7 +576,7 @@ def write_review_markdown(results: List[dict], path: Path, clearly_zero: bool) -
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="远程 Chat API 相关性评测（唯一提示词变量：--clearly-zero）"
+        description="远程 Chat API 相关性评测（默认 multi-chunk，与线上 v2 一致）"
     )
     parser.add_argument("-c", "--cases", type=Path, required=True, help="用例 JSON 数组")
     parser.add_argument("-o", "--output", type=Path, default=None, help="结果 JSONL（可续跑）")
@@ -591,13 +590,24 @@ def main() -> None:
     parser.add_argument(
         "--clearly-zero",
         action="store_true",
-        help=f'提示词追加: "{CLEARLY_ZERO_SENTENCE}"',
+        help=f'仅 --single-chunk：提示词追加 "{CLEARLY_ZERO_SENTENCE}"',
     )
-    parser.add_argument(
+    chunk_mode = parser.add_mutually_exclusive_group()
+    chunk_mode.add_argument(
         "--multi-chunk",
-        action="store_true",
-        help="多 chunk 模式：以「文章切片 Context」为单位请求，一次对多块各报 count，目标块按 [N] 对齐（纯文本版）",
+        dest="chunk_mode",
+        action="store_const",
+        const="multi",
+        help="多 chunk 模式（默认，可省略）：以文章切片 Context 为单位请求，与线上 v2 一致",
     )
+    chunk_mode.add_argument(
+        "--single-chunk",
+        dest="chunk_mode",
+        action="store_const",
+        const="single",
+        help="废弃：逐块单条请求（旧路径）",
+    )
+    parser.set_defaults(chunk_mode="multi")
     parser.add_argument(
         "--ctx-max",
         type=int,
@@ -622,7 +632,7 @@ def main() -> None:
         "--jobs",
         type=int,
         default=1,
-        help="并发数（用例彼此独立；默认 1；可试 4/8）",
+        help="仅 --single-chunk：并发数（用例彼此独立；默认 1）",
     )
     args = parser.parse_args()
 
@@ -648,9 +658,14 @@ def main() -> None:
         print(f"错误: 需要 --token / {OPENROUTER_TOKEN_ENV} / {HF_TOKEN_ENV}")
         sys.exit(1)
 
+    if args.clearly_zero and args.chunk_mode != "single":
+        print("错误: --clearly-zero 仅用于已废弃的 --single-chunk")
+        sys.exit(1)
+
     jobs = max(1, int(args.jobs))
     print(
         f"已加载 {len(cases)} 条用例；model={args.model}；"
+        f"chunk_mode={args.chunk_mode}；"
         f"clearly_zero={args.clearly_zero}；jobs={jobs}"
     )
 
@@ -696,7 +711,7 @@ def main() -> None:
         completed.add(name)
         return True
 
-    if args.multi_chunk:
+    if args.chunk_mode == "multi":
         _run_multi_chunk_main(
             args, pending, completed, all_results,
             write_lock=write_lock, stop=stop,

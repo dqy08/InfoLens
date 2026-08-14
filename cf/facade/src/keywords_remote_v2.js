@@ -1,24 +1,24 @@
 /**
- * 远程 keywords v2：OpenRouter Chat（虚拟提交工具）→ 无重叠 token_attention（可直接上色）。
+ * 远程 keywords v2：OpenRouter Chat（口头逐行 [keyword]<score>）→ 无重叠 token_attention。
  * 路径 /api/v2/analyze-semantic-keywords；只走边缘远程，无本地/HF 回退。
  * 双轨：旧扩展仍用 /api/analyze-semantic-keywords（梯度归因）；本模块不接管旧路径。
- * 提示词 / tool / 解析 SYNC: scripts/eval_semantic_keywords_remote.py
- * - 强制 tool_choice → submit_keywords；只读 arguments，不执行副作用
- * - arguments 须为合法 JSON；非法则失败（不做 fence）
- * - 仅当 length 截断（native_finish_reason/finish_reason=length）时，从残缺 JSON 捞已写完的条目
- * - score 整数 1–5；正文忽略大小写找齐全部出现；原文找不到则跳过
+ * 提示词 / 解析 SYNC: scripts/eval_semantic_keywords_remote.py（默认口头；--tool 仅评测对照）
+ * - 口头：Task 与 Output Format 解耦；头尾同序 Task(Reminder) → Query → Output Format
+ *   （跟相关度同一序。Hy3 对这段顺序敏感：相关度实测 Query 在最后会抬错检）
+ * - 回复逐行 [keyword]<score>，score 整数 1–5；空字符串 = 合法零词；无 content 报错
+ * - 空行忽略；任一非空行对不上格式 → 报错（不跳过）
+ * - 正文忽略大小写找齐全部出现；原文找不到则跳过
  * - 字重叠取 max，不累加；模型分先归一化到 (0,1]
  * - 渲染 Workarounds（uniquifyHighScores / REPEAT_DIM）：只服务上色观感，不代表模型能力；
  *   评测模型抽取能力请用 scripts/eval_semantic_keywords_remote.py（不跑定位/压分）
  * - 不返回 input_token_count
  */
 import { logRemoteFailure, publicRemoteError } from './remote_log.js';
-import { makeSseDeltaFeeder } from './relevance_remote_v2.js';
+import { makeLineSplitter, makeSseDeltaFeeder } from './relevance_remote_v2.js';
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 const KEYWORDS_MODEL = 'tencent/hy3';
 const KEYWORDS_MAX_TOKENS = 256;
-const TOOL_NAME = 'submit_keywords';
 
 /** 模型分 1–5 → (0.2…1.0] */
 const SCORE_NORMALIZE = 5;
@@ -27,152 +27,68 @@ const REPEAT_DIM_FACTOR = 5;
 
 export const KEYWORDS_V2_PATH = '/api/v2/analyze-semantic-keywords';
 /** 提示词/模型/解析变了、影响缓存准确性时加一。 */
-export const KEYWORDS_CACHE_VERSION = 1;
+export const KEYWORDS_CACHE_VERSION = 2;
 
-/** SYNC: scripts/eval_semantic_keywords_remote.py → KEYWORDS_TASK / build_keywords_user_content */
+/** SYNC: scripts/eval_semantic_keywords_remote.py → KEYWORDS_TASK_CORE */
 const KEYWORDS_TASK =
   'Extract all keywords related to the query topic. ' +
   'A keyword can be a word or short phrase. ' +
   'Make sure to only extract keywords that appear in the text. ' +
-  'Order them from most important to least important. ' +
-  `Submit with ${TOOL_NAME}.`;
+  'Order them from most important to least important.';
 
-/** SYNC: scripts/eval_semantic_keywords_remote.py → SUBMIT_KEYWORDS_TOOL */
-const SUBMIT_KEYWORDS_TOOL = {
-  type: 'function',
-  function: {
-    name: TOOL_NAME,
-    description: 'Submit extracted keywords with scores.',
-    parameters: {
-      type: 'object',
-      required: ['keywords'],
-      properties: {
-        keywords: {
-          type: 'array',
-          items: {
-            type: 'object',
-            required: ['keyword', 'score'],
-            properties: {
-              keyword: { type: 'string' },
-              score: {
-                type: 'integer',
-                description: '1 (slightly related) to 5 (strongly related).',
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-};
+/** SYNC: scripts/eval_semantic_keywords_remote.py → KEYWORDS_OUTPUT_FORMAT */
+const KEYWORDS_OUTPUT_FORMAT =
+  'Output Format: each keyword on its own line ' +
+  'as [keyword]<score, 1 slightly related to 5 strongly related>. ' +
+  'Nothing else.\n' +
+  'Example reply:\n' +
+  '[foo]5\n[bar]3';
 
-/** SYNC: scripts/eval_semantic_keywords_remote.py → build_keywords_user_content（三明治） */
+/** SYNC: scripts/eval_semantic_keywords_remote.py → build_keywords_user_content（verbal 默认）
+ * 头尾同序 Task(Reminder) → Query → Output Format。Hy3 对这段顺序敏感（相关度实测：Query 在最后会抬错检）。 */
 export function buildKeywordsUserContent(query, text) {
   const queryLine = `Query: ${query}`;
-  const head = `Task: ${KEYWORDS_TASK}\n${queryLine}`;
-  const reminder = `Task Reminder: ${KEYWORDS_TASK}\n${queryLine}`;
+  const mid = `${queryLine}\n${KEYWORDS_OUTPUT_FORMAT}`;
+  const head = `Task: ${KEYWORDS_TASK}\n${mid}`;
+  const reminder = `Task Reminder: ${KEYWORDS_TASK}\n${mid}`;
   return `${head}\nText:\n\n${text}\n\n${reminder}`;
 }
 
 /**
- * SYNC: scripts/eval_semantic_keywords_remote.py → parse_submit_keywords_arguments
- * 严格 JSON.parse；非法或结构不对 → null
+ * 独立单行：`[keyword]<score>`（] 与数字之间空格可选）→ [kw, score]；失败 null。
+ * score 定档 1–5。SYNC: parse_verbal_keywords 的行规则。
+ * @returns {[string, number] | null}
+ */
+function parseSingleKeyword(line) {
+  if (!line) return null;
+  const m = line.trim().match(/^\[(.+)\]\s*(\d+)\s*$/);
+  if (!m) return null;
+  const kw = m[1].trim();
+  if (!kw) return null;
+  const score = Number(m[2]);
+  if (!Number.isFinite(score)) return null;
+  let s = Math.round(score);
+  s = Math.max(1, Math.min(5, s));
+  return [kw, s];
+}
+
+/**
+ * SYNC: scripts/eval_semantic_keywords_remote.py → parse_verbal_keywords
+ * 空/空白字符串 = 合法零词；无 content / 非字符串 / 任一非空行对不上 = 契约外 → null
  * @returns {Array<[string, number]>|null}
  */
-export function parseSubmitKeywordsArguments(argumentsStr) {
-  if (!argumentsStr || typeof argumentsStr !== 'string') return null;
-  let data;
-  try {
-    data = JSON.parse(argumentsStr);
-  } catch {
-    return null;
-  }
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
-  const items = data.keywords;
-  if (!Array.isArray(items)) return null;
+export function parseVerbalKeywords(content) {
+  if (typeof content !== 'string') return null;
+  if (!content.trim()) return [];
   /** @type {Array<[string, number]>} */
   const out = [];
-  for (const x of items) {
-    if (!x || typeof x !== 'object' || Array.isArray(x)) continue;
-    const kw = x.keyword;
-    const score = x.score;
-    if (typeof kw !== 'string' || !kw.trim()) continue;
-    if (typeof score !== 'number' || !Number.isFinite(score)) continue;
-    let s = Math.round(score);
-    s = Math.max(1, Math.min(5, s));
-    out.push([kw.trim(), s]);
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    const p = parseSingleKeyword(line);
+    if (!p) return null;
+    out.push(p);
   }
-  // 空数组 = 合法零词；非空却 0 条有效 = 契约外，当解析失败
-  if (items.length > 0 && out.length === 0) return null;
   return out;
-}
-
-/** OpenRouter 常把 finish_reason 归一成 tool_calls；超长截断看 native_finish_reason=length */
-export function isKeywordsLengthStop(choice) {
-  if (!choice || typeof choice !== 'object') return false;
-  return choice.finish_reason === 'length' || choice.native_finish_reason === 'length';
-}
-
-/**
- * 从残缺 arguments 字符串中捞已写完的 {keyword,score} 条目。
- * 供流式增量消费与原非流式截断兜底共用。
- *
- * @param {string} argumentsStr  累计的工具参数增量（可为残缺 JSON）
- * @param {number} [fromIndex]   只扫描该偏移起的新内容；省略/0 = 全扫整块（原兜底行为）
- * @returns {{ items: Array<[string, number]>, next: number } | null}
- *   items：本次新发现的完整条目（已闭合 `}`，含关键词与定档后分数）
- *   next：建议下一轮 fromIndex（= 已完整处理到的结尾偏移；未闭合的尾巴原样保留在窗口，等后续补齐）
- */
-function salvagePartialKeywordsArgumentsFromIndex(argumentsStr, fromIndex = 0) {
-  if (!argumentsStr || typeof argumentsStr !== 'string') return null;
-  const windowStr = argumentsStr.slice(fromIndex);
-  const base = fromIndex;
-  /** @type {Array<{ i: number, kw: string, score: number }>} */
-  const found = [];
-  let maxEnd = -1;
-  const push = (i, kwRaw, scoreRaw, endIdx) => {
-    let kw;
-    try {
-      kw = JSON.parse(`"${kwRaw}"`);
-    } catch {
-      return;
-    }
-    if (typeof kw !== 'string' || !kw.trim()) return;
-    const score = Number(scoreRaw);
-    if (!Number.isFinite(score)) return;
-    let s = Math.round(score);
-    s = Math.max(1, Math.min(5, s));
-    found.push({ i, kw: kw.trim(), score: s });
-    if (endIdx > maxEnd) maxEnd = endIdx;
-  };
-  const reKwScore =
-    /\{\s*"keyword"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"score"\s*:\s*(-?\d+(?:\.\d+)?)\s*\}/g;
-  const reScoreKw =
-    /\{\s*"score"\s*:\s*(-?\d+(?:\.\d+)?)\s*,\s*"keyword"\s*:\s*"((?:\\.|[^"\\])*)"\s*\}/g;
-  for (const re of [reKwScore, reScoreKw]) {
-    re.lastIndex = 0;
-    let m;
-    while ((m = re.exec(windowStr))) {
-      const field = re === reKwScore ? [m[1], m[2]] : [m[2], m[1]];
-      push(base + m.index, field[0], field[1], base + m.index + m[0].length);
-    }
-  }
-  if (!found.length && maxEnd < 0) return null;
-  found.sort((a, b) => a.i - b.i);
-  return {
-    items: found.map((x) => /** @type {[string, number]} */ ([x.kw, x.score])),
-    next: maxEnd >= 0 ? maxEnd : 0,
-  };
-}
-
-/**
- * SYNC: scripts/eval_semantic_keywords_remote.py → salvage_partial_submit_keywords_arguments
- * 从残缺 arguments 捞已写完的 {keyword,score}；一个都没有 → null（整块一次捞全，供非流式截断兜底）
- * @returns {Array<[string, number]>|null}
- */
-export function salvagePartialKeywordsArguments(argumentsStr) {
-  const r = argumentsStr ? salvagePartialKeywordsArgumentsFromIndex(argumentsStr) : null;
-  return r?.items || null;
 }
 
 /**
@@ -287,6 +203,26 @@ function findAllCaseInsensitive(textCps, keyword) {
   return hits;
 }
 
+function keywordsChatBody(query, text, stream) {
+  return {
+    model: KEYWORDS_MODEL,
+    messages: [{ role: 'user', content: buildKeywordsUserContent(query, text) }],
+    temperature: 0,
+    max_tokens: KEYWORDS_MAX_TOKENS,
+    stream,
+    reasoning: { effort: 'none' },
+  };
+}
+
+function keywordsChatHeaders(token) {
+  return {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+    'HTTP-Referer': 'https://info-lens.app',
+    'X-Title': 'infolens-keywords-v2',
+  };
+}
+
 /**
  * @returns {Promise<{ model: string, token_attention: Array<{ offset: [number, number], raw: string, score: number }> }>}
  */
@@ -300,22 +236,8 @@ export async function chatKeywordsV2(env, query, text) {
   try {
     resp = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://info-lens.app',
-        'X-Title': 'infolens-keywords-v2',
-      },
-      body: JSON.stringify({
-        model: KEYWORDS_MODEL,
-        messages: [{ role: 'user', content: buildKeywordsUserContent(query, text) }],
-        tools: [SUBMIT_KEYWORDS_TOOL],
-        tool_choice: { type: 'function', function: { name: TOOL_NAME } },
-        temperature: 0,
-        max_tokens: KEYWORDS_MAX_TOKENS,
-        stream: false,
-        reasoning: { effort: 'none' },
-      }),
+      headers: keywordsChatHeaders(token),
+      body: JSON.stringify(keywordsChatBody(query, text, false)),
     });
   } catch (e) {
     const m = e && e.message != null ? String(e.message) : String(e);
@@ -339,19 +261,10 @@ export async function chatKeywordsV2(env, query, text) {
 
   const choice = (data.choices && data.choices[0]) || {};
   const msg = choice.message || {};
-  const toolCalls = msg.tool_calls || [];
-  if (!toolCalls.length) {
-    throw new Error(
-      `missing tool_calls: content=${JSON.stringify(msg.content)} finish_reason=${JSON.stringify(choice.finish_reason)}`,
-    );
-  }
-  const rawArgs = ((toolCalls[0].function || {}).arguments) || '';
-  let scored = parseSubmitKeywordsArguments(rawArgs);
-  if (scored === null && isKeywordsLengthStop(choice)) {
-    scored = salvagePartialKeywordsArguments(rawArgs);
-  }
+  const raw = msg.content;
+  const scored = parseVerbalKeywords(raw);
   if (scored === null) {
-    throw new Error(`unparseable tool arguments: ${JSON.stringify(rawArgs)}`);
+    throw new Error(`unparseable verbal output: ${JSON.stringify(raw)}`);
   }
 
   return {
@@ -361,13 +274,10 @@ export async function chatKeywordsV2(env, query, text) {
 }
 
 /**
- * 流式版本：向 OpenRouter stream:true，读 SSE 的 tool_calls.function.arguments 增量，
- * 边累积边增量捞（只扫上次已消费位置之后的新内容）已完整的关键字条目，捞到即：
+ * 流式：读 SSE 的 delta.content，按行切 `[keyword]<score>`，完整一行即：
  * ① 增量 uniquify 定档（共享 taken，与整块版逐位一致）
  * ② 定位 + REPEAT_DIM → 逐条 emit 高亮 run。
- *
- * Q1 已定：长截断一律增量-save（在线路径不再区分 finish_reason），捞到啥画啥；
- * parseSubmitKeywordsArguments 整块解析仅留评测脚本使用。
+ * 空行忽略；非空行对不上格式即报错（含长截断末行残缺）；全空 = 合法零词。
  *
  * @param {object} env
  * @param {string} query
@@ -386,22 +296,8 @@ export async function streamKeywordsV2(env, query, text, emit, signal) {
   try {
     resp = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://info-lens.app',
-        'X-Title': 'infolens-keywords-v2',
-      },
-      body: JSON.stringify({
-        model: KEYWORDS_MODEL,
-        messages: [{ role: 'user', content: buildKeywordsUserContent(query, text) }],
-        tools: [SUBMIT_KEYWORDS_TOOL],
-        tool_choice: { type: 'function', function: { name: TOOL_NAME } },
-        temperature: 0,
-        max_tokens: KEYWORDS_MAX_TOKENS,
-        stream: true,
-        reasoning: { effort: 'none' },
-      }),
+      headers: keywordsChatHeaders(token),
+      body: JSON.stringify(keywordsChatBody(query, text, true)),
       signal,
     });
   } catch (e) {
@@ -425,35 +321,29 @@ export async function streamKeywordsV2(env, query, text, emit, signal) {
   }
 
   const textCps = Array.from(text);
-  /** 增量 uniquify 共享档位集 */
   const taken = new Set();
-  /** 已 emit 条目 key：kw\x00score（条目一旦完整即固定，不再变化） */
   const seen = new Set();
-  let emittedRows = 0;
-  let argsBuffer = '';
-  /** 增量扫描游标：只扫上次已完全消费位置之后的新内容（未闭合尾部自动留在窗口） */
-  let scanFrom = 0;
 
-  const onDelta = (d) => {
-    argsBuffer += d;
-    const rt = salvagePartialKeywordsArgumentsFromIndex(argsBuffer, scanFrom);
-    if (!rt) return;
-    scanFrom = rt.next;
-    for (const [kw, score] of rt.items) {
-      const key = `${kw}\x00${score}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const scoreInt = uniquifyStep(score, taken);
-      for (const run of keywordToRuns(textCps, kw, scoreInt, null)) {
-        emittedRows += 1;
-        emit({ type: 'row', offset: run.offset, raw: run.raw, score: run.score });
-      }
+  const onLine = (line) => {
+    const s = line.trim();
+    if (!s) return;
+    const p = parseSingleKeyword(s);
+    if (!p) {
+      throw new Error(`unparseable verbal output: ${JSON.stringify(line)}`);
+    }
+    const [kw, score] = p;
+    const key = `${kw}\x00${score}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const scoreInt = uniquifyStep(score, taken);
+    for (const run of keywordToRuns(textCps, kw, scoreInt, null)) {
+      emit({ type: 'row', offset: run.offset, raw: run.raw, score: run.score });
     }
   };
+  const split = makeLineSplitter(onLine);
 
   const decoder = new TextDecoder();
-  const sseFeeder = makeSseDeltaFeeder(onDelta, {
-    toolArgs: true,
+  const sseFeeder = makeSseDeltaFeeder(split, {
     onError: (err) => {
       throw new Error(err);
     },
@@ -464,15 +354,8 @@ export async function streamKeywordsV2(env, query, text, emit, signal) {
     if (done) break;
     sseFeeder(decoder.decode(value, { stream: true }));
   }
-  sseFeeder(''); // 冲刷 SSE 残留帧行
-
-  if (emittedRows === 0) {
-    // 零行 emit：合法零词（空数组，或有词但原文全对不上——与「找不到则跳过」同）→ 成功；
-    // 解析失败（null，含非空却 0 条有效）→ 仍报错。与非流式 keywordsToTokenAttention 对齐。
-    const parsed = parseSubmitKeywordsArguments(argsBuffer.trim());
-    if (parsed !== null) return;
-    throw new Error('unparseable tool arguments output: no keyword rows emitted');
-  }
+  sseFeeder('');
+  split('');
 }
 
 /**
