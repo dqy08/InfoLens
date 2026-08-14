@@ -2863,6 +2863,8 @@
       let analyzedCpEnd = 0;
       let batchResume = resume;
       let networkBatches = 0;
+      // Continue 保留历史匹配；原则 1/2 的「有没有匹配」只看本轮是否新找到。
+      const matchBaseline = resume ? matchedChunks.length : 0;
 
       while (true) {
         if (batchResume) {
@@ -3193,7 +3195,7 @@
         if (epoch !== searchEpoch || abortWanted) break;
         if (plannedWindowNeedsSend(taken)) networkBatches += 1;
         // 续火：1→2→3。搜尽则 1 已尽。下一火不打网 → 1、2 打平，3 续。
-        // 下一火要打网：无匹配且未满 8 → 1 续；否则停（2，或 1 的 8 次上限）。
+        // 下一火要打网：本轮无新匹配且未满 8 → 1 续；否则停（2，或 1 的 8 次上限）。
         if (!canResumeSearch()) break;
         const nextTaken = await takeSearchWindow(
           query,
@@ -3201,7 +3203,7 @@
         );
         if (epoch !== searchEpoch || abortWanted) break;
         const nextSend = plannedWindowNeedsSend(nextTaken);
-        if (nextSend && (matchedChunks.length > 0 || networkBatches >= MAX_AUTO_CONTINUE_BATCHES)) {
+        if (nextSend && (matchedChunks.length > matchBaseline || networkBatches >= MAX_AUTO_CONTINUE_BATCHES)) {
           break;
         }
         batchResume = true;
