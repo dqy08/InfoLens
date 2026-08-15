@@ -47,6 +47,14 @@
       return fn(root);
     }
 
+    function collectTextMapAsync(root, isStale) {
+      const fn = globalThis.IL_collectTextMapAsync;
+      if (typeof fn !== 'function') {
+        throw new Error('IL_collectTextMapAsync missing — inject collectTextMap.js before content.js');
+      }
+      return fn(root, isStale);
+    }
+
     function setPieces(newPieces) {
       pieces = newPieces;
       pieceNodeSet = new Set(pieces.map((p) => p.node));
@@ -341,15 +349,28 @@
       extractRoot = null;
     }
 
-    function refresh() {
-      const root = pickArticleRoot();
+    function applyMapped(root, mapped) {
       extractRoot = root;
       ensurePaintMount(root);
-      const mapped = collectTextMap(root);
       setExtractedText(mapped.text);
       setPieces(mapped.pieces);
       contentDirty = false;
       return { root, length: extractedText.length };
+    }
+
+    function refresh() {
+      const root = pickArticleRoot();
+      return applyMapped(root, collectTextMap(root));
+    }
+
+    /** 分片让出主线程；isStale 为真则丢弃，不改已有 extract。 */
+    async function refreshAsync(isStale) {
+      const root = pickArticleRoot();
+      const mapped = await collectTextMapAsync(root, isStale);
+      if (isStale?.()) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }
+      return applyMapped(root, mapped);
     }
 
     /** Continue：正文未变则重绑 pieces；变了 / 根断开 → false */
@@ -378,6 +399,7 @@
 
     return {
       refresh,
+      refreshAsync,
       rebindIfUnchanged,
       release,
       getText: () => extractedText,

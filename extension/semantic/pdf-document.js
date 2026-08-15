@@ -193,6 +193,14 @@
       return { root: extractRoot, length: pageText.length };
     }
 
+    /** 正文已在 viewer 拼好；这里只取快照（与网页 collectTextMap 不同）。过期则不写。 */
+    async function refreshAsync(isStale) {
+      if (isStale?.()) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }
+      return refresh();
+    }
+
     function rebindIfUnchanged() {
       if (!extractRoot?.isConnected) return false;
       let data;
@@ -282,6 +290,7 @@
 
     return {
       refresh,
+      refreshAsync,
       rebindIfUnchanged,
       release,
       getText: () => pageText,

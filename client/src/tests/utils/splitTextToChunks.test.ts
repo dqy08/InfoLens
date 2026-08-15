@@ -45,10 +45,10 @@ function expectChunks(text: string, limit: number, expectedTexts: string[]) {
 console.log("1. Guard 校验");
 
 test("bytesPerChunk=0 抛错", () => {
-    assert.throws(() => splitTextToChunks("hello", 0), /必须大于 0/);
+    assert.throws(() => splitTextToChunks("hello", 0), /bytesPerChunk must be > 0/);
 });
 test("bytesPerChunk=-1 抛错", () => {
-    assert.throws(() => splitTextToChunks("hello", -1), /必须大于 0/);
+    assert.throws(() => splitTextToChunks("hello", -1), /bytesPerChunk must be > 0/);
 });
 test("文本含 \\r 抛错", () => {
     assert.throws(() => splitTextToChunks("hello\r\nworld", 512), /\\r/);

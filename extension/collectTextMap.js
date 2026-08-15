@@ -4,10 +4,15 @@
  */
 (() => {
   /**
-   * @param {Element} root
-   * @returns {{ text: string, pieces: Array<{ node: Text, start: number, end: number }>, root: Element }}
+   * 在 background 任务里跑 work（省略则空让一次）。
+   * 计算必须放进回调：await 之后的续跑是微任务，仍会挡住绘制 / 输入。
    */
-  function collectTextMap(root) {
+  function yieldToMain(work) {
+    return globalThis.scheduler.postTask(work || (() => {}), { priority: 'background' });
+  }
+  globalThis.IL_yieldToMain = yieldToMain;
+
+  function createCollector(root) {
     const out = [];
     let text = '';
     /** 同父节点可见性只算一次（一篇正文大量文本节点共享父元素） */
@@ -35,15 +40,60 @@
         return NodeFilter.FILTER_ACCEPT;
       },
     });
-    let n;
-    while ((n = walker.nextNode())) {
-      const value = n.nodeValue;
-      const start = text.length;
-      text += value;
-      out.push({ node: n, start, end: text.length });
+    return {
+      step() {
+        const n = walker.nextNode();
+        if (!n) return false;
+        const value = n.nodeValue;
+        const start = text.length;
+        text += value;
+        out.push({ node: n, start, end: text.length });
+        return true;
+      },
+      result() {
+        return { text, pieces: out, root };
+      },
+    };
+  }
+
+  /**
+   * @param {Element} root
+   * @returns {{ text: string, pieces: Array<{ node: Text, start: number, end: number }>, root: Element }}
+   */
+  function collectTextMap(root) {
+    const c = createCollector(root);
+    while (c.step()) {}
+    return c.result();
+  }
+
+  const YIELD_MS = 8;
+
+  /**
+   * 与 collectTextMap 同结果；每 YIELD_MS 让出主线程，开栏期间可打字。
+   * @param {Element} root
+   * @param {() => boolean} [isStale]
+   */
+  async function collectTextMapAsync(root, isStale) {
+    const c = createCollector(root);
+    for (;;) {
+      const done = await yieldToMain(() => {
+        if (isStale?.()) {
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        }
+        const t0 = performance.now();
+        while (c.step()) {
+          if (isStale?.()) {
+            throw new DOMException('The operation was aborted.', 'AbortError');
+          }
+          if (performance.now() - t0 >= YIELD_MS) return false;
+        }
+        return true;
+      });
+      if (done) break;
     }
-    return { text, pieces: out, root };
+    return c.result();
   }
 
   globalThis.IL_collectTextMap = collectTextMap;
+  globalThis.IL_collectTextMapAsync = collectTextMapAsync;
 })();
