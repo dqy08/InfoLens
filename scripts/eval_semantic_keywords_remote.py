@@ -6,11 +6,14 @@
 不跑线上渲染路径：不定位、不 uniquifyHighScores、不 REPEAT_DIM 压分——那些是
 keywords_remote_v2.js 里为上色观感做的 Workaround，与模型能力无关。
 
-契约（SYNC: cf/facade/src/keywords_remote_v2.js）：
-  - Task：抽取与 query 相关、且出现在正文中的关键词，按重要性排序；用 submit_keywords 提交
-  - Tool schema：keywords[{keyword, score}]，score 1–5
-  - 版式：Task/Query → Text → Task Reminder/Query（三明治）
+默认口头（SYNC: cf/facade/src/keywords_remote_v2.js）：
+  - Task：抽取与 query 相关、且出现在正文中的关键词，按重要性排序
+  - Output Format：逐行 [keyword]<score>，score 1–5；头尾同序 Task(Reminder) → Query → Format
 对照 expect_keywords 打分时先忽略 score，只用关键词列表。仅跑 expect_relevant=true。
+
+--tool 保留旧 submit_keywords 对照（门面已不用）。Hy3 全集 108 条相关例（2026-08-14）：
+口头相对 tool：F1(综合) 66.0%→67.7%，精确略升、召回几乎不动；完成 token 约少 65%
+（词条数/词长几乎不变，差在 JSON 骨架）；两边解析失败都是 0。故默认与门面都走口头。
 
 打分（子串互含）：
   - 集合：召回 / 精确 / F1 —— 对外展示必须带括号释义，见下方 METRIC_*
@@ -22,6 +25,12 @@ keywords_remote_v2.js 里为上色观感做的 Workaround，与模型能力无�
     -o scripts/results/keywords_typical10_remote_hy3.jsonl \\
     --review-md scripts/results/keywords_typical10_remote_hy3_review.md \\
     -j 8
+
+  # 旧 tool 对照（submit_keywords JSON）
+  python scripts/eval_semantic_keywords_remote.py \\
+    -c scripts/cases/subsets/keywords.typical10.json \\
+    -o scripts/results/keywords_typical10_remote_hy3_tool.jsonl \\
+    --tool
 """
 
 from __future__ import annotations
@@ -56,17 +65,27 @@ DEFAULT_MODEL = "tencent/hy3"
 DEFAULT_MAX_TOKENS = 256
 
 # ---------------------------------------------------------------------------
-# 虚拟提交工具契约（SYNC: cf/facade/src/keywords_remote_v2.js）
-# Task：做什么 + 用哪个 tool；字段格式只在 tool schema。
+# 口头默认（SYNC 门面）；--tool 走旧 submit_keywords，仅评测对照。
 # ---------------------------------------------------------------------------
 TOOL_NAME = "submit_keywords"
 
-KEYWORDS_TASK = (
+KEYWORDS_TASK_CORE = (
     "Extract all keywords related to the query topic. "
     "A keyword can be a word or short phrase. "
     "Make sure to only extract keywords that appear in the text. "
-    "Order them from most important to least important. "
-    f"Submit with {TOOL_NAME}."
+    "Order them from most important to least important."
+)
+KEYWORDS_TASK = KEYWORDS_TASK_CORE + f" Submit with {TOOL_NAME}."
+
+# 口头：与相关度 multi-chunk 同构——Task 只说做什么；
+# 头尾同序 Task(Reminder) → Query → Output Format，格式各一次。
+# Hy3 对这段顺序敏感（相关度实测：Query 在最后会抬错检）；跟相关度同一序。
+KEYWORDS_OUTPUT_FORMAT = (
+    "Output Format: each keyword on its own line "
+    "as [keyword]<score, 1 slightly related to 5 strongly related>. "
+    "Nothing else.\n"
+    "Example reply:\n"
+    "[foo]5\n[bar]3"
 )
 
 SUBMIT_KEYWORDS_TOOL: Dict[str, Any] = {
@@ -117,11 +136,15 @@ def format_rpf1(recall: float, precision: float, f1: float, *, pct: bool = True)
     return f"{METRIC_R}={recall} {METRIC_P}={precision} {METRIC_F1}={f1}"
 
 
-def build_keywords_user_content(query: str, text: str) -> str:
-    """三明治：Task/Query → Text → Task Reminder/Query。SYNC: keywords_remote_v2.js"""
+def build_keywords_user_content(query: str, text: str, *, verbal: bool = True) -> str:
+    """三明治。默认口头（SYNC 门面）：Task(Reminder) → Query → Output Format。
+    Hy3 对这段顺序敏感（相关度实测：Query 在最后会抬错检）；跟相关度同一序。
+    verbal=False（--tool）：旧 Task 含 Submit with，无 Output Format 段。"""
     query_line = f"Query: {query}"
-    head = f"Task: {KEYWORDS_TASK}\n{query_line}"
-    reminder = f"Task Reminder: {KEYWORDS_TASK}\n{query_line}"
+    task = KEYWORDS_TASK_CORE if verbal else KEYWORDS_TASK
+    mid = f"{query_line}\n{KEYWORDS_OUTPUT_FORMAT}" if verbal else query_line
+    head = f"Task: {task}\n{mid}"
+    reminder = f"Task Reminder: {task}\n{mid}"
     return f"{head}\nText:\n\n{text}\n\n{reminder}"
 
 
@@ -131,20 +154,56 @@ def build_keywords_chat_body(
     *,
     model: str = DEFAULT_MODEL,
     max_tokens: int = DEFAULT_MAX_TOKENS,
+    verbal: bool = True,
 ) -> Dict[str, Any]:
-    return {
+    body: Dict[str, Any] = {
         "model": model,
-        "messages": [{"role": "user", "content": build_keywords_user_content(query, text)}],
-        "tools": [SUBMIT_KEYWORDS_TOOL],
-        "tool_choice": {
-            "type": "function",
-            "function": {"name": TOOL_NAME},
-        },
+        "messages": [
+            {"role": "user", "content": build_keywords_user_content(query, text, verbal=verbal)}
+        ],
         "temperature": 0,
         "max_tokens": max_tokens,
         "stream": False,
         "reasoning": {"effort": "none"},
     }
+    if not verbal:
+        body["tools"] = [SUBMIT_KEYWORDS_TOOL]
+        body["tool_choice"] = {
+            "type": "function",
+            "function": {"name": TOOL_NAME},
+        }
+    return body
+
+
+_RE_VERBAL_KEYWORD = re.compile(r"^\[(.+)\]\s*(\d+)\s*$")
+
+
+def parse_verbal_keywords(content: Optional[str]) -> Optional[List[Tuple[str, int]]]:
+    """口头逐行 `[keyword]<score>` → [(kw, score), ...]；失败返回 None。
+    空/空白字符串 = 合法零词；None / 非 str / 任一非空行对不上 = 契约外。score 定档 1–5。"""
+    if not isinstance(content, str):
+        return None
+    if not content.strip():
+        return []
+    out: List[Tuple[str, int]] = []
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _RE_VERBAL_KEYWORD.match(line)
+        if not m:
+            return None
+        kw = m.group(1).strip()
+        if not kw:
+            return None
+        try:
+            score = float(m.group(2))
+        except ValueError:
+            return None
+        s = int(round(score))
+        s = max(1, min(5, s))
+        out.append((kw, s))
+    return out
 
 
 def parse_submit_keywords_arguments(arguments: str) -> Optional[List[Tuple[str, int]]]:
@@ -188,7 +247,7 @@ def salvage_partial_submit_keywords_arguments(
     arguments: str,
 ) -> Optional[List[Tuple[str, int]]]:
     """从 length 截断的残缺 arguments 捞已写完的 {keyword,score}；一个都没有 → None。
-    SYNC: cf/facade/src/keywords_remote_v2.js → salvagePartialKeywordsArguments
+    --tool 对照用（门面口头路径不再 salvage JSON）。
     """
     if not isinstance(arguments, str) or not arguments:
         return None
@@ -374,14 +433,17 @@ def chat_keywords(
     token: str,
     timeout: int,
     max_tokens: int = DEFAULT_MAX_TOKENS,
+    verbal: bool = True,
 ) -> dict:
-    """submit_keywords 虚拟提交工具 → scored 关键词列表。"""
+    """默认口头 [keyword]<score>；verbal=False 则 submit_keywords 虚拟提交。"""
     url = f"{api_base.rstrip('/')}/chat/completions"
-    body = build_keywords_chat_body(query, text, model=model, max_tokens=max_tokens)
+    body = build_keywords_chat_body(
+        query, text, model=model, max_tokens=max_tokens, verbal=verbal
+    )
     if "openrouter.ai" not in api_base:
         body.pop("reasoning", None)
         body["thinking"] = {"type": "disabled"}
-    prompt = build_keywords_user_content(query, text)
+    prompt = build_keywords_user_content(query, text, verbal=verbal)
 
     resp = requests.post(url, headers=_chat_headers(api_base, token), json=body, timeout=timeout)
     data = resp.json()
@@ -393,26 +455,34 @@ def chat_keywords(
     choice = (data.get("choices") or [{}])[0]
     msg = choice.get("message") or {}
 
-    tool_calls = msg.get("tool_calls") or []
-    if not tool_calls:
-        raise RuntimeError(
-            f"no tool_calls: content={msg.get('content')!r} finish={choice.get('finish_reason')!r}"
-        )
-    raw_args = (tool_calls[0].get("function") or {}).get("arguments") or ""
-    scored = resolve_submit_keywords_arguments(raw_args, choice)
-    if scored is None:
-        raise RuntimeError(f"unparseable tool arguments: {raw_args!r}")
+    if verbal:
+        raw = msg.get("content")
+        scored = parse_verbal_keywords(raw)
+        if scored is None:
+            raise RuntimeError(f"unparseable verbal output: {raw!r}")
+        content_out = raw if isinstance(raw, str) else ""
+    else:
+        tool_calls = msg.get("tool_calls") or []
+        if not tool_calls:
+            raise RuntimeError(
+                f"no tool_calls: content={msg.get('content')!r} finish={choice.get('finish_reason')!r}"
+            )
+        content_out = (tool_calls[0].get("function") or {}).get("arguments") or ""
+        scored = resolve_submit_keywords_arguments(content_out, choice)
+        if scored is None:
+            raise RuntimeError(f"unparseable tool arguments: {content_out!r}")
 
     keywords = [k for k, _s in scored]
     return {
         "prompt": prompt,
-        "content": raw_args,
+        "content": content_out,
         "keywords": keywords,
         "scored": [{"keyword": k, "score": s} for k, s in scored],
         "finish_reason": choice.get("finish_reason"),
         "native_finish_reason": choice.get("native_finish_reason"),
         "usage": data.get("usage"),
         "raw_model": data.get("model") or model,
+        "verbal": verbal,
     }
 
 
@@ -424,6 +494,7 @@ def run_one(
     token: str,
     timeout: int,
     max_retries: int,
+    verbal: bool = True,
 ) -> dict:
     name = case["name"]
     query = case["query"]
@@ -438,6 +509,7 @@ def run_one(
             "expect_keywords": expect,
             "model": model,
             "source": case.get("source"),
+            "verbal": verbal,
             **extra,
         }
 
@@ -446,7 +518,7 @@ def run_one(
         try:
             r = chat_keywords(
                 api_base, model, query, text,
-                token=token, timeout=timeout,
+                token=token, timeout=timeout, verbal=verbal,
             )
             m = match_keywords(expect, r["keywords"])
             return _base(
@@ -547,7 +619,8 @@ def write_review_markdown(results: List[dict], path: Path) -> None:
         lines.append(r.get("prompt") or "")
         lines.append("```")
         lines.append("")
-        lines.append("**content**（tool arguments）")
+        kind = "verbal" if r.get("verbal") else "tool arguments"
+        lines.append(f"**content**（{kind}）")
         lines.append("")
         lines.append("```")
         lines.append(r.get("content") or "")
@@ -559,7 +632,7 @@ def write_review_markdown(results: List[dict], path: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="远程 Chat API 关键词匹配评测（submit_keywords）")
+    parser = argparse.ArgumentParser(description="远程 Chat API 关键词匹配评测（默认口头 [keyword]<score>）")
     parser.add_argument("-c", "--cases", type=Path, default=None, help="用例 JSON / 索引")
     parser.add_argument("-o", "--output", type=Path, default=None, help="结果 JSONL（可续跑）")
     parser.add_argument("--review-md", type=Path, default=None, help="对照表 Markdown")
@@ -576,6 +649,11 @@ def main() -> None:
         type=int,
         default=8,
         help="并发数（用例彼此独立；默认 8）",
+    )
+    parser.add_argument(
+        "--tool",
+        action="store_true",
+        help="对照：旧 submit_keywords tool 输出（门面已不用；见文件头评测备注）",
     )
     args = parser.parse_args()
 
@@ -605,7 +683,8 @@ def main() -> None:
     jobs = max(1, int(args.jobs))
     print(
         f"已加载 {len(cases)} 条相关用例（跳过无关 {skipped}）；"
-        f"model={args.model}；jobs={jobs}"
+        f"model={args.model}；jobs={jobs}；"
+        f"verbal={'off' if args.tool else 'on'}"
     )
 
     completed = set()
@@ -630,6 +709,7 @@ def main() -> None:
         record = run_one(
             args.url, args.model, case,
             token=token, timeout=args.timeout, max_retries=args.retries,
+            verbal=not args.tool,
         )
         return i, case, record
 

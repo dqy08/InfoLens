@@ -1,19 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  parseSubmitKeywordsArguments,
-  salvagePartialKeywordsArguments,
+  parseVerbalKeywords,
   uniquifyStep,
   keywordsToTokenAttention,
   buildKeywordsUserContent,
   streamKeywordsV2,
 } from '../src/keywords_remote_v2.js';
 
-/** 构造 OpenRouter stream 响应体：把若干 delta 帧拼成 SSE 文本 */
-function sseResp(deltaArgsChunks) {
+/** 构造 OpenRouter stream 响应体：把若干 delta.content 帧拼成 SSE 文本 */
+function sseResp(deltaChunks) {
   const enc = new TextEncoder();
-  const data = deltaArgsChunks
-    .map((args) => `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ function: { arguments: args } }] } }] })}\n\n`)
+  const data = deltaChunks
+    .map((c) => `data: ${JSON.stringify({ choices: [{ delta: { content: c } }] })}\n\n`)
     .join('');
   return {
     status: 200,
@@ -26,9 +25,9 @@ function sseResp(deltaArgsChunks) {
   };
 }
 
-async function runStream(argsChunks, text = '正文无需任何关键词') {
+async function runStream(deltaChunks, text = '正文无需任何关键词') {
   const rows = [];
-  globalThis.fetch = async () => sseResp(argsChunks);
+  globalThis.fetch = async () => sseResp(deltaChunks);
   await streamKeywordsV2(
     { OPENROUTER_API_KEY: 'test' },
     '查询',
@@ -41,28 +40,27 @@ async function runStream(argsChunks, text = '正文无需任何关键词') {
   return rows;
 }
 
-test('parseSubmitKeywordsArguments: 合法空数组 = 零词', () => {
-  assert.deepEqual(parseSubmitKeywordsArguments('{"keywords":[]}'), []);
-  assert.deepEqual(parseSubmitKeywordsArguments('{"keywords": [  ] }'), []);
+test('parseVerbalKeywords: 空/空白字符串 = 零词', () => {
+  assert.deepEqual(parseVerbalKeywords(''), []);
+  assert.deepEqual(parseVerbalKeywords('  \n  '), []);
 });
 
-test('parseSubmitKeywordsArguments: 合法条目解析并截断分到 1..5', () => {
-  assert.deepEqual(
-    parseSubmitKeywordsArguments('{"keywords":[{"keyword":"红楼","score":5},{"keyword":"梦","score":0}]}'),
-    [['红楼', 5], ['梦', 1]]
-  );
-});
-
-test('parseSubmitKeywordsArguments: 非空却 0 条有效 = 解析失败', () => {
-  assert.equal(parseSubmitKeywordsArguments('{"keywords":[{"wrong":1}]}'), null);
-  assert.equal(parseSubmitKeywordsArguments('{oops'), null);
-});
-
-test('salvagePartialKeywordsArguments: 从残缺增量捞已写完条目', () => {
-  assert.deepEqual(salvagePartialKeywordsArguments('{"keywords":[{"keyword":"红楼","score":5},'), [
+test('parseVerbalKeywords: 合法条目解析并截断分到 1..5', () => {
+  assert.deepEqual(parseVerbalKeywords('[红楼]5\n[梦]0'), [
     ['红楼', 5],
+    ['梦', 1],
   ]);
-  assert.equal(salvagePartialKeywordsArguments('{"keywords":['), null);
+  assert.deepEqual(parseVerbalKeywords('[红楼]5\n\n[梦]0'), [
+    ['红楼', 5],
+    ['梦', 1],
+  ]);
+});
+
+test('parseVerbalKeywords: 非空却 0 条有效 / 无 content / 夹杂非法行 = 解析失败', () => {
+  assert.equal(parseVerbalKeywords('sorry'), null);
+  assert.equal(parseVerbalKeywords('{oops'), null);
+  assert.equal(parseVerbalKeywords(null), null);
+  assert.equal(parseVerbalKeywords('[红楼]5\nsorry'), null);
 });
 
 test('uniquifyStep: 档位降级但不落到 1 以下', () => {
@@ -83,40 +81,43 @@ test('keywordsToTokenAttention: 关键词定位出无重叠 run', () => {
   assert.equal(runs[0].score, 1); // 5/5 = 1
 });
 
-test('buildKeywordsUserContent: 三明治结构包含 query/text', () => {
+test('buildKeywordsUserContent: 三明治 Task/Query/Format 头尾同序', () => {
   const s = buildKeywordsUserContent('红楼梦', '红楼梦正文');
   assert.ok(s.includes('Query: 红楼梦'));
   assert.ok(s.includes('红楼梦正文'));
   assert.ok(s.includes('Task Reminder'));
+  assert.ok(s.includes('Output Format:'));
+  assert.ok(!s.includes('Submit with'));
+  const iTask = s.indexOf('Task: ');
+  const iQuery1 = s.indexOf('Query: 红楼梦');
+  const iFmt1 = s.indexOf('Output Format:');
+  const iText = s.indexOf('Text:');
+  const iRem = s.indexOf('Task Reminder:');
+  const iQuery2 = s.lastIndexOf('Query: 红楼梦');
+  const iFmt2 = s.lastIndexOf('Output Format:');
+  assert.ok(iTask < iQuery1 && iQuery1 < iFmt1 && iFmt1 < iText);
+  assert.ok(iText < iRem && iRem < iQuery2 && iQuery2 < iFmt2);
 });
 
-test('streamKeywordsV2: 模型返回合法空数组 → 不抛错（回归修复）', async () => {
-  const rows = await runStream([JSON.stringify({ keywords: [] })]);
+test('streamKeywordsV2: 空回复 → 不抛错', async () => {
+  const rows = await runStream(['']);
   assert.deepEqual(rows, []);
 });
 
-test('streamKeywordsV2: 有词但原文全对不上 → 与空数组一样成功（零行）', async () => {
-  const rows = await runStream(
-    [JSON.stringify({ keywords: [{ keyword: 'Final words', score: 5 }] })],
-    '正文里没有这个短语'
-  );
+test('streamKeywordsV2: 有词但原文全对不上 → 与空回复一样成功（零行）', async () => {
+  const rows = await runStream(['[Final words]5\n'], '正文里没有这个短语');
   assert.deepEqual(rows, []);
 });
 
 test('streamKeywordsV2: 碎片增量仍能捞到完整 keyword', async () => {
-  const chunks = ['{"keywo', 'rds":[{"keyword":"测试","score":5}]}'];
+  const chunks = ['[测', '试]5\n'];
   const rows = await runStream(chunks, '这是测试正文');
   assert.equal(rows.length, 1);
   assert.equal(rows[0].raw, '测试');
 });
 
 test('streamKeywordsV2: 增量扫描跨多个 delta 仍只 emit 一次完整条目', async () => {
-  // 每个 delta 切成小碎片，多轮跨边界累计；增量 fromIndex 扫描应不重不漏
-  const chunks = [
-    '{"keywo',
-    'rds":[{"keyword":"测试","score":5},{"keywo',
-    'rd":"匹配","score":3}]}',
-  ];
+  const chunks = ['[测', '试]5\n[匹', '配]3\n'];
   const rows = await runStream(chunks, '这是测试正文，还有一个匹配的词');
   assert.equal(rows.length, 2);
   assert.deepEqual(
@@ -127,15 +128,22 @@ test('streamKeywordsV2: 增量扫描跨多个 delta 仍只 emit 一次完整条�
 
 test('streamKeywordsV2: 非空但无效输出 → 仍报 unparseable', async () => {
   await assert.rejects(
-    () => runStream([JSON.stringify({ keywords: [{ wrong: 1 }] })]),
-    /unparseable tool arguments output/
+    () => runStream(['sorry I cannot']),
+    /unparseable verbal output/
+  );
+});
+
+test('streamKeywordsV2: 合法行后夹杂非法行 → 报错（不跳过）', async () => {
+  await assert.rejects(
+    () => runStream(['[测试]5\nsorry\n'], '这是测试正文'),
+    /unparseable verbal output/
   );
 });
 
 test('streamKeywordsV2: 流式中断带顶层 error → 抛真实错误', async () => {
   const enc = new TextEncoder();
   const data = [
-    `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ function: { arguments: '{"key' } }] } }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: { content: '[测' } }] })}\n\n`,
     `data: ${JSON.stringify({
       error: { code: 502, message: 'Overloaded' },
       choices: [{ index: 0, delta: { content: '' }, finish_reason: 'error' }],

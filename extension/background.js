@@ -14,10 +14,12 @@ const CONTENT_CSS = ['content.css'];
 const CONTENT_JS = [
   'config.js',
   'vendor/Readability.js',
+  'extractRootPatches.js',
   'articleRoot.js',
   'collectTextMap.js',
   'splitTextToChunks.js',
   'semantic/page-document.js',
+  'semantic/analyzeCache.js',
   'semantic/find.js',
   'content.js',
 ];
@@ -202,6 +204,25 @@ async function injectOnce(tabId) {
   });
 }
 
+/** 页内已有实例则只 open（叉掉后再点只是显示，不重注入） */
+async function openIfInjected(tabId, query) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      func: (q) => {
+        const api = window.__IL_SEMANTIC_DEMO__;
+        if (!api) return false;
+        api.open(q || undefined);
+        return true;
+      },
+      args: [typeof query === 'string' ? query : ''],
+    });
+    return !!results?.[0]?.result;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * PDF 页：注入入口脚本（浮出「打开 InfoLens PDF 查看器」按钮）。
  * 与语义管线不同——PDF 顶层是 Chrome viewer 宿主页，不注入 content.js。
@@ -300,6 +321,10 @@ async function activateTab(tab, opts = {}) {
       await setBadgeError('bad page');
       return;
     }
+    if (await openIfInjected(tab.id, query)) {
+      await chrome.action.setBadgeText({ text: '' });
+      return;
+    }
     if (!(await ensureFileUrlAccess(freshUrl, isFileUrl(freshUrl) ? fileHostPromise : null))) return;
     if (isPdfUrl(freshUrl)) {
       await injectPdfEntry(tab.id);
@@ -316,15 +341,7 @@ async function activateTab(tab, opts = {}) {
 
     const okTab = await injectWithRetry(tab.id);
     console.info('[InfoLens] injected into', okTab.url);
-    if (query) {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id, frameIds: [0] },
-        func: (q) => {
-          window.__IL_SEMANTIC_DEMO__?.open(q);
-        },
-        args: [query],
-      });
-    }
+    if (query) await openIfInjected(tab.id, query);
     await chrome.action.setBadgeText({ text: '' });
   } catch (err) {
     // 无 .pdf 后缀的 PDF（如 arxiv）：content 注入常失败；仅当页内确认是 PDF 并挂上入口才算成功
@@ -343,6 +360,16 @@ async function activateTab(tab, opts = {}) {
 }
 
 const CONTEXT_MENU_ID = 'il-semantic-search';
+const UNINSTALL_SURVEY_URL = 'https://info-lens.app/uninstall.html';
+
+function setUninstallSurveyUrl() {
+  const version = chrome.runtime.getManifest().version;
+  chrome.runtime.setUninstallURL(
+    `${UNINSTALL_SURVEY_URL}?v=${encodeURIComponent(version)}`
+  );
+}
+
+setUninstallSurveyUrl();
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
@@ -382,16 +409,10 @@ function apiHttpError(message, detail) {
 }
 
 /**
- * POST JSON；要求 HTTP ok 且 body.success === true（避免 2xx HTML/空对象被当成成功）。
- * 先读正文；仅 Content-Type 为 JSON 时再 parse（平台 HTML 错误页等在 parse 前失败）。
- * @returns {{ data: object, backend: string | null }} backend = X-Infolens-Backend（hf|accel）
+ * 读 API JSON 响应；要求 HTTP ok 且 body.success === true。
+ * @returns {{ data: object, backend: string | null }}
  */
-async function postJsonApi(url, body) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+async function readJsonApi(res) {
   const raw = await res.text();
   const ctHeader = res.headers.get('Content-Type') || '';
   const ct = ctHeader.split(';')[0].trim().toLowerCase() || '(none)';
@@ -423,6 +444,24 @@ async function postJsonApi(url, body) {
   }
   const backend = res.headers.get('X-Infolens-Backend');
   return { data, backend: backend || null };
+}
+
+/**
+ * POST JSON；要求 HTTP ok 且 body.success === true（避免 2xx HTML/空对象被当成成功）。
+ * 先读正文；仅 Content-Type 为 JSON 时再 parse（平台 HTML 错误页等在 parse 前失败）。
+ */
+async function postJsonApi(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return readJsonApi(res);
+}
+
+async function getJsonApi(url) {
+  const res = await fetch(url);
+  return readJsonApi(res);
 }
 
 /**
@@ -511,7 +550,7 @@ chrome.runtime.onConnect.addListener((port) => {
           /* ignore */
         }
       } catch (err) {
-        if (ac.signal.aborted) return;
+        if (ac.signal.aborted || err?.name === 'AbortError') return;
         console.error('[InfoLens][bg] relevance stream error:', err?.message, err);
         try {
           port.postMessage({
@@ -531,6 +570,38 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === 'il-open-options') {
+    (async () => {
+      try {
+        await chrome.runtime.openOptionsPage();
+        sendResponse({ ok: true });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg?.type === 'il-analyze-semantic-version') {
+    (async () => {
+      try {
+        const apiBase = msg.apiBase || IL_CONFIG.apiBase;
+        const { data } = await getJsonApi(
+          `${String(apiBase).replace(/\/$/, '')}/api/v2/analyze-semantic-version`
+        );
+        const relevance = data.relevance;
+        const keywords = data.keywords;
+        if (!Number.isInteger(relevance) || relevance < 1 || !Number.isInteger(keywords) || keywords < 1) {
+          throw apiHttpError('version response missing integer');
+        }
+        sendResponse({ ok: true, relevance, keywords });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
   if (msg?.type === 'il-analyze-semantic') {
     (async () => {
       try {

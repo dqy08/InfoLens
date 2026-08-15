@@ -21,7 +21,7 @@
         if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'TEXTAREA' || tag === 'SVG') {
           return NodeFilter.FILTER_REJECT;
         }
-        if (p.closest('#il-find-root, #il-overlay-host, [data-il-underline]')) {
+        if (p.closest('#il-find-root, #il-overlay-host, #il-scope-divider-host, #il-scope-divider, [data-il-underline]')) {
           return NodeFilter.FILTER_REJECT;
         }
         // 折叠/hidden/MathML annotation 等不可见文本不送语义；

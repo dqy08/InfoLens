@@ -75,5 +75,25 @@
         "content": "$1"
       }
     }
+  },
+  "optionsStorageSection": {
+    "message": "Storage",
+    "description": "Options page section heading"
+  },
+  "optionsCacheTitle": {
+    "message": "Analysis cache",
+    "description": "Options row title for the request cache"
+  },
+  "optionsCacheUsage": {
+    "message": "$1 entries · $2",
+    "description": "Cache occupancy: count and formatted size",
+    "placeholders": {
+      "count": { "content": "$1" },
+      "size": { "content": "$2" }
+    }
+  },
+  "optionsCacheClear": {
+    "message": "Clear",
+    "description": "Button that deletes the analysis cache"
   }
 }

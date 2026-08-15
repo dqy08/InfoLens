@@ -2,7 +2,7 @@
  * 远程 relevance v2：OpenRouter Chat（Hy3）→ 隐含多切片 whole-article 单次请求 → 每片 degree。
  * 路径 /api/v2/analyze-semantic-relevance；只走边缘远程，无本地/HF 回退（与 keywords v2 同轨）。
  *
- * 流式：向 OpenRouter 开 stream:true，边读边按 '\n' 切行，每出完整一行 [N] count
+ * 流式：向 OpenRouter 开 stream:true，边读边按 '\n' 切行，每出完整一行 [N]count
  * 即 emit 结构化 SSE 事件（type:row）；凑齐 texts.length 后 abort 上游（忽略尾部多余行）；
  * 正常收尾 emit type:result / 失败 type:error。契约为 SSE（v1 单 text 仍供旧扩展）。
  *
@@ -20,8 +20,14 @@ const CHUNK_BYTE_MAX = 800;
 const MAX_TOKENS_PER_CHUNK = 8;
 
 export const RELEVANCE_V2_PATH = '/api/v2/analyze-semantic-relevance';
+/** 提示词/模型/解析变了、影响缓存准确性时加一。 */
+export const RELEVANCE_CACHE_VERSION = 5;
 
 /** SYNC: scripts/eval_semantic_relevance_remote.py → build_multi_chunk_user_content（正式版，格式两次）。
+ * 正文前缀 Passage N:（不用 [N]，避免与文中 [N] 冲突）；回复仍为 [N]<count>。
+ * 头尾同序：Task(Reminder) → Query → Output Format；正文夹在中间。
+ * Hy3 对这段顺序敏感、会影响门控精度：Query 若顶在生成口会更积极认相关、错检升；
+ * 本序（Format 在最后）与旧「尾段单独贴 Format」精度相当。不要改成 Task→Format→Query。
  * 基线 task；曾尝试追加全文判定句（"A word's relevance ... in the whole article"）但实测增误放行、
  * 对真相关零增益，故回退不再采用（详见 eval 脚本注释）。 */
 export function buildMultiChunkUserContent(query, chunks) {
@@ -30,18 +36,19 @@ export function buildMultiChunkUserContent(query, chunks) {
     'How many words in each passage are related to the query topic?';
   const outputFormat =
     'Output Format: each passage on its own line ' +
-    'as [N] <count, 0 if not related>, where N is the passage index. Nothing else.\n' +
+    'as [N]<count, 0 if not related>, where N is the passage index. Nothing else.\n' +
     'Example reply for 3 passages:\n' +
-    '[1] 0\n[2] 0\n[3] 3';
+    '[1]0\n[2]0\n[3]3';
   const queryLine = `Query: ${query}`;
-  const head = `Task: ${task}\n${outputFormat}\n${queryLine}`;
-  const reminder = `Task Reminder: ${task}\n${queryLine}`;
-  const passages = chunks.map((text, i) => `[${i + 1}] ${text}`).join('\n');
-  return `${head}\nArticle:\n\n${passages}\n\n${reminder}\n\n${outputFormat}`;
+  const mid = `${queryLine}\n${outputFormat}`;
+  const head = `Task: ${task}\n${mid}`;
+  const reminder = `Task Reminder: ${task}\n${mid}`;
+  const passages = chunks.map((text, i) => `Passage ${i + 1}: ${text}`).join('\n');
+  return `${head}\nArticle:\n\n${passages}\n\n${reminder}`;
 }
 
 /**
- * 独立单行解析：`[N] 数字` → {n, count}，失败返回 null。
+ * 独立单行解析：`[N]数字`（空格可选）→ {n, count}，失败返回 null。
  * 供逐行流式与 parseMultiChunkCounts 复用同一正则（DRY）。
  * @returns {{ n: number, count: number } | null}
  */
@@ -54,7 +61,7 @@ function parseSingleCount(line) {
 }
 
 /**
- * 从整段解析 `[N] 数字`（整块非流式场景的基线版）。SYNC: parse_multi_chunk_counts
+ * 从整段解析 `[N]数字`（整块非流式场景的基线版）。SYNC: parse_multi_chunk_counts
  * 流式主线上已改为逐行连续校验（emitRow），本函数保持宽松 Map 解析供对照/供评测基线。
  * @returns {{counts: Map<number, number>, raw: string} | null}
  */
@@ -93,7 +100,7 @@ export function makeLineSplitter(onLine) {
 
 /**
  * 流式版本：向 OpenRouter stream:true，读 SSE，边收 delta.content 边按行切，
- * 每出完整 `[N] count` 行就 emit 一次。
+ * 每出完整 `[N]count` 行就 emit 一次。
  *
  * @param {object} env
  * @param {string} query
@@ -162,7 +169,7 @@ export async function streamRelevanceV2(env, query, chunks, emit, signal) {
   const decoder = new TextDecoder();
   const counts = new Map();
   const rawLines = [];
-  // 连续校验游标：契约要求从 [1] 起逐块连续输出 `[N] <count>`，直到凑齐 texts.length。
+  // 连续校验游标：契约要求从 [1] 起逐块连续输出 `[N]<count>`，直到凑齐 texts.length。
   // 凑齐前：跳号/乱序/重复/说明文字 → 格式异常（优先报错）。
   // 凑齐后：任务完成——忽略尾部多行，并 abort 上游停止继续生成。
   let expectedN = 1;
@@ -226,14 +233,11 @@ export async function streamRelevanceV2(env, query, chunks, emit, signal) {
  * 误报成 unparseable（丢失真实原因）。
  *
  * @param {(delta: string) => void} onDelta
- * @param {{ toolArgs?: boolean, onError?: (err: string) => void }} [opts]
- *   toolArgs=true 时取 `delta.tool_calls[0].function.arguments`
- *     而非 `delta.content`（keywords 走 tool_call 流式的 arguments 增量）
+ * @param {{ onError?: (err: string) => void }} [opts]
  *   onError(err) 收到流式错误事件时回调；省略则直接 throw（禁止静默跳过）
  * @returns {(text: string) => void}
  */
 export function makeSseDeltaFeeder(onDelta, opts) {
-  const useToolArgs = opts?.toolArgs === true;
   const onError = opts?.onError;
   /** 未传 onError 时直接抛：避免再静默跳过错误帧（本函数曾因此把上游故障误报成 unparseable） */
   const reportStreamError = (msg) => {
@@ -269,14 +273,7 @@ export function makeSseDeltaFeeder(onDelta, opts) {
       reportStreamError(`OpenRouter stream error: finish_reason=error${fr}`);
       return;
     }
-    const delta = choice.delta || {};
-    let d;
-    if (useToolArgs) {
-      const toolCalls = delta.tool_calls || [];
-      d = ((toolCalls[0] || {}).function || {}).arguments;
-    } else {
-      d = delta.content;
-    }
+    const d = (choice.delta || {}).content;
     if (typeof d === 'string' && d) {
       onDelta(d);
     }

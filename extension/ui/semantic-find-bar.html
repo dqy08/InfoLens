@@ -5,21 +5,31 @@
         <div class="semantic-find-bar">
             <div class="semantic-search-input-wrapper semantic-find-bar-input-wrap">
                 <input type="text" id="semantic_find_input" class="semantic-find-input" autocomplete="off">
-                <button type="button" id="semantic_find_clear" class="semantic-search-clear demo-delete-btn" title="Clear" aria-label="Clear" data-i18n="title,aria-label">×</button>
+                <div class="semantic-find-input-trailing">
+                    <button type="button" id="semantic_find_clear" class="semantic-search-clear demo-delete-btn" title="Clear" aria-label="Clear" data-i18n="title,aria-label">×</button>
+                    <button type="button" id="semantic_find_scope" class="semantic-find-scope-toggle" title="Search entire document" aria-label="Search entire document" aria-pressed="false">
+                        <svg class="semantic-find-scope-icon-full" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 2.5h6M3 5h6M3 7.5h6M3 10h4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                        <svg class="semantic-find-scope-icon-from" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 2.5h6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M2 5h8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="semantic-find-scope-below" d="M3 7.5h6M3 10h4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                    </button>
+                </div>
             </div>
             <ul id="semantic_find_history_dropdown" class="semantic-search-history-dropdown"></ul>
             <span class="semantic-find-bar-sep" aria-hidden="true"></span>
-            <button type="button" id="semantic_find_prev" class="semantic-find-bar-btn" title="Previous match (Shift+Enter)" aria-label="Previous match (Shift+Enter)" disabled>
+            <button type="button" id="semantic_find_prev" class="semantic-find-bar-btn" title="Previous match" aria-label="Previous match" disabled>
                 <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 7.5 L6 4.5 L9 7.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            <button type="button" id="semantic_find_next" class="semantic-find-bar-btn" title="Next match (Enter)" aria-label="Next match (Enter)" disabled>
+            <button type="button" id="semantic_find_next" class="semantic-find-bar-btn" title="Next match" aria-label="Next match" disabled>
                 <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 L6 7.5 L9 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            <button type="button" id="semantic_find_close" class="semantic-find-bar-btn semantic-find-bar-close" title="Close (Esc)" aria-label="Close (Esc)">
+            <button type="button" id="semantic_find_more" class="semantic-find-bar-btn" title="Settings" aria-label="Settings">
+                <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="2.4" r="1.15" fill="currentColor"/><circle cx="6" cy="6" r="1.15" fill="currentColor"/><circle cx="6" cy="9.6" r="1.15" fill="currentColor"/></svg>
+            </button>
+            <button type="button" id="semantic_find_close" class="semantic-find-bar-btn" title="Close (Esc)" aria-label="Close (Esc)">
                 <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3.5 3.5 L8.5 8.5 M8.5 3.5 L3.5 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
             </button>
         </div>
         <svg id="semantic_match_progress" class="semantic-match-progress" viewBox="0 0 100 100" aria-label="Semantic match progress" hidden>
+            <rect id="semantic_match_progress_viewport" class="semantic-match-progress-viewport" hidden />
             <g id="semantic_match_progress_lines"></g>
         </svg>
         <div id="semantic_find_backend_notice" class="semantic-find-strip semantic-find-backend-notice" hidden role="status">

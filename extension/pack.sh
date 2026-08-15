@@ -41,6 +41,11 @@ def runtime_files() -> list[str]:
 
 # 扩展页 / PDF 入口随包发布（不在 CONTENT_JS 推导链上，须显式列入）。
 # pdf/viewer.html 还通过 <script> 引用 config.js / splitTextToChunks.js（已在 CONTENT_JS，会随 runtime 打包）。
+# options.html 引用 semantic/analyzeCache.js（已在 CONTENT_JS）。
+OPTIONS_FILES = [
+    "options.html",
+    "options.js",
+]
 PDF_VIEWER_FILES = [
     "pdf/entry.js",
     "pdf/stash-db.js",
@@ -51,6 +56,7 @@ PDF_VIEWER_FILES = [
     "pdf/file-access.html",
     "pdf/file-access.js",
     "semantic/pdf-document.js",
+    "semantic/analyzeCache.js",
     "semantic/find.js",
     "vendor/pdfjs/pdf.min.js",
     "vendor/pdfjs/pdf.worker.min.js",
@@ -81,15 +87,16 @@ def store_manifest_text() -> str:
 KNOWN_TOP_KEYS = {
     "manifest_version", "default_locale", "name", "version", "description",
     "icons", "permissions", "host_permissions", "optional_host_permissions", "background", "commands",
-    "action", "web_accessible_resources",
+    "action", "options_ui", "web_accessible_resources",
 }
 KNOWN_BACKGROUND_KEYS = {"service_worker", "type"}
 KNOWN_ACTION_KEYS = {"default_title", "default_icon"}
+KNOWN_OPTIONS_UI_KEYS = {"page", "open_in_tab"}
 
 
 def verify_manifest_shape(manifest: dict) -> None:
     """白名单校验 manifest.json 结构。
-    出现未知字段（如 options_page/chrome_url_overrides/content_scripts/sandbox 等）说明
+    出现未知字段（如 chrome_url_overrides/content_scripts/sandbox 等）说明
     引入了 pack.sh 尚未处理的资源引用方式，直接报错，而非静默漏打包。
     """
     errors: list[str] = []
@@ -104,6 +111,10 @@ def verify_manifest_shape(manifest: dict) -> None:
     unknown_action = set(manifest.get("action", {})) - KNOWN_ACTION_KEYS
     if unknown_action:
         errors.append(f"manifest.json action 出现未知字段 {sorted(unknown_action)}（如 default_popup 需要额外打包该页面）")
+
+    unknown_options = set(manifest.get("options_ui", {})) - KNOWN_OPTIONS_UI_KEYS
+    if unknown_options:
+        errors.append(f"manifest.json options_ui 出现未知字段 {sorted(unknown_options)}")
 
     if errors:
         print("pack: manifest.json 结构超出 pack.sh 已知范围：", file=sys.stderr)
@@ -163,6 +174,9 @@ def package_destinations() -> dict[str, Path]:
         mapping[rel] = source_path(rel)
 
     for rel in locale_files():
+        mapping[rel] = ROOT / rel
+
+    for rel in OPTIONS_FILES:
         mapping[rel] = ROOT / rel
 
     for rel in PDF_VIEWER_FILES:

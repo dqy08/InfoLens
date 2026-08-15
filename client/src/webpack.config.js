@@ -174,6 +174,13 @@ module.exports = {
                 copyHtmlWithIncludesAndPageMeta('attribution.html', 'attribution.html', 'attribution'),
                 copyHtmlWithIncludesAndPageMeta('causal_flow.html', 'causal_flow.html', 'causalFlow'),
                 { from: 'privacy-policy.html', to: 'privacy-policy.html' },
+                {
+                    from: 'uninstall.html',
+                    to: 'uninstall.html',
+                    transform(content) {
+                        return injectApiBaseMeta(content.toString('utf8'));
+                    },
+                },
             ]
         }),
         new GenAttributeDemoManifestPlugin(),

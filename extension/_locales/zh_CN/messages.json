@@ -75,5 +75,25 @@
         "content": "$1"
       }
     }
+  },
+  "optionsStorageSection": {
+    "message": "存储",
+    "description": "设置页分节标题"
+  },
+  "optionsCacheTitle": {
+    "message": "分析缓存",
+    "description": "请求缓存这一行的标题"
+  },
+  "optionsCacheUsage": {
+    "message": "$1 条 · $2",
+    "description": "缓存占用：条数与格式化体积",
+    "placeholders": {
+      "count": { "content": "$1" },
+      "size": { "content": "$2" }
+    }
+  },
+  "optionsCacheClear": {
+    "message": "清空",
+    "description": "删除分析缓存的按钮"
   }
 }
