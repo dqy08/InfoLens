@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Leaving Semantic Highlight</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            max-width: 640px;
+            margin: 40px auto;
+            padding: 0 20px;
+            font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif;
+            line-height: 1.6;
+            color: #222;
+        }
+        h1 { font-size: 1.85rem; font-weight: 600; margin: 0 0 0.45em; line-height: 1.3; }
+        .lead { margin: 0 0 1.4em; color: #444; }
+        fieldset { border: 0; margin: 0 0 1.2em; padding: 0; }
+        legend { font-weight: 600; margin-bottom: 0.6em; }
+        label.reason { display: block; margin: 0.35em 0; }
+        textarea {
+            width: 100%;
+            box-sizing: border-box;
+            min-height: 6em;
+            margin-top: 0.4em;
+            padding: 0.5em 0.6em;
+            font: inherit;
+        }
+        button[type="submit"] {
+            font: inherit;
+            padding: 0.45em 1.1em;
+            cursor: pointer;
+        }
+        .err { margin: 0.8em 0 0; color: #a33; }
+        .thanks { margin-top: 1.2em; }
+        .home { margin-top: 2em; font-size: 0.9rem; }
+        .home-tagline { display: block; margin-top: 0.25em; color: #666; }
+    </style>
+</head>
+
+<body>
+    <h1 data-i18n="title"></h1>
+    <p class="lead" data-i18n="lead"></p>
+
+    <form id="uninstall-form">
+        <fieldset>
+            <legend data-i18n="reasonsLegend"></legend>
+            <label class="reason"><input type="checkbox" name="reason" value="unused"> <span data-i18n="unused"></span></label>
+            <label class="reason"><input type="checkbox" name="reason" value="inaccurate"> <span data-i18n="inaccurate"></span></label>
+            <label class="reason"><input type="checkbox" name="reason" value="slow_or_fail"> <span data-i18n="slow_or_fail"></span></label>
+            <label class="reason"><input type="checkbox" name="reason" value="looks_bad"> <span data-i18n="looks_bad"></span></label>
+            <label class="reason"><input type="checkbox" name="reason" value="privacy"> <span data-i18n="privacy"></span></label>
+            <label class="reason"><input type="checkbox" name="reason" value="alternative"> <span data-i18n="alternative"></span></label>
+        </fieldset>
+        <label>
+            <span data-i18n="commentLabel"></span>
+            <textarea name="comment" maxlength="2000"></textarea>
+        </label>
+        <p>
+            <button type="submit" data-i18n="submit"></button>
+        </p>
+        <p class="err" id="form-error" hidden></p>
+    </form>
+    <p class="thanks" id="thanks" hidden data-i18n="thanks"></p>
+    <p class="home">
+        <a href="index.html" data-i18n="home"></a>
+        <span class="home-tagline" data-i18n="homeTagline"></span>
+    </p>
+
+    <script>
+        const COPY = {
+            en: {
+                title: 'Thank you for using Semantic Highlight',
+                lead: 'Would you mind leaving a reason for uninstalling? It would help us a lot.',
+                reasonsLegend: 'Reasons for uninstalling (multiple ok)',
+                unused: 'Did not use it enough',
+                inaccurate: 'Search was not accurate',
+                slow_or_fail: 'Too slow or often failed',
+                looks_bad: 'The interface does not look good',
+                privacy: 'Worried about privacy',
+                alternative: 'Found something else',
+                commentLabel: 'Any complaints or suggestions',
+                submit: 'Send',
+                thanks: 'Thank you. You can close this page.',
+                home: 'Take a look around Info Lens',
+                // 与 page-meta.json home.subtitle、translations.ts 同步
+                homeTagline: 'A toolbox for exploring the informational nature of LLMs and language',
+                needOne: 'Please choose a reason or write something.',
+            },
+            zh: {
+                title: '感谢用过 Semantic Highlight',
+                lead: '方便留下卸载原因吗？会对我们很有帮助。',
+                reasonsLegend: '卸载原因（可多选）',
+                unused: '用不太上',
+                inaccurate: '搜索不准',
+                slow_or_fail: '太慢或经常失败',
+                looks_bad: '界面不好看',
+                privacy: '担心隐私',
+                alternative: '找到了替代',
+                commentLabel: '任何吐槽或建议',
+                submit: '发送',
+                thanks: '谢谢。可以关掉这个页面了。',
+                home: '去Info Lens逛一逛',
+                // 与 page-meta.json home.subtitle、translations.ts 同步
+                homeTagline: '用于探索 LLM 与语言的信息本质的工具箱',
+                needOne: '请选一项原因或写一句吐槽、建议。',
+            },
+        };
+
+        const params = new URLSearchParams(location.search);
+        const langParam = (params.get('lang') || '').toLowerCase();
+        const lang = langParam.startsWith('zh')
+            ? 'zh'
+            : langParam.startsWith('en')
+                ? 'en'
+                : /^\s*zh/i.test(navigator.language || '') ? 'zh' : 'en';
+        const t = COPY[lang];
+        document.documentElement.lang = lang;
+        document.title = t.title;
+        document.querySelectorAll('[data-i18n]').forEach((el) => {
+            el.textContent = t[el.getAttribute('data-i18n')] || '';
+        });
+
+        const form = document.getElementById('uninstall-form');
+        const errEl = document.getElementById('form-error');
+        const thanksEl = document.getElementById('thanks');
+        const meta = document.querySelector('meta[name="inforadar-api-base"]');
+        const apiBase = ((meta && meta.content) || 'https://api.info-lens.app').replace(/\/+$/, '');
+        const version = (params.get('v') || '').trim();
+        if (version) {
+            void fetch(`${apiBase}/api/extension-feedback`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source: 'uninstall_visit', version }),
+                keepalive: true,
+            });
+        }
+
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const reasons = [...form.querySelectorAll('input[name="reason"]:checked')].map((el) => el.value);
+            const comment = (form.comment.value || '').trim();
+            if (!reasons.length && !comment) {
+                errEl.hidden = false;
+                errEl.textContent = t.needOne;
+                return;
+            }
+            form.hidden = true;
+            thanksEl.hidden = false;
+            void fetch(`${apiBase}/api/extension-feedback`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source: 'uninstall',
+                    reasons,
+                    comment,
+                    extension_version: params.get('v') || '',
+                    user_agent: navigator.userAgent,
+                }),
+                keepalive: true,
+            });
+        });
+    </script>
+</body>
+
+</html>

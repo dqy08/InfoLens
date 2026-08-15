@@ -360,6 +360,16 @@ async function activateTab(tab, opts = {}) {
 }
 
 const CONTEXT_MENU_ID = 'il-semantic-search';
+const UNINSTALL_SURVEY_URL = 'https://info-lens.app/uninstall.html';
+
+function setUninstallSurveyUrl() {
+  const version = chrome.runtime.getManifest().version;
+  chrome.runtime.setUninstallURL(
+    `${UNINSTALL_SURVEY_URL}?v=${encodeURIComponent(version)}`
+  );
+}
+
+setUninstallSurveyUrl();
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
@@ -560,6 +570,18 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === 'il-open-options') {
+    (async () => {
+      try {
+        await chrome.runtime.openOptionsPage();
+        sendResponse({ ok: true });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
   if (msg?.type === 'il-analyze-semantic-version') {
     (async () => {
       try {

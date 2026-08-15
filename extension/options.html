@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Semantic Highlight</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fg: #1f1f1f;
+      --muted: #5e5e5e;
+      --bg: #fff;
+      --line: #e1e3e1;
+      --btn-border: #747775;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #e3e3e3;
+        --muted: #c4c7c5;
+        --bg: #1f1f1f;
+        --line: #444746;
+        --btn-border: #8e918f;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font: 16px/1.45 system-ui, sans-serif;
+      color: var(--fg);
+      background: var(--bg);
+    }
+    .top {
+      border-bottom: 1px solid var(--line);
+    }
+    .top-inner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 16px 24px;
+    }
+    .top-icon { width: 40px; height: 40px; border-radius: 8px; }
+    .top-name { font-size: 22px; font-weight: 600; }
+    main { max-width: 680px; margin: 0 auto; padding: 28px 24px 64px; }
+    h2 {
+      font-size: 1.05rem;
+      font-weight: 500;
+      margin: 0 0 0.25rem;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 48px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .row-text { min-width: 0; }
+    .row-title { font-size: 16px; }
+    .row-desc { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+    button {
+      flex-shrink: 0;
+      font: inherit;
+      font-weight: 500;
+      height: 36px;
+      padding: 0 16px;
+      border: 1px solid var(--btn-border);
+      border-radius: 16px;
+      background: transparent;
+      color: var(--fg);
+      cursor: pointer;
+    }
+    button:hover:not(:disabled) { filter: brightness(1.08); }
+    button:disabled { opacity: 0.45; cursor: default; }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="top-inner">
+      <img id="brand_icon" class="top-icon" width="40" height="40" alt="">
+      <span id="brand_name" class="top-name"></span>
+    </div>
+  </header>
+  <main>
+    <h2 id="storage_heading"></h2>
+    <div class="row">
+      <div class="row-text">
+        <div id="cache_title" class="row-title"></div>
+        <p id="cache_desc" class="row-desc"></p>
+      </div>
+      <button type="button" id="cache_clear"></button>
+    </div>
+  </main>
+  <script src="semantic/analyzeCache.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

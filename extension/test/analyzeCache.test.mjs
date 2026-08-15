@@ -479,6 +479,39 @@ test('打开时清掉旧整包 key', async () => {
   assert.equal(data.il_analyze_cache, undefined);
 });
 
+test('usage：条数为数据 key，不含 meta/order', async () => {
+  mockLocal();
+  await cache.relevance('q', ['a', 'b'], () => {}, undefined, async (_q, _t, onRow) => {
+    onRow(1, 0.1);
+    onRow(2, 0.2);
+  });
+  await cache.keywords('q', 'a', () => {}, undefined, async (_q, _t, onRun) => {
+    onRun({ offset: [0, 1], score: 1 });
+  });
+  const u = await cache.usage();
+  assert.equal(u.entries, 3);
+  assert.ok(u.bytes > 0);
+});
+
+test('dropAll：清掉缓存条，不碰其它 key', async () => {
+  const data = mockLocal({ il_semantic_find_history: ['keep'] });
+  await cache.relevance('q', ['a'], () => {}, undefined, async (_q, _t, onRow) => {
+    onRow(1, 0.4);
+  });
+  await cache.dropAll();
+  const u = await cache.usage();
+  assert.equal(u.entries, 0);
+  assert.equal(u.bytes, 0);
+  assert.deepEqual(data.il_semantic_find_history, ['keep']);
+  assert.equal(Object.keys(data).some((k) => k.startsWith('il_ac/')), false);
+  let called = 0;
+  await cache.relevance('q', ['a'], () => {}, undefined, async (_q, _t, onRow) => {
+    called += 1;
+    onRow(1, 0.4);
+  });
+  assert.equal(called, 1);
+});
+
 test('syncRemoteModel：fetch 失败不改 key，下次仍问', async () => {
   mockLocal();
   await assert.rejects(() => cache.syncRemoteModel(async () => {

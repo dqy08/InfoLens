@@ -11,7 +11,8 @@
  *   - /api/v2/analyze-semantic-relevance → Hy3 多切片（新扩展/新前端，texts 数组，新版本主力）
  *   - /api/v2/analyze-semantic-keywords → Hy3（新扩展）
  *   - GET /api/v2/analyze-semantic-version → 相关度 / keywords 缓存 epoch（扩展打开栏时问；不打上游）
- * - /api/extension-feedback → STATE KV（单向黑箱；TTL 90 天）；读：GET /facade-extension-feedback
+ * - /api/extension-feedback → STATE KV（单向黑箱）；读：GET /facade-extension-feedback
+ *   卸载打开（source=uninstall_visit）按版本加一；读同一口 ?counts=1
  * - keywords 双轨（扩展审核慢于 Worker，过渡期内并存）：
  *   - 旧扩展：/api/analyze-semantic-keywords → 仍 HF/Home 梯度归因（COMPUTE_PATHS，勿接到 v2）
  *   旧扩展升级完后再决定退役旧路径，或把旧入口接到 v2；当前不切

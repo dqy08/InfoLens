@@ -1913,6 +1913,7 @@
       texts,
       privacy_mode: CFG.privacyMode !== false,
     };
+    if (searching) syncClearButton(true);
     return new Promise((resolve, reject) => {
       const port = chrome.runtime.connect({ name: 'relevance-stream' });
       const { finish, closePort, touch } = guardStreamPromise(port, STREAM_IDLE_MS, 'relevance', reject);
@@ -1973,6 +1974,7 @@
       stream: true,
       privacy_mode: CFG.privacyMode !== false,
     };
+    if (searching) syncClearButton(true);
     return new Promise((resolve, reject) => {
       const port = chrome.runtime.connect({ name: 'relevance-stream' });
       const { finish, closePort, touch } = guardStreamPromise(port, STREAM_IDLE_MS, 'keywords', reject);
@@ -2319,6 +2321,15 @@
     });
     ui$('semantic_find_prev')?.addEventListener('click', () => navigateMatch(-1));
     ui$('semantic_find_next')?.addEventListener('click', () => navigateMatch(1));
+    ui$('semantic_find_more')?.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'il-open-options' }, (resp) => {
+        if (chrome.runtime.lastError) {
+          console.error('[InfoLens] open options:', chrome.runtime.lastError.message);
+          return;
+        }
+        if (!resp?.ok) console.error('[InfoLens] open options:', resp?.error || 'failed');
+      });
+    });
     ui$('semantic_find_close')?.addEventListener('click', () => close());
     ui$('semantic_find_status_list')?.addEventListener('click', (e) => {
       const btn = e.target instanceof Element ? e.target.closest('button') : null;
@@ -2370,13 +2381,13 @@
       findInput.value = '';
       findInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    // 输入区选项：mousedown 不让 button 抢焦点，并 focus 输入（vscode「option click → fix focus」）
+    // 输入区选项：mousedown 只挡住 button 抢焦点。未聚焦时不在这里 focus：
+    // 聚焦会藏 ↑↓、按钮右移，随后 click 落空（停止 / 范围都是这个问题）
     const inputWrap = findInput.closest('.semantic-find-bar-input-wrap');
     inputWrap?.addEventListener('mousedown', (e) => {
       const btn = e.target instanceof Element ? e.target.closest('button') : null;
       if (!btn || !inputWrap.contains(btn)) return;
       e.preventDefault();
-      findInput.focus();
     });
     ui$('semantic_find_scope')?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2786,7 +2797,7 @@
     }
     ui$('semantic_find_history_dropdown')?.classList.remove('is-visible');
     chromeBar?.classList.remove('is-input-active');
-    syncClearButton(on);
+    if (!on) syncClearButton(false);
     // 搜索结束时若正文仍脏（例如 debounce 未到期），补一次 sync
     if (!on && doc.isContentDirty()) doc.scheduleLayoutSync();
     // 结束/停止时重绘进度图：把「等待首 chunk」的空框架收起（hidden 判据依赖 searching）

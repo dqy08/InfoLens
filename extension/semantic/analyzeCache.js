@@ -288,11 +288,46 @@ globalThis.IL_analyzeCache ||= (function () {
     await put({ [META]: { relevanceKey, keywordsKey } });
   }
 
+  /** 只丢本模块内存；storage 里的条留下（测试 / 注入重跑）。 */
   function clear() {
     relevanceKey = null;
     keywordsKey = null;
     metaReady = false;
     for (const k of Object.keys(mem)) delete mem[k];
+  }
+
+  function cacheKeys(all) {
+    return Object.keys(all).filter((k) => k === OLD_BLOB || k.startsWith(PREFIX));
+  }
+
+  async function usage() {
+    const all = await storage().get(null);
+    const keys = cacheKeys(all);
+    const entries = keys.filter((k) => k !== META && k !== ORDER && k !== OLD_BLOB).length;
+    const store = storage();
+    let bytes = 0;
+    if (keys.length) {
+      if (typeof store.getBytesInUse === 'function') {
+        bytes = await store.getBytesInUse(keys);
+      } else {
+        const slice = {};
+        for (const k of keys) slice[k] = all[k];
+        bytes = new TextEncoder().encode(JSON.stringify(slice)).length;
+      }
+    }
+    if (!Number.isFinite(bytes) || bytes < 0) {
+      throw new Error(`il_analyze_cache: bad byte count ${bytes}`);
+    }
+    return { entries, bytes };
+  }
+
+  function dropAll() {
+    return enqueueWrite(async () => {
+      const all = await storage().get(null);
+      const drop = cacheKeys(all);
+      if (drop.length) await storage().remove(drop);
+      clear();
+    });
   }
 
   return {
@@ -303,6 +338,8 @@ globalThis.IL_analyzeCache ||= (function () {
     relevance,
     keywords,
     syncRemoteModel,
+    usage,
+    dropAll,
     clear,
   };
 })();

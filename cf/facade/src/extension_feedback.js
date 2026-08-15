@@ -7,8 +7,17 @@
 export const FEEDBACK_PATH = '/api/extension-feedback';
 export const FEEDBACK_ADMIN_PATH = '/facade-extension-feedback';
 export const FEEDBACK_KEY_PREFIX = 'feedback:';
-/** 90 天；黑箱不承诺永久存档 */
-export const FEEDBACK_TTL_SEC = 90 * 24 * 60 * 60;
+export const UNINSTALL_COUNT_PREFIX = 'uninstall_count:';
+
+export const UNINSTALL_REASON_IDS = [
+  'unused',
+  'inaccurate',
+  'slow_or_fail',
+  'looks_bad',
+  'privacy',
+  'alternative',
+];
+const UNINSTALL_REASON_SET = new Set(UNINSTALL_REASON_IDS);
 
 export function clipStr(v, maxLen) {
   if (v == null) return null;
@@ -57,20 +66,40 @@ export function feedbackKey(id8, ms = Date.now()) {
  * @param {Record<string, unknown>} body
  * @returns {Record<string, unknown>}
  */
+function clipUninstallReasons(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const item of v) {
+    const id = clipStr(item, 32);
+    if (!id || !UNINSTALL_REASON_SET.has(id) || out.includes(id)) continue;
+    out.push(id);
+    if (out.length >= UNINSTALL_REASON_IDS.length) break;
+  }
+  return out;
+}
+
 export function buildFeedbackRecord(body) {
   const d = body && typeof body === 'object' ? body : {};
   const status = d.status && typeof d.status === 'object' ? d.status : {};
   const progress = d.progress && typeof d.progress === 'object' ? d.progress : {};
   const config = d.config && typeof d.config === 'object' ? d.config : {};
   const saved_at = utcSavedAt();
+  const source = d.source === 'uninstall' ? 'uninstall' : 'extension';
+  const reasons = source === 'uninstall' ? clipUninstallReasons(d.reasons) : null;
+  const comment = source === 'uninstall' ? clipStr(d.comment, 2000) : null;
   return {
     saved_at,
-    source: 'extension',
+    source,
+    ...(reasons?.length ? { reasons } : {}),
+    ...(comment ? { comment } : {}),
     status: {
-      tone: clipStr(status.tone, 32),
-      label: clipStr(status.label, 64),
-      detail: clipStr(status.detail, 2000),
-      error_detail: clipStr(status.error_detail, 2000),
+      tone: source === 'uninstall' ? 'uninstall' : clipStr(status.tone, 32),
+      label:
+        source === 'uninstall'
+          ? clipStr(reasons.join(',') || 'uninstall', 64)
+          : clipStr(status.label, 64),
+      detail: source === 'uninstall' ? comment : clipStr(status.detail, 2000),
+      error_detail: source === 'uninstall' ? null : clipStr(status.error_detail, 2000),
     },
     page_url: clipStr(d.page_url, 2000),
     query: clipStr(d.query, 500),
@@ -101,12 +130,30 @@ export async function handlePostExtensionFeedback(request, env, json) {
     return json(request, { success: false, message: 'invalid json' }, 400);
   }
 
+  if (body && body.source === 'uninstall_visit') {
+    const version = String(body.version || '').trim().slice(0, 32);
+    if (!version) return json(request, { success: false, message: 'invalid version' }, 400);
+    const key = `${UNINSTALL_COUNT_PREFIX}${version}`;
+    const n = parseInt(await env.STATE.get(key), 10);
+    const count = (Number.isFinite(n) ? n : 0) + 1;
+    await env.STATE.put(key, String(count));
+    return json(request, { success: true, version, count });
+  }
+
   const record = buildFeedbackRecord(body && typeof body === 'object' ? body : {});
+  const s = record.status || {};
+  const empty =
+    record.source === 'uninstall'
+      ? !record.reasons?.length && !record.comment
+      : !s.tone && !s.label && !s.detail && !s.error_detail;
+  if (empty) {
+    return json(request, { success: true, stored: false });
+  }
   const id8 = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
   const key = feedbackKey(id8);
 
   try {
-    await env.STATE.put(key, JSON.stringify(record), { expirationTtl: FEEDBACK_TTL_SEC });
+    await env.STATE.put(key, JSON.stringify(record));
   } catch (err) {
     const msg = err && err.message ? String(err.message) : String(err);
     console.error('[extension feedback] KV put failed:', msg);
@@ -133,6 +180,14 @@ export async function handleListExtensionFeedback(request, env, json, requireAdm
   }
 
   const url = new URL(request.url);
+  if (url.searchParams.has('counts')) {
+    const listed = await env.STATE.list({ prefix: UNINSTALL_COUNT_PREFIX, limit: 128 });
+    const counts = {};
+    for (const { name } of listed.keys) {
+      counts[name.slice(UNINSTALL_COUNT_PREFIX.length)] = parseInt(await env.STATE.get(name), 10) || 0;
+    }
+    return json(request, { ok: true, counts });
+  }
   const rawLimit = parseInt(url.searchParams.get('limit') || '20', 10);
   const limit = Number.isFinite(rawLimit) ? Math.min(50, Math.max(1, rawLimit)) : 20;
   const wantKey = (url.searchParams.get('key') || '').trim();

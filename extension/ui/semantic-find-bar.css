@@ -49,6 +49,8 @@
   background-clip: padding-box, border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 4px 12px var(--semantic-ai-glow-muted);
   box-sizing: border-box;
+  /* 输入 220 + 分隔 + 四按钮 + gap/padding/border；藏按钮时 flex 把空位给输入 */
+  width: 338px;
   max-width: 100%;
   flex-shrink: 0;
   cursor: grab;
@@ -258,8 +260,7 @@
 .semantic-find-bar .semantic-find-bar-input-wrap {
   position: relative;
   flex: 1 1 auto;
-  min-width: 220px;
-  max-width: 380px;
+  min-width: 0;
   display: flex;
   align-items: center;
   height: 28px;
@@ -322,6 +323,9 @@
 }
 .semantic-find-bar .semantic-search-clear.is-visible {
   display: flex;
+}
+.semantic-find-bar:not(:has(.semantic-find-input:focus)) .semantic-search-clear.is-visible:not(.is-stop) {
+  display: none;
 }
 .semantic-find-bar .semantic-search-clear.is-stop {
   font-size: 0;
@@ -488,7 +492,7 @@
   align-self: center;
   width: 1px;
   height: 20px;
-  margin: 0 4px;
+  margin: 0 2px;
   background: rgba(232, 234, 237, 0.28);
   flex-shrink: 0;
 }
@@ -496,8 +500,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   margin: 0;
   border: none;
@@ -524,10 +528,10 @@
   cursor: default;
   opacity: 1;
 }
-.semantic-find-bar .semantic-find-bar-close {
-  margin-left: 1px;
+.semantic-find-bar:has(.semantic-find-input:focus) #semantic_find_prev,
+.semantic-find-bar:has(.semantic-find-input:focus) #semantic_find_next {
+  display: none;
 }
-
 :root[data-theme=light] .semantic-find-bar,
 .semantic-find-bar-host[data-theme=light] .semantic-find-bar {
   color: #202124;
