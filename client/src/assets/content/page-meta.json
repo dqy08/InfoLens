@@ -1,5 +1,5 @@
 {
-  "navPageKeys": ["causalFlow", "analysis", "attribution", "chat"],
+  "navPageKeys": ["causalFlow", "analysis", "semanticHighlight"],
   "pages": {
     "home": {
       "title": "Info Lens",
@@ -11,6 +11,12 @@
       "title": "Info Highlight",
       "subtitle": "- highlight the 'informative' parts",
       "href": "analysis.html"
+    },
+    "semanticHighlight": {
+      "title": "Semantic Highlight",
+      "titleNote": "(Chrome extension)",
+      "subtitle": "- search and highlight words by meaning",
+      "href": "https://chromewebstore.google.com/detail/semantic-highlight/jnjglfjkbopeiodpcgmlhkfhldjfcdda"
     },
     "chat": {
       "title": "LLM Raw Chat",
