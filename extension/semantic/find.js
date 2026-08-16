@@ -309,8 +309,9 @@
     return job;
   }
 
-  /** 栏开着且正文/切块无效：开一趟后台抽取。已有在途则只复用。 */
+  /** 栏开着且正文/切块无效：开一趟后台抽取。已有在途则只复用。搜索中不抽：正文变了走 giveUp。 */
   function kickExtractIfNeeded() {
+    if (searching) return;
     if (extractStillValid() && chunksCacheHits()) return;
     const bar = ui$('semantic_find_bar');
     if (!bar || bar.hidden) return;
@@ -820,16 +821,11 @@
   function sendFeedback(status, btn) {
     if (!status || !btn || btn.disabled) return;
     btn.disabled = true;
-    chrome.runtime.sendMessage(
-      {
-        type: 'il-extension-feedback',
-        apiBase: CFG.apiBase,
-        body: buildFeedbackBody(status),
-      },
-      () => {
-        void chrome.runtime.lastError; // fire-and-forget
-      }
-    );
+    chrome.runtime.sendMessage({
+      type: 'il-extension-feedback',
+      apiBase: CFG.apiBase,
+      body: buildFeedbackBody(status),
+    });
     markFeedbackThanks(btn);
   }
 

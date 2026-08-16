@@ -371,7 +371,17 @@ function setUninstallSurveyUrl() {
 
 setUninstallSurveyUrl();
 
-chrome.runtime.onInstalled.addListener(() => {
+function postKeepalive(path, body, apiBase) {
+  const base = String(apiBase || IL_CONFIG?.apiBase || 'https://api.info-lens.app').replace(/\/$/, '');
+  void fetch(`${base}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    keepalive: true,
+  });
+}
+
+chrome.runtime.onInstalled.addListener((details) => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: CONTEXT_MENU_ID,
@@ -379,6 +389,14 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ['page', 'selection'],
     });
   });
+
+  if (details.reason === 'install' || details.reason === 'update') {
+    const body = { event: details.reason, version: chrome.runtime.getManifest().version };
+    if (details.reason === 'update' && details.previousVersion) {
+      body.previous_version = details.previousVersion;
+    }
+    postKeepalive('/api/extension-events', body);
+  }
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -622,23 +640,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg?.type === 'il-extension-feedback') {
-    (async () => {
-      try {
-        const apiBase = msg.apiBase || IL_CONFIG.apiBase;
-        const body = {
-          ...(msg.body && typeof msg.body === 'object' ? msg.body : {}),
-          extension_version: chrome.runtime.getManifest().version,
-        };
-        const { data } = await postJsonApi(
-          `${String(apiBase).replace(/\/$/, '')}/api/extension-feedback`,
-          body
-        );
-        sendResponse({ ok: true, data });
-      } catch (err) {
-        sendResponse({ ok: false, error: String(err?.message || err) });
-      }
-    })();
-    return true;
+    postKeepalive(
+      '/api/extension-feedback',
+      {
+        ...(msg.body && typeof msg.body === 'object' ? msg.body : {}),
+        extension_version: chrome.runtime.getManifest().version,
+      },
+      msg.apiBase
+    );
+    return;
   }
 
   if (

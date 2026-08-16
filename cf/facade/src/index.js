@@ -11,8 +11,9 @@
  *   - /api/v2/analyze-semantic-relevance → Hy3 多切片（新扩展/新前端，texts 数组，新版本主力）
  *   - /api/v2/analyze-semantic-keywords → Hy3（新扩展）
  *   - GET /api/v2/analyze-semantic-version → 相关度 / keywords 缓存 epoch（扩展打开栏时问；不打上游）
- * - /api/extension-feedback → STATE KV（单向黑箱）；读：GET /facade-extension-feedback
- *   卸载打开（source=uninstall_visit）按版本加一；读同一口 ?counts=1
+ * - /api/extension-events → STATE KV（流水：install / update / uninstall）；读：GET /facade-extension-events
+ * - /api/extension-feedback → STATE KV（技术诊断与崩溃报告）；读：GET /facade-extension-feedback
+ * - /api/extension-uninstall-survey → STATE KV（卸载问卷调查）；读：GET /facade-extension-uninstall-survey
  * - keywords 双轨（扩展审核慢于 Worker，过渡期内并存）：
  *   - 旧扩展：/api/analyze-semantic-keywords → 仍 HF/Home 梯度归因（COMPUTE_PATHS，勿接到 v2）
  *   旧扩展升级完后再决定退役旧路径，或把旧入口接到 v2；当前不切
@@ -40,6 +41,18 @@ import {
   handlePostExtensionFeedback,
   handleListExtensionFeedback,
 } from './extension_feedback.js';
+import {
+  EVENTS_PATH,
+  EVENTS_ADMIN_PATH,
+  handlePostExtensionEvents,
+  handleListExtensionEvents,
+} from './extension_events.js';
+import {
+  UNINSTALL_SURVEY_PATH,
+  UNINSTALL_SURVEY_ADMIN_PATH,
+  handlePostUninstallSurvey,
+  handleListUninstallSurveys,
+} from './extension_uninstall_survey.js';
 const HOP_BY_HOP = new Set([
   'connection',
   'keep-alive',
@@ -390,6 +403,12 @@ async function handleRequest(request, env) {
   if (url.pathname === FEEDBACK_ADMIN_PATH) {
     return handleListExtensionFeedback(request, env, json, requireAdmin);
   }
+  if (url.pathname === EVENTS_ADMIN_PATH) {
+    return handleListExtensionEvents(request, env, json, requireAdmin);
+  }
+  if (url.pathname === UNINSTALL_SURVEY_ADMIN_PATH) {
+    return handleListUninstallSurveys(request, env, json, requireAdmin);
+  }
   if (url.pathname === '/' || url.pathname === '/facade-health') {
     return json(request, { ok: true, facade: true });
   }
@@ -399,9 +418,15 @@ async function handleRequest(request, env) {
     return json(request, { ok: false, error: 'not_found' }, 404);
   }
 
-  // 扩展反馈：边缘写 KV，不碰 HF/Home
+  // 扩展打点、反馈、卸载问卷：边缘写 KV，不碰 HF/Home
+  if (path === EVENTS_PATH) {
+    return handlePostExtensionEvents(request, env, json);
+  }
   if (path === FEEDBACK_PATH) {
     return handlePostExtensionFeedback(request, env, json);
+  }
+  if (path === UNINSTALL_SURVEY_PATH) {
+    return handlePostUninstallSurvey(request, env, json);
   }
 
   if (path === '/api/v2/analyze-semantic-version') {

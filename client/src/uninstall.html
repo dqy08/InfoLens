@@ -129,10 +129,10 @@
         const apiBase = ((meta && meta.content) || 'https://api.info-lens.app').replace(/\/+$/, '');
         const version = (params.get('v') || '').trim();
         if (version) {
-            void fetch(`${apiBase}/api/extension-feedback`, {
+            void fetch(`${apiBase}/api/extension-events`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source: 'uninstall_visit', version }),
+                body: JSON.stringify({ event: 'uninstall', version }),
                 keepalive: true,
             });
         }
@@ -148,14 +148,13 @@
             }
             form.hidden = true;
             thanksEl.hidden = false;
-            void fetch(`${apiBase}/api/extension-feedback`, {
+            void fetch(`${apiBase}/api/extension-uninstall-survey`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    source: 'uninstall',
                     reasons,
                     comment,
-                    extension_version: params.get('v') || '',
+                    version: params.get('v') || '',
                     user_agent: navigator.userAgent,
                 }),
                 keepalive: true,

@@ -139,10 +139,18 @@ html[data-theme='dark'] body.nav-landing-page {
     width: 1.5rem;
     background-image: url('../../assets/images/social/xiaohongshu.svg');
   }
+
+  &--home {
+    background-image: url('../../assets/images/social/home.svg');
+  }
 }
 
 html[data-theme='dark'] .nav-landing-social-link--github {
   background-image: url('../../assets/images/social/github-dark.svg');
+}
+
+html[data-theme='dark'] .nav-landing-social-link--home {
+  background-image: url('../../assets/images/social/home-dark.svg');
 }
 
 .nav-landing-hint {
