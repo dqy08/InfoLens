@@ -83,7 +83,9 @@ MULTI_CHUNK_OUTPUT_FORMAT = (
 )
 
 
-def build_multi_chunk_user_content(query: str, chunks: List[str]) -> str:
+def build_multi_chunk_user_content(
+    query: str, chunks: List[str], format_reminder: bool = False
+) -> str:
     """multi-chunk 相关性 user 正文。Task 与 Output Format 分离且格式出现两次：
     - 三明治头尾同序：Task(Reminder) → Query → Output Format，正文夹在中间。
       Hy3 对这段顺序敏感、会影响门控精度：Query 若顶在生成口会更积极认相关、错检升；
@@ -111,7 +113,23 @@ def build_multi_chunk_user_content(query: str, chunks: List[str]) -> str:
     head = f"Task: {task}\n{mid}"
     reminder = f"Task Reminder: {task}\n{mid}"
     passages = "\n".join(f"Passage {i}: {text}" for i, text in enumerate(chunks, 1))
-    return f"{head}\nArticle:\n\n{passages}\n\n{reminder}"
+    content = f"{head}\nArticle:\n\n{passages}\n\n{reminder}"
+    if format_reminder:
+        n = len(chunks)
+        if n == 1:
+            example = "[1]0"
+        elif n == 2:
+            example = "[1]0\n[2]1"
+        elif n == 3:
+            example = "[1]0\n[2]1\n[3]0"
+        else:
+            example = f"[1]0\n[2]1\n...\n[{n}]0"
+        content += (
+            f"\nCRITICAL: Strictly adhere to the format. Output EXACTLY {n} lines, from [1] to [{n}]. Nothing else.\n"
+            f"Example reply for {n} passages:\n"
+            f"{example}"
+        )
+    return content
 
 
 _RE_BRACKET_COUNT = re.compile(r"\[(\d+)\]\s*(\d+)")
@@ -244,6 +262,7 @@ def chat_relevance_multi_chunk(
     *,
     token: str,
     timeout: int,
+    format_reminder: bool = False,
 ) -> dict:
     """multi-chunk：一次请求让模型对整组连续切片各报 count。
 
@@ -255,7 +274,7 @@ def chat_relevance_multi_chunk(
         "messages": [
             {
                 "role": "user",
-                "content": build_multi_chunk_user_content(query, chunks),
+                "content": build_multi_chunk_user_content(query, chunks, format_reminder=format_reminder),
             }
         ],
         "temperature": 0,
@@ -434,21 +453,25 @@ def _run_multi_chunk_main(
     groups = _build_full_groups(pending, cases_dir, args.ctx_max)
 
     def _run_group(group):
+        # 评测整组重打（与线上断点续跑不同）：acc 只看最终成功输出；失败次数另计。
         last_error = None
+        attempts = 0
         for attempt in range(args.retries + 1):
+            attempts = attempt + 1
             try:
+                reminder = attempt > 0
                 r = chat_relevance_multi_chunk(
                     args.url, args.model, group["query"], group["chunks"],
-                    token=token, timeout=args.timeout,
+                    token=token, timeout=args.timeout, format_reminder=reminder,
                 )
-                return r, None
+                return r, None, attempts
             except Exception as e:
                 last_error = e
                 if attempt < args.retries:
                     wait = 3 * (attempt + 1)
-                    print(f"  ({group['ctx_id']}) 重试 {attempt + 1}/{args.retries}，{wait}s… {e}", flush=True)
+                    print(f"  ({group['ctx_id']}) 重试 {attempt + 1}/{args.retries}（format_reminder={reminder}），{wait}s… {e}", flush=True)
                     time.sleep(wait)
-        return None, last_error
+        return None, last_error, attempts
 
     def _emit_record(record: dict) -> bool:
         nonlocal done_n
@@ -472,13 +495,15 @@ def _run_multi_chunk_main(
         completed.add(name)
         return True
 
-    def _emit(ctx_id: str, case: dict, n: int, r: dict) -> None:
+    def _emit(ctx_id: str, case: dict, n: int, r: dict, attempts: int) -> None:
         count = r["counts"].get(n)
         if count is None:
             _emit_record({
                 "case": case["name"],
+                "query": case["query"],
                 "error": f"multi-chunk: 目标块 [{n}] 未在模型输出 {r.get('content')!r}",
                 "multi_chunk_ctx": ctx_id,
+                "attempts": attempts,
             })
             return
         degree = 1.0 if count > 0 else 0.0
@@ -492,6 +517,7 @@ def _run_multi_chunk_main(
             "clearly_zero": False,
             "multi_chunk_ctx": ctx_id,
             "multi_chunk_n": n,
+            "attempts": attempts,
             "full_match_degree": degree,
             "gate_passed": degree >= SEMANTIC_MATCH_THRESHOLD,
             "count": count,
@@ -506,21 +532,58 @@ def _run_multi_chunk_main(
         _emit_record(record)
 
     # 逐 Context 请求；同组任一目标块缺数只影响该条，不中断同组其它（不静默降级）。
-    ctx_results: List[Tuple[dict, Optional[dict], Optional[BaseException]]] = []
+    ctx_results: List[Tuple[dict, Optional[dict], Optional[BaseException], int]] = []
     for group in groups:
         if stop.is_set():
             break
-        r, err = _run_group(group)
-        ctx_results.append((group, r, err))
-    for group, r, err in ctx_results:
+        r, err, attempts = _run_group(group)
+        ctx_results.append((group, r, err, attempts))
+    for group, r, err, attempts in ctx_results:
         for i, case, n in group["targets"]:
             if r is None:
                 _emit_record({
                     "case": case["name"],
+                    "query": case["query"],
                     "error": f"multi-chunk: {err}",
+                    "multi_chunk_ctx": group["ctx_id"],
+                    "attempts": attempts,
+                    "request_failed": True,
                 })
             else:
-                _emit(group["ctx_id"], case, n, r)
+                _emit(group["ctx_id"], case, n, r, attempts)
+    case_s, req_s = format_fail_stats(all_results)
+    print(f"失败统计：{case_s}" + (f"；{req_s}" if req_s else ""), flush=True)
+
+
+def format_fail_stats(results: List[dict]) -> Tuple[str, Optional[str]]:
+    """case 级 error 比例；有 multi_chunk_ctx 时再给请求（组）级首次/最终失败。"""
+    n = len(results)
+    err_n = sum(1 for r in results if r.get("error"))
+    case_s = f"error={err_n}/{n}" + (f"（{err_n / n:.1%}）" if n else "")
+    groups: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for r in results:
+        ctx = r.get("multi_chunk_ctx")
+        if not ctx:
+            continue
+        key = (str(ctx), str(r.get("query") or ""))
+        g = groups.setdefault(key, {"attempts": 1, "request_failed": False})
+        att = r.get("attempts")
+        if isinstance(att, int):
+            g["attempts"] = max(g["attempts"], att)
+        if r.get("request_failed"):
+            g["request_failed"] = True
+    if not groups:
+        return case_s, None
+    g_n = len(groups)
+    term_fail = sum(1 for g in groups.values() if g["request_failed"])
+    first_fail = sum(
+        1 for g in groups.values() if g["attempts"] > 1 or g["request_failed"]
+    )
+    req_s = (
+        f"请求 {g_n} 组，首次失败 {first_fail}（{first_fail / g_n:.1%}），"
+        f"最终失败 {term_fail}"
+    )
+    return case_s, req_s
 
 
 def write_review_markdown(
@@ -564,11 +627,15 @@ def write_review_markdown(
         )
     total = tn + tp + fp + fn
     acc = (tn + tp) / total if total else 0.0
-    lines[4:4] = [
+    case_s, req_s = format_fail_stats(results)
+    summary = [
         f"汇总：TN（拒识对）={tn} TP（正检）={tp} "
-        f"FP（误检）={fp} FN（漏检）={fn} acc={acc:.1%}（n={total}）",
-        "",
+        f"FP（误检）={fp} FN（漏检）={fn} acc={acc:.1%}（n={total}）；{case_s}",
     ]
+    if req_s:
+        summary.append(req_s)
+    summary.append("")
+    lines[4:4] = summary
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"✅ 对照表已写入 {path}")

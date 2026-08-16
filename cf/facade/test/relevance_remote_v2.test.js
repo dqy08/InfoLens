@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   streamRelevanceV2,
+  handleRemoteRelevanceV2,
   makeSseDeltaFeeder,
   makeLineSplitter,
   parseMultiChunkCounts,
@@ -217,4 +218,105 @@ test('buildMultiChunkUserContent: 三明治包含 task/query/输出格式/ok pas
   const iQuery2 = s.lastIndexOf('Query: 查询');
   assert.ok(iTask < iQuery1 && iQuery1 < iFmt1 && iFmt1 < iArt);
   assert.ok(iArt < iRem && iRem < iQuery2 && iQuery2 < iFmt2);
+});
+
+test('buildMultiChunkUserContent: formatReminder 为 true 时附加具体行数与非全0举例', () => {
+  const s1 = buildMultiChunkUserContent('查询', ['红'], true);
+  assert.ok(s1.includes('CRITICAL: Strictly adhere to the format. Output EXACTLY 1 lines, from [1] to [1].'));
+  assert.ok(s1.includes('Example reply for 1 passages:\n[1]0'));
+
+  const s2 = buildMultiChunkUserContent('查询', ['红', '蓝'], true);
+  assert.ok(s2.includes('CRITICAL: Strictly adhere to the format. Output EXACTLY 2 lines, from [1] to [2].'));
+  assert.ok(s2.includes('Example reply for 2 passages:\n[1]0\n[2]1'));
+
+  const s3 = buildMultiChunkUserContent('查询', ['红', '蓝', '绿'], true);
+  assert.ok(s3.includes('Example reply for 3 passages:\n[1]0\n[2]1\n[3]0'));
+
+  const sLong = buildMultiChunkUserContent('查询', ['1', '2', '3', '4', '5'], true);
+  assert.ok(sLong.includes('CRITICAL: Strictly adhere to the format. Output EXACTLY 5 lines, from [1] to [5].'));
+  assert.ok(sLong.includes('Example reply for 5 passages:\n[1]0\n[2]1\n...\n[5]0'));
+});
+
+test('handleRemoteRelevanceV2: 首次中途 unparseable 重试时从断点切片继续并映射 n 序号', async () => {
+  let callCount = 0;
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (_url, init) => {
+      callCount++;
+      const body = JSON.parse(init.body);
+      const content = body.messages[0].content;
+      if (callCount === 1) {
+        assert.ok(content.includes('Passage 1: 红') && content.includes('Passage 2: 蓝'));
+        // 第一次成功发了 [1]，在 [2] 乱码断开
+        return sseRespContent(['[1] 2\n[s,\n']);
+      }
+      // 重试只发送了剩余切片（蓝），模型从 [1] 编号输出
+      assert.ok(!content.includes('Passage 1: 红'));
+      assert.ok(content.includes('Passage 1: 蓝'));
+      assert.ok(content.includes('CRITICAL: Strictly adhere'));
+      return sseRespContent(['[1] 0\n']);
+    };
+    const req = new Request('https://test.local/api/v2/analyze-semantic-relevance', {
+      method: 'POST',
+      body: JSON.stringify({ query: '查询', texts: ['红', '蓝'] }),
+    });
+    const resp = await handleRemoteRelevanceV2(
+      req,
+      { OPENROUTER_API_KEY: 'test' },
+      (_r, b, s) => new Response(JSON.stringify(b), { status: s || 200 })
+    );
+    assert.equal(resp.status, 200);
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value);
+    }
+    assert.equal(callCount, 2);
+    // 验证 n:1 与 n:2 各有一条正确结果
+    assert.ok(text.includes('"type":"row","n":1,"full_match_degree":1'));
+    assert.ok(text.includes('"type":"row","n":2,"full_match_degree":0'));
+    assert.ok(text.includes('"type":"result","success":true'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('handleRemoteRelevanceV2: unparseable 耗尽 3 次重试 → error', async () => {
+  let callCount = 0;
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (_url, init) => {
+      callCount++;
+      const content = JSON.parse(init.body).messages[0].content;
+      if (callCount === 1) assert.ok(!content.includes('CRITICAL: Strictly adhere'));
+      else assert.ok(content.includes('CRITICAL: Strictly adhere'));
+      return sseRespContent(['[s,\n']);
+    };
+    const req = new Request('https://test.local/api/v2/analyze-semantic-relevance', {
+      method: 'POST',
+      body: JSON.stringify({ query: '查询', texts: ['红', '蓝'] }),
+    });
+    const resp = await handleRemoteRelevanceV2(
+      req,
+      { OPENROUTER_API_KEY: 'test' },
+      (_r, b, s) => new Response(JSON.stringify(b), { status: s || 200 })
+    );
+    assert.equal(resp.status, 200);
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value);
+    }
+    assert.equal(callCount, 4);
+    assert.ok(text.includes('"type":"error"'));
+    assert.ok(!text.includes('"type":"result","success":true'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

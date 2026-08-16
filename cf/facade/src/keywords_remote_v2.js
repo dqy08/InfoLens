@@ -13,7 +13,7 @@
  *   评测模型抽取能力请用 scripts/eval_semantic_keywords_remote.py（不跑定位/压分）
  * - 不返回 input_token_count
  */
-import { logRemoteFailure, publicRemoteError } from './remote_log.js';
+import { logRemoteFailure, publicRemoteError, UNPARSEABLE_RETRIES } from './remote_log.js';
 import { makeLineSplitter, makeSseDeltaFeeder } from './relevance_remote_v2.js';
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
@@ -46,12 +46,19 @@ const KEYWORDS_OUTPUT_FORMAT =
 
 /** SYNC: scripts/eval_semantic_keywords_remote.py → build_keywords_user_content（verbal 默认）
  * 头尾同序 Task(Reminder) → Query → Output Format。Hy3 对这段顺序敏感（相关度实测：Query 在最后会抬错检）。 */
-export function buildKeywordsUserContent(query, text) {
+export function buildKeywordsUserContent(query, text, formatReminder = false) {
   const queryLine = `Query: ${query}`;
   const mid = `${queryLine}\n${KEYWORDS_OUTPUT_FORMAT}`;
   const head = `Task: ${KEYWORDS_TASK}\n${mid}`;
   const reminder = `Task Reminder: ${KEYWORDS_TASK}\n${mid}`;
-  return `${head}\nText:\n\n${text}\n\n${reminder}`;
+  let content = `${head}\nText:\n\n${text}\n\n${reminder}`;
+  if (formatReminder) {
+    content +=
+      '\nCRITICAL: Strictly adhere to the format. Output each keyword on its own line as [keyword]<score>. Nothing else.\n' +
+      'Example reply:\n' +
+      '[foo]5\n[bar]3';
+  }
+  return content;
 }
 
 /**
@@ -203,10 +210,10 @@ function findAllCaseInsensitive(textCps, keyword) {
   return hits;
 }
 
-function keywordsChatBody(query, text, stream) {
+function keywordsChatBody(query, text, stream, formatReminder = false) {
   return {
     model: KEYWORDS_MODEL,
-    messages: [{ role: 'user', content: buildKeywordsUserContent(query, text) }],
+    messages: [{ role: 'user', content: buildKeywordsUserContent(query, text, formatReminder) }],
     temperature: 0,
     max_tokens: KEYWORDS_MAX_TOKENS,
     stream,
@@ -284,9 +291,10 @@ export async function chatKeywordsV2(env, query, text) {
  * @param {string} text
  * @param {(event: object) => void} emit  结构化事件（type:row / type:result / type:error）
  * @param {AbortSignal} [signal]  客户端取消 → 中止 OpenRouter 流
+ * @param {boolean} [formatReminder=false]  格式强化提醒（重试时启用）
  * @returns {Promise<void>}
  */
-export async function streamKeywordsV2(env, query, text, emit, signal) {
+export async function streamKeywordsV2(env, query, text, emit, signal, formatReminder = false) {
   const token = (env.OPENROUTER_API_KEY || '').trim();
   if (!token) {
     throw new Error('OPENROUTER_API_KEY secret is not set');
@@ -297,7 +305,7 @@ export async function streamKeywordsV2(env, query, text, emit, signal) {
     resp = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
       method: 'POST',
       headers: keywordsChatHeaders(token),
-      body: JSON.stringify(keywordsChatBody(query, text, true)),
+      body: JSON.stringify(keywordsChatBody(query, text, true, formatReminder)),
       signal,
     });
   } catch (e) {
@@ -393,15 +401,66 @@ export async function handleRemoteKeywordsV2(request, env, json) {
     const stream = new ReadableStream({
       async start(controller) {
         const sse = (obj) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        let emitted = false;
+        const runStream = (reminder) => {
+          return streamKeywordsV2(
+            env,
+            query,
+            text,
+            (ev) => {
+              if (ev.type === 'row') {
+                emitted = true;
+                sse({ type: 'row', offset: ev.offset, raw: ev.raw, score: ev.score });
+              }
+            },
+            request.signal,
+            reminder
+          );
+        };
         try {
-          await streamKeywordsV2(env, query, text, (ev) => {
-            if (ev.type === 'row') sse({ type: 'row', offset: ev.offset, raw: ev.raw, score: ev.score });
-          }, request.signal);
-          sse({ type: 'result', success: true });
+          const retryable = (err) =>
+            err &&
+            err.name !== 'AbortError' &&
+            !request.signal?.aborted &&
+            typeof err.message === 'string' &&
+            err.message.startsWith('unparseable verbal output');
+          for (let attempt = 0; attempt <= UNPARSEABLE_RETRIES; attempt++) {
+            try {
+              await runStream(attempt > 0);
+              sse({ type: 'result', success: true });
+              return;
+            } catch (err) {
+              if (!retryable(err)) throw err;
+              await logRemoteFailure(
+                'remote_keywords_v2_failed',
+                err,
+                publicRemoteError(err),
+                env,
+                request,
+                { attempt: attempt + 1, retries: UNPARSEABLE_RETRIES }
+              );
+              // 已发出过 row：客户端当成功。零行才继续带格式提醒重试。
+              if (emitted) {
+                sse({ type: 'result', success: true });
+                return;
+              }
+              if (attempt === UNPARSEABLE_RETRIES) {
+                const pub = publicRemoteError(err);
+                sse({
+                  type: 'error',
+                  success: false,
+                  kind: pub.kind,
+                  message: pub.message,
+                  error_detail: pub.error_detail,
+                });
+                return;
+              }
+            }
+          }
         } catch (err) {
           if (err && err.name === 'AbortError') return;
           const pub = publicRemoteError(err);
-          logRemoteFailure('remote_keywords_v2_failed', err, pub);
+          await logRemoteFailure('remote_keywords_v2_failed', err, pub, env, request);
           sse({
             type: 'error',
             success: false,
@@ -438,7 +497,7 @@ export async function handleRemoteKeywordsV2(request, env, json) {
     });
   } catch (err) {
     const pub = publicRemoteError(err);
-    logRemoteFailure('remote_keywords_v2_failed', err, pub);
+    await logRemoteFailure('remote_keywords_v2_failed', err, pub, env, request);
     return json(
       request,
       { success: false, message: pub.message, error_detail: pub.error_detail },
