@@ -324,9 +324,6 @@
 .semantic-find-bar .semantic-search-clear.is-visible {
   display: flex;
 }
-.semantic-find-bar:not(:has(.semantic-find-input:focus)) .semantic-search-clear.is-visible:not(.is-stop) {
-  display: none;
-}
 .semantic-find-bar .semantic-search-clear.is-stop {
   font-size: 0;
   line-height: 0;

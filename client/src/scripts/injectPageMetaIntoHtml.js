@@ -50,7 +50,7 @@ function injectDataPageBlock(html, attrToken, text) {
 /**
  * @param {string} html
  * @param {string} pageKey
- * @param {{ pages: Record<string, { title: string, subtitle: string, href?: string, heartline?: string, formula?: string }>, navPageKeys: string[] }} doc
+ * @param {{ pages: Record<string, { title: string, subtitle: string, href?: string, titleNote?: string, heartline?: string, formula?: string }>, navPageKeys: string[] }} doc
  * @returns {string}
  */
 function injectPageMeta(html, pageKey, doc) {
@@ -86,9 +86,12 @@ function injectPageMeta(html, pageKey, doc) {
                 throw new Error(`injectPageMeta: navPageKeys references missing page "${navKey}"`);
             }
             const navTitle = documentTitleEn(navMeta);
+            const titleNote = navMeta.titleNote
+                ? ` <span class="nav-landing-card-title-note" data-i18n>${escapeHtmlText(navMeta.titleNote)}</span>`
+                : '';
             const textBlock =
                 `<div class="nav-landing-card-text">` +
-                `<span class="nav-landing-card-title" data-i18n>${escapeHtmlText(navMeta.title)}</span>` +
+                `<span class="nav-landing-card-title"><span data-i18n>${escapeHtmlText(navMeta.title)}</span>${titleNote}</span>` +
                 `<span class="nav-landing-card-subtitle" data-i18n>${escapeHtmlText(navMeta.subtitle)}</span>` +
                 `</div>`;
             const shot =
@@ -137,15 +140,16 @@ function injectPageMeta(html, pageKey, doc) {
             }
 
             const re = new RegExp(
-                `(<a\\b[^>]*\\bdata-nav-page=["']?${navKey}["']?[^>]*>)([\\s\\S]*?)(<\\/a>)`,
+                `(<(a|div)\\b[^>]*\\bdata-nav-page=["']?${navKey}["']?[^>]*>)([\\s\\S]*?)(<\\/\\2>)`,
                 'i'
             );
             const m = html.match(re);
             if (!m) {
-                throw new Error(`injectPageMeta: missing <a data-nav-page="${navKey}"> in home HTML`);
+                throw new Error(`injectPageMeta: missing <a or div data-nav-page="${navKey}"> in home HTML`);
             }
             let openTag = m[1];
-            if (navMeta.href) {
+            const tagName = m[2].toLowerCase();
+            if (navMeta.href && tagName === 'a') {
                 if (/\bhref\s*=/.test(openTag)) {
                     openTag = openTag.replace(
                         /\bhref\s*=\s*("[^"]*"|'[^']*')/i,
@@ -161,7 +165,7 @@ function injectPageMeta(html, pageKey, doc) {
                 openTag = openTag.replace(/>$/, ` title="${escapeHtmlText(navTitle)}">`);
             }
             const inner = badge + textBlock + shot;
-            html = html.replace(re, `${openTag}${inner}${m[3]}`);
+            html = html.replace(re, `${openTag}${inner}${m[4]}`);
         }
     }
 

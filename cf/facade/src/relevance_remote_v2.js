@@ -8,7 +8,7 @@
  *
  * CPU 开销：本处理器同步计算只有 JSON 解析 + 提示词拼接 + 逐行切分；远低于 Free 10ms 上限。
  */
-import { logRemoteFailure, publicRemoteError } from './remote_log.js';
+import { logRemoteFailure, publicRemoteError, UNPARSEABLE_RETRIES } from './remote_log.js';
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 const RELEVANCE_MODEL = 'tencent/hy3';
@@ -30,7 +30,7 @@ export const RELEVANCE_CACHE_VERSION = 5;
  * 本序（Format 在最后）与旧「尾段单独贴 Format」精度相当。不要改成 Task→Format→Query。
  * 基线 task；曾尝试追加全文判定句（"A word's relevance ... in the whole article"）但实测增误放行、
  * 对真相关零增益，故回退不再采用（详见 eval 脚本注释）。 */
-export function buildMultiChunkUserContent(query, chunks) {
+export function buildMultiChunkUserContent(query, chunks, formatReminder = false) {
   const task =
     'The passages are consecutive slices of one complete article, in reading order. ' +
     'How many words in each passage are related to the query topic?';
@@ -44,7 +44,25 @@ export function buildMultiChunkUserContent(query, chunks) {
   const head = `Task: ${task}\n${mid}`;
   const reminder = `Task Reminder: ${task}\n${mid}`;
   const passages = chunks.map((text, i) => `Passage ${i + 1}: ${text}`).join('\n');
-  return `${head}\nArticle:\n\n${passages}\n\n${reminder}`;
+  let content = `${head}\nArticle:\n\n${passages}\n\n${reminder}`;
+  if (formatReminder) {
+    const n = chunks.length;
+    let example;
+    if (n === 1) {
+      example = '[1]0';
+    } else if (n === 2) {
+      example = '[1]0\n[2]1';
+    } else if (n === 3) {
+      example = '[1]0\n[2]1\n[3]0';
+    } else {
+      example = `[1]0\n[2]1\n...\n[${n}]0`;
+    }
+    content +=
+      `\nCRITICAL: Strictly adhere to the format. Output EXACTLY ${n} lines, from [1] to [${n}]. Nothing else.\n` +
+      `Example reply for ${n} passages:\n` +
+      `${example}`;
+  }
+  return content;
 }
 
 /**
@@ -107,9 +125,10 @@ export function makeLineSplitter(onLine) {
  * @param {string[]} chunks
  * @param {(event: object) => void} emit  结构化事件回调（type:row / type:result / type:error）
  * @param {AbortSignal} [signal]  客户端取消 → 中止 OpenRouter 流，停止继续生成
+ * @param {boolean} [formatReminder=false]  格式强化提醒：是否在提示词尾部强申明具体行数与输出示例（重试时启用）
  * @returns {Promise<void>}
  */
-export async function streamRelevanceV2(env, query, chunks, emit, signal) {
+export async function streamRelevanceV2(env, query, chunks, emit, signal, formatReminder = false) {
   const token = (env.OPENROUTER_API_KEY || '').trim();
   if (!token) {
     throw new Error('OPENROUTER_API_KEY secret is not set');
@@ -138,7 +157,7 @@ export async function streamRelevanceV2(env, query, chunks, emit, signal) {
       },
       body: JSON.stringify({
         model: RELEVANCE_MODEL,
-        messages: [{ role: 'user', content: buildMultiChunkUserContent(query, chunks) }],
+        messages: [{ role: 'user', content: buildMultiChunkUserContent(query, chunks, formatReminder) }],
         temperature: 0,
         max_tokens: Math.max(MULTI_CHUNK_MAX * MAX_TOKENS_PER_CHUNK, 16 * chunks.length),
         stream: true,
@@ -340,18 +359,65 @@ export async function handleRemoteRelevanceV2(request, env, json) {
           encoder.encode(`data: ${JSON.stringify(obj)}\n\n`)
         );
       };
+      let emittedN = 0;
+      const runStream = (offset, reminder) => {
+        const remainingTexts = texts.slice(offset);
+        if (remainingTexts.length === 0) return Promise.resolve();
+        return streamRelevanceV2(
+          env,
+          query,
+          remainingTexts,
+          (ev) => {
+            if (ev.type === 'row') {
+              const actualN = offset + ev.n;
+              emittedN = actualN;
+              sse({ type: 'row', n: actualN, full_match_degree: ev.count > 0 ? 1.0 : 0.0 });
+            }
+          },
+          request.signal,
+          reminder
+        );
+      };
       try {
-        await streamRelevanceV2(env, query, texts, (ev) => {
-          if (ev.type === 'row') {
-            sse({ type: 'row', n: ev.n, full_match_degree: ev.count > 0 ? 1.0 : 0.0 });
+        const retryable = (err) =>
+          err &&
+          err.name !== 'AbortError' &&
+          !request.signal?.aborted &&
+          typeof err.message === 'string' &&
+          err.message.startsWith('unparseable multi-chunk output');
+        for (let attempt = 0; attempt <= UNPARSEABLE_RETRIES; attempt++) {
+          try {
+            await runStream(emittedN, attempt > 0);
+            sse({ type: 'result', success: true });
+            return;
+          } catch (err) {
+            if (!retryable(err)) throw err;
+            await logRemoteFailure(
+              'remote_relevance_v2_failed',
+              err,
+              publicRemoteError(err),
+              env,
+              request,
+              { attempt: attempt + 1, retries: UNPARSEABLE_RETRIES }
+            );
+            if (attempt === UNPARSEABLE_RETRIES) {
+              const pub = publicRemoteError(err);
+              sse({
+                type: 'error',
+                success: false,
+                kind: pub.kind,
+                message: pub.message,
+                error_detail: pub.error_detail,
+              });
+              return;
+            }
           }
-        }, request.signal);
-        sse({ type: 'result', success: true });
+        }
       } catch (err) {
         // 用户取消（客户端断连）不应视为失败：不发 error、不记失败日志，静默收尾
         if (err && err.name === 'AbortError') return;
         const pub = publicRemoteError(err);
-        logRemoteFailure('remote_relevance_v2_failed', err, pub);
+        await logRemoteFailure('remote_relevance_v2_failed', err, pub, env, request);
         sse({
           type: 'error',
           success: false,

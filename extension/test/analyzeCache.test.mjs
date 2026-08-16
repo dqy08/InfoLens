@@ -368,6 +368,13 @@ test('storage：按条写入后可直接命中', async () => {
   assert.equal(called, 0);
 });
 
+test('文本哈希为 32 位十六进制', async () => {
+  const k = await cache.key('q', 'hello');
+  const th = k.slice(k.lastIndexOf('/') + 1);
+  assert.equal(th.length, 32);
+  assert.match(th, /^[0-9a-f]{32}$/);
+});
+
 test('键含 query：不同 query 不命中', async () => {
   await cache.relevance('q1', ['same'], () => {}, undefined, async (_q, _t, onRow) => {
     onRow(1, 0.1);
@@ -390,8 +397,8 @@ test('syncRemoteModel：每次打开都 fetch', async () => {
   await cache.syncRemoteModel(fetchVer);
   await cache.syncRemoteModel(fetchVer);
   assert.equal(n, 2);
-  assert.equal(data['il_ac/meta'].relevanceKey, '1:1');
-  assert.equal(data['il_ac/meta'].keywordsKey, '1:1');
+  assert.equal(data['il_ac/meta'].relevanceKey, '2:1');
+  assert.equal(data['il_ac/meta'].keywordsKey, '2:1');
 });
 
 test('syncRemoteModel：只升相关度不清 keywords', async () => {
@@ -449,7 +456,7 @@ test('只升 keywords 且环已满：不拧淘汰指针', async () => {
     data[k] = 0.1;
   }
   data['il_ac/order'] = { keys, i: 7 };
-  data['il_ac/meta'] = { relevanceKey: '1:1', keywordsKey: '1:1' };
+  data['il_ac/meta'] = { relevanceKey: '2:1', keywordsKey: '2:1' };
   await cache.syncRemoteModel(async () => ({ relevance: 1, keywords: 2 }));
   assert.equal(data['il_ac/order'].i, 7);
   assert.equal(data['il_ac/order'].keys.length, cache.MAX_ENTRIES);
@@ -467,7 +474,7 @@ test('丢一类后剩余按年龄排', async () => {
     data[k] = k.startsWith('il_ac/k/') ? [] : 0.1;
   }
   data['il_ac/order'] = { keys, i: 1 };
-  data['il_ac/meta'] = { relevanceKey: '1:1', keywordsKey: '1:1' };
+  data['il_ac/meta'] = { relevanceKey: '2:1', keywordsKey: '2:1' };
   await cache.syncRemoteModel(async () => ({ relevance: 2, keywords: 1 }));
   assert.deepEqual(data['il_ac/order'].keys, [kOld, kNew]);
   assert.equal(data['il_ac/order'].i, 0);
@@ -491,6 +498,57 @@ test('usage：条数为数据 key，不含 meta/order', async () => {
   const u = await cache.usage();
   assert.equal(u.entries, 3);
   assert.ok(u.bytes > 0);
+});
+
+test('dropQuery：只丢该 query 的 r/k，其它 query 留下', async () => {
+  mockLocal();
+  await cache.relevance('q1', ['a', 'b'], () => {}, undefined, async (_q, _t, onRow) => {
+    onRow(1, 0.1);
+    onRow(2, 0.2);
+  });
+  await cache.relevance('q2', ['a'], () => {}, undefined, async (_q, _t, onRow) => {
+    onRow(1, 0.3);
+  });
+  await cache.keywords('q1', 'a', () => {}, undefined, async (_q, _t, onRun) => {
+    onRun({ offset: [0, 1], score: 1 });
+  });
+  await cache.dropQuery('q1');
+  let q1 = 0;
+  await cache.relevance('q1', ['a'], () => {}, undefined, async () => {
+    q1 += 1;
+  });
+  assert.equal(q1, 1);
+  let q2 = 0;
+  await cache.relevance('q2', ['a'], () => {}, undefined, async () => {
+    q2 += 1;
+  });
+  assert.equal(q2, 0);
+  let kw = 0;
+  await cache.keywords('q1', 'a', () => {}, undefined, async () => {
+    kw += 1;
+  });
+  assert.equal(kw, 1);
+});
+
+test('dropQuery：query 含斜杠不误伤前缀', async () => {
+  mockLocal();
+  await cache.relevance('a', ['t'], () => {}, undefined, async (_q, _t, onRow) => {
+    onRow(1, 0.1);
+  });
+  await cache.relevance('a/b', ['t'], () => {}, undefined, async (_q, _t, onRow) => {
+    onRow(1, 0.2);
+  });
+  await cache.dropQuery('a');
+  let a = 0;
+  await cache.relevance('a', ['t'], () => {}, undefined, async () => {
+    a += 1;
+  });
+  assert.equal(a, 1);
+  let ab = 0;
+  await cache.relevance('a/b', ['t'], () => {}, undefined, async () => {
+    ab += 1;
+  });
+  assert.equal(ab, 0);
 });
 
 test('dropAll：清掉缓存条，不碰其它 key', async () => {

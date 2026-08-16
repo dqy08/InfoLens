@@ -149,7 +149,13 @@ export async function handlePostExtensionFeedback(request, env, json) {
   if (empty) {
     return json(request, { success: true, stored: false });
   }
-  const id8 = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+  const id8 = (
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : Math.random().toString(36).slice(2, 10)
+  )
+    .replace(/-/g, '')
+    .slice(0, 8);
   const key = feedbackKey(id8);
 
   try {

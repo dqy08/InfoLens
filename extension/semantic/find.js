@@ -4,6 +4,7 @@
  *
  * 范围 / Enter / 灰区：
  *   Enter 每次开窗开火并离开输入；翻匹配只用上下按钮（不绑键：留在输入则预览与结果灰打架）
+ *   全文搜尽：↑↓ 两端循环。未搜尽：到头不绕（窗后未搜禁↓，窗前未搜禁↑）
  *   灰：聚焦未搜 = 预览（全文整篇 / 从当前位置则窗前灰+虚线）；开搜或失焦 = 窗前∪前沿后
  *   搜索优先级见 runSearch
  *   进度图横轴 = 文档 Y；范围 / 跳转 / 翻匹配均用焦点线 Y，高亮块顶不高于 CHUNK_START_MAX_Y_RATIO
@@ -257,7 +258,79 @@
 
   // ---------- extract（经 DocumentAdapter） ----------
 
+  /** 已抽过且 DOM 未变：不必再走 collectTextMap。 */
+  function extractStillValid() {
+    return (
+      doc.isConnected() &&
+      !!doc.getText().trim() &&
+      !doc.isContentDirty() &&
+      !doc.piecesStale()
+    );
+  }
+
+  let extractGen = 0;
+  /** @type {Promise<void> | null} */
+  let extractJob = null;
+
+  /** 开栏不阻塞：已有则复用，否则开一趟分片抽取+切块。搜索 await 同一趟。 */
+  function chunksCacheHits() {
+    return !!(contentChunksCache && contentChunksCache.text === doc.getText());
+  }
+
+  function yieldToMain() {
+    const fn = globalThis.IL_yieldToMain;
+    if (typeof fn !== 'function') {
+      throw new Error('IL_yieldToMain missing — inject collectTextMap.js first');
+    }
+    return fn();
+  }
+
+  function ensureExtract() {
+    if (extractJob) return extractJob;
+    if (extractStillValid() && chunksCacheHits()) return Promise.resolve();
+    const gen = extractGen;
+    const job = (async () => {
+      await yieldToMain();
+      if (gen !== extractGen) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }
+      if (!extractStillValid()) {
+        await doc.refreshAsync(() => gen !== extractGen);
+        if (gen !== extractGen) {
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        }
+      }
+      await splitContentChunksAsync(() => gen !== extractGen);
+    })();
+    extractJob = job;
+    job.finally(() => {
+      if (extractJob === job) extractJob = null;
+    });
+    return job;
+  }
+
+  /** 栏开着且正文/切块无效：开一趟后台抽取。已有在途则只复用。 */
+  function kickExtractIfNeeded() {
+    if (extractStillValid() && chunksCacheHits()) return;
+    const bar = ui$('semantic_find_bar');
+    if (!bar || bar.hidden) return;
+    const started = !extractJob;
+    const p = ensureExtract();
+    if (!started) return;
+    void p.then(() => {
+      if (bar.hidden || searching) return;
+      syncScopeVisual();
+    }, (err) => {
+      if (bar.hidden || searching || isAbortErr(err)) return;
+      console.error('[InfoLens] extract aborted:', err?.message || err);
+      if (isPdfNoTextError(err)) showPdfNoTextNotice();
+      else if (String(err?.message || err) === OTHER_IL_MSG) alert(OTHER_IL_MSG);
+    });
+  }
+
   function refreshExtract() {
+    extractGen += 1;
+    extractJob = null;
     clearOverlays();
     const info = doc.refresh();
     matchedChunks = [];
@@ -275,11 +348,17 @@
     if (typeof split !== 'function') {
       throw new Error('IL_splitTextToChunks missing — inject splitTextToChunks.js before content.js');
     }
-    return split(text, byteLimit).map((c) => ({
-      start: c.startOffset,
-      end: c.startOffset + c.text.length,
-      text: c.text,
-    }));
+    return chunksFromRaw(split(text, byteLimit));
+  }
+
+  function chunksFromRaw(raw) {
+    return raw
+      .map((c) => ({
+        start: c.startOffset,
+        end: c.startOffset + c.text.length,
+        text: c.text,
+      }))
+      .filter(chunkHasContent);
   }
 
   /** 全空白 chunk 不送 API / 不作为语义匹配目标 */
@@ -292,10 +371,23 @@
     const text = doc.getText();
     if (contentChunksCache && contentChunksCache.text === text) return contentChunksCache.chunks;
     if (contentChunksCache) progressChunkContentY = new Map();
-    contentChunksCache = {
-      text,
-      chunks: splitChunks(text, CHUNK_BYTES).filter(chunkHasContent),
-    };
+    contentChunksCache = { text, chunks: splitChunks(text, CHUNK_BYTES) };
+    return contentChunksCache.chunks;
+  }
+
+  async function splitContentChunksAsync(isStale) {
+    const text = doc.getText();
+    if (contentChunksCache && contentChunksCache.text === text) return contentChunksCache.chunks;
+    const splitAsync = globalThis.IL_splitTextToChunksAsync;
+    if (typeof splitAsync !== 'function') {
+      throw new Error('IL_splitTextToChunksAsync missing — inject splitTextToChunks.js before content.js');
+    }
+    const raw = await splitAsync(text, CHUNK_BYTES, isStale);
+    if (isStale?.()) {
+      throw new DOMException('The operation was aborted.', 'AbortError');
+    }
+    if (contentChunksCache) progressChunkContentY = new Map();
+    contentChunksCache = { text, chunks: chunksFromRaw(raw) };
     return contentChunksCache.chunks;
   }
 
@@ -957,9 +1049,13 @@
    * 清当前会话的渲染与搜索进度。
    * @param {{ clearCache?: boolean, releaseDoc?: boolean }} [options]
    *   clearCache=true 时连 lastResult 一并丢弃（改 query / giveUp）
-   *   releaseDoc=false：保留 extract（仅输入中清结果后立刻重画范围预览）
+   *   releaseDoc=false：保留 extract（关栏后再开、新搜索、输入中清结果）
    */
   function resetSearchSession({ clearCache = false, releaseDoc = true } = {}) {
+    if (releaseDoc) {
+      extractGen += 1;
+      extractJob = null;
+    }
     keywordsPool.invalidate();
     renderQueue.reset();
     clearOverlays({ releaseDoc });
@@ -994,7 +1090,8 @@
     /** @type {number | null} */
     let dividerCp = null;
     const focused = isFindInputFocused();
-    const ready = doc.isConnected() && !!doc.getText().trim();
+    kickExtractIfNeeded();
+    const ready = extractStillValid();
 
     if (searching) {
       if (progressOriginCp > 0) nextPrefix = progressOriginCp;
@@ -1241,7 +1338,7 @@
   /**
    * 正文被第三方（如翻译插件）意外改写、或提取根本身被替换/移除时的止损：
    * 不尝试修复或用旧偏移套新文本，直接放弃本次结果，回到未搜索状态（等价于清空输入框）。
-   * 下次搜索会走 refreshExtract() 全量重新提取，天然恢复正常。
+   * 结果放弃；栏仍开着则后台重抽，预览灰按新正文恢复。
    */
   function giveUp() {
     abortWanted = true;
@@ -1337,6 +1434,7 @@
       return;
     }
     if (paintSpecs.length === 0 && !hasGrayPaint()) {
+      kickExtractIfNeeded();
       if (searching || semanticMatchProgress.length > 0) {
         progressChunkContentY = new Map();
         renderSemanticMatchProgress();
@@ -1429,13 +1527,14 @@
     });
   }
 
-  /** 滚动时只更新进度图视口带，不重画竖线、不改选中态 */
+  /** 滚动时更新进度图视口带和上下键状态，不重画竖线、不改选中态 */
   function scheduleProgressViewportFromScroll() {
     if (semanticMatchProgress.length === 0 && !searching) return;
     if (progressViewportScrollRaf) return;
     progressViewportScrollRaf = requestAnimationFrame(() => {
       progressViewportScrollRaf = 0;
       applyProgressViewportBand();
+      updateNav();
     });
   }
 
@@ -1752,6 +1851,56 @@
     }
   }
 
+  function hasUnsearchedBefore() {
+    return (lastSearchMeta?.windowStart ?? 0) > 0;
+  }
+
+  function hasUnsearchedAfter() {
+    if (!lastSearchMeta) return false;
+    return (
+      (lastSearchMeta.windowStart ?? 0) + semanticMatchProgress.length <
+      (lastSearchMeta.contentChunkCount ?? 0)
+    );
+  }
+
+  /**
+   * 按焦点线所在块计算导航目标；返回 null 表示这一方向仍有未搜索内容，不能循环。
+   * updateNav 与实际点击共用，避免按钮状态和 navigateMatch 使用两套判据。
+   */
+  function navigationTargetIndex(
+    delta,
+    anchor = semanticMatchProgress.length > 0 ? progressAnchorFromViewport() : null
+  ) {
+    if (!matchedChunks.length) return null;
+
+    const n = matchedChunks.length;
+    let index;
+    if (anchor === 'before') {
+      index = delta < 0 ? -1 : 0;
+    } else if (typeof anchor !== 'number') {
+      index = matchIndex < 0 ? (delta < 0 ? n - 1 : 0) : matchIndex + delta;
+    } else {
+      const currentIndex = matchedChunks.findIndex((chunk) => chunk.start === anchor);
+      if (currentIndex >= 0) {
+        index = currentIndex + delta;
+      } else {
+        const nextIndex = matchedChunks.findIndex((chunk) => chunk.start > anchor);
+        const insertionIndex = nextIndex < 0 ? n : nextIndex;
+        index = delta < 0 ? insertionIndex - 1 : insertionIndex;
+      }
+    }
+
+    if (index >= n) {
+      if (hasUnsearchedAfter()) return null;
+      return index % n;
+    }
+    if (index < 0) {
+      if (hasUnsearchedBefore()) return null;
+      return ((index % n) + n) % n;
+    }
+    return index;
+  }
+
   /**
    * SYNC: client/src/shared/vis/GLTR_Text_Box.ts → jumpToChunkHighlight
    * + client/src/features/analysis/semanticFindBar.ts → jumpTo
@@ -1759,8 +1908,7 @@
    */
   function jumpToMatch(index) {
     if (!matchedChunks.length) return;
-    const n = matchedChunks.length;
-    matchIndex = ((index % n) + n) % n;
+    matchIndex = index;
     revealChunk(matchedChunks[matchIndex]);
     updateNav();
   }
@@ -1778,29 +1926,8 @@
    * 首块前循环；落在匹配上则 ±1，落在灰块上则按插入点。
    */
   function navigateMatch(delta) {
-    if (!matchedChunks.length) return;
-
-    const anchor =
-      semanticMatchProgress.length > 0 ? progressAnchorFromViewport() : null;
-
-    if (anchor === 'before') {
-      jumpToMatch(delta < 0 ? -1 : 0);
-      return;
-    }
-    if (typeof anchor !== 'number') {
-      jumpToMatch(matchIndex < 0 ? (delta < 0 ? matchedChunks.length - 1 : 0) : matchIndex + delta);
-      return;
-    }
-
-    const currentIndex = matchedChunks.findIndex((chunk) => chunk.start === anchor);
-    if (currentIndex >= 0) {
-      jumpToMatch(currentIndex + delta);
-      return;
-    }
-
-    const nextIndex = matchedChunks.findIndex((chunk) => chunk.start > anchor);
-    const insertionIndex = nextIndex < 0 ? matchedChunks.length : nextIndex;
-    jumpToMatch(delta < 0 ? insertionIndex - 1 : insertionIndex);
+    const index = navigationTargetIndex(delta);
+    if (index != null) jumpToMatch(index);
   }
 
   /**
@@ -1822,6 +1949,7 @@
         : highlightChunks;
     const matched = chunks.find((c) => matchedChunks.some((m) => m.start === c.start));
     if (matched) matchIndex = matchedChunks.findIndex((item) => item.start === matched.start);
+    updateNav();
     requestAnimationFrame(() => {
       if (contentY != null) scrollToContentY(contentY, chunks);
       if (generation !== revealGeneration || !doc.isConnected()) return;
@@ -2248,6 +2376,7 @@
   function removeHistory(query) {
     historyList = historyList.filter((s) => s !== query);
     void persistHistory();
+    void globalThis.IL_analyzeCache.dropQuery(query);
   }
 
   function hideHistoryDropdown() {
@@ -2380,6 +2509,7 @@
       }
       findInput.value = '';
       findInput.dispatchEvent(new Event('input', { bubbles: true }));
+      findInput.focus();
     });
     // 输入区选项：mousedown 只挡住 button 抢焦点。未聚焦时不在这里 focus：
     // 聚焦会藏 ↑↓、按钮右移，随后 click 落空（停止 / 范围都是这个问题）
@@ -2414,8 +2544,7 @@
     findInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.isComposing) {
         e.preventDefault();
-        const startCp = intendedSearchStartCp();
-        if (startCp >= doc.getPaintLength()) return;
+        if (!extractJob && extractStillValid() && intendedSearchStartCp() >= doc.getPaintLength()) return;
         hideHistoryDropdown();
         if (!searching) void runSearch();
         findInput.blur();
@@ -2629,9 +2758,10 @@
   function updateNav() {
     const prev = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_prev'));
     const next = /** @type {HTMLButtonElement | null} */ (ui$('semantic_find_next'));
-    const disabled = matchedChunks.length === 0;
-    if (prev) prev.disabled = disabled;
-    if (next) next.disabled = disabled;
+    const anchor =
+      semanticMatchProgress.length > 0 ? progressAnchorFromViewport() : null;
+    if (prev) prev.disabled = navigationTargetIndex(-1, anchor) == null;
+    if (next) next.disabled = navigationTargetIndex(1, anchor) == null;
   }
 
   function progressChartLayout(chart) {
@@ -2710,10 +2840,12 @@
       doc.getText().length === 0 ||
       (semanticMatchProgress.length === 0 && !searching);
     chart.toggleAttribute('hidden', hidden);
-    if (hidden) {
+    // 空进度必须一次性清 DOM：searching 时 hidden=false，逐条 remove 会在长文上叠出数秒回流。
+    if (semanticMatchProgress.length === 0) {
       lines.replaceChildren();
-      ui$('semantic_match_progress_viewport')?.setAttribute('hidden', '');
+      if (hidden) ui$('semantic_match_progress_viewport')?.setAttribute('hidden', '');
       updateViewportFollowScrollBinding();
+      if (!hidden) applyProgressViewportBand();
       return;
     }
 
@@ -2769,6 +2901,29 @@
     applyProgressViewportBand();
   }
 
+  /** 只改已有线的灰/红，不整图重画。 */
+  function markProgressHasKeywords(chunkStart) {
+    const row = semanticMatchProgress.find((c) => c.start === chunkStart);
+    if (!row) return;
+    row.hasKeywords = true;
+    const lines = ui$('semantic_match_progress_lines');
+    const chart = ui$('semantic_match_progress');
+    if (!(lines instanceof SVGGElement) || !(chart instanceof SVGSVGElement)) return;
+    const group = [...lines.children].find((el) => el.dataset.progressStart === String(chunkStart));
+    const line = group?.querySelector('.semantic-match-progress-line');
+    if (line) {
+      const degree = Math.max(0, Math.min(1, Number(row.matchDegree) || 0));
+      line.classList.toggle('is-gray', !(degree >= CFG.matchThreshold));
+      return;
+    }
+    if (chart.hasAttribute('hidden')) return;
+    const layout = progressChartLayout(chart);
+    if (!layout.axis) return;
+    const cy = measureChunkContentY(row, layout.axis.scrollRoot);
+    if (!cy) return;
+    upsertProgressLine(lines, layout, row, cy, null, null);
+  }
+
   function setHoveredProgressChunk(start) {
     if (hoveredProgressChunkStart === start) return;
     const lines = ui$('semantic_match_progress_lines');
@@ -2800,8 +2955,8 @@
     if (!on) syncClearButton(false);
     // 搜索结束时若正文仍脏（例如 debounce 未到期），补一次 sync
     if (!on && doc.isContentDirty()) doc.scheduleLayoutSync();
-    // 结束/停止时重绘进度图：把「等待首 chunk」的空框架收起（hidden 判据依赖 searching）
-    if (!on) renderSemanticMatchProgress();
+    // 空进度的 hidden 跟 searching：开搜亮空框架，结束收起。已有进度不必整图重画。
+    if (semanticMatchProgress.length === 0) renderSemanticMatchProgress();
     syncScopeVisual();
   }
 
@@ -2848,6 +3003,10 @@
     }
     if (resume && !canResumeSearch()) return;
 
+    // 新搜索：先清旧画面，再占 searching。Continue 保留进度。
+    // 不 releaseDoc：开栏已抽过的正文留下，后面 extractStillValid 才能跳过再抽。
+    if (!resume) resetSearchSession({ releaseDoc: false });
+
     // 必须在任何 await 之前占住 searching + epoch，否则连按会 concurrent 多轮：
     // 旧轮 finally 清掉 searching，新轮仍在跑 → 有报错、像在搜、却没有停止按钮。
     const epoch = ++searchEpoch;
@@ -2855,14 +3014,16 @@
     // 本轮的流式 cancel 句柄（模块级）：Stop/×/giveUp/close（abortWanted）或本轮收尾时断开 in-flight port →
     // background abort → 门面取消 OpenRouter。新轮重建，避免旧轮已 abort 的信号影响新一轮。
     sessionAbortCtrl = new AbortController();
-    // 重开须在 await 前作废旧 keywords，避免 ensureHistory 窗口内旧任务仍落笔；Continue 保留
-    if (!resume) keywordsPool.invalidate();
-    else keywordsPool.resetAbortSignal(); // Continue 复用池：换新信号，避免沿用上一轮已 abort 的信号
+    // Continue 复用池：换新信号，避免沿用上一轮已 abort 的信号。新搜索已在 resetSearchSession 里 invalidate。
     // Continue 首火要跳到本批新匹配；同一次搜索里后续纯缓存续批不得再清，以免抢走视口。
-    if (resume) firstMatchJumped = false;
+    if (resume) {
+      keywordsPool.resetAbortSignal();
+      firstMatchJumped = false;
+    }
     setSearching(true);
     refreshStatusContinueButtons();
 
+    const extractP = resume ? Promise.resolve() : ensureExtract();
     try {
       await ensureHistory();
       if (epoch !== searchEpoch) return;
@@ -2885,22 +3046,22 @@
             if (epoch === searchEpoch) showFindError('Page content changed; start a new search');
             return;
           }
-          // 不可走 refreshExtract：它会清 overlays/进度。只复测正文是否仍一致并重绑节点。
-          if (!doc.rebindIfUnchanged()) {
+          // 不可走 refreshExtract：它会清 overlays/进度。未脏且节点仍在则不必重走 collectTextMap。
+          if (!extractStillValid() && !doc.rebindIfUnchanged()) {
             resetSearchSession({ clearCache: true });
             if (epoch === searchEpoch) showFindError('Page content changed; start a new search');
             return;
           }
         } else {
-          resetSearchSession();
           try {
-            refreshExtract();
+            await extractP;
+            if (epoch !== searchEpoch) return;
+            if (!extractStillValid()) refreshExtract();
           } catch (err) {
+            if (epoch !== searchEpoch || isAbortErr(err)) return;
             console.error('[InfoLens] extract aborted:', err?.message || err);
-            if (epoch === searchEpoch) {
-              if (isPdfNoTextError(err)) showPdfNoTextNotice();
-              else showFindError(err?.message || err, { errorDetail: err?.errorDetail });
-            }
+            if (isPdfNoTextError(err)) showPdfNoTextNotice();
+            else showFindError(err?.message || err, { errorDetail: err?.errorDetail });
             return;
           }
           if (!doc.getText().trim()) {
@@ -3051,11 +3212,7 @@
               }
               // 有可上色段才把进度线染红（此前保持灰）。↑↓ 仍跟 relevance，不 demote。
               // 蓝线由 renderQueue.advance（该块数据齐全、真正上色完毕）时拆，见顺序渲染队列。
-              if (painted > 0) {
-                const row = semanticMatchProgress.find((c) => c.start === chunkCpStart);
-                if (row) row.hasKeywords = true;
-                renderSemanticMatchProgress();
-              }
+              if (painted > 0) markProgressHasKeywords(chunkCpStart);
               // 标记数据流成功结束并推进队列（见 renderQueue.release）
               renderQueue.release(chunkCpStart, true);
               snapshotLastResult(query);
@@ -3141,6 +3298,7 @@
             else enqueueFollow(item);
           }
           if (!deferPaint) snapshotLastResult(query);
+          updateNav();
         };
 
         let prefixLen = 0;
@@ -3348,19 +3506,23 @@
       }
       input?.focus();
       input?.select();
-      try {
-        refreshExtract();
+      const afterExtract = () => {
+        if (bar.hidden || searching) return;
         renderSemanticMatchProgress();
         if (!prefill) tryRestoreLastResult(input?.value?.trim() || '');
-        // extract/还原之后再派生灰区/虚线
         syncScopeVisual();
-      } catch (err) {
-        console.error('[InfoLens] extract aborted:', err?.message || err);
-        if (isPdfNoTextError(err)) {
-          showPdfNoTextNotice();
-          return;
-        }
-        throw err;
+      };
+      const canPaintNow = extractStillValid();
+      if (canPaintNow) afterExtract();
+      if (!canPaintNow || !chunksCacheHits()) {
+        void ensureExtract().then(() => {
+          if (!canPaintNow) afterExtract();
+        }, (err) => {
+          if (bar.hidden || searching || isAbortErr(err)) return;
+          console.error('[InfoLens] extract aborted:', err?.message || err);
+          if (isPdfNoTextError(err)) showPdfNoTextNotice();
+          else if (String(err?.message || err) === OTHER_IL_MSG) alert(OTHER_IL_MSG);
+        });
       }
     } catch (err) {
       console.error('[InfoLens]', err);
@@ -3377,7 +3539,10 @@
     const query =
       /** @type {HTMLInputElement | null} */ (ui$('semantic_find_input'))?.value?.trim() || '';
     if (query) snapshotLastResult(query);
-    resetSearchSession();
+    // 不 releaseDoc：已完成的正文留下。bump extractGen 并丢掉 extractJob：中止在途抽取，再开不会复用已作废的那趟。
+    extractGen += 1;
+    extractJob = null;
+    resetSearchSession({ releaseDoc: false });
     hideHistoryDropdown();
     const bar = ui$('semantic_find_bar');
     if (bar) {

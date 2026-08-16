@@ -147,7 +147,7 @@ export async function handleRemoteRelevance(request, env, json) {
     });
   } catch (err) {
     const pub = publicRemoteError(err);
-    logRemoteFailure('remote_relevance_failed', err, pub);
+    await logRemoteFailure('remote_relevance_failed', err, pub, env, request);
     return json(
       request,
       { success: false, message: pub.message, error_detail: pub.error_detail },

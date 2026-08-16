@@ -492,7 +492,7 @@ export const translations: Translations = {
             '无法使用加密API（crypto.subtle），保存到本地缓存功能不可用。',
         'URL text extraction failed': 'URL 文本提取失败',
         'Semantic analysis failed': '语义分析失败',
-        'Semantic Find(Beta)': '语义查找(Beta)',
+        'Semantic Find': '语义查找',
         'Enter query question or topic': '请输入查询问题或主题',
         'Semantic find': '语义查找',
         'Tokenizer results inconsistent: semantic and info-density token boundaries differ.': 'Tokenizer 结果不一致：语义分析与信息密度的 token 边界存在差异，属预期外情况。',

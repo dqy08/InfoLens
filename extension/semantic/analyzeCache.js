@@ -1,7 +1,8 @@
 /**
  * 页内请求缓存：同一 query + 块文本不再打网。
  * 按条存：一条 = 一块的相关度或 keywords。相关度本窗已到的行一次写入；keywords 整段成功才写。
- * 数据按 hash 存；il_ac/order 循环数组记占用。满员覆盖最旧格并删对应 key。
+ * 数据按 encodeURIComponent(query)/textHash 存；il_ac/order 循环数组记占用。满员覆盖最旧格并删对应 key。
+ * 删一条搜索历史时按 query 前缀丢掉对应条。
  * 打开栏后台问门面相关度 / keywords epoch，各与插件 epoch 合成；对不上只丢对应表。
  * 开搜与还原上次结果都不等待这次询问，只用当时已有的 key 决定是否走缓存。
  * 已有则留下（首次注入失败重试仍可能重跑本文件）。
@@ -12,9 +13,9 @@ globalThis.IL_analyzeCache ||= (function () {
   const ORDER = 'il_ac/order';
   const OLD_BLOB = 'il_analyze_cache';
   /** 影响缓存准确性时加一。 */
-  const PLUGIN_CACHE_VERSION = 1;
-  /** 约 1MB / 每条数百字节。 */
-  const MAX_ENTRIES = 2000;
+  const PLUGIN_CACHE_VERSION = 2;
+  /** 实测约 160 字节/条；2 万条约 3MB。chrome.storage.local 上限 10MB。 */
+  const MAX_ENTRIES = 20000;
   const subtle = globalThis.crypto.subtle;
 
   const mem = Object.create(null);
@@ -51,10 +52,17 @@ globalThis.IL_analyzeCache ||= (function () {
     return out;
   }
 
+  async function hashStr(s) {
+    return hex(await subtle.digest('SHA-256', new TextEncoder().encode(String(s)))).slice(0, 32);
+  }
+
+  function queryPart(query) {
+    return encodeURIComponent(String(query));
+  }
+
   /** @param {string} query @param {string} text */
   async function key(query, text) {
-    const bytes = new TextEncoder().encode(String(query) + '\0' + String(text));
-    return hex(await subtle.digest('SHA-256', bytes));
+    return `${queryPart(query)}/${await hashStr(text)}`;
   }
 
   function storage() {
@@ -122,12 +130,11 @@ globalThis.IL_analyzeCache ||= (function () {
     if (drop.length) await storage().remove(drop);
   }
 
-  function dropKind(kind) {
+  function dropWhere(match) {
     return enqueueWrite(async () => {
-      const prefix = `${PREFIX}${kind}/`;
       const raw = (await storage().get(ORDER))[ORDER];
       let keys = Array.isArray(raw?.keys) ? raw.keys : [];
-      const drop = keys.filter((k) => k.startsWith(prefix));
+      const drop = keys.filter(match);
       if (!drop.length) return;
       await storage().remove(drop);
       if (keys.length === MAX_ENTRIES) {
@@ -135,9 +142,19 @@ globalThis.IL_analyzeCache ||= (function () {
         keys = keys.slice(i).concat(keys.slice(0, i));
       }
       await storage().set({
-        [ORDER]: { keys: keys.filter((k) => !k.startsWith(prefix)), i: 0 },
+        [ORDER]: { keys: keys.filter((k) => !match(k)), i: 0 },
       });
     });
+  }
+
+  function dropKind(kind) {
+    const prefix = `${PREFIX}${kind}/`;
+    return dropWhere((k) => k.startsWith(prefix));
+  }
+
+  function dropQuery(query) {
+    const q = queryPart(query);
+    return dropWhere((k) => k.startsWith(`${PREFIX}r/${q}/`) || k.startsWith(`${PREFIX}k/${q}/`));
   }
 
   /**
@@ -339,6 +356,7 @@ globalThis.IL_analyzeCache ||= (function () {
     keywords,
     syncRemoteModel,
     usage,
+    dropQuery,
     dropAll,
     clear,
   };

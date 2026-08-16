@@ -156,7 +156,7 @@ html[data-theme='dark'] .nav-landing-social-link--github {
   letter-spacing: 0.02em;
 }
 
-// 首行一张 featured，末行三张 compact；单列时竖排同序
+// 首行一张 featured，末行三列：两张 compact + 链接；单列时竖排同序
 .nav-landing-grid {
   display: grid;
   gap: $nav-grid-gap;
@@ -169,7 +169,7 @@ html[data-theme='dark'] .nav-landing-social-link--github {
     'c3';
 }
 
-// 宽屏：首行大卡跨三列，末行三列各放一张小卡
+// 宽屏：首行大卡跨三列，末行三列各放一张小卡/链接
 @media (min-width: $breakpoint-mobile + 1) {
   .nav-landing-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -179,7 +179,7 @@ html[data-theme='dark'] .nav-landing-social-link--github {
   }
 }
 
-// index.html 顺序：nth-child(1) featured，(2)(3)(4) 为三张 compact
+// index.html 顺序：nth-child(1) featured，(2)(3) compact，(4) 链接
 .nav-landing-card--featured {
   grid-area: hero;
   width: $nav-featured-width-narrow;
@@ -193,7 +193,7 @@ html[data-theme='dark'] .nav-landing-social-link--github {
   }
 }
 
-// 三张 compact 对应第二行 c1–c3（与 grid-template-areas 一致）
+// 三列对应第二行 c1–c3（与 grid-template-areas 一致）
 .nav-landing-card.nav-landing-card--compact:nth-child(2) {
   grid-area: c1;
   width: #{$nav-compact-track-fraction * 100%};
@@ -204,9 +204,15 @@ html[data-theme='dark'] .nav-landing-social-link--github {
   width: #{$nav-compact-track-fraction * 100%};
 }
 
-.nav-landing-card.nav-landing-card--compact:nth-child(4) {
+.nav-landing-more {
   grid-area: c3;
   width: #{$nav-compact-track-fraction * 100%};
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
 }
 
 // 双类链：特异性高于单独 .nav-landing-card，避免基类盖掉小卡的 padding/gap
@@ -312,6 +318,11 @@ html[data-theme='dark'] .nav-landing-card {
   line-height: var(--nav-landing-line-height);
 }
 
+.nav-landing-card-title-note {
+  font-size: calc(#{$nav-subtitle-size} / #{$nav-title-size} * 1em);
+  font-weight: 400;
+}
+
 .nav-landing-card-subtitle {
   display: block;
   text-align: right;
@@ -338,13 +349,8 @@ html[data-theme='dark'] .nav-landing-card {
   background-color: var(--bg-hover, #f0f0f0);
 }
 
-.nav-landing-card[data-nav-page='chat'] .nav-landing-card-shot {
-  background-image: url('../../assets/images/chat.png');
-  background-color: var(--bg-hover, #f0f0f0);
-}
-
-.nav-landing-card[data-nav-page='attribution'] .nav-landing-card-shot {
-  background-image: url('../../assets/images/attribute.png');
+.nav-landing-card[data-nav-page='semanticHighlight'] .nav-landing-card-shot {
+  background-image: url('../../assets/images/小型宣传图块.png');
   background-color: var(--bg-hover, #f0f0f0);
 }
 
@@ -488,12 +494,7 @@ html[data-theme='dark'] .nav-landing-card[data-nav-page='analysis'] .nav-landing
   background-color: var(--bg-hover, #2a2a2a);
 }
 
-html[data-theme='dark'] .nav-landing-card[data-nav-page='chat'] .nav-landing-card-shot {
-  background-image: url('../../assets/images/chat-dark.png');
+html[data-theme='dark'] .nav-landing-card[data-nav-page='semanticHighlight'] .nav-landing-card-shot {
   background-color: var(--bg-hover, #2a2a2a);
-}
-
-html[data-theme='dark'] .nav-landing-card[data-nav-page='attribution'] .nav-landing-card-shot {
-  background-image: url('../../assets/images/attribute-dark.png');
-  background-color: var(--bg-hover, #2a2a2a);
+  filter: brightness(0.8);
 }

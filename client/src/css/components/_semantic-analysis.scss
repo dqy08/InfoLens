@@ -112,6 +112,11 @@
     &:has(> input[type='checkbox']:not(:checked)) {
       color: var(--text-muted);
     }
+
+    a {
+      color: inherit;
+      text-decoration: underline;
+    }
   }
 
   input[type='checkbox'] {
