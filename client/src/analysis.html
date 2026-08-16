@@ -71,20 +71,10 @@
                         <textarea id="test_text"></textarea>
                         <div class="button-group">
                             <div class="button-left">
-                                <div class="button-left-stack">
-                                    <div class="button-left-primary">
-                                        <button id="submit_text_btn" class="primary-btn" data-i18n>Analyze</button>
-                                        <div class="loadersmall loader-small-container"></div>
-                                        <span id="analyze_progress" class="analyze-progress"></span>
-                                    </div>
-                                    <div class="options-row semantic-analysis-enable-row">
-                                        <span class="options-group">
-                                            <label class="options-label" for="semantic_analysis_toggle">
-                                                <input type="checkbox" id="semantic_analysis_toggle" />
-                                                <span><span data-i18n>Semantic Find</span> - <span data-i18n>Deprecated demo. For latest version please try</span> <a href="https://chromewebstore.google.com/detail/semantic-highlight/jnjglfjkbopeiodpcgmlhkfhldjfcdda" target="_blank" rel="noopener" data-i18n onclick="event.stopPropagation()">Semantic Highlight</a> <span data-i18n>(Chrome extension)</span></span>
-                                            </label>
-                                        </span>
-                                    </div>
+                                <div class="button-left-primary">
+                                    <button id="submit_text_btn" class="primary-btn" data-i18n>Analyze</button>
+                                    <div class="loadersmall loader-small-container"></div>
+                                    <span id="analyze_progress" class="analyze-progress"></span>
                                 </div>
                             </div>
                             <div id="text_metrics" class="text-metrics">
@@ -104,6 +94,14 @@
                                 <button id="save_local_demo_btn" class="primary-btn inactive" title="Save to local file"
                                     data-i18n="text,title">Save</button>
                             </div>
+                        </div>
+                        <div class="options-row semantic-analysis-enable-row">
+                            <span class="options-group">
+                                <label class="options-label" for="semantic_analysis_toggle">
+                                    <input type="checkbox" id="semantic_analysis_toggle" />
+                                    <span><span data-i18n>Semantic Find</span> - <span data-i18n>Deprecated demo. For latest version please try</span> <a href="https://chromewebstore.google.com/detail/semantic-highlight/jnjglfjkbopeiodpcgmlhkfhldjfcdda" target="_blank" rel="noopener" data-i18n onclick="event.stopPropagation()">Semantic Highlight</a> <span data-i18n>(Chrome extension)</span></span>
+                                </label>
+                            </span>
                         </div>
                     </div>
                 </section>

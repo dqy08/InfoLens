@@ -99,8 +99,12 @@
   }
 }
 
-// Analyze 下方 Semantic Query 总开关：与 gen_attribute「Raw prompt mode」同款（未勾选整行灰色，勾选正文色）
+// Semantic Find 总开关：独立于信息密度分析行；未勾选整行灰色，勾选正文色
 .textarea-wrapper .options-row.semantic-analysis-enable-row {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+
   label.options-label {
     display: inline-flex;
     align-items: center;

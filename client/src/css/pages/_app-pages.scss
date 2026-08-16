@@ -90,13 +90,6 @@ textarea{
       flex-shrink: 0;  // 防止左侧按钮被压缩
     }
 
-    .button-left-stack {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 25px;  // Analyze 行与下方 Semantic Query 开关间距（略大于常规行距）
-    }
-
     .button-left-primary {
       display: flex;
       align-items: center;
