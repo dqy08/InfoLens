@@ -16,6 +16,58 @@ import { SettingsMenuManager } from '../../shared/cross/settingsMenuManager';
 import { initializeCommonApp } from '../../shared/bootstrap';
 import { DEFAULT_DEMO_URL_PARAM } from '../../shared/cross/contentUrl';
 
+/** 首页主角卡片。`?hero=` 值为 `data-nav-page`：causalFlow | analysis | semanticHighlight。缺省 causalFlow。 */
+const HOME_HERO_URL_PARAM = 'hero';
+/** 商店入口主机名：无查询串；落到此后转到主站并带上插件主角。 */
+const HOME_HERO_ENTRY_HOST = 'extension.info-lens.app';
+const HOME_CANONICAL_HOST = 'info-lens.app';
+const HOME_HERO_ENTRY_PAGE = 'semanticHighlight';
+
+function isHomePath(pathname: string): boolean {
+    return pathname === '/' || pathname.endsWith('/index.html');
+}
+
+/** 子域入口转到主站，首页无 `hero` 时补上插件主角。返回是否已发起跳转。 */
+function redirectHeroEntryHost(): boolean {
+    if (window.location.hostname !== HOME_HERO_ENTRY_HOST) return false;
+    const dest = new URL(window.location.href);
+    dest.hostname = HOME_CANONICAL_HOST;
+    dest.protocol = 'https:';
+    dest.port = '';
+    if (isHomePath(dest.pathname) && !dest.searchParams.has(HOME_HERO_URL_PARAM)) {
+        dest.searchParams.set(HOME_HERO_URL_PARAM, HOME_HERO_ENTRY_PAGE);
+    }
+    window.location.replace(dest.href);
+    return true;
+}
+
+function readHeroNavPage(): string | null {
+    const raw = new URLSearchParams(window.location.search).get(HOME_HERO_URL_PARAM);
+    if (!raw) return null;
+    const card = document.querySelector(`.nav-landing-card[data-nav-page="${CSS.escape(raw)}"]`);
+    return card ? raw : null;
+}
+
+/** 把指定卡片设为大卡并移到网格首位；其余卡片改为小卡。 */
+function applyHeroNavCard(): void {
+    const heroPage = readHeroNavPage();
+    if (!heroPage) return;
+    const grid = document.querySelector('.nav-landing-grid');
+    if (!grid) return;
+    const cards = Array.from(grid.querySelectorAll<HTMLElement>('.nav-landing-card'));
+    const hero = cards.find((card) => card.dataset.navPage === heroPage);
+    if (!hero) return;
+    for (const card of cards) {
+        const isHero = card === hero;
+        card.classList.toggle('nav-landing-card--featured', isHero);
+        card.classList.toggle('nav-landing-card--compact', !isHero);
+    }
+    const first = grid.firstElementChild;
+    if (first && hero !== first) {
+        grid.insertBefore(hero, first);
+    }
+}
+
 /** 首页轮播三帧 → 打包 demo slug（与 demos/causal_flow/*.json 文件名一致） */
 const GEN_ATTRIBUTE_CAROUSEL_DEMO_SLUG = {
     flow: { en: 'Write a sonnet about love', zh: '写一首绝句，主题是春天' },
@@ -208,6 +260,7 @@ function bindGenAttributeBadgeLink(): void {
 
 initI18n();
 
+if (!redirectHeroEntryHost()) applyHeroNavCard();
 applyGenAttributeNavCardHref();
 bindGenAttributeBadgeLink();
 

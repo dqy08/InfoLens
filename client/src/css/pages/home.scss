@@ -187,7 +187,7 @@ html[data-theme='dark'] .nav-landing-social-link--home {
   }
 }
 
-// index.html 顺序：nth-child(1) featured，(2)(3) compact，(4) 链接
+// featured 占首行；compact 自动填入剩余格（与哪张卡当主角无关）
 .nav-landing-card--featured {
   grid-area: hero;
   width: $nav-featured-width-narrow;
@@ -199,17 +199,6 @@ html[data-theme='dark'] .nav-landing-social-link--home {
     width: $nav-featured-width-wide;
     justify-self: center; // 在跨三列的首行里水平居中
   }
-}
-
-// 三列对应第二行 c1–c3（与 grid-template-areas 一致）
-.nav-landing-card.nav-landing-card--compact:nth-child(2) {
-  grid-area: c1;
-  width: #{$nav-compact-track-fraction * 100%};
-}
-
-.nav-landing-card.nav-landing-card--compact:nth-child(3) {
-  grid-area: c2;
-  width: #{$nav-compact-track-fraction * 100%};
 }
 
 .nav-landing-more {
@@ -225,6 +214,7 @@ html[data-theme='dark'] .nav-landing-social-link--home {
 
 // 双类链：特异性高于单独 .nav-landing-card，避免基类盖掉小卡的 padding/gap
 .nav-landing-card.nav-landing-card--compact {
+  width: #{$nav-compact-track-fraction * 100%};
   padding: #{$nav-card-pad-block * $nav-compact-inner-scale} #{$nav-card-pad-inline * $nav-compact-inner-scale};
   gap: #{$nav-card-gap * $nav-compact-inner-scale};
   border-radius: #{$nav-card-radius * $nav-compact-inner-scale};
