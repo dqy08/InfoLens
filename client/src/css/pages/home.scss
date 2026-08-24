@@ -237,6 +237,7 @@ html[data-theme='dark'] .nav-landing-social-link--home {
   display: flex;
   flex-direction: column;
   position: relative;
+  container-type: inline-size;
   gap: $nav-card-gap;
   padding: $nav-card-pad-block $nav-card-pad-inline;
   border-radius: $nav-card-radius;
@@ -262,18 +263,18 @@ html[data-theme='dark'] .nav-landing-social-link--home {
 
 .nav-landing-card-badge {
   position: absolute;
-  top: -10px;
-  right: 12px;
+  top: calc(-10em / 12);
+  right: 1em;
   z-index: 2;
-  height: 22px;
-  padding: 0 10px;
+  height: calc(22em / 12);
+  padding: 0 calc(10em / 12);
   border-radius: 9999px;
   border: 1px solid rgba(212, 107, 8, 0.35);
   background: rgba(255, 247, 230, 0.78);
   color: rgba(141, 73, 0, 0.86);
-  font-size: 12px;
+  font-size: clamp(8px, 2.12cqi, 12px);
   font-weight: 600;
-  line-height: 22px;
+  line-height: calc(22em / 12);
   white-space: nowrap;
   cursor: pointer;
   opacity: 0.82;

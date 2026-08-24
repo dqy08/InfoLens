@@ -32,6 +32,7 @@ export const translations: Translations = {
         '- explore the context-attribution DAG': '- 探索上下文归因的 DAG 关系图',
         '1M+ plays on RedNote': '小红书 100万+次播放',
         'Go to demo on RedNote: xhslink.com': '在小红书打开demo：xhslink.com',
+        '500 likes/stars on RedNote': '小红书 500 赞藏',
         // 合成标题串（<title>）：英文 key 与 injectPageMeta documentTitleEn 拼接一致
         'Info Lens - A toolbox for exploring the informational nature of LLMs and language': 'Info Lens 信息透镜 - 用于探索 LLM 与语言的信息本质的工具箱',
         "Info Highlight - highlight the 'informative' parts": 'Info Highlight 信息高亮 - 高亮“信息量大”的地方',

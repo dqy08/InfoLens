@@ -20,6 +20,9 @@ client/dist-cf/
 extension/dist/
 extension/config.js
 extension/config.secrets.js
+extension/e2e/.results/
+extension/playwright-report/
+extension/test-results/
 build/
 dist/
 *.egg-info/

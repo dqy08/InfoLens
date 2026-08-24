@@ -247,14 +247,12 @@ function initGenAttributeCardCarousel(): (theme: Theme) => void {
 }
 
 function bindGenAttributeBadgeLink(): void {
-    const badge = document.querySelector<HTMLElement>(
-        '.nav-landing-card[data-nav-page="causalFlow"] .nav-landing-card-badge'
-    );
-    if (!badge) return;
-    badge.addEventListener('click', (event: MouseEvent) => {
-        event.preventDefault();
-        event.stopPropagation();
-        window.open(GEN_ATTRIBUTE_BADGE_LINK, '_blank', 'noopener');
+    document.querySelectorAll<HTMLElement>('.nav-landing-card-badge').forEach((badge) => {
+        badge.addEventListener('click', (event: MouseEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+            window.open(GEN_ATTRIBUTE_BADGE_LINK, '_blank', 'noopener');
+        });
     });
 }
 

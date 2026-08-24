@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "test:api": "node scripts/check-api.mjs"
   }
 }

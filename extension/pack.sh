@@ -6,6 +6,8 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
+./run-tests.sh
+
 pack_tool() {
   python3 - "$@" <<'PY'
 import json
