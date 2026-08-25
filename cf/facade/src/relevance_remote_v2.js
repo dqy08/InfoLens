@@ -162,6 +162,7 @@ export async function streamRelevanceV2(env, query, chunks, emit, signal, format
         max_tokens: Math.max(MULTI_CHUNK_MAX * MAX_TOKENS_PER_CHUNK, 16 * chunks.length),
         stream: true,
         reasoning: { effort: 'none' },
+        provider: { sort: 'latency' },
       }),
       signal: localAc.signal,
     });

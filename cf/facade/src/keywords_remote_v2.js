@@ -218,6 +218,7 @@ function keywordsChatBody(query, text, stream, formatReminder = false) {
     max_tokens: KEYWORDS_MAX_TOKENS,
     stream,
     reasoning: { effort: 'none' },
+    provider: { sort: 'latency' },
   };
 }
 

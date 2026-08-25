@@ -125,6 +125,7 @@ test('handleRemoteKeywordsV2: 首次 unparseable 时以 formatReminder 重试一
     globalThis.fetch = async (_url, init) => {
       callCount++;
       const body = JSON.parse(init.body);
+      assert.deepEqual(body.provider, { sort: 'latency' });
       const content = body.messages[0].content;
       if (callCount === 1) {
         assert.ok(!content.includes('CRITICAL: Strictly adhere'));

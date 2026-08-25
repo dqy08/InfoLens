@@ -244,6 +244,7 @@ test('handleRemoteRelevanceV2: 首次中途 unparseable 重试时从断点切片
     globalThis.fetch = async (_url, init) => {
       callCount++;
       const body = JSON.parse(init.body);
+      assert.deepEqual(body.provider, { sort: 'latency' });
       const content = body.messages[0].content;
       if (callCount === 1) {
         assert.ok(content.includes('Passage 1: 红') && content.includes('Passage 2: 蓝'));

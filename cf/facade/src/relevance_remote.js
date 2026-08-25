@@ -59,6 +59,7 @@ export async function chatRelevance(env, query, text) {
         max_tokens: RELEVANCE_MAX_TOKENS,
         stream: false,
         reasoning: { effort: 'none' },
+        provider: { sort: 'latency' },
       }),
     });
   } catch (e) {
