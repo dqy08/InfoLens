@@ -125,6 +125,9 @@
   width: 100%;
   flex-direction: column;
   align-items: stretch;
+  color: #9aa0a6;
+}
+.semantic-find-status.is-error {
   color: #e8eaed;
 }
 .semantic-find-status-actions {
@@ -565,6 +568,10 @@
 }
 :root[data-theme=light] .semantic-find-status,
 .semantic-find-bar-host[data-theme=light] .semantic-find-status {
+  color: #80868b;
+}
+:root[data-theme=light] .semantic-find-status.is-error,
+.semantic-find-bar-host[data-theme=light] .semantic-find-status.is-error {
   color: #202124;
 }
 :root[data-theme=light] .semantic-find-status-label,

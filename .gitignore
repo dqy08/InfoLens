@@ -41,9 +41,7 @@ notes/*
 user_dialog_history/*
 .cache_huggingface/
 .env
-# 内部文档
-CONTEXT.md
-company/
+project-context/
 .dev.vars
 **/.dev.vars
 cf/facade/.wrangler/

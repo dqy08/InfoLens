@@ -18,17 +18,17 @@ PDF：http(s) 页内读字节；`file:` 由 SW 读 tab URL（`optional_host_perm
 ./extension/dev-env.sh prod   # 或 dev；生成 gitignore 的 config.js（clone 后至少一次）
 ```
 
-Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选 `extension/`（`dev` 为绿角标图标）。  
+Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选 `extension/`。  
 普通 `https` 页 → 工具栏图标、右键「Search with Semantic Highlight」、或 `Ctrl+Shift+F`（Mac `⌘⇧F`）→ 输入 query → Enter。
 有选区时右键会预填选区文字，不自动搜索。
 
 测试入口见 [TESTING.md](./TESTING.md)。
 
-改配置改源头，再生成（**不要手改** `config.js`；图标路径会改 `manifest.json`，提交前请切回 `dev`）：
+改配置改源头，再生成（**不要手改** `config.js`）：
 
 ```bash
-./extension/dev-env.sh prod    # apiBase=api.info-lens.app + 正式图标
-./extension/dev-env.sh dev     # apiBase=*.workers.dev + icons/dev/
+./extension/dev-env.sh prod    # apiBase=api.info-lens.app
+./extension/dev-env.sh dev     # apiBase=*.workers.dev
 ```
 
 改完扩展页「重新加载」。浮条改 `extension/ui/`，需站内一致再手工同步 client。
@@ -39,7 +39,7 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 ./extension/pack.sh
 ```
 
-临时目录打 zip（正式图标 + `config.prod.js` → 包内 `config.js`），不改工作树。产出在 `extension/dist/`（gitignore）。
+临时目录打 zip（`config.prod.js` → 包内 `config.js`），不改工作树。产出在 `extension/dist/`（gitignore）。
 
 上传与提交审核见 [PUBLISH.md](./PUBLISH.md)（Chrome Web Store API）。
 
@@ -78,9 +78,8 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 ## 目录要点
 
 ```text
-manifest.json          # unpacked；图标由 dev-env 在 icons/dev/ ↔ icons/ 间切换
-icons/icon*.png        # 正式图标（prod / 上架）
-icons/dev/icon*.png    # unpack 开发图标
+manifest.json
+icons/icon*.png
 pack.sh / dev-env.sh / PUBLISH.md
 config.prod.js         # 上架默认 / 官方域名（源头）；pack 打进包
 config.dev.js          # Dev 门面 *.workers.dev（源头）

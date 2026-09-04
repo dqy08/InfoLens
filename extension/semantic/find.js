@@ -870,13 +870,13 @@
     for (const entry of statusEntries) {
       const btn = entry.el.querySelector('.semantic-find-status-continue');
       if (!(btn instanceof HTMLButtonElement)) continue;
-      // Failed / Stopped / 截断 Note 可续跑；chunk 级 keywords 失败 resumable=false 不挂
+      // Failed / Stopped / 截断 Paused 可续跑；chunk 级 keywords 失败 resumable=false 不挂
       const allow =
         show &&
         entry.resumable !== false &&
         (entry.label === 'Failed' ||
           entry.label === 'Stopped' ||
-          entry.label === 'Note');
+          entry.label === 'Paused');
       btn.hidden = !allow;
     }
   }
@@ -911,7 +911,10 @@
     const resumable = opts?.resumable !== false;
 
     const el = document.createElement('div');
-    el.className = 'semantic-find-strip semantic-find-status';
+    el.className =
+      tone === 'error'
+        ? 'semantic-find-strip semantic-find-status is-error'
+        : 'semantic-find-strip semantic-find-status';
     el.setAttribute('role', 'status');
 
     const textEl = document.createElement('span');
@@ -3386,7 +3389,7 @@
             // 顺序推进，新匹配块的等待线→红染会被旧块拖住延迟暴露。故提醒等 whenIdle 之后。
             await keywordsPool.whenIdle();
             if (epoch !== searchEpoch || abortWanted) return;
-            showFindStatus('Note', 'paused by single-search limit');
+            showFindStatus('Paused', 'Continue to search more');
           }
         }
         // abort：Stopped/Continue 已在 Stop 点击时展示，此处只收尾 truncated + 下方 snapshot

@@ -74,16 +74,9 @@ def source_path(runtime_path: str) -> Path:
 
 
 def manifest_source_path(manifest_rel: str) -> Path:
-    """dev manifest 的 icons/dev/ 对应上架用的 icons/。"""
-    if manifest_rel.startswith("icons/dev/"):
-        return ROOT / manifest_rel.replace("icons/dev/", "icons/", 1)
     if manifest_rel == "config.js":
         return ROOT / "config.prod.js"
     return ROOT / manifest_rel
-
-
-def store_manifest_text() -> str:
-    return (ROOT / "manifest.json").read_text(encoding="utf-8").replace("icons/dev/", "icons/")
 
 
 KNOWN_TOP_KEYS = {
@@ -124,17 +117,6 @@ def verify_manifest_shape(manifest: dict) -> None:
             print(f"  - {e}", file=sys.stderr)
         print("  请人工确认是否需要新增文件引用，并相应更新 pack.sh 后重试。", file=sys.stderr)
         sys.exit(1)
-
-
-def verify_manifest_transform(dev_text: str, store_text: str) -> None:
-    """确保 icons/dev/ -> icons/ 替换只改了图标路径，没有意外改动其它内容。"""
-    dev_manifest = json.loads(dev_text)
-    store_manifest = json.loads(store_text)
-    dev_norm = json.loads(dev_text.replace("icons/dev/", "icons/"))
-    if dev_norm != store_manifest:
-        print("pack: manifest.json 的 icons/dev/ -> icons/ 替换产生了意外差异，需人工检查 pack.sh", file=sys.stderr)
-        sys.exit(1)
-    _ = dev_manifest  # 仅用于确认 dev_text 本身也是合法 JSON
 
 
 def expand_glob(root: Path, pattern: str) -> list[str]:
@@ -186,8 +168,14 @@ def package_destinations() -> dict[str, Path]:
 
     dev_manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
     for rel in manifest_asset_paths(dev_manifest):
-        dest = rel.replace("icons/dev/", "icons/", 1) if rel.startswith("icons/dev/") else rel
-        mapping[dest] = manifest_source_path(rel)
+        mapping[rel] = manifest_source_path(rel)
+
+    icons = dev_manifest.get("action", {}).get("default_icon", {})
+    for size in ("16", "32"):
+        rel = icons.get(size)
+        if isinstance(rel, str) and rel.endswith(".png"):
+            rel = rel[:-4] + "-dot.png"
+            mapping[rel] = ROOT / rel
 
     return mapping
 
@@ -333,9 +321,7 @@ def stage_tree(stage: Path) -> None:
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, out)
 
-    store_text = store_manifest_text()
-    verify_manifest_transform(dev_text, store_text)
-    (stage / "manifest.json").write_text(store_text, encoding="utf-8")
+    shutil.copy2(ROOT / "manifest.json", stage / "manifest.json")
     print(f"pack: 已拷贝 {len(expected_package_files())} 个文件到打包目录")
 
 
@@ -391,4 +377,4 @@ rm -f "$out"
 
 pack_tool post "$stage" "$out"
 
-echo "pack: 已打包（商店图标）：$out"
+echo "pack: 已打包：$out"

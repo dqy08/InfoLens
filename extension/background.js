@@ -287,6 +287,15 @@ async function setBadgeError(brief) {
   }
 }
 
+function actionIcons(dotted) {
+  const src = chrome.runtime.getManifest().action.default_icon;
+  if (!dotted) return src;
+  return {
+    16: src['16'].replace(/\.png$/, '-dot.png'),
+    32: src['32'].replace(/\.png$/, '-dot.png'),
+  };
+}
+
 /**
  * @param {chrome.tabs.Tab} tab
  * @param {{ query?: string }} [opts] query：右键选区预填，不自动搜
@@ -299,6 +308,7 @@ async function activateTab(tab, opts = {}) {
 
   // optional file:// request 必须在手势同步阶段启动；前面不能有 await
   const fileHostPromise = isFileUrl(freshUrl) ? requestFileHostFromGesture() : null;
+  void chrome.action.setIcon({ path: actionIcons(false) });
 
   // 手势当下立刻读一次 url；无 url 时仍尝试 get（activeTab 授权后）
   try {
@@ -390,6 +400,11 @@ chrome.runtime.onInstalled.addListener((details) => {
     });
   });
 
+  // 商店用户：仅新安装打点。unpacked Reload 也打，方便本地看。升级暂不打。
+  const unpacked = !('update_url' in chrome.runtime.getManifest());
+  if (details.reason === 'install' || (unpacked && details.reason === 'update')) {
+    void chrome.action.setIcon({ path: actionIcons(true) });
+  }
   if (details.reason === 'install' || details.reason === 'update') {
     const body = { event: details.reason, version: chrome.runtime.getManifest().version };
     if (details.reason === 'update' && details.previousVersion) {
