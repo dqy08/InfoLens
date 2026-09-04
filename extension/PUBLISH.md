@@ -134,6 +134,7 @@ curl -sS -x "$http_proxy" \
 
 ## 注意
 
+- **第三方 JS**：PDF.js 必须打包 Mozilla 官方**非压缩** `vendor/pdfjs/pdf.js` + `pdf.worker.js`（勿用 `*.min.js` / 勿远程加载）。商店曾以 Red Titanium 拒绝压缩 vendor 文件。
 - **Listing**：短名称 / 短描述来自包内 `_locales`；长描述、截图等须在 Dashboard 改，或另走 listing API（本流程未覆盖）。
 - **可见性**：若只在 Dashboard 改过可见性却从未用新设置手工发布过一次，API publish 可能失败；先在后台成功发布一次即可。
 - **凭证泄露**：refresh token 等同发版权限；泄露后到 Google 账号撤销该 OAuth 应用授权并重新按上文换 token。

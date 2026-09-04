@@ -46,7 +46,8 @@ InfoLens PDF viewer：pdf/entry 读字节 → SW 写入 IndexedDB → 本页 ?id
     <span class="il-pv-spacer"></span>
     <span id="il-pv-status" role="status" hidden></span>
   </aside>
-  <script src="../vendor/pdfjs/pdf.min.js"></script>
+  <!-- 包内 Mozilla pdfjs-dist 3.11.174 legacy 官方非压缩 UMD（勿改用 *.min.js / 远程 CDN；商店审核） -->
+  <script src="../vendor/pdfjs/pdf.js"></script>
   <script src="../config.js"></script>
   <script src="../collectTextMap.js"></script>
   <script src="../splitTextToChunks.js"></script>

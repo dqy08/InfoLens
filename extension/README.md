@@ -67,7 +67,8 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 - 浏览能力（分析载体，非完备阅读器）：对齐 Chrome 内置 PDF——默认 Automatic Zoom
  （fit-width 且不超过 100%）、预设档 ±（含 Ctrl/⌘+滚轮）、Fit 单按钮在 page/width 间切换、全屏；
   页码只读显示。图标取自 Chromium PDF viewer Material Symbols。
-- 资源在 `vendor/pdfjs/`（pdfjs-dist 3.11.174 legacy UMD + LICENSE），pack 打成包内文件。
+- 资源在 `vendor/pdfjs/`（pdfjs-dist **3.11.174** legacy 官方非压缩 UMD：`pdf.js` + `pdf.worker.js` + LICENSE），pack 打成包内文件。  
+  **不要**换成 `*.min.js`、不要 beautify 压缩文件、不要从 CDN 远程加载——Chrome Web Store 会把压缩/混淆 JS 判为违规（Red Titanium）。
 
 ### 排查：`Frame with ID 0 was removed`
 
@@ -91,5 +92,5 @@ splitTextToChunks.js   # SYNC ← client
 semantic/              # DocumentAdapter + 共享 semantic find（page/pdf + find.js）
 vendor/Readability.js
 pdf/                   # PDF：宿主页入口、暂存、viewer、file-access 引导
-vendor/pdfjs/          # pdfjs-dist 3.11.174 legacy（pdf.min.js + worker + LICENSE）
+vendor/pdfjs/          # pdfjs-dist 3.11.174 legacy 官方非压缩（pdf.js + pdf.worker.js + LICENSE）
 ```

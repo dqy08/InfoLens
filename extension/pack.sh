@@ -60,8 +60,10 @@ PDF_VIEWER_FILES = [
     "semantic/pdf-document.js",
     "semantic/analyzeCache.js",
     "semantic/find.js",
-    "vendor/pdfjs/pdf.min.js",
-    "vendor/pdfjs/pdf.worker.min.js",
+    # Chrome Web Store 拒绝压缩/混淆第三方 JS（Red Titanium）。
+    # 打包 Mozilla 官方非压缩 pdfjs-dist 3.11.174 legacy UMD，不要 *.min.js。
+    "vendor/pdfjs/pdf.js",
+    "vendor/pdfjs/pdf.worker.js",
     "vendor/pdfjs/LICENSE",
 ]
 
@@ -288,6 +290,12 @@ def verify_files(root: Path, rel_paths: list[str], label: str) -> None:
 def verify_zip(zip_path: Path, rel_paths: list[str]) -> None:
     with zipfile.ZipFile(zip_path) as zf:
         names = {n for n in zf.namelist() if not n.endswith("/")}
+    minified = sorted(n for n in names if n.endswith(".min.js"))
+    if minified:
+        print("pack: zip 含压缩 JS（Chrome Web Store Red Titanium 会拒）：", file=sys.stderr)
+        for p in minified:
+            print(f"  - {p}", file=sys.stderr)
+        sys.exit(1)
     expected = set(rel_paths)
     missing = sorted(expected - names)
     if missing:
