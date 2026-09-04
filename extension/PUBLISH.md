@@ -130,6 +130,14 @@ curl -sS -x "$http_proxy" \
 - 上传：`"uploadState": "SUCCEEDED"`，`"crxVersion": "<version>"`
 - 发布：`"state": "PENDING_REVIEW"`（通过后自动上线；可见性沿用后台已有设置）
 
+### 4. 打 tag
+
+提交商店用的那次 commit 打附注 tag（与历史 `chrome-0.6.6` 同形）：
+
+```bash
+git tag -a chrome-<version> -m "chrome-<version>"
+```
+
 ---
 
 ## 注意
