@@ -6,6 +6,7 @@
  * 供语义搜索与原生选区/复制（均走阅读序，不按 PDF 内容流绘制序）。
  * 浏览对齐 Chrome 内置 PDF：Automatic Zoom 默认、预设 ±、Fit to page / width、全屏；
  * 页码只读显示（不做跳转）。
+ * PDF.js：包内 vendor/pdfjs/pdf.js + pdf.worker.js（pdfjs-dist 3.11.174 legacy 官方非压缩；勿用 *.min.js / 远程）。
  */
 
 (() => {
@@ -511,7 +512,7 @@
       setError("PDF stash API missing");
       return;
     }
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "../vendor/pdfjs/pdf.worker.min.js";
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "../vendor/pdfjs/pdf.worker.js";
 
     const params = new URLSearchParams(location.search);
     const id = params.get("id");
