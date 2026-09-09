@@ -34,7 +34,7 @@ def _truncate_text_by_tokens(tokenizer, text: str, max_tokens: int) -> tuple[str
     返回 (截断后文本, 实际 token 数)，token 数供调用方复用（日志等），避免重复分词。
 
     已知问题：截断是静默的，响应里没有任何字段告知调用方发生过截断。前端按字节数切 chunk
-    （extension/config.js chunkBytes=800），与这里的 token 上限没有联动；数字/标点/代码等
+    （extension/semantic-highlight/config.js chunkBytes=800），与这里的 token 上限没有联动；数字/标点/代码等
     token 密度高的内容，800 字节可能远超 max_tokens，导致相关度判断和 keywords 高亮只覆盖
     截断后的前缀。后果是漏检（chunk 被判无关或部分内容不高亮），不是误报。调大 max_tokens
     只能缓解、不能根治（数字等本就按字符/短片段单独分词，token 密度上限很高）。

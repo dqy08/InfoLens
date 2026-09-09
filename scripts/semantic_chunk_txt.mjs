@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 按插件分块规则切 txt（SYNC: extension/splitTextToChunks.js ← semanticUtils.splitTextToChunks）。
+ * 按插件分块规则切 txt（SYNC: extension/shared/page/splitTextToChunks.js ← semanticUtils.splitTextToChunks）。
  *
  * 用法（项目根目录）:
  *   node scripts/semantic_chunk_txt.mjs scripts/cases/红楼-第3回.txt
@@ -19,14 +19,14 @@ const ROOT = path.resolve(__dirname, '..');
 const CHUNK_BYTES = 800; // SYNC: SEMANTIC_CHUNK_BYTES / extension chunkBytes
 
 function loadSplitTextToChunks() {
-  const srcPath = path.join(ROOT, 'extension', 'splitTextToChunks.js');
+  const srcPath = path.join(ROOT, 'extension', 'shared', 'page', 'splitTextToChunks.js');
   const code = fs.readFileSync(srcPath, 'utf8');
   const sandbox = { TextEncoder, globalThis: {} };
   sandbox.globalThis = sandbox;
   vm.runInNewContext(code, sandbox, { filename: srcPath });
   const fn = sandbox.IL_splitTextToChunks;
   if (typeof fn !== 'function') {
-    throw new Error('IL_splitTextToChunks missing after loading extension/splitTextToChunks.js');
+    throw new Error(`IL_splitTextToChunks missing after loading ${srcPath}`);
   }
   return fn;
 }

@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "default_locale": "en",
+  "name": "Info Highlight",
+  "version": "0.1.0",
+  "description": "Paint a surprisal heatmap on the current webpage.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://localhost:5001/*"],
+  "optional_host_permissions": ["file:///*"],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Info Highlight",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  }
+}

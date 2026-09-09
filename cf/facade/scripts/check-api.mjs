@@ -2,7 +2,7 @@
 /**
  * 打真实接口：版本 + 相关度 SSE + 关键词 SSE。
  * 只确认通、能结束；不断言具体命中词。
- * 默认 apiBase 取自 extension/config.dev.js，避免打到主域名。
+ * 默认 apiBase 取自 extension/semantic-highlight/config.dev.js，避免打到主域名。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,11 +10,11 @@ import { fileURLToPath } from 'node:url';
 
 function defaultApiBase() {
   const src = fs.readFileSync(
-    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../extension/config.dev.js'),
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../extension/semantic-highlight/config.dev.js'),
     'utf8'
   );
   const m = src.match(/apiBase:\s*'([^']+)'/);
-  if (!m) throw new Error('apiBase missing in extension/config.dev.js');
+  if (!m) throw new Error('apiBase missing in extension/semantic-highlight/config.dev.js');
   return m[1];
 }
 

@@ -8,6 +8,7 @@
     "test:charIndex": "npx tsx tests/utils/charIndexForByteLimit.test.ts",
     "test:findSplitPoint": "npx tsx tests/utils/findSplitPoint.test.ts",
     "test:splitChunks": "npx tsx tests/utils/splitTextToChunks.test.ts",
+    "test:splitChunksParity": "npx tsx tests/utils/splitTextToChunksParity.test.ts",
     "test:dagPropagationPlayback": "npx tsx tests/prediction_attribution/genAttributeDagPropagationPlayback.test.ts",
     "test:dagAttentionPlayback": "npx tsx tests/prediction_attribution/genAttributeDagAttentionPlayback.test.ts",
     "test:runAttentionPlayback": "npx tsx tests/prediction_attribution/runAttentionPlayback.test.ts",

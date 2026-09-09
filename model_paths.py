@@ -21,6 +21,9 @@ MODEL_PATHS = {
     'qwen3.5-0.8b': 'Qwen/Qwen3.5-0.8B-Base',
     'qwen3.5-2b': 'Qwen/Qwen3.5-2B-Base',
     'qwen3.5-4b': 'Qwen/Qwen3.5-4B-Base',
+    # hunyuan pretrain（仅记录信息密度候选；需 transformers>=4.56，启用前先升级并验证）
+    'hunyuan-0.5b': 'tencent/Hunyuan-0.5B-Pretrain',
+    'hunyuan-1.8b': 'tencent/Hunyuan-1.8B-Pretrain',
 }
 
 # Instruct 槽位（--instruct_model；chat template 与指令理解）

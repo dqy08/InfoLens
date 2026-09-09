@@ -1,0 +1,34 @@
+{
+  "extName": {
+    "message": "Semantic Highlight",
+    "description": "Extension name shown in the store and chrome://extensions"
+  },
+  "extDescription": {
+    "message": "Search and highlight relevant words by meaning, adding a semantic heatmap to webpages — helping you read, not reading for you.",
+    "description": "Short extension description in the store listing"
+  },
+  "contextMenuSearch": {
+    "message": "Search with Semantic Highlight",
+    "description": "Right-click context menu item on page / selection"
+  },
+  "optionsStorageSection": {
+    "message": "Storage",
+    "description": "Options page section heading"
+  },
+  "optionsCacheTitle": {
+    "message": "Analysis cache",
+    "description": "Options row title for the request cache"
+  },
+  "optionsCacheUsage": {
+    "message": "$1 entries · $2",
+    "description": "Cache occupancy: count and formatted size",
+    "placeholders": {
+      "count": { "content": "$1" },
+      "size": { "content": "$2" }
+    }
+  },
+  "optionsCacheClear": {
+    "message": "Clear",
+    "description": "Button that deletes the analysis cache"
+  }
+}

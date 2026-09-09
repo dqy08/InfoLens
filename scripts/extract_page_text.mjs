@@ -66,9 +66,9 @@ async function main() {
     await page.goto(args.url, { waitUntil: 'networkidle', timeout: 90_000 });
 
     for (const rel of [
-      'extension/vendor/Readability.js',
-      'extension/articleRoot.js',
-      'extension/collectTextMap.js',
+      'extension/shared/vendor/Readability.js',
+      'extension/shared/page/articleRoot.js',
+      'extension/shared/page/collectTextMap.js',
     ]) {
       await page.addScriptTag({ path: path.join(ROOT, rel) });
     }

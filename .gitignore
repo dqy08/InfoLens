@@ -18,11 +18,11 @@ client/dist/
 client/dist-github_pages/
 client/dist-cf/
 extension/dist/
-extension/config.js
-extension/config.secrets.js
-extension/e2e/.results/
-extension/playwright-report/
-extension/test-results/
+extension/semantic-highlight/config.js
+extension/semantic-highlight/config.secrets.js
+extension/semantic-highlight/e2e/.results/
+extension/semantic-highlight/playwright-report/
+extension/semantic-highlight/test-results/
 build/
 dist/
 *.egg-info/

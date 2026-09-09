@@ -114,7 +114,7 @@ export class SemanticSearchController {
 
     /**
      * 分块搜索（demo）：严格串行——await 分析 → 上色 → 下一块；无预取/hold/follow；结束滚到首个匹配。
-     * 产品决策：站内节奏刻意简化；扩展侧仍保留预取/hold/follow（见 extension/content.js），两边不必对齐。
+     * 产品决策：站内节奏刻意简化；扩展侧仍保留预取/hold/follow（见 extension/semantic-highlight/content.js），两边不必对齐。
      */
     private async runChunked(params: { query: string; text: string; signal: AbortSignal }): Promise<void> {
         const { query, text, signal } = params;

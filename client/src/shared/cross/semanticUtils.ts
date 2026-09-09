@@ -196,7 +196,7 @@ export function mergeTokenSpansFullyForRendering<T extends { offset: [number, nu
     return mergeTokenDigitSpans(overlapped, text);
 }
 
-/** bytesPerChunk：UTF-8 字节数；startOffset：UTF-16 码元下标（非码点；拼到 API offset 前须转码点）。扩展侧副本：`extension/splitTextToChunks.js`（改此处请同步）。 */
+/** bytesPerChunk：UTF-8 字节数；startOffset：UTF-16 码元下标（非码点；拼到 API offset 前须转码点）。扩展侧副本：`extension/shared/page/splitTextToChunks.js`（改此处请同步）。 */
 export function splitTextToChunks(text: string, bytesPerChunk: number): Array<{ text: string; startOffset: number }> {
     if (bytesPerChunk <= 0) {
         throw new Error("bytesPerChunk must be > 0, got: " + bytesPerChunk);
@@ -233,6 +233,10 @@ export function splitTextToChunks(text: string, bytesPerChunk: number): Array<{ 
             }
             chunkBytes += paragBytes;
             chunkEnd = paragEnd;
+        }
+        if (chunkEnd <= pos) {
+            // bytesPerChunk 装不下 pos 处的单个字符时切点无法前进；报错，不要退化成空 chunk 死循环
+            throw new Error("bytesPerChunk=" + bytesPerChunk + " cannot hold the character at " + pos);
         }
         chunks.push({ text: text.slice(pos, chunkEnd), startOffset: pos });
         pos = chunkEnd;
