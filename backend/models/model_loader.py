@@ -27,7 +27,20 @@ from .load_utils import resolve_and_load
 from backend.platform.quantization_config import get_quantization_config
 
 
-def get_device_load_strategy(device: torch.device) -> Dict[str, Any]:
+def gemma_runtime_dtype(
+    device: torch.device, model_path: Optional[str], default: torch.dtype
+) -> torch.dtype:
+    """Gemma 以 bf16 训练；MPS/CUDA 上用 fp16 前向会出 NaN logits。"""
+    if device.type not in ("cuda", "mps"):
+        return default
+    if not model_path or "gemma" not in model_path.lower():
+        return default
+    return torch.bfloat16
+
+
+def get_device_load_strategy(
+    device: torch.device, model_path: Optional[str] = None
+) -> Dict[str, Any]:
     """
     根据设备推断加载策略（device_map、dtype、use_int8 等）。
 
@@ -59,16 +72,18 @@ def get_device_load_strategy(device: torch.device) -> Dict[str, Any]:
         if use_int8:
             print("⚠️  启用 INT8 量化（FORCE_INT8=1）")
         else:
-            print("🔧 dtype: float16")
+            dtype = gemma_runtime_dtype(device, model_path, dtype)
+            print(f"🔧 dtype: {str(dtype).replace('torch.', '')}")
         print("🔧 device_map: auto")
     else:
-        # MPS 模式：自动设备分配 + float16（MPS 不支持 INT8 量化）
+        # MPS 模式：自动设备分配（默认 float16；Gemma 用 bfloat16）
         print(f"🔧 {device.type.upper()} 模式：自动设备分配")
         if os.environ.get("FORCE_INT8") == "1":
             print("⚠️  MPS 不支持 INT8 量化，已忽略 FORCE_INT8=1 环境变量")
         device_map = "auto"
         use_low_cpu_mem = True
-        print("🔧 dtype: float16")
+        dtype = gemma_runtime_dtype(device, model_path, dtype)
+        print(f"🔧 dtype: {str(dtype).replace('torch.', '')}")
         print("🔧 device_map: auto")
 
     return {
@@ -110,7 +125,7 @@ def load_causal_lm(
     Returns:
         已 eval() 的模型
     """
-    strategy = get_device_load_strategy(device)
+    strategy = get_device_load_strategy(device, model_path=model_path)
     device_map = strategy["device_map"]
     dtype = strategy["dtype"]
     use_low_cpu_mem = strategy["use_low_cpu_mem"]

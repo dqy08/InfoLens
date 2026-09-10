@@ -6,6 +6,11 @@ from typing import Callable, Generator, Optional, Tuple
 from flask import Response
 
 
+def _dumps(data) -> str:
+    # allow_nan=False：禁止把 NaN/Inf 写成非法 JSON（JS JSON.parse 会失败）
+    return json.dumps(data, allow_nan=False)
+
+
 class SSEProgressReporter:
     """SSE进度报告器"""
     
@@ -29,7 +34,7 @@ class SSEProgressReporter:
                 'type': 'error',
                 'message': str(e)
             }
-            yield f"data: {json.dumps(error_data)}\n\n"
+            yield f"data: {_dumps(error_data)}\n\n"
     
     def create_response(self) -> Response:
         """创建SSE响应"""
@@ -68,7 +73,7 @@ def send_progress_event(step: int, total_steps: int, stage: str, percentage: Opt
         data['percentage'] = percentage
     if message:
         data['message'] = message
-    return f"data: {json.dumps(data)}\n\n"
+    return f"data: {_dumps(data)}\n\n"
 
 
 def send_result_event(result: dict) -> str:
@@ -85,7 +90,7 @@ def send_result_event(result: dict) -> str:
         'type': 'result',
         'data': result
     }
-    return f"data: {json.dumps(data)}\n\n"
+    return f"data: {_dumps(data)}\n\n"
 
 
 def send_completion_delta_event(text: str, stream_end: bool) -> str:
@@ -96,7 +101,7 @@ def send_completion_delta_event(text: str, stream_end: bool) -> str:
     }
     if stream_end:
         data["stream_end"] = True
-    return f"data: {json.dumps(data)}\n\n"
+    return f"data: {_dumps(data)}\n\n"
 
 
 def send_prompt_used_event(prompt_used: str) -> str:
@@ -105,7 +110,7 @@ def send_prompt_used_event(prompt_used: str) -> str:
         "type": "prompt_used",
         "prompt_used": prompt_used,
     }
-    return f"data: {json.dumps(data)}\n\n"
+    return f"data: {_dumps(data)}\n\n"
 
 
 def send_error_event(message: str, status_code: Optional[int] = None) -> str:
@@ -122,7 +127,7 @@ def send_error_event(message: str, status_code: Optional[int] = None) -> str:
     data = {'type': 'error', 'message': message}
     if status_code is not None:
         data['status_code'] = status_code
-    return f"data: {json.dumps(data)}\n\n"
+    return f"data: {_dumps(data)}\n\n"
 
 
 def consume_progress_queue(

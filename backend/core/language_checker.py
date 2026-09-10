@@ -1,5 +1,6 @@
 import torch
 import gc
+import math
 from typing import Callable, Dict, List, Optional, Tuple
 
 from backend.platform.format import round_to_sig_figs
@@ -12,6 +13,56 @@ from model_paths import DEFAULT_BASE_MODEL, INSTRUCT_MODEL_PATHS, MODEL_PATHS, r
 
 # 按 id(model) 缓存「仅含 BOS/等价起始符一步 forward」得到的末位词表 logits（全词表，不随分析文本变）
 _bos_first_position_logits_cache: Dict[int, torch.Tensor] = {}
+
+
+def scoring_payload_offsets(
+    token_offsets: List[Tuple[int, int]],
+) -> Tuple[List[Tuple[int, int]], bool]:
+    """
+    将编码 offset 对齐到 chunked 打分结果。
+
+    因果 LM 的 chunked 路径对 token[1:] 计分。若序列以空 span 开头（Gemma 的 BOS），
+    那些位置已是「给定前缀预测下一文本 token」，不要再 insert 首 token 的 BOS-cache 分；
+    去掉首尾空 span 后，剩余 offset 与 chunked 的文本 token 一一对应。
+    若没有前导空 span（Qwen），返回原 offset，并要求 insert 首 token 分。
+    """
+    start = 0
+    while start < len(token_offsets) and token_offsets[start][0] >= token_offsets[start][1]:
+        start += 1
+    end = len(token_offsets)
+    while end > start and token_offsets[end - 1][0] >= token_offsets[end - 1][1]:
+        end -= 1
+    return token_offsets[start:end], start == 0
+
+
+def ensure_bos_prefix(
+    token_ids: torch.Tensor,
+    token_offsets: List[Tuple[int, int]],
+    *,
+    bos_id: Optional[int],
+    model_type: str,
+    max_length: int,
+) -> Tuple[torch.Tensor, List[Tuple[int, int]]]:
+    """Gemma 要求整段从 BOS 起；tokenizer 已写入则不动。其它模型原样返回。"""
+    if bos_id is None or not (model_type or "").startswith("gemma"):
+        return token_ids, token_offsets
+    if token_offsets and token_offsets[0][0] >= token_offsets[0][1]:
+        return token_ids, token_offsets
+    if token_ids.shape[1] > 0 and int(token_ids[0, 0].item()) == int(bos_id):
+        return token_ids, token_offsets
+    bos = torch.tensor([[int(bos_id)]], device=token_ids.device, dtype=token_ids.dtype)
+    token_ids = torch.cat([bos, token_ids], dim=1)
+    token_offsets = [(0, 0)] + list(token_offsets)
+    if token_ids.shape[1] > max_length:
+        token_ids = token_ids[:, :max_length]
+        token_offsets = token_offsets[:max_length]
+    return token_ids, token_offsets
+
+
+def require_finite_probs(probs: List[float], *, what: str) -> None:
+    bad = sum(1 for p in probs if not math.isfinite(p))
+    if bad:
+        raise RuntimeError(f"{what}: {bad} non-finite values")
 
 
 def compute_first_token_lm_with_bos_prefix_cache(
@@ -47,16 +98,11 @@ def compute_first_token_lm_with_bos_prefix_cache(
     p = float(probs[first_token_id].item())
 
     topk_vals, topk_inds = torch.topk(probs, k=min(effective_topk, probs.shape[0]), dim=-1)
-    topk_vals = topk_vals.float().numpy()
-    topk_inds_flat = topk_inds.flatten().tolist()
-    topk_tokens_decoded = tokenizer.batch_decode(
-        [[tid] for tid in topk_inds_flat],
-        skip_special_tokens=False,
+    pred_topk = pred_topk_pairs_from_flat_ids_and_probs(
+        topk_inds.flatten().tolist(),
+        topk_vals.float().flatten().tolist(),
+        tokenizer,
     )
-    pred_topk = [
-        (topk_tokens_decoded[j], round_to_sig_figs(float(topk_vals[j])))
-        for j in range(len(topk_tokens_decoded))
-    ]
     return p, pred_topk
 
 
@@ -174,8 +220,14 @@ class QwenLM(AbstractLanguageChecker):
                 print(f"⚠️  文本过长，已截断至前 {self.max_length} token ({len(in_text)} char -> {last_offset_end} char)")
         
         token_ids = token_ids.to(self.device)
-        
-        return token_ids, token_offsets
+        model_type = getattr(getattr(self.model, "config", None), "model_type", "") or ""
+        return ensure_bos_prefix(
+            token_ids,
+            token_offsets,
+            bos_id=self.tokenizer.bos_token_id,
+            model_type=model_type,
+            max_length=self.max_length,
+        )
 
     def _run_inference_and_process_chunked(
         self, 
@@ -332,61 +384,57 @@ class QwenLM(AbstractLanguageChecker):
         - percentage: 可选的百分比，仅在 inference 阶段提供
         """
         TOTAL_STEPS = 3
-        
-        try:
-            # Step 1: 编码文本
-            if progress_callback: 
-                progress_callback(1, TOTAL_STEPS, 'encoding', None)
-            token_ids, token_offsets = self._encode_text(in_text)
-            
-            # Step 2: 分块推理并处理（带百分比进度）
-            # 这取代了原来的 _run_model_inference, MPS 流式处理, 和 _process_topk
-            
-            if progress_callback:
-                progress_callback(2, 3, 'inference', 0)
-            pred_topk, real_topk_probs = self._run_inference_and_process_chunked(
-                token_ids, DEFAULT_TOPK, progress_callback
+
+        # Step 1: 编码文本
+        if progress_callback:
+            progress_callback(1, TOTAL_STEPS, 'encoding', None)
+        token_ids, token_offsets = self._encode_text(in_text)
+        payload_offsets, insert_first = scoring_payload_offsets(token_offsets)
+
+        # Step 2: 分块推理并处理（带百分比进度）
+        # 这取代了原来的 _run_model_inference, MPS 流式处理, 和 _process_topk
+
+        if progress_callback:
+            progress_callback(2, 3, 'inference', 0)
+        pred_topk, real_topk_probs = self._run_inference_and_process_chunked(
+            token_ids, DEFAULT_TOPK, progress_callback
+        )
+
+        # Step 3: 构建结果
+        if progress_callback:
+            progress_callback(3, TOTAL_STEPS, 'processing', None)
+
+        if insert_first and token_ids.shape[1] >= 1:
+            p0, pred0 = compute_first_token_lm_with_bos_prefix_cache(
+                self.model,
+                self.tokenizer,
+                self.device,
+                int(token_ids[0, 0].item()),
+                DEFAULT_TOPK,
             )
-            
-            # Step 3: 构建结果
-            if progress_callback: 
-                progress_callback(3, TOTAL_STEPS, 'processing', None)
+            pred_topk.insert(0, pred0)
+            real_topk_probs.insert(0, p0)
 
-            if token_ids.shape[1] >= 1:
-                p0, pred0 = compute_first_token_lm_with_bos_prefix_cache(
-                    self.model,
-                    self.tokenizer,
-                    self.device,
-                    int(token_ids[0, 0].item()),
-                    DEFAULT_TOPK,
-                )
-                pred_topk.insert(0, pred0)
-                real_topk_probs.insert(0, p0)
+        require_finite_probs(real_topk_probs, what="token probability")
 
-            seq_len = len(real_topk_probs)
-            real_topk = list(zip([0] * seq_len, [round_to_sig_figs(p) for p in real_topk_probs]))
-            
-            bpe_strings = self._build_bpe_strings(token_offsets, real_topk, pred_topk, in_text)
-            
-            # 最终清理
-            DeviceManager.clear_cache(self.device)
-            gc.collect()
-            
-            # 更新分析计数器
-            self._analysis_count += 1
-            
-            # 打印分析任务完成后的内存统计（第1、11、21...次分析后打印）
-            if self.device.type == "cuda" and (self._analysis_count - 1) % 10 == 0:
-                device_idx = self.device.index if self.device.index is not None else 0
-                DeviceManager.print_cuda_memory_summary(device=device_idx)
-            
-            return {'bpe_strings': bpe_strings}
-            
-        except Exception as e:
-            import traceback
-            print(f"❌ Error in QwenLM.analyze_text: {e}")
-            traceback.print_exc()
-            return {'bpe_strings': []}
+        seq_len = len(real_topk_probs)
+        real_topk = list(zip([0] * seq_len, [round_to_sig_figs(p) for p in real_topk_probs]))
+
+        bpe_strings = self._build_bpe_strings(payload_offsets, real_topk, pred_topk, in_text)
+
+        # 最终清理
+        DeviceManager.clear_cache(self.device)
+        gc.collect()
+
+        # 更新分析计数器
+        self._analysis_count += 1
+
+        # 打印分析任务完成后的内存统计（第1、11、21...次分析后打印）
+        if self.device.type == "cuda" and (self._analysis_count - 1) % 10 == 0:
+            device_idx = self.device.index if self.device.index is not None else 0
+            DeviceManager.print_cuda_memory_summary(device=device_idx)
+
+        return {'bpe_strings': bpe_strings}
     
     # _cleanup_tensors 方法已被移除，因为不再需要显式清理小张量
 

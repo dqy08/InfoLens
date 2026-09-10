@@ -24,6 +24,8 @@ MODEL_PATHS = {
     # hunyuan pretrain（仅记录信息密度候选；需 transformers>=4.56，启用前先升级并验证）
     'hunyuan-0.5b': 'tencent/Hunyuan-0.5B-Pretrain',
     'hunyuan-1.8b': 'tencent/Hunyuan-1.8B-Pretrain',
+    # gemma 3 270m pretrain（gated：需在 Hugging Face 接受 Gemma 条款后才能下载）
+    'gemma-3-270m': 'google/gemma-3-270m',
 }
 
 # Instruct 槽位（--instruct_model；chat template 与指令理解）
