@@ -824,6 +824,8 @@
   globalThis.IH_segmentWindow = segmentWindow;
   globalThis.IH_tokensInSegment = tokensInSegment;
   globalThis.IH_paintTokens = paintTokens;
+  globalThis.IH_tokenBits = tokenBits;
+  globalThis.IH_rangesFromUtf16 = rangesFromUtf16;
   globalThis.IH_clearHighlights = clearHighlights;
   globalThis.IH_showError = showError;
   globalThis.IH_showPaused = showPaused;

@@ -3,12 +3,14 @@
     throw new Error('IH_analyzeCache missing — inject analyzeCache.js before options.js');
   }
 
+  /** 复选框 id 即 chrome.storage.local 的键；值为默认值 */
+  const TOGGLES = { show_progress: false, show_token_tip: true };
+
   const iconEl = document.getElementById('brand_icon');
   const brandEl = document.getElementById('brand_name');
-  const checkbox = document.getElementById('show_progress');
   const descEl = document.getElementById('cache_desc');
   const clearBtn = document.getElementById('cache_clear');
-  if (!iconEl || !brandEl || !checkbox || !descEl || !clearBtn) {
+  if (!iconEl || !brandEl || !descEl || !clearBtn) {
     throw new Error('options page missing required elements');
   }
 
@@ -17,13 +19,16 @@
   brandEl.textContent = manifest.name;
   iconEl.src = manifest.icons?.['48'] || manifest.icons?.['32'] || manifest.icons?.['128'] || '';
 
-  chrome.storage.local.get({ show_progress: false }, (res) => {
-    checkbox.checked = !!res.show_progress;
-  });
-
-  checkbox.addEventListener('change', () => {
-    chrome.storage.local.set({ show_progress: checkbox.checked });
-  });
+  for (const [key, fallback] of Object.entries(TOGGLES)) {
+    const box = document.getElementById(key);
+    if (!box) throw new Error(`options page missing checkbox: ${key}`);
+    chrome.storage.local.get({ [key]: fallback }, (res) => {
+      box.checked = !!res[key];
+    });
+    box.addEventListener('change', () => {
+      chrome.storage.local.set({ [key]: box.checked });
+    });
+  }
 
   function formatBytes(n) {
     if (!Number.isFinite(n) || n < 0) throw new Error(`bad cache size: ${n}`);

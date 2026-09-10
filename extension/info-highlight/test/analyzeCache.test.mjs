@@ -62,6 +62,10 @@ function stored(s, e, p = 0.5) {
   return { offset: [s, e], p };
 }
 
+function live(s, e, p = 0.5, raw = '', pred = []) {
+  return { offset: [s, e], p, raw, pred_topk: pred };
+}
+
 test('全未命中：一次 send，再读走缓存', async () => {
   let calls = 0;
   const send = async () => {
@@ -71,7 +75,7 @@ test('全未命中：一次 send，再读走缓存', async () => {
   const a = await cache.tokens('t0', send);
   const b = await cache.tokens('t0', send);
   assert.equal(calls, 1);
-  assert.deepEqual(a, [stored(0, 1)]);
+  assert.deepEqual(a, [live(0, 1)]);
   assert.deepEqual(b, [stored(0, 1)]);
 });
 
@@ -97,7 +101,7 @@ test('相同请求命中缓存后按当前文档位置重新映射', async () =>
     segStartCp: 30,
     segEndCp: 31,
   });
-  assert.deepEqual(at10, [stored(10, 11, 0.25)]);
+  assert.deepEqual(at10, [live(10, 11, 0.25)]);
   assert.deepEqual(at30, [stored(30, 31, 0.25)]);
 });
 
@@ -124,16 +128,17 @@ test('失败不写', async () => {
     return [tok(2, 3, 0.2)];
   });
   assert.equal(calls, 1);
-  assert.deepEqual(got, [stored(2, 3, 0.2)]);
+  assert.deepEqual(got, [live(2, 3, 0.2)]);
 });
 
-test('只存 offset 与 p', async () => {
+test('只存 offset 与 p；悬停字段只在未命中的返回值里', async () => {
   const data = mockLocal();
-  await cache.tokens('hello', async () => [
-    { offset: [0, 1], real_topk: [3, 0.25], pred_topk: [['a', 0.5]], raw: 'h' },
+  const got = await cache.tokens('hello', async () => [
+    { offset: [0, 1], real_topk: [3, 0.25], pred_topk: [['a', 0.5]], raw: 'h', extra: 1 },
   ]);
   const k = `ih_ac/t/${await cache.key('hello')}`;
   assert.deepEqual(data[k], [stored(0, 1, 0.25)]);
+  assert.deepEqual(got, [live(0, 1, 0.25, 'h', [['a', 0.5]])]);
 });
 
 test('再次执行脚本不丢已有缓存', async () => {

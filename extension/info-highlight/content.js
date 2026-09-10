@@ -15,6 +15,9 @@
   if (!globalThis.IH_analyzeCache) {
     throw new Error('IH_analyzeCache missing — inject analyzeCache.js before content.js');
   }
+  if (!globalThis.IH_tokenTip) {
+    throw new Error('IH_tokenTip missing — inject tokenTip.js before content.js');
+  }
 
   /** SYNC: extension/semantic-highlight/semantic/find.js → MAX_CHUNKS_PER_SEARCH */
   const MAX_SEGMENTS_PER_RUN = 32;
@@ -30,6 +33,7 @@
     globalThis.IH_clearHighlights();
     globalThis.IH_clearProgress();
     globalThis.IH_clearError();
+    globalThis.IH_tokenTip.clear();
     active = false;
   }
 
@@ -80,6 +84,7 @@
         if (!segs.length) throw new Error('No article text');
         globalThis.IH_clearHighlights();
         globalThis.IH_bindProgress(mapped, segs);
+        globalThis.IH_tokenTip.bind(mapped);
         session = { mapped, segs, next: 0, painted: 0 };
       }
       const { mapped, segs } = session;
@@ -90,6 +95,7 @@
         const tokens = await analyzeSegment(mapped.text, segs, i);
         if (myGen !== gen) return;
         session.painted += globalThis.IH_paintTokens(tokens, mapped, { append: true });
+        globalThis.IH_tokenTip.add(tokens);
         globalThis.IH_appendProgress(tokens, segs[i]);
       }
       session.next = end;

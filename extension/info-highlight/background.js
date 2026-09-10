@@ -21,6 +21,7 @@ const CONTENT_JS = [
   'textIndex.js',
   'scrollGeometry.js',
   'page-map.js',
+  'tokenTip.js',
   'cache/ring-store.js',
   'analyzeCache.js',
   'content.js',
