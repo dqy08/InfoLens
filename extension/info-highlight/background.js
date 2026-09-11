@@ -1,14 +1,21 @@
 /**
  * 工具栏点击 → 注入 content（activeTab 手势）。已注入则 toggle。
- * 分析：SW fetch 本机 http://localhost:5001/api/analyze（与站点 Info Highlight 同一后端）。
+ * 分析：SW fetch IH_CONFIG.apiBase/api/analyze（prod / 本机由 config.js 决定；依赖服务端 CORS，无 API host_permissions）。
  * PDF：整条流程在 pdf/sw.js（共享），本文件只负责在网页管线里的何处插入它。
  */
 
 importScripts('sw/restricted-url.js');
+importScripts('config.js');
 importScripts('pdf/stash-db.js');
 importScripts('pdf/sw.js');
 
-const API_URL = 'http://localhost:5001/api/analyze';
+if (!globalThis.IH_CONFIG || typeof IH_CONFIG.apiBase !== 'string' || !IH_CONFIG.apiBase) {
+  throw new Error('IH_CONFIG.apiBase missing — inject config.js before background.js');
+}
+
+function analyzeUrl() {
+  return `${String(IH_CONFIG.apiBase).replace(/\/$/, '')}/api/analyze`;
+}
 
 const CONTENT_CSS = ['content.css'];
 const CONTENT_JS = [
@@ -97,11 +104,21 @@ function isJsonContentType(contentTypeHeader) {
 
 /** POST /api/analyze；站点成功体无 success=true，仅 success===false 视为失败。 */
 async function postAnalyze(text) {
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'default', text }),
-  });
+  const url = analyzeUrl();
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'default', text }),
+    });
+  } catch (err) {
+    const msg = String(err?.message || err);
+    if (/Failed to fetch|NetworkError|ERR_CONNECTION/i.test(msg)) {
+      throw new Error(`Cannot reach ${IH_CONFIG.apiBase}`);
+    }
+    throw err;
+  }
   const raw = await res.text();
   const ctHeader = res.headers.get('Content-Type') || '';
   const ct = ctHeader.split(';')[0].trim().toLowerCase() || '(none)';

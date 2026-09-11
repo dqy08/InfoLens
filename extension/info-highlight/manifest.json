@@ -11,7 +11,6 @@
     "128": "icons/icon128.png"
   },
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["http://localhost:5001/*"],
   "optional_host_permissions": ["file:///*"],
   "options_ui": {
     "page": "options.html",

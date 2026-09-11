@@ -297,7 +297,7 @@
   function shortError(msg) {
     let t = String(msg || 'Analyze failed').replace(/\s+/g, ' ').trim();
     if (/Failed to fetch|NetworkError|ERR_CONNECTION/i.test(t)) {
-      t = 'Cannot reach http://localhost:5001';
+      t = 'Cannot reach the analyze server';
     }
     return t.length > 120 ? t.slice(0, 119) + '…' : t;
   }

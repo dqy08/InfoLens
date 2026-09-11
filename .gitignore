@@ -19,6 +19,7 @@ client/dist-github_pages/
 client/dist-cf/
 extension/dist/
 extension/semantic-highlight/config.js
+extension/info-highlight/config.js
 extension/semantic-highlight/config.secrets.js
 extension/semantic-highlight/e2e/.results/
 extension/semantic-highlight/playwright-report/
