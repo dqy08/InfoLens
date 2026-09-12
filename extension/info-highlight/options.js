@@ -80,11 +80,7 @@
   }
 
   prefSel.addEventListener('change', () => {
-    chrome.runtime.sendMessage({ type: 'ih-local-set-pref', pref: prefSel.value }, (res) => {
-      if (chrome.runtime.lastError || !res?.ok) {
-        loadBackend();
-        return;
-      }
+    chrome.runtime.sendMessage({ type: 'ih-local-set-pref', pref: prefSel.value }, () => {
       loadBackend();
     });
   });
@@ -152,6 +148,9 @@
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     if (changes.ih_webgpu_ok || changes.ih_analyze_pref || changes.ih_local_ready) loadBackend();
+    if (Object.keys(changes).some((k) => k.startsWith(globalThis.IH_analyzeCache.PREFIX))) {
+      void refresh().catch(showCacheError);
+    }
   });
 
   clearBtn.addEventListener('click', async () => {
@@ -166,7 +165,4 @@
   });
 
   void refresh().catch(showCacheError);
-  setInterval(() => {
-    void refresh().catch(showCacheError);
-  }, 2000);
 })();

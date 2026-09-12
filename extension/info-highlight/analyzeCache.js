@@ -88,6 +88,7 @@ globalThis.IH_analyzeCache ||= (function () {
   }
 
   return {
+    PREFIX,
     key,
     MAX_ENTRIES: store.MAX_ENTRIES,
     tokens,

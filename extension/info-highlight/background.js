@@ -34,6 +34,7 @@ const CONTENT_JS = [
   'scrollGeometry.js',
   'page-map.js',
   'tokenTip.js',
+  'analyzeRun.js',
   'content.js',
 ];
 
@@ -155,7 +156,7 @@ async function postAnalyze(text) {
 let creating = null;
 
 async function ensureOffscreen() {
-  if (creating) await creating;
+  while (creating) await creating;
   if (chrome.offscreen.hasDocument && (await chrome.offscreen.hasDocument())) return;
   if (creating) {
     await creating;
@@ -209,6 +210,7 @@ async function dropLocalModel() {
   }
   await IH_localState.dropModelCache();
   await IH_localState.set({ ready: false });
+  await IH_analyzeCache.dropAll();
 }
 
 async function probeAndStore() {

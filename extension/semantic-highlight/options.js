@@ -62,7 +62,11 @@
   });
 
   void refresh().catch(showCacheError);
-  setInterval(() => {
-    void refresh().catch(showCacheError);
-  }, 2000);
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (Object.keys(changes).some((k) => k.startsWith(globalThis.IL_analyzeCache.PREFIX))) {
+      void refresh().catch(showCacheError);
+    }
+  });
 })();

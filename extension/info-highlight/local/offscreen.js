@@ -112,10 +112,17 @@ async function analyzeText(text) {
     }
     const utf16 = globalThis.IH_localScoring.alignUtf16Offsets(text, ids, tokenStr, specialIds);
     const offsets = globalThis.IH_localScoring.utf16ToCpOffsets(text, utf16);
-    const aligned = globalThis.IH_localScoring.ensureGemmaBos(ids, offsets, bosId);
-    if (aligned.ids.length !== ids.length) {
-      throw new Error('Gemma encoding missing BOS');
+    // SYNC: backend/core/language_checker.py → _encode_text truncation warn
+    if (offsets.length) {
+      const lastEnd = offsets[offsets.length - 1][1];
+      const cpLen = globalThis.IH_localScoring.utf16ToCpOffsets(text, [[0, text.length]])[0][1];
+      if (lastEnd < cpLen) {
+        console.warn(
+          `[Info Highlight] 文本过长，已截断至前 ${MAX_LENGTH} token (${cpLen} char -> ${lastEnd} char)`,
+        );
+      }
     }
+    const aligned = globalThis.IH_localScoring.ensureGemmaBos(ids, offsets, bosId);
 
     const rows = [];
     const seq = aligned.ids.length;

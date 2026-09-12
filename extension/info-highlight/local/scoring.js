@@ -36,12 +36,15 @@ globalThis.IH_localScoring ||= (function () {
     return { offsets: tokenOffsets.slice(start, end), insertFirst: start === 0 };
   }
 
-  /** SYNC: backend/core/language_checker.py → ensure_bos_prefix（仅 Gemma） */
+  /**
+   * 本机 tokenizer 必须已带 BOS；缺则抛，不补（补了也和已编码的 input_ids 对不上）。
+   * SYNC: backend/core/language_checker.py → ensure_bos_prefix 的判定，不含插入。
+   */
   function ensureGemmaBos(ids, offsets, bosId) {
     if (bosId == null) return { ids, offsets };
     if (offsets.length && offsets[0][0] >= offsets[0][1]) return { ids, offsets };
     if (ids.length && ids[0] === bosId) return { ids, offsets };
-    return { ids: [bosId, ...ids], offsets: [[0, 0], ...offsets] };
+    throw new Error('Gemma encoding missing BOS');
   }
 
   function utf16ToCpIndex(text) {
@@ -259,30 +262,6 @@ globalThis.IH_localScoring ||= (function () {
     return { bpe_strings: bpe };
   }
 
-  /**
-   * @param {object} args
-   * @param {ArrayLike<number>} args.logits
-   * @param {number[]} args.dims [batch, seq, vocab]
-   * @param {number[]} args.ids
-   * @param {Array<[number, number]>} args.offsets code-point offsets，与 ids 等长
-   * @param {string} args.text
-   * @param {(id: number) => string} args.decodeId
-   * @param {number} [args.topk]
-   */
-  function bpeFromLogits({ logits, dims, ids, offsets, text, decodeId, topk = TOPK }) {
-    if (!dims || dims.length < 3) throw new Error(`bad logits dims: ${JSON.stringify(dims)}`);
-    const seq = dims[1];
-    const vocab = dims[2];
-    if (ids.length !== seq) throw new Error(`ids length ${ids.length} != logits seq ${seq}`);
-    if (offsets.length !== seq) throw new Error(`offsets length ${offsets.length} != seq ${seq}`);
-    const { insertFirst } = scoringPayloadOffsets(offsets);
-    if (insertFirst) {
-      throw new Error('Gemma scoring requires a leading empty BOS span');
-    }
-    const rows = scoreChunk(logits, vocab, ids, 0, seq, topk);
-    return bpeFromRows({ rows, ids, offsets, text, decodeId });
-  }
-
   return {
     TOPK,
     roundSigFigs,
@@ -293,7 +272,6 @@ globalThis.IH_localScoring ||= (function () {
     scoreRow,
     scoreChunk,
     bpeFromRows,
-    bpeFromLogits,
     sliceByCp,
   };
 })();

@@ -69,17 +69,14 @@ test('ensureGemmaBos 已有空 span 则不动', () => {
   assert.deepEqual(out.offsets, offsets);
 });
 
-test('ensureGemmaBos 缺 BOS 则前置', () => {
-  const out = S.ensureGemmaBos([10, 11], [
-    [0, 2],
-    [2, 4],
-  ], 2);
-  assert.deepEqual(out.ids, [2, 10, 11]);
-  assert.deepEqual(out.offsets, [
-    [0, 0],
-    [0, 2],
-    [2, 4],
-  ]);
+test('ensureGemmaBos 缺 BOS 则报错', () => {
+  assert.throws(
+    () => S.ensureGemmaBos([10, 11], [
+      [0, 2],
+      [2, 4],
+    ], 2),
+    /missing BOS/,
+  );
 });
 
 test('alignUtf16Offsets：特殊 token 空 span，正文顺序对齐', () => {
@@ -170,25 +167,25 @@ test('scoreRow gold 与 top1 一致', () => {
   assert.ok(row.p > 0.5);
 });
 
-test('bpeFromLogits 跳过 BOS，产出 Analyze 形状', () => {
+test('bpeFromRows 跳过 BOS，产出 Analyze 形状', () => {
   const vocab = 3;
   const seq = 3;
   const logits = new Float32Array(seq * vocab);
   // row 0 → class 1; row 1 → class 2
   logits[1] = 5;
   logits[vocab + 2] = 5;
-  const out = S.bpeFromLogits({
-    logits,
-    dims: [1, seq, vocab],
-    ids: [0, 1, 2],
-    offsets: [
-      [0, 0],
-      [0, 1],
-      [1, 2],
-    ],
+  const ids = [0, 1, 2];
+  const offsets = [
+    [0, 0],
+    [0, 1],
+    [1, 2],
+  ];
+  const out = S.bpeFromRows({
+    rows: S.scoreChunk(logits, vocab, ids, 0, seq, 2),
+    ids,
+    offsets,
     text: 'ab',
     decodeId: (id) => ['<bos>', 'a', 'b'][id],
-    topk: 2,
   });
   assert.equal(out.bpe_strings.length, 2);
   assert.deepEqual(out.bpe_strings[0].offset, [0, 1]);
@@ -198,13 +195,11 @@ test('bpeFromLogits 跳过 BOS，产出 Analyze 形状', () => {
   assert.equal(out.bpe_strings[1].raw, 'b');
 });
 
-test('bpeFromLogits 无 BOS 空 span 则报错', () => {
-  const logits = new Float32Array(4);
+test('bpeFromRows 无 BOS 空 span 则报错', () => {
   assert.throws(
     () =>
-      S.bpeFromLogits({
-        logits,
-        dims: [1, 2, 2],
+      S.bpeFromRows({
+        rows: [{ p: 1, pred: [] }, { p: 1, pred: [] }],
         ids: [1, 2],
         offsets: [
           [0, 1],
@@ -217,7 +212,7 @@ test('bpeFromLogits 无 BOS 空 span 则报错', () => {
   );
 });
 
-test('scoreChunk 拼起来与整表 bpeFromLogits 一致', () => {
+test('scoreChunk 拼起来与整表 bpeFromRows 一致', () => {
   const vocab = 3;
   const seq = 5;
   const logits = new Float32Array(seq * vocab);
@@ -235,7 +230,10 @@ test('scoreChunk 拼起来与整表 bpeFromLogits 一致', () => {
     decodeId: (id) => ['x', 'a', 'b'][id],
     topk: 2,
   };
-  const full = S.bpeFromLogits({ logits, dims: [1, seq, vocab], ...args });
+  const full = S.bpeFromRows({
+    rows: S.scoreChunk(logits, vocab, args.ids, 0, seq, args.topk),
+    ...args,
+  });
   const rows = [
     ...S.scoreChunk(logits, vocab, args.ids, 0, 3, args.topk),
     ...S.scoreChunk(logits.subarray(3 * vocab), vocab, args.ids, 3, 5, args.topk),
