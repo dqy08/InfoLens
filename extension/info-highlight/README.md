@@ -17,6 +17,14 @@ Toolbar icon is a 5-row red mosaic (`icons/render-icons.py`); same RGB as the he
 Chrome → `chrome://extensions` → Developer mode → Load unpacked → select `extension/dist/info-highlight/`。
 普通 http(s) 文章或 PDF → 点工具栏图标。再点清除。
 
+本机 WebGPU 分析依赖 `@huggingface/transformers`（构建时拷进包，不进 git）：
+
+```bash
+cd extension/info-highlight && npm install
+```
+
+clone 后至少要装一次，再 `dev-env.sh` / `build_extension.py`。选项里可改「自动 / 仅本机 / 仅云端」；本机模型需先在「本地模型初始化」里同意下载。仅本机失败不会改走云端。
+
 受限页（`chrome://`、Web Store、…）无操作。无键盘快捷键。
 
 `file:` PDF 须在扩展详情页打开 “Allow access to file URLs”。

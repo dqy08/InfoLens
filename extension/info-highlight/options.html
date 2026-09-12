@@ -82,6 +82,17 @@
     }
     button:hover:not(:disabled) { filter: brightness(1.08); }
     button:disabled { opacity: 0.45; cursor: default; }
+    .row-btns { display: flex; flex-shrink: 0; gap: 8px; }
+    select {
+      flex-shrink: 0;
+      font: inherit;
+      height: 36px;
+      padding: 0 8px;
+      border: 1px solid var(--btn-border);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--fg);
+    }
     main h2:not(:first-of-type) { margin-top: 28px; }
   </style>
 </head>
@@ -108,6 +119,34 @@
       </div>
       <input type="checkbox" id="show_token_tip">
     </label>
+    <h2>分析后端</h2>
+    <div class="row">
+      <div class="row-text">
+        <div class="row-title">分析方式</div>
+        <p class="row-desc">自动：本机就绪则用本机，否则云端。仅本机：不上传；不可用时说明原因，不会改走云端。</p>
+      </div>
+      <select id="analyze_pref" aria-label="分析方式">
+        <option value="auto">自动</option>
+        <option value="local">仅本机</option>
+        <option value="cloud">仅云端</option>
+      </select>
+    </div>
+    <div class="row">
+      <div class="row-text">
+        <div class="row-title">本机 WebGPU</div>
+        <p id="webgpu_desc" class="row-desc">正在检测…</p>
+      </div>
+    </div>
+    <div class="row">
+      <div class="row-text">
+        <div class="row-title">本机模型</div>
+        <p id="model_desc" class="row-desc">Gemma 3 270M ONNX q4</p>
+      </div>
+      <div class="row-btns">
+        <button type="button" id="local_init">初始化</button>
+        <button type="button" id="model_clear" disabled>清空</button>
+      </div>
+    </div>
     <h2>存储</h2>
     <div class="row">
       <div class="row-text">
@@ -119,6 +158,7 @@
   </main>
   <script src="cache/ring-store.js"></script>
   <script src="analyzeCache.js"></script>
+  <script src="local/state.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

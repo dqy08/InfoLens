@@ -111,13 +111,23 @@ def check_js(root: Path, files: list[Path]) -> None:
     if not node:
         raise SystemExit("pack: node is required for syntax checking")
     for path in files:
+        rel = path.relative_to(root)
+        if "vendor" in rel.parts:
+            continue
         if path.suffix != ".js":
             continue
         if path.name.endswith(".min.js"):
             raise SystemExit(f"pack: minified JavaScript is not allowed: {path.relative_to(root)}")
-        if shutil.which(node) is None:
-            raise SystemExit("pack: node disappeared")
-        result = subprocess.run([node, "--check", str(path)], text=True, capture_output=True)
+        text = path.read_text(encoding="utf-8")
+        if re.search(r"(?m)^(?:import|export)\s", text):
+            result = subprocess.run(
+                [node, "--check", "--input-type=module"],
+                input=text,
+                text=True,
+                capture_output=True,
+            )
+        else:
+            result = subprocess.run([node, "--check", str(path)], text=True, capture_output=True)
         if result.returncode:
             raise SystemExit(result.stderr.strip() or f"pack: syntax error: {path.relative_to(root)}")
 

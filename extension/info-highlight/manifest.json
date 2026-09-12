@@ -10,8 +10,11 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["activeTab", "scripting", "storage"],
-  "optional_host_permissions": ["file:///*"],
+  "permissions": ["activeTab", "scripting", "storage", "offscreen"],
+  "optional_host_permissions": ["file:///*", "https://huggingface.co/*", "https://*.huggingface.co/*", "https://*.hf.co/*", "https://*.xethub.hf.co/*", "https://*.modelscope.cn/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true

@@ -45,6 +45,11 @@
     clearBtn.disabled = entries === 0;
   }
 
+  function showCacheError(err) {
+    descEl.textContent = err?.message || String(err);
+    clearBtn.disabled = true;
+  }
+
   clearBtn.addEventListener('click', async () => {
     clearBtn.disabled = true;
     try {
@@ -56,8 +61,8 @@
     }
   });
 
-  void refresh().catch((err) => {
-    descEl.textContent = err?.message || String(err);
-    clearBtn.disabled = true;
-  });
+  void refresh().catch(showCacheError);
+  setInterval(() => {
+    void refresh().catch(showCacheError);
+  }, 2000);
 })();

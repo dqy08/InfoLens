@@ -12,9 +12,6 @@
   if (typeof globalThis.IH_extractPage !== 'function') {
     throw new Error('IH_extractPage missing — inject page-map.js before content.js');
   }
-  if (!globalThis.IH_analyzeCache) {
-    throw new Error('IH_analyzeCache missing — inject analyzeCache.js before content.js');
-  }
   if (!globalThis.IH_tokenTip) {
     throw new Error('IH_tokenTip missing — inject tokenTip.js before content.js');
   }
@@ -53,6 +50,12 @@
     });
   }
 
+  function releaseLocalEngine() {
+    chrome.runtime.sendMessage({ type: 'ih-local-unload' }, () => {
+      void chrome.runtime.lastError;
+    });
+  }
+
   async function fetchTokens(text) {
     const data = await sendAnalyze(text);
     const tokens = data?.result?.bpe_strings;
@@ -60,11 +63,11 @@
     return tokens;
   }
 
-  /** 缓存请求相对坐标；命中后再映射、裁剪到当前文档的这一段。 */
+  /** 请求相对坐标；命中缓存后再映射、裁剪到当前文档的这一段（缓存在 SW）。 */
   async function analyzeSegment(text, segs, i) {
     if (!/\S/.test(segs[i].text)) return [];
     const win = globalThis.IH_segmentWindow(text, segs, i);
-    const tokens = await globalThis.IH_analyzeCache.tokens(win.requestText, fetchTokens);
+    const tokens = await fetchTokens(win.requestText);
     return globalThis.IH_tokensInSegment(tokens, win);
   }
 
@@ -90,9 +93,19 @@
       const { mapped, segs } = session;
       const start = session.next;
       const end = Math.min(start + MAX_SEGMENTS_PER_RUN, segs.length);
+      let lastAlignErr;
       for (let i = start; i < end; i++) {
         if (myGen !== gen) return;
-        const tokens = await analyzeSegment(mapped.text, segs, i);
+        let tokens;
+        try {
+          tokens = await analyzeSegment(mapped.text, segs, i);
+        } catch (err) {
+          if (myGen !== gen) return;
+          if (!String(err?.message || err).includes('token offset align failed')) throw err;
+          console.warn('[Info Highlight] skip segment', i, err);
+          lastAlignErr = err;
+          continue;
+        }
         if (myGen !== gen) return;
         session.painted += globalThis.IH_paintTokens(tokens, mapped, { append: true });
         globalThis.IH_tokenTip.add(tokens);
@@ -101,12 +114,12 @@
       session.next = end;
       if (myGen !== gen) return;
       globalThis.IH_setProgressSearching(false);
+      if (!session.painted) throw lastAlignErr || new Error('No tokens mapped onto the page');
       if (end < segs.length) {
         active = true;
         globalThis.IH_showPaused(continuePaused);
         return;
       }
-      if (!session.painted) throw new Error('No tokens mapped onto the page');
       active = true;
     } catch (err) {
       if (myGen !== gen) return;
@@ -114,7 +127,10 @@
       globalThis.IH_showError(err?.message || err);
       active = true;
     } finally {
-      if (myGen === gen) busy = false;
+      if (myGen === gen) {
+        busy = false;
+        releaseLocalEngine();
+      }
     }
   }
 
@@ -123,6 +139,7 @@
       gen += 1;
       busy = false;
       clearAll();
+      releaseLocalEngine();
       return;
     }
     void runBatch(gen += 1);

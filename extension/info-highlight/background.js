@@ -1,6 +1,6 @@
 /**
  * 工具栏点击 → 注入 content（activeTab 手势）。已注入则 toggle。
- * 分析：SW fetch IH_CONFIG.apiBase/api/analyze（prod / 本机由 config.js 决定；依赖服务端 CORS，无 API host_permissions）。
+ * 分析：本机 WebGPU（已就绪）或 IH_CONFIG.apiBase/api/analyze。
  * PDF：整条流程在 pdf/sw.js（共享），本文件只负责在网页管线里的何处插入它。
  */
 
@@ -8,10 +8,15 @@ importScripts('sw/restricted-url.js');
 importScripts('config.js');
 importScripts('pdf/stash-db.js');
 importScripts('pdf/sw.js');
+importScripts('cache/ring-store.js');
+importScripts('analyzeCache.js');
+importScripts('local/state.js');
 
 if (!globalThis.IH_CONFIG || typeof IH_CONFIG.apiBase !== 'string' || !IH_CONFIG.apiBase) {
   throw new Error('IH_CONFIG.apiBase missing — inject config.js before background.js');
 }
+if (!globalThis.IH_localState) throw new Error('IH_localState missing');
+if (!globalThis.IH_analyzeCache) throw new Error('IH_analyzeCache missing');
 
 function analyzeUrl() {
   return `${String(IH_CONFIG.apiBase).replace(/\/$/, '')}/api/analyze`;
@@ -29,8 +34,6 @@ const CONTENT_JS = [
   'scrollGeometry.js',
   'page-map.js',
   'tokenTip.js',
-  'cache/ring-store.js',
-  'analyzeCache.js',
   'content.js',
 ];
 
@@ -148,8 +151,370 @@ async function postAnalyze(text) {
   return data;
 }
 
+/** 并发 createDocument 共用这一次 load；完成初次 page load 后才 settle。 */
+let creating = null;
+
+async function ensureOffscreen() {
+  if (creating) await creating;
+  if (chrome.offscreen.hasDocument && (await chrome.offscreen.hasDocument())) return;
+  if (creating) {
+    await creating;
+    return;
+  }
+  creating = chrome.offscreen
+    .createDocument({
+      url: 'local/offscreen.html',
+      reasons: ['WORKERS'],
+      justification: 'Run the local WebGPU language model for Info Highlight',
+    })
+    .catch((err) => {
+      const msg = String(err?.message || err);
+      if (/already exists|Only a single offscreen/i.test(msg)) return;
+      throw err;
+    })
+    .finally(() => {
+      creating = null;
+    });
+  await creating;
+}
+
+let localInflight = 0;
+let unloadQueued = false;
+
+async function sendToEngine(payload) {
+  await ensureOffscreen();
+  const res = await chrome.runtime.sendMessage({ type: 'ih-local-engine', ...payload });
+  if (res == null) throw new Error('local engine not ready');
+  return res;
+}
+
+async function closeOffscreenIfIdle() {
+  if (creating) await creating;
+  if (localInflight > 0 || initBusy || offerLock) return;
+  unloadQueued = false;
+  if (chrome.offscreen.hasDocument && (await chrome.offscreen.hasDocument())) {
+    await chrome.offscreen.closeDocument();
+  }
+}
+
+async function queueUnload() {
+  unloadQueued = true;
+  await closeOffscreenIfIdle();
+}
+
+async function dropLocalModel() {
+  if (creating) await creating;
+  if (chrome.offscreen.hasDocument && (await chrome.offscreen.hasDocument())) {
+    await chrome.offscreen.closeDocument();
+  }
+  await IH_localState.dropModelCache();
+  await IH_localState.set({ ready: false });
+}
+
+async function probeAndStore() {
+  let webgpu = await IH_localState.probeWebGPU();
+  if (globalThis.navigator?.gpu == null) {
+    const res = await sendToEngine({ cmd: 'probe' });
+    if (!res?.ok) throw new Error(res?.error || 'WebGPU probe failed');
+    webgpu = !!res.webgpu;
+  }
+  await IH_localState.set({ webgpuOk: webgpu });
+  return webgpu;
+}
+
+/** @type {((engine: string) => void)[]} */
+let initWaiters = [];
+let initGeneration = 0;
+let initWindowId = null;
+let offerLock = null;
+let initBusy = false;
+
+function resolveInitWaiters(engine) {
+  const waiters = initWaiters;
+  initWaiters = [];
+  for (const w of waiters) w(engine);
+}
+
+async function resolveInitWithoutReady() {
+  initGeneration += 1;
+  await IH_localState.set({ ready: false });
+  resolveInitWaiters(engineFrom(await IH_localState.get()));
+}
+
+async function refuseLocal() {
+  initGeneration += 1;
+  const st = await IH_localState.get();
+  if (st.pref === IH_localState.PREF_LOCAL) {
+    await IH_localState.set({ ready: false });
+    resolveInitWaiters('local');
+    return;
+  }
+  await IH_localState.set({ pref: IH_localState.PREF_CLOUD, ready: false });
+  resolveInitWaiters('cloud');
+}
+
+async function openInitWindow() {
+  if (initWindowId != null) {
+    try {
+      await chrome.windows.update(initWindowId, { focused: true });
+      return initWindowId;
+    } catch {
+      initWindowId = null;
+    }
+  }
+  const width = 540;
+  const height = 420;
+  /** @type {chrome.windows.CreateData} */
+  const create = {
+    url: chrome.runtime.getURL('local/init.html'),
+    type: 'popup',
+    width,
+    height,
+    focused: true,
+  };
+  try {
+    const host = await chrome.windows.getLastFocused();
+    if (Number.isFinite(host.left) && Number.isFinite(host.top) && host.width > 0 && host.height > 0) {
+      create.left = Math.round(host.left + (host.width - width) / 2);
+      create.top = Math.round(host.top + (host.height - height) / 2);
+    }
+  } catch {
+    /* 没有宿主窗口时让浏览器自己放 */
+  }
+  const win = await chrome.windows.create(create);
+  if (win.id != null && create.left != null && create.top != null) {
+    await chrome.windows.update(win.id, { left: create.left, top: create.top, focused: true });
+  }
+  initWindowId = win.id;
+  return initWindowId;
+}
+
+async function openInitAndWait() {
+  const windowId = await openInitWindow();
+  return new Promise((resolve) => {
+    initWaiters.push(resolve);
+    function onRemoved(id) {
+      if (id !== windowId) return;
+      chrome.windows.onRemoved.removeListener(onRemoved);
+      initWindowId = null;
+      void (async () => {
+        const st = await IH_localState.get();
+        if (st.ready || initBusy) return;
+        await resolveInitWithoutReady();
+      })();
+    }
+    chrome.windows.onRemoved.addListener(onRemoved);
+  });
+}
+
+async function maybeOfferInitOnce() {
+  const st = await IH_localState.get();
+  if (st.pref === IH_localState.PREF_CLOUD) return;
+  if (st.ready) return;
+  if (st.webgpuOk === false) return;
+  let webgpu;
+  try {
+    webgpu = await probeAndStore();
+  } catch (err) {
+    console.warn('[Info Highlight] WebGPU probe failed', err);
+    await IH_localState.set({ webgpuOk: false });
+    if (st.pref === IH_localState.PREF_LOCAL) {
+      throw new Error(`本机 WebGPU 探测失败：${err?.message || err}。已按「仅本机」不使用云端。`);
+    }
+    return;
+  }
+  if (!webgpu) return;
+  await openInitAndWait();
+}
+
+function maybeOfferInit() {
+  if (!offerLock) {
+    offerLock = maybeOfferInitOnce().finally(async () => {
+      offerLock = null;
+      const st = await IH_localState.get();
+      if (!st.ready) await closeOffscreenIfIdle();
+    });
+  }
+  return offerLock;
+}
+
+function engineFrom(st) {
+  if (st.pref === IH_localState.PREF_CLOUD) return 'cloud';
+  if (st.pref === IH_localState.PREF_LOCAL) return 'local';
+  return st.ready ? 'local' : 'cloud';
+}
+
+function localOnlyBlockReason(st) {
+  if (st.pref !== IH_localState.PREF_LOCAL) return '';
+  if (st.webgpuOk === false) return '本机 WebGPU 不可用，已按「仅本机」不使用云端。';
+  if (!st.ready) return '本机模型未就绪，已按「仅本机」不使用云端。请先初始化本机模型。';
+  return '';
+}
+
+async function resolveEngine() {
+  return engineFrom(await IH_localState.get());
+}
+
+async function initEngine() {
+  const st = await IH_localState.get();
+  return sendToEngine({ cmd: 'init', hub: st.hub });
+}
+
+async function fetchTokens(engine, text) {
+  if (engine === 'local') {
+    localInflight += 1;
+    try {
+      const status = await sendToEngine({ cmd: 'status' });
+      if (!status?.ok) throw new Error(status?.error || 'local engine status failed');
+      if (!status.loaded) {
+        const loaded = await initEngine();
+        if (!loaded?.ok) throw new Error(loaded?.error || 'local model reload failed');
+      }
+      const res = await sendToEngine({ cmd: 'analyze', text });
+      if (!res?.ok) throw new Error(res?.error || 'local analyze failed');
+      const tokens = res.result?.bpe_strings;
+      if (!Array.isArray(tokens)) throw new Error('local analyze returned no tokens');
+      return tokens;
+    } finally {
+      localInflight -= 1;
+      if (unloadQueued) await closeOffscreenIfIdle();
+    }
+  }
+  const data = await postAnalyze(text);
+  const tokens = data?.result?.bpe_strings;
+  if (!Array.isArray(tokens)) throw new Error('Analyze returned no tokens');
+  return tokens;
+}
+
+async function handleAnalyze(text) {
+  await maybeOfferInit();
+  const st = await IH_localState.get();
+  const blocked = localOnlyBlockReason(st);
+  if (blocked) throw new Error(blocked);
+  const engine = engineFrom(st);
+  let tokens;
+  try {
+    tokens = await IH_analyzeCache.tokens(text, () => fetchTokens(engine, text));
+  } catch (err) {
+    if (st.pref === IH_localState.PREF_LOCAL) {
+      throw new Error(`本机分析失败：${err?.message || err}`);
+    }
+    throw err;
+  }
+  return {
+    request: { text },
+    result: {
+      model: engine === 'local' ? IH_localState.MODEL_ID : undefined,
+      bpe_strings: tokens,
+    },
+  };
+}
+
+async function handleAgree() {
+  const gen = initGeneration;
+  try {
+    const webgpu = await probeAndStore();
+    if (!webgpu) throw new Error('WebGPU 不可用');
+    const res = await initEngine();
+    if (!res?.ok) throw new Error(res?.error || 'local model init failed');
+    if (gen !== initGeneration) throw new Error('已取消');
+    const st = await IH_localState.get();
+    const pref = st.pref === IH_localState.PREF_CLOUD ? IH_localState.PREF_AUTO : st.pref;
+    await IH_localState.set({ pref, ready: true });
+    await IH_analyzeCache.dropAll();
+    resolveInitWaiters('local');
+  } finally {
+    initBusy = false;
+  }
+}
+
+async function handleStatus() {
+  try {
+    await probeAndStore();
+  } catch {
+    await IH_localState.set({ webgpuOk: false });
+    await closeOffscreenIfIdle();
+    return IH_localState.get();
+  }
+  try {
+    const status = await sendToEngine({ cmd: 'status' });
+    if (!status?.loaded) await closeOffscreenIfIdle();
+  } catch {
+    await closeOffscreenIfIdle();
+  }
+  return IH_localState.get();
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (IL_pdfSw.handleMessage(msg, sender, sendResponse)) return true;
+  if (msg?.type === 'ih-local-engine' || msg?.type === 'ih-local-progress') return;
+
+  if (msg?.type === 'ih-local-status') {
+    handleStatus()
+      .then((data) => sendResponse({ ok: true, ...data }))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
+  if (msg?.type === 'ih-local-set-pref') {
+    const pref = IH_localState.normalizePref(msg.pref);
+    (async () => {
+      const prev = await resolveEngine();
+      await IH_localState.set({ pref });
+      if ((await resolveEngine()) !== prev) await IH_analyzeCache.dropAll();
+      sendResponse({ ok: true, pref });
+    })().catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
+  if (msg?.type === 'ih-local-set-hub') {
+    const hub = IH_localState.normalizeHub(msg.hub);
+    (async () => {
+      const st = await IH_localState.get();
+      if (st.hub !== hub) {
+        await dropLocalModel();
+        await IH_localState.set({ hub });
+      }
+      sendResponse({ ok: true, hub });
+    })().catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
+  if (msg?.type === 'ih-local-open-init') {
+    maybeOfferInit()
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
+  if (msg?.type === 'ih-local-agree') {
+    initBusy = true;
+    handleAgree()
+      .then(() => sendResponse({ ok: true }))
+      .catch(async (err) => {
+        try {
+          await resolveInitWithoutReady();
+        } catch {
+          resolveInitWaiters('cloud');
+        }
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      });
+    return true;
+  }
+  if (msg?.type === 'ih-local-refuse') {
+    refuseLocal()
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
+  if (msg?.type === 'ih-local-unload') {
+    queueUnload()
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
+  if (msg?.type === 'ih-local-drop-model') {
+    dropLocalModel()
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
 
   if (msg?.type !== 'ih-analyze') return;
   const text = typeof msg.text === 'string' ? msg.text : '';
@@ -157,7 +522,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: false, error: 'Missing text' });
     return;
   }
-  postAnalyze(text)
+  handleAnalyze(text)
     .then((data) => sendResponse({ ok: true, data }))
     .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
   return true;

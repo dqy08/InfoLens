@@ -195,7 +195,7 @@ test('满员时覆盖环上最旧条', async () => {
     data[k] = [tok(0, 1)];
   }
   data['ih_ac/order'] = { keys, i: 0 };
-  data['ih_ac/meta'] = { v: 3 };
+  data['ih_ac/meta'] = { v: 5 };
   await cache.tokens('new', async () => [tok(0, 2, 0.9)]);
   assert.equal(data[keys[0]], undefined);
   assert.equal(data[keys[1]][0].offset[1], 1);

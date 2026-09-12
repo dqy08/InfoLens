@@ -65,6 +65,37 @@ def extension_names() -> list[str]:
     return sorted(p.name for p in EXTENSIONS.iterdir() if (p / "manifest.json").is_file())
 
 
+def copy_info_highlight_transformers(source: Path, output: Path) -> None:
+    """Info Highlight 本机 WebGPU 需要 transformers.js 与 ORT wasm，从 npm 产物拷进包。"""
+    if source.name != "info-highlight":
+        return
+    dist = source / "node_modules" / "@huggingface" / "transformers" / "dist"
+    names = (
+        "transformers.js",
+        "ort-wasm-simd-threaded.jsep.wasm",
+        "ort-wasm-simd-threaded.jsep.mjs",
+        "ort.bundle.min.mjs",
+    )
+    dest = output / "vendor" / "transformers"
+    dest.mkdir(parents=True, exist_ok=True)
+    missing = []
+    for name in names:
+        src = dist / name
+        if not src.is_file() and name == "ort.bundle.min.mjs":
+            src = source / "node_modules" / "onnxruntime-web" / "dist" / name
+        if not src.is_file():
+            missing.append(name)
+            continue
+        copy(src, dest / name)
+    if missing:
+        raise SystemExit(
+            "build: info-highlight 缺少 @huggingface/transformers，"
+            "请先在 extension/info-highlight 执行 npm install"
+            f"（缺 {', '.join(missing)}）"
+        )
+    print("build: vendor/transformers <- @huggingface/transformers/dist")
+
+
 def build(name: str, release: bool) -> Path:
     source = EXTENSIONS / name
     output = EXTENSIONS / "dist" / name
@@ -81,6 +112,7 @@ def build(name: str, release: bool) -> Path:
     for shared_rel, packaged_rel in shared.items():
         copy(SHARED / shared_rel, output / packaged_rel)
     merge_locales(source, output)
+    copy_info_highlight_transformers(source, output)
     # config.js 由源头变体生成：--release 固定 prod，否则用 dev-env.sh 生成的 config.js。
     prod = source / "config.prod.js"
     if prod.is_file():
