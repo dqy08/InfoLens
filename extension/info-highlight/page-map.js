@@ -5,7 +5,7 @@
  *
  * 段：切分力度 = 语义 800 字节 × 倍数。每次送 1 段前文 + 本段（1:1），只画本段。
  * 骑在段界上的 BPE token：offset 裁进本段，不画进前文、也不丢掉本段侧。
- * 进度图：竖轴默认 4–8 bit；分析中亮空框，段回了加线；不自动跟滚。
+ * 进度图：竖轴默认 4–8 bit；分析中亮空框，段回了加线；后一段从上一线终点起；不自动跟滚。
  */
 (() => {
   /** SYNC: client/src/shared/core/constants.ts → SEMANTIC_CHUNK_BYTES */
@@ -29,6 +29,8 @@
   const SELECT_HOLD_MS = 1000;
   /** shared/page/scrollGeometry.js：滚动容器与文档 Y 的换算 */
   const geo = () => globalThis.IL_scrollGeometry;
+  const progressAxis = globalThis.IL_progressAxis;
+  if (!progressAxis) throw new Error('IL_progressAxis missing — inject progressAxis.js first');
 
   function requireFns() {
     if (typeof globalThis.IL_findArticleRoot !== 'function') {
@@ -344,8 +346,6 @@
   let progressIdx = null;
   /** @type {{ start: number, end: number, bits: number }[]} */
   let progressRows = [];
-  /** 全文段（码点），供邻段 Y 衔接；未分析的也量 */
-  let progressSegs = [];
   let progressSearching = false;
   let progressEnabled = false;
   chrome.storage?.local?.get({ show_progress: false }, (res) => {
@@ -378,63 +378,34 @@
     return geo().axisYRange(progressMapped?.root, findScrollRoot());
   }
 
-  function clientRectNearCp(cp0) {
-    if (!progressMapped || !progressIdx || cp0 < 0) return null;
-    const fullCp = progressIdx.utf16ToCp(progressMapped.text.length);
-    if (cp0 >= fullCp) return null;
-    const u0 = progressIdx.cpToUtf16(cp0);
-    const u1 = progressIdx.cpToUtf16(Math.min(fullCp, cp0 + 128));
-    for (const range of rangesFromUtf16(progressMapped.pieces, progressMapped.text, u0, u1)) {
-      if (!/\S/.test(range.toString())) continue;
-      for (const r of range.getClientRects()) {
-        if (r.width >= 1 && r.height >= 1) return r;
-      }
-    }
-    return null;
+  /** 本插件的码点 → Range；几何见 shared/page/progressAxis.js */
+  function rangesFromChunkCp(cp0, cp1) {
+    if (!progressMapped || !progressIdx || cp1 <= cp0) return [];
+    return rangesFromUtf16(
+      progressMapped.pieces,
+      progressMapped.text,
+      progressIdx.cpToUtf16(cp0),
+      progressIdx.cpToUtf16(cp1),
+    );
   }
 
   function measureChunkContentY(chunk, scrollRoot) {
-    const hit = progressYCache.get(chunk.start);
-    if (hit) return hit;
-    const startRect = clientRectNearCp(chunk.start);
-    const endRect = clientRectNearCp(Math.max(chunk.start, chunk.end - 1));
-    if (!startRect && !endRect) return null;
-    const top = startRect || endRect;
-    const bot = endRect || startRect;
-    let y0 = geo().contentYFromClientY(top.top, scrollRoot);
-    let y1 = geo().contentYFromClientY(bot.bottom, scrollRoot);
-    if (y1 < y0) {
-      const t = y0;
-      y0 = y1;
-      y1 = t;
-    }
-    const row = { y0, y1 };
-    progressYCache.set(chunk.start, row);
-    return row;
+    return progressAxis.measureChunkContentY(chunk, scrollRoot, progressYCache, rangesFromChunkCp);
   }
 
-  function measureNextContentY(chunk, scrollRoot) {
-    for (const row of progressSegs) {
-      if (row.start > chunk.start) return measureChunkContentY(row, scrollRoot);
+  function tiledProgress(scrollRoot) {
+    const rows = [];
+    for (const chunk of progressRows) {
+      const cy = measureChunkContentY(chunk, scrollRoot);
+      if (cy) rows.push({ chunk, cy });
     }
-    return null;
-  }
-
-  /** 进度图横轴占用的文档 Y：与竖线 abut 一致（接到下一段顶，含图/空档）。 */
-  function axisYFromBoxes(cy, nextCy) {
-    if (!cy) return null;
-    if (nextCy && nextCy.y0 > cy.y0) return { y0: cy.y0, y1: nextCy.y0 };
-    return cy;
+    return progressAxis.tileProgressRows(rows);
   }
 
   function chunksCoveringContentY(contentY, scrollRoot) {
     const hits = [];
-    for (const chunk of progressRows) {
-      const cy = axisYFromBoxes(
-        measureChunkContentY(chunk, scrollRoot),
-        measureNextContentY(chunk, scrollRoot),
-      );
-      if (cy && cy.y0 <= contentY && contentY <= cy.y1) hits.push(chunk);
+    for (const { chunk, axisY } of tiledProgress(scrollRoot)) {
+      if (axisY.y0 <= contentY && contentY <= axisY.y1) hits.push(chunk);
     }
     return hits;
   }
@@ -532,18 +503,15 @@
     }
   }
 
-  function upsertProgressLine(layout, chunk, cy, nextCy, group) {
+  function upsertProgressLine(layout, chunk, axisY, group) {
     const ui = chartEls();
     if (!ui) return;
     const { x0, x1, y0, y1, axis } = layout;
     if (!axis) return;
-    if (!nextCy) nextCy = measureNextContentY(chunk, axis.scrollRoot);
     const degree = Math.max(
       0,
       Math.min(1, (chunk.bits - PROGRESS_BITS_MIN) / (PROGRESS_BITS_MAX - PROGRESS_BITS_MIN)),
     );
-    const axisY = axisYFromBoxes(cy, nextCy);
-    const abut = !!(nextCy && nextCy.y0 > cy.y0);
     const yStart = Math.max(axis.y0, Math.min(axis.y1, axisY.y0));
     const yEnd = Math.max(axis.y0, Math.min(axis.y1, axisY.y1));
     const start = geo().xFromContentY(yStart, x0, x1, axis);
@@ -573,7 +541,7 @@
     const hitArea = /** @type {SVGRectElement} */ (group.querySelector('.ih-progress-hit'));
     line.classList.toggle('is-selected', selectedStarts.has(chunk.start));
     line.classList.toggle('is-hovered', hoveredStart === chunk.start);
-    const lineEnd = abut ? Math.max(start, end) : Math.max(start + PROGRESS_MIN_WIDTH_PX, end);
+    const lineEnd = end > start ? end : start + PROGRESS_MIN_WIDTH_PX;
     const y = y0 - (y0 - y1) * degree;
     line.setAttribute('d', `M${start} ${y}H${lineEnd}`);
     label.setAttribute('x', String((start + lineEnd) / 2));
@@ -695,17 +663,10 @@
         .map((el) => [Number(el.dataset.progressStart), el]),
     );
     const liveStarts = new Set();
-    const rows = [];
-    if (layout.axis) {
-      for (const chunk of progressRows) {
-        const cy = measureChunkContentY(chunk, layout.axis.scrollRoot);
-        if (cy) rows.push({ chunk, cy });
-      }
-    }
-    for (let i = 0; i < rows.length; i++) {
-      const { chunk, cy } = rows[i];
+    const tiled = layout.axis ? tiledProgress(layout.axis.scrollRoot) : [];
+    for (const { chunk, axisY } of tiled) {
       liveStarts.add(chunk.start);
-      upsertProgressLine(layout, chunk, cy, rows[i + 1]?.cy, groupsByStart.get(chunk.start));
+      upsertProgressLine(layout, chunk, axisY, groupsByStart.get(chunk.start));
     }
     for (const [start, group] of groupsByStart) {
       if (!liveStarts.has(start)) group.remove();
@@ -762,10 +723,6 @@
     progressIdx = globalThis.IL_createTextIndex(mapped.text);
     progressYCache = new Map();
     progressRows = [];
-    progressSegs = segs.map((s) => ({
-      start: progressIdx.utf16ToCp(s.start),
-      end: progressIdx.utf16ToCp(s.end),
-    }));
     selectedStarts = new Set();
     hoveredStart = null;
     ensureHost();
@@ -801,7 +758,6 @@
     progressMapped = null;
     progressIdx = null;
     progressRows = [];
-    progressSegs = [];
     progressYCache = new Map();
     selectedStarts = new Set();
     hoveredStart = null;

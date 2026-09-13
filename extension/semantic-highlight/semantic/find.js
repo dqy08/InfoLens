@@ -39,9 +39,13 @@
   if (!globalThis.IL_analyzeCache) {
     throw new Error('IL_analyzeCache missing — inject semantic/analyzeCache.js before find.js');
   }
+  if (!globalThis.IL_progressAxis) {
+    throw new Error('IL_progressAxis missing — inject progressAxis.js first');
+  }
   const CFG = globalThis.IL_CONFIG;
   /** shared/page/scrollGeometry.js：滚动容器与文档 Y 的换算 */
   const geo = () => globalThis.IL_scrollGeometry;
+  const progressAxis = globalThis.IL_progressAxis;
   const DOM_DEBUG = !!CFG.domDebug;
 
   // SYNC: client/src/shared/cross/SurprisalColorConfig.ts → SURPRISAL_RED / MAX_ALPHA（色值见 content.css）
@@ -1199,14 +1203,10 @@
     return geo().contentYFromX(x, 4, width - 4, axis);
   }
 
-  /** 覆盖该文档 Y 的已分析块（重叠则全部返回）。 */
-  function chunksCoveringContentY(contentY, scrollRoot) {
-    const hits = [];
-    for (const chunk of semanticMatchProgress) {
-      const cy = measureChunkContentY(chunk, scrollRoot);
-      if (cy && cy.y0 <= contentY && contentY <= cy.y1) hits.push(chunk);
-    }
-    return hits;
+  /** 本插件的码点 → Range；几何见 shared/page/progressAxis.js */
+  function rangesFromChunkCp(cp0, cp1) {
+    if (!doc.getText() || cp1 <= cp0) return [];
+    return doc.rangesFromOffsets(cp0, cp1);
   }
 
   /**
@@ -1216,33 +1216,25 @@
    * @returns {null | { y0: number, y1: number }}
    */
   function measureChunkContentY(chunk, scrollRoot) {
-    const hit = progressChunkContentY.get(chunk.start);
-    if (hit) return hit;
-    const startRect = clientRectNearCp(chunk.start);
-    const endRect = clientRectNearCp(Math.max(chunk.start, chunk.end - 1));
-    if (!startRect && !endRect) return null;
-    const top = startRect || endRect;
-    const bot = endRect || startRect;
-    let y0 = geo().contentYFromClientY(top.top, scrollRoot);
-    let y1 = geo().contentYFromClientY(bot.bottom, scrollRoot);
-    if (y1 < y0) {
-      const t = y0;
-      y0 = y1;
-      y1 = t;
-    }
-    const row = { y0, y1 };
-    progressChunkContentY.set(chunk.start, row);
-    return row;
+    return progressAxis.measureChunkContentY(chunk, scrollRoot, progressChunkContentY, rangesFromChunkCp);
   }
 
-  /** 文档序下一块的 Y（未分析也量）；没有下一块则 null */
-  function measureNextContentChunkY(chunk, scrollRoot) {
-    for (const c of splitContentChunks()) {
-      if (doc.toPaintOffset(c.start) > chunk.start) {
-        return measureChunkContentY(contentChunkToPaint(c), scrollRoot);
-      }
+  function tiledSemanticProgress(scrollRoot) {
+    const rows = [];
+    for (const chunk of semanticMatchProgress) {
+      const cy = measureChunkContentY(chunk, scrollRoot);
+      if (cy) rows.push({ chunk, cy });
     }
-    return null;
+    return progressAxis.tileProgressRows(rows);
+  }
+
+  /** 覆盖该文档 Y 的已分析块（重叠则全部返回）。命中范围与竖线一致。 */
+  function chunksCoveringContentY(contentY, scrollRoot) {
+    const hits = [];
+    for (const { chunk, axisY } of tiledSemanticProgress(scrollRoot)) {
+      if (axisY.y0 <= contentY && contentY <= axisY.y1) hits.push(chunk);
+    }
+    return hits;
   }
 
   /** 视口顶/底 → 进度图浅灰底（文档 Y 交集）；不相交则隐藏。只改 rect，不重画竖线。 */
@@ -2718,13 +2710,12 @@
     };
   }
 
-  function upsertProgressLine(lines, layout, chunk, cy, nextCy, group) {
+  function upsertProgressLine(lines, layout, chunk, axisY, group) {
     const { x0, x1, y0, y1, axis } = layout;
-    if (!nextCy) nextCy = measureNextContentChunkY(chunk, axis.scrollRoot);
+    if (!axis) return;
     const degree = Math.max(0, Math.min(1, Number(chunk.matchDegree) || 0));
-    const abut = !!(nextCy && nextCy.y0 > cy.y0);
-    const yStart = Math.max(axis.y0, Math.min(axis.y1, cy.y0));
-    const yEnd = Math.max(axis.y0, Math.min(axis.y1, abut ? nextCy.y0 : cy.y1));
+    const yStart = Math.max(axis.y0, Math.min(axis.y1, axisY.y0));
+    const yEnd = Math.max(axis.y0, Math.min(axis.y1, axisY.y1));
     const start = geo().xFromContentY(yStart, x0, x1, axis);
     const end = geo().xFromContentY(yEnd, x0, x1, axis);
     const y = y0 - (y0 - y1) * degree;
@@ -2757,7 +2748,7 @@
     line.classList.toggle('is-gray', !showMatchRed);
     line.classList.toggle('is-selected', selectedProgressChunkStarts.has(chunk.start));
     line.classList.toggle('is-hovered', hoveredProgressChunkStart === chunk.start);
-    const lineEnd = abut ? Math.max(start, end) : Math.max(start + PROGRESS_MIN_WIDTH_PX, end);
+    const lineEnd = end > start ? end : start + PROGRESS_MIN_WIDTH_PX;
     line.setAttribute('d', `M${start} ${y}H${lineEnd}`);
     label.setAttribute('x', String((start + lineEnd) / 2));
     label.setAttribute('y', String(Math.max(y1 + 10, y - 4)));
@@ -2797,18 +2788,10 @@
         .map((el) => [Number(el.dataset.progressStart), el])
     );
     const liveStarts = new Set();
-    const rows = [];
-    if (layout.axis) {
-      for (const chunk of semanticMatchProgress) {
-        const cy = measureChunkContentY(chunk, layout.axis.scrollRoot);
-        if (cy) rows.push({ chunk, cy });
-      }
-    }
-
-    for (let i = 0; i < rows.length; i++) {
-      const { chunk, cy } = rows[i];
+    const tiled = layout.axis ? tiledSemanticProgress(layout.axis.scrollRoot) : [];
+    for (const { chunk, axisY } of tiled) {
       liveStarts.add(chunk.start);
-      upsertProgressLine(lines, layout, chunk, cy, rows[i + 1]?.cy, groupsByStart.get(chunk.start));
+      upsertProgressLine(lines, layout, chunk, axisY, groupsByStart.get(chunk.start));
     }
     for (const [start, group] of groupsByStart) {
       if (!liveStarts.has(start)) group.remove();
@@ -2833,12 +2816,13 @@
       return;
     }
     const last = semanticMatchProgress[n - 1];
-    const cy = measureChunkContentY(last, layout.axis.scrollRoot);
-    if (!cy) {
+    const tiled = tiledSemanticProgress(layout.axis.scrollRoot);
+    const lastTiled = tiled[tiled.length - 1];
+    if (!lastTiled || lastTiled.chunk.start !== last.start) {
       renderSemanticMatchProgress();
       return;
     }
-    upsertProgressLine(lines, layout, last, cy, null, null);
+    upsertProgressLine(lines, layout, lastTiled.chunk, lastTiled.axisY, null);
     applyProgressViewportBand();
   }
 
@@ -2860,9 +2844,9 @@
     if (chart.hasAttribute('hidden')) return;
     const layout = progressChartLayout(chart);
     if (!layout.axis) return;
-    const cy = measureChunkContentY(row, layout.axis.scrollRoot);
-    if (!cy) return;
-    upsertProgressLine(lines, layout, row, cy, null, null);
+    const hit = tiledSemanticProgress(layout.axis.scrollRoot).find((r) => r.chunk.start === chunkStart);
+    if (!hit) return;
+    upsertProgressLine(lines, layout, hit.chunk, hit.axisY, group);
   }
 
   function setHoveredProgressChunk(start) {

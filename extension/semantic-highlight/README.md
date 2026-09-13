@@ -105,6 +105,8 @@ page/articleRoot.js         # Readability 定根
 page/extractRootPatches.js  # 定根后的手动修补管线（可追加）
 page/collectTextMap.js      # DOM → 文本映射
 page/splitTextToChunks.js   # SYNC ← client
+page/scrollGeometry.js      # 滚动容器 ↔ 文档 Y
+page/progressAxis.js        # 进度图段 Y / 增量铺线
 pdf/                        # 宿主页入口、暂存、viewer 渲染、file-access 引导
 _locales/                   # 上面这些共享页面的文案；构建时与插件自己的 _locales 合并（插件同名 key 优先）
 vendor/Readability.js

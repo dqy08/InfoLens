@@ -19,6 +19,7 @@ const CONTENT_JS = [
   'splitTextToChunks.js',
   'textIndex.js',
   'scrollGeometry.js',
+  'progressAxis.js',
   'semantic/page-document.js',
   'cache/ring-store.js',
   'semantic/analyzeCache.js',

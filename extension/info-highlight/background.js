@@ -32,6 +32,7 @@ const CONTENT_JS = [
   'splitTextToChunks.js',
   'textIndex.js',
   'scrollGeometry.js',
+  'progressAxis.js',
   'page-map.js',
   'tokenTip.js',
   'analyzeRun.js',

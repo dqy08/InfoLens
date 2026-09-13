@@ -39,18 +39,18 @@
   }
 
   function modelStatusText(st, webgpu) {
-    if (st.ready) return '已就绪（Gemma 3 270M ONNX q4）';
-    if (webgpu) return '未就绪，需先初始化';
-    return '当前环境不能初始化本机模型';
+    if (st.ready) return '已就绪（Gemma 3 270M）';
+    if (webgpu) return '尚未准备（Gemma 3 270M）';
+    return '这台电脑不能使用本机模型';
   }
 
   let modelCacheGen = 0;
   function applyBackend(st) {
     const webgpu = st.webgpuOk === true;
     webgpuDesc.textContent = webgpu
-      ? '可用（低开销探测，尚未等于模型已就绪）'
+      ? '可用'
       : st.webgpuOk === false
-        ? (st.pref === 'local' ? '不可用（仅本机：不会改走云端）' : '不可用，分析走云端')
+        ? (st.pref === 'local' ? '不可用。已选仅本机，不会改去云端' : '不可用，将使用云端')
         : '尚未检测';
     const base = modelStatusText(st, webgpu);
     modelDesc.textContent = base;
@@ -96,7 +96,7 @@
   });
 
   modelClear.addEventListener('click', () => {
-    if (!confirm('清空本机模型缓存？下次分析需重新下载约 800 MB。')) return;
+    if (!confirm('清空本机模型？下次要用需重新下载约 800 MB。')) return;
     modelClear.disabled = true;
     chrome.runtime.sendMessage({ type: 'ih-local-drop-model' }, (res) => {
       if (chrome.runtime.lastError || !res?.ok) {

@@ -107,25 +107,25 @@
     <h2>显示</h2>
     <label class="row">
       <div class="row-text">
-        <div class="row-title">显示进度图</div>
-        <p class="row-desc">在页面顶部展示信息量走势与视口位置</p>
+        <div class="row-title">顶部走势图</div>
+        <p class="row-desc">在页面顶部标出全文信息量变化，以及你正在看的位置</p>
       </div>
       <input type="checkbox" id="show_progress">
     </label>
     <label class="row">
       <div class="row-text">
-        <div class="row-title">悬停显示 token 详情</div>
-        <p class="row-desc">当场分析后，鼠标停在正文上时展示信息量与 Top-K 候选；走缓存的回访不显示</p>
+        <div class="row-title">悬停查看详情</div>
+        <p class="row-desc">鼠标停在文字上时，显示该处信息量和更可能出现的词。同一页再次分析时不显示。</p>
       </div>
       <input type="checkbox" id="show_token_tip">
     </label>
-    <h2>分析后端</h2>
+    <h2>分析</h2>
     <div class="row">
       <div class="row-text">
-        <div class="row-title">分析方式</div>
-        <p class="row-desc">自动：本机就绪则用本机，否则云端。仅本机：不上传；不可用时说明原因，不会改走云端。</p>
+        <div class="row-title">在哪分析</div>
+        <p class="row-desc">自动会优先用本机。仅本机不上传正文，也不会改去云端。</p>
       </div>
-      <select id="analyze_pref" aria-label="分析方式">
+      <select id="analyze_pref" aria-label="在哪分析">
         <option value="auto">自动</option>
         <option value="local">仅本机</option>
         <option value="cloud">仅云端</option>
@@ -140,10 +140,10 @@
     <div class="row">
       <div class="row-text">
         <div class="row-title">本机模型</div>
-        <p id="model_desc" class="row-desc">Gemma 3 270M ONNX q4</p>
+        <p id="model_desc" class="row-desc">正在读取…</p>
       </div>
       <div class="row-btns">
-        <button type="button" id="local_init">初始化</button>
+        <button type="button" id="local_init">准备</button>
         <button type="button" id="model_clear" disabled>清空</button>
       </div>
     </div>
