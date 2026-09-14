@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>本地模型初始化</title>
+  <title>On-device model setup</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -57,7 +57,9 @@
       margin: 16px 0 0;
       color: var(--fg);
     }
+    label.hub > span { flex: 1; min-width: 0; }
     select {
+      flex-shrink: 0;
       font: inherit;
       height: 36px;
       padding: 0 8px;
@@ -78,22 +80,22 @@
 </head>
 <body>
   <main>
-    <h1>本地模型初始化</h1>
-    <p id="lead">本机可用 WebGPU 时，可用 Gemma 3 270M（q4）在浏览器里分析信息密度，热力图不必每次走云端。首次需下载约 800 MB 权重，之后留在本机。</p>
+    <h1>On-device model setup</h1>
+    <p id="lead">When this computer has WebGPU, Gemma 3 270M (q4) can score information density in the browser, so the heatmap does not have to go to the cloud every time. The first run downloads about 800 MB of weights and keeps them here.</p>
     <label class="hub">
-      下载源
-      <select id="model_hub" aria-label="权重下载源">
-        <option value="huggingface">官方</option>
-        <option value="modelscope">国内</option>
+      <span>Download source</span>
+      <select id="model_hub" aria-label="Weight download source">
+        <option value="huggingface">Official</option>
+        <option value="modelscope">China</option>
       </select>
     </label>
     <p id="status"></p>
     <progress id="bar" hidden></progress>
     <div class="actions">
-      <button type="button" id="agree">同意并准备</button>
-      <button type="button" id="refuse">仅使用云端</button>
-      <button type="button" id="hide" hidden>隐藏</button>
-      <button type="button" id="close" hidden>关闭</button>
+      <button type="button" id="agree">Agree and prepare</button>
+      <button type="button" id="refuse">Use cloud only</button>
+      <button type="button" id="hide" hidden>Hide</button>
+      <button type="button" id="close" hidden>Close</button>
     </div>
   </main>
   <script src="state.js"></script>

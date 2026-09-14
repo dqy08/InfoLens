@@ -1,8 +1,4 @@
 {
-  "pdfEntryLabel": {
-    "message": "Open with InfoLens PDF viewer",
-    "description": "Button injected into a PDF host page to open the bundled viewer"
-  },
   "fileAccessPageTitle": {
     "message": "InfoLens — Allow access to file URLs",
     "description": "Browser tab title for the local-file access help page"

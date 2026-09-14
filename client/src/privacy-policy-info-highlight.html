@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Info Highlight — Privacy Policy</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+
+<body style="max-width:700px;margin:40px auto;padding:0 20px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;line-height:1.6;color:#222;">
+    <h1>Privacy Policy for Info Highlight</h1>
+    <p><em>Last updated: September 2026</em></p>
+
+    <h2>Data We Process</h2>
+    <p>When you invoke the extension (toolbar icon or page context menu) on the webpage or PDF you are viewing, it reads the visible article/body text of that page. What happens next depends on how analysis is run:</p>
+    <ul>
+        <li><strong>Cloud</strong> (default until an on-device model is ready): the extracted text is sent to our backend server at <code>api.info-lens.app</code>.</li>
+        <li><strong>On-device</strong> (after you agree on the setup page): the text stays on your computer. The extension downloads about 800&nbsp;MB of model weights from Hugging Face or ModelScope (you choose which) and keeps them locally.</li>
+    </ul>
+    <p>This happens only when you actively invoke the extension on the page you are viewing at that moment. The extension does not run in the background and does not access any other tabs or pages.</p>
+
+    <h2>How We Use It</h2>
+    <p>The page text is used solely to compute information-density scores and return a heatmap overlay on that page. No other use is made of this data. On-device analysis does the same computation locally and does not send the page text to our server.</p>
+
+    <h2>Data We Do Not Collect</h2>
+    <p>We do not collect or store: names, email addresses, passwords, financial information, health information, personal communications, or any other personally identifiable information. We do not track your browsing history across pages or sessions.</p>
+
+    <h2>Data Storage &amp; Retention</h2>
+    <ul>
+        <li>Page text sent to our server is processed transiently to generate the heatmap and is not stored on our server after the response is returned.</li>
+        <li>Our server keeps a temporary, in-memory counter to distinguish visitor sessions for basic operational purposes (e.g., diagnosing issues). This counter is not written to disk, is not linked to any other data, and is cleared whenever the server restarts.</li>
+        <li>Heatmap results, display preferences, and on-device model status are saved locally in your browser (via the extension's local storage). Model weights, if you download them, stay in the browser cache on your device. You can clear both from the extension's options page. This data never leaves your device except as described above for cloud analysis.</li>
+    </ul>
+
+    <h2>Third-Party Sharing</h2>
+    <p>We do not share, sell, or transfer page content to third parties. We do not use your data for advertising. If you agree to on-device analysis, the extension contacts Hugging Face or ModelScope only to download model weights; those services do not receive the page text.</p>
+
+    <h2>Security</h2>
+    <p>All data sent to our server is transmitted over HTTPS.</p>
+
+    <h2>Permissions</h2>
+    <p>The extension requests the minimum permissions needed for its single purpose (highlighting informative words on the active page):</p>
+    <ul>
+        <li><strong>activeTab / scripting</strong>: to read and highlight text on the page you are currently viewing, only when you invoke the extension</li>
+        <li><strong>storage</strong>: to save heatmap results and your preferences locally in your browser</li>
+        <li><strong>offscreen</strong>: to run the on-device model when you have enabled it</li>
+        <li><strong>contextMenus</strong>: so you can invoke the same highlight from the page's right-click menu</li>
+    </ul>
+    <p>Optional host access is requested only when needed: <code>file://</code> for local PDF files, and Hugging Face or ModelScope origins to download model weights after you agree. Cloud analysis does <strong>not</strong> use host permissions; page text is sent to our backend by the extension’s background service worker via a standard cross-origin HTTPS request. The page you are viewing never talks to our server directly.</p>
+
+    <h2>Changes to This Policy</h2>
+    <p>If our data practices change, we will update this policy and the Chrome Web Store listing accordingly.</p>
+
+    <h2>Contact</h2>
+    <p>For questions about this policy, please contact <a href="mailto:xiaoyundqy@qq.com">xiaoyundqy@qq.com</a>.</p>
+</body>
+
+</html>

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -41,7 +41,7 @@
       margin: 0 auto;
       padding: 16px 24px;
     }
-    .top-icon { width: 40px; height: 40px; border-radius: 8px; }
+    .top-icon { flex-shrink: 0; width: 40px; height: 40px; border-radius: 8px; }
     .top-name { font-size: 22px; font-weight: 600; }
     main { max-width: 680px; margin: 0 auto; padding: 28px 24px 64px; }
     h2 {
@@ -59,10 +59,11 @@
       border-bottom: 1px solid var(--line);
     }
     label.row { cursor: pointer; }
-    .row-text { min-width: 0; }
+    .row-text { flex: 1; min-width: 0; }
     .row-title { font-size: 16px; }
     .row-desc { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
     input[type="checkbox"] {
+      flex-shrink: 0;
       width: 18px;
       height: 18px;
       margin: 0;
@@ -104,56 +105,56 @@
     </div>
   </header>
   <main>
-    <h2>显示</h2>
+    <h2>Display</h2>
     <label class="row">
       <div class="row-text">
-        <div class="row-title">顶部走势图</div>
-        <p class="row-desc">在页面顶部标出全文信息量变化，以及你正在看的位置</p>
+        <div class="row-title">Progress chart</div>
+        <p class="row-desc">Show how information density changes across the page, and where you are</p>
       </div>
       <input type="checkbox" id="show_progress">
     </label>
     <label class="row">
       <div class="row-text">
-        <div class="row-title">悬停查看详情</div>
-        <p class="row-desc">鼠标停在文字上时，显示该处信息量和更可能出现的词。同一页再次分析时不显示。</p>
+        <div class="row-title">Hover for details</div>
+        <p class="row-desc">When the pointer rests on text, show its information density and more likely words. Hidden when you analyze the same page again.</p>
       </div>
-      <input type="checkbox" id="show_token_tip">
+      <input type="checkbox" id="show_token_tip" checked>
     </label>
-    <h2>分析</h2>
+    <h2>Analysis</h2>
     <div class="row">
       <div class="row-text">
-        <div class="row-title">在哪分析</div>
-        <p class="row-desc">自动会优先用本机。仅本机不上传正文，也不会改去云端。</p>
+        <div class="row-title">Where to analyze</div>
+        <p class="row-desc">Auto prefers this device. On-device only does not upload the page, and will not fall back to the cloud.</p>
       </div>
-      <select id="analyze_pref" aria-label="在哪分析">
-        <option value="auto">自动</option>
-        <option value="local">仅本机</option>
-        <option value="cloud">仅云端</option>
+      <select id="analyze_pref" aria-label="Where to analyze">
+        <option value="auto">Auto</option>
+        <option value="local">On this device only</option>
+        <option value="cloud">Cloud only</option>
       </select>
     </div>
     <div class="row">
       <div class="row-text">
-        <div class="row-title">本机 WebGPU</div>
-        <p id="webgpu_desc" class="row-desc">正在检测…</p>
+        <div class="row-title">On-device WebGPU</div>
+        <p id="webgpu_desc" class="row-desc">Checking…</p>
       </div>
     </div>
     <div class="row">
       <div class="row-text">
-        <div class="row-title">本机模型</div>
-        <p id="model_desc" class="row-desc">正在读取…</p>
+        <div class="row-title">On-device model</div>
+        <p id="model_desc" class="row-desc">Reading…</p>
       </div>
       <div class="row-btns">
-        <button type="button" id="local_init">准备</button>
-        <button type="button" id="model_clear" disabled>清空</button>
+        <button type="button" id="local_init">Prepare</button>
+        <button type="button" id="model_clear" disabled>Clear</button>
       </div>
     </div>
-    <h2>存储</h2>
+    <h2>Storage</h2>
     <div class="row">
       <div class="row-text">
-        <div class="row-title">分析缓存</div>
+        <div class="row-title">Analysis cache</div>
         <p id="cache_desc" class="row-desc"></p>
       </div>
-      <button type="button" id="cache_clear">清空</button>
+      <button type="button" id="cache_clear">Clear</button>
     </div>
   </main>
   <script src="cache/ring-store.js"></script>

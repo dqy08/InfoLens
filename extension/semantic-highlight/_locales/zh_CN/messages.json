@@ -6,29 +6,5 @@
   "extDescription": {
     "message": "根据含义搜索并高亮原文中的相关词语，给页面加上一层语义热力图：帮你阅读，而不是替你阅读。",
     "description": "商店列表中的简短介绍"
-  },
-  "contextMenuSearch": {
-    "message": "Search with Semantic Highlight",
-    "description": "网页/选区右键菜单项文案"
-  },
-  "optionsStorageSection": {
-    "message": "存储",
-    "description": "设置页分节标题"
-  },
-  "optionsCacheTitle": {
-    "message": "分析缓存",
-    "description": "请求缓存这一行的标题"
-  },
-  "optionsCacheUsage": {
-    "message": "$1 条 · $2",
-    "description": "缓存占用：条数与格式化体积",
-    "placeholders": {
-      "count": { "content": "$1" },
-      "size": { "content": "$2" }
-    }
-  },
-  "optionsCacheClear": {
-    "message": "清空",
-    "description": "删除分析缓存的按钮"
   }
 }

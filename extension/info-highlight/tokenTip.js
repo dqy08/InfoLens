@@ -98,7 +98,7 @@ globalThis.IH_tokenTip ||= (function () {
   overflow-wrap: anywhere;
 }
 
-/* SYNC: extension/info-highlight/content.css → [prefers-color-scheme: light] 进度图 / 状态条 */
+/* 浮层浅色：与 shared/ui/overlay.css 进度图 / 状态条同一套边框底色 */
 @media (prefers-color-scheme: light) {
   .panel {
     border-color: #dadce0;

@@ -74,18 +74,18 @@ globalThis.IH_analyzeRun ||= (function () {
     return lastAlignErr;
   }
 
-  function beginSession(mapped, emptyMsg) {
+  async function beginSession(mapped, emptyMsg) {
     const segs = globalThis.IH_splitSegments(mapped.text);
     if (!segs.length) throw new Error(emptyMsg);
     globalThis.IH_clearHighlights();
-    globalThis.IH_bindProgress(mapped, segs);
+    await globalThis.IH_bindProgress(mapped, segs);
     return { mapped, segs, next: 0, painted: 0 };
   }
 
-  function afterPaint(session, lastAlignErr, emptyMsg, onMore) {
-    globalThis.IH_setProgressSearching(false);
+  async function afterPaint(session, lastAlignErr, emptyMsg, onMore) {
+    await globalThis.IH_setProgressSearching(false);
     if (session.next < session.segs.length) {
-      onMore();
+      await onMore();
       return;
     }
     if (!session.painted) throw lastAlignErr || new Error(emptyMsg);
@@ -93,17 +93,17 @@ globalThis.IH_analyzeRun ||= (function () {
 
   /**
    * @param {() => boolean} still
-   * @param {{ fail: (err: unknown) => void, idle: () => void }} hooks
+   * @param {{ fail: (err: unknown) => void | Promise<void>, idle: () => void }} hooks
    * @param {() => Promise<void>} job
    */
   async function runJob(still, { fail, idle }, job) {
     globalThis.IH_clearError();
-    globalThis.IH_setProgressSearching(true);
+    await globalThis.IH_setProgressSearching(true);
     try {
       await job();
     } catch (err) {
       if (!still()) return;
-      fail(err);
+      await fail(err);
     } finally {
       if (!still()) return;
       idle();

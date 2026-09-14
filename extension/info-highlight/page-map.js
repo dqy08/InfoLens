@@ -17,7 +17,38 @@
   /** SYNC: extension/semantic-highlight/semantic/find.js → HL_UNDERLINE（命名空间 ih-，避免和语义插件互踩） */
   const HL_UNDERLINE = 'ih-underline';
   const HOST_ID = 'ih-progress-host';
-  const ERROR_ID = 'ih-error';
+  const HOST_CSS = `
+:host {
+  all: initial;
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 2147483646;
+  display: block;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+}
+.semantic-find-bar-host {
+  position: static;
+  margin: 0;
+  padding: 0;
+  width: 338px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+.semantic-match-progress {
+  margin-top: 0;
+  height: 36px;
+}
+.semantic-match-progress[hidden] + .semantic-find-status-list > :first-child {
+  margin-top: 0;
+}
+`;
   /** SYNC: client/src/shared/cross/surprisalMath.ts → REFERENCE_MAX_SURPRISAL_BITS */
   const MAX_SURPRISAL_BITS = 18;
   const PROGRESS_BITS_MIN = 4;
@@ -31,6 +62,11 @@
   const geo = () => globalThis.IL_scrollGeometry;
   const progressAxis = globalThis.IL_progressAxis;
   if (!progressAxis) throw new Error('IL_progressAxis missing — inject progressAxis.js first');
+
+  function requireOverlay() {
+    if (!globalThis.IL_overlay) throw new Error('IL_overlay missing — inject overlay.js first');
+    return globalThis.IL_overlay;
+  }
 
   function requireFns() {
     if (typeof globalThis.IL_findArticleRoot !== 'function') {
@@ -304,40 +340,42 @@
     return t.length > 120 ? t.slice(0, 119) + '…' : t;
   }
 
-  function noticeEl() {
-    const host = ensureHost();
-    let el = host.querySelector('#' + ERROR_ID);
-    if (!el) {
-      el = document.createElement('div');
-      el.id = ERROR_ID;
-      host.appendChild(el);
-    }
-    el.replaceChildren();
-    el.removeAttribute('hidden');
-    return el;
+  async function noticeList() {
+    await ensureHost();
+    const list = ui$('ih-status-list');
+    if (!list) throw new Error('ih-status-list missing');
+    return list;
   }
 
-  function showError(msg) {
-    const el = noticeEl();
-    el.classList.remove('is-paused');
-    el.textContent = shortError(msg);
+  async function showError(msg) {
+    const list = await noticeList();
+    list.replaceChildren(requireOverlay().createStatus({
+      label: 'Failed',
+      detail: shortError(msg),
+      tone: 'error',
+      continueHidden: true,
+      feedbackHidden: true,
+      onClose: clearError,
+    }));
   }
 
-  /** SYNC: extension/semantic-highlight/semantic/find.js → showFindStatus('Paused', 'Continue to search more') */
-  function showPaused(onContinue) {
-    const el = noticeEl();
-    el.classList.add('is-paused');
-    const text = document.createElement('span');
-    text.textContent = 'Paused · Continue to search more';
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = 'Continue';
-    btn.addEventListener('click', onContinue);
-    el.append(text, btn);
+  async function showPaused(onContinue) {
+    const list = await noticeList();
+    list.replaceChildren(requireOverlay().createStatus({
+      label: 'Paused',
+      detail: 'Continue to highlight more',
+      continueHidden: false,
+      feedbackHidden: true,
+      onContinue: () => {
+        clearError();
+        onContinue();
+      },
+      onClose: clearError,
+    }));
   }
 
   function clearError() {
-    document.getElementById(ERROR_ID)?.remove();
+    ui$('ih-status-list')?.replaceChildren();
   }
 
   /** @type {{ text: string, pieces: Array<{ node: Text, start: number, end: number }>, root: Element } | null} */
@@ -366,9 +404,18 @@
   let selectHoldTimer = 0;
   let hostWired = false;
   let windowFollowBound = false;
+  /** @type {ShadowRoot | null} */
+  let uiShadow = null;
+  /** @type {Promise<HTMLElement> | null} */
+  let hostReady = null;
+  let hostEpoch = 0;
   /** @type {Element | null} */
   let innerScrollBound = null;
   let viewportRaf = 0;
+
+  function ui$(id) {
+    return uiShadow?.getElementById(id) ?? null;
+  }
 
   function findScrollRoot() {
     return geo().findScrollRoot(progressMapped?.root);
@@ -433,11 +480,11 @@
   }
 
   function applyProgressSelectedClass() {
-    const lines = document.getElementById('ih-progress-lines');
+    const lines = ui$('ih-progress-lines');
     if (!(lines instanceof SVGGElement)) return;
     for (const el of lines.children) {
       if (!(el instanceof SVGGElement) || el.dataset.progressStart == null) continue;
-      el.querySelector('.ih-progress-line')?.classList.toggle(
+      el.querySelector('.semantic-match-progress-line')?.classList.toggle(
         'is-selected',
         selectedStarts.has(Number(el.dataset.progressStart)),
       );
@@ -473,9 +520,9 @@
   }
 
   function chartEls() {
-    const chart = document.getElementById('ih-progress');
-    const lines = document.getElementById('ih-progress-lines');
-    const band = document.getElementById('ih-progress-viewport');
+    const chart = ui$('ih-progress');
+    const lines = ui$('ih-progress-lines');
+    const band = ui$('ih-progress-viewport');
     if (!(chart instanceof SVGSVGElement) || !(lines instanceof SVGGElement) || !(band instanceof SVGRectElement)) {
       return null;
     }
@@ -498,8 +545,8 @@
     for (const chunkStart of [previous, start]) {
       if (chunkStart == null) continue;
       const group = [...ui.lines.children].find((el) => el.dataset.progressStart === String(chunkStart));
-      group?.querySelector('.ih-progress-line')?.classList.toggle('is-hovered', chunkStart === start);
-      group?.querySelector('.ih-progress-label')?.toggleAttribute('hidden', chunkStart !== start);
+      group?.querySelector('.semantic-match-progress-line')?.classList.toggle('is-hovered', chunkStart === start);
+      group?.querySelector('.semantic-match-progress-label')?.toggleAttribute('hidden', chunkStart !== start);
     }
   }
 
@@ -520,15 +567,15 @@
       group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       group.dataset.progressStart = String(chunk.start);
       const lineEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      lineEl.classList.add('ih-progress-line');
+      lineEl.classList.add('semantic-match-progress-line');
       group.appendChild(lineEl);
       const labelEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      labelEl.classList.add('ih-progress-label');
+      labelEl.classList.add('semantic-match-progress-label');
       labelEl.setAttribute('text-anchor', 'middle');
       labelEl.setAttribute('hidden', '');
       group.appendChild(labelEl);
       const hitEl = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      hitEl.classList.add('ih-progress-hit');
+      hitEl.classList.add('semantic-match-progress-hit-area');
       hitEl.addEventListener('mouseenter', () => setHoveredProgress(chunk.start));
       hitEl.addEventListener('mouseleave', () => {
         if (hoveredStart === chunk.start) setHoveredProgress(null);
@@ -536,9 +583,9 @@
       group.appendChild(hitEl);
       ui.lines.appendChild(group);
     }
-    const line = /** @type {SVGPathElement} */ (group.querySelector('.ih-progress-line'));
-    const label = /** @type {SVGTextElement} */ (group.querySelector('.ih-progress-label'));
-    const hitArea = /** @type {SVGRectElement} */ (group.querySelector('.ih-progress-hit'));
+    const line = /** @type {SVGPathElement} */ (group.querySelector('.semantic-match-progress-line'));
+    const label = /** @type {SVGTextElement} */ (group.querySelector('.semantic-match-progress-label'));
+    const hitArea = /** @type {SVGRectElement} */ (group.querySelector('.semantic-match-progress-hit-area'));
     line.classList.toggle('is-selected', selectedStarts.has(chunk.start));
     line.classList.toggle('is-hovered', hoveredStart === chunk.start);
     const lineEnd = end > start ? end : start + PROGRESS_MIN_WIDTH_PX;
@@ -689,23 +736,47 @@
     revealAtContentY(geo().contentYFromX(x, 4, width - 4, axis));
   }
 
-  function ensureHost() {
-    let host = document.getElementById(HOST_ID);
-    if (host) return host;
-    host = document.createElement('div');
+  function attachExistingHost(host) {
+    uiShadow = host.shadowRoot;
+    if (!uiShadow) throw new Error('ih-progress-host shadow missing');
+    return host;
+  }
+
+  async function buildHost(epoch) {
+    const css = await requireOverlay().loadCss();
+    if (epoch !== hostEpoch) throw new Error('ih-progress-host cleared');
+    const existing = document.getElementById(HOST_ID);
+    if (existing) return attachExistingHost(existing);
+    const host = document.createElement('div');
     host.id = HOST_ID;
+    const shadow = host.attachShadow({ mode: 'open' });
+    uiShadow = shadow;
+    const style = document.createElement('style');
+    style.textContent = css + '\n' + HOST_CSS;
+    const wrap = document.createElement('div');
+    wrap.className = 'semantic-find-bar-host';
+    const uiOverlay = requireOverlay();
+    uiOverlay.applyTheme(wrap);
+    uiOverlay.watchTheme(wrap);
     const chart = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     chart.id = 'ih-progress';
+    chart.classList.add('semantic-match-progress');
     chart.setAttribute('viewBox', '0 0 100 100');
     chart.setAttribute('aria-label', 'Information progress');
     chart.setAttribute('hidden', '');
     const band = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     band.id = 'ih-progress-viewport';
+    band.classList.add('semantic-match-progress-viewport');
     band.setAttribute('hidden', '');
     const lines = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     lines.id = 'ih-progress-lines';
     chart.append(band, lines);
-    host.appendChild(chart);
+    const list = document.createElement('div');
+    list.id = 'ih-status-list';
+    list.className = 'semantic-find-status-list';
+    wrap.append(chart, list);
+    shadow.append(style, wrap);
+    if (epoch !== hostEpoch) throw new Error('ih-progress-host cleared');
     document.documentElement.appendChild(host);
     if (!hostWired) {
       hostWired = true;
@@ -714,24 +785,37 @@
     return host;
   }
 
+  async function ensureHost() {
+    const existing = document.getElementById(HOST_ID);
+    if (existing) return attachExistingHost(existing);
+    if (!hostReady) {
+      const epoch = hostEpoch;
+      hostReady = buildHost(epoch);
+      hostReady.catch(() => {
+        if (epoch === hostEpoch) hostReady = null;
+      });
+    }
+    return hostReady;
+  }
+
   /**
    * @param {{ text: string, pieces: Array<{ node: Text, start: number, end: number }>, root: Element }} mapped
    * @param {{ start: number, end: number }[]} segs
    */
-  function bindProgress(mapped, segs) {
+  async function bindProgress(mapped, segs) {
     progressMapped = mapped;
     progressIdx = globalThis.IL_createTextIndex(mapped.text);
     progressYCache = new Map();
     progressRows = [];
     selectedStarts = new Set();
     hoveredStart = null;
-    ensureHost();
+    await ensureHost();
     renderProgress();
   }
 
-  function setProgressSearching(on) {
+  async function setProgressSearching(on) {
     progressSearching = !!on;
-    ensureHost();
+    await ensureHost();
     renderProgress();
   }
 
@@ -771,6 +855,9 @@
     }
     unbindFollow();
     hostWired = false;
+    uiShadow = null;
+    hostEpoch += 1;
+    hostReady = null;
     clearUnderline();
     document.getElementById(HOST_ID)?.remove();
   }

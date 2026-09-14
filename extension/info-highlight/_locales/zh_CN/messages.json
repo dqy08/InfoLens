@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "信息高亮｜Info Highlight",
+    "description": "商店与扩展管理页显示的扩展名称"
+  },
+  "extDescription": {
+    "message": "高亮信息量大的字，加快阅读。",
+    "description": "商店列表中的简短介绍"
+  }
+}

@@ -42,6 +42,9 @@
   if (!globalThis.IL_progressAxis) {
     throw new Error('IL_progressAxis missing — inject progressAxis.js first');
   }
+  if (!globalThis.IL_overlay) {
+    throw new Error('IL_overlay missing — inject overlay.js first');
+  }
   const CFG = globalThis.IL_CONFIG;
   /** shared/page/scrollGeometry.js：滚动容器与文档 Y 的换算 */
   const geo = () => globalThis.IL_scrollGeometry;
@@ -916,50 +919,14 @@
         : undefined;
     const resumable = opts?.resumable !== false;
 
-    const el = document.createElement('div');
-    el.className =
-      tone === 'error'
-        ? 'semantic-find-strip semantic-find-status is-error'
-        : 'semantic-find-strip semantic-find-status';
-    el.setAttribute('role', 'status');
-
-    const textEl = document.createElement('span');
-    textEl.className = 'semantic-find-status-text';
-    const labelEl = document.createElement('span');
-    labelEl.className =
-      tone === 'error' ? 'semantic-find-status-label is-error' : 'semantic-find-status-label';
-    labelEl.textContent = head;
-    textEl.replaceChildren(labelEl, ...(body ? [document.createTextNode(` · ${body}`)] : []));
-    textEl.title = body ? `${head} · ${body}` : head;
-
-    const actions = document.createElement('div');
-    actions.className = 'semantic-find-status-actions';
-
-    const feedbackBtn = document.createElement('button');
-    feedbackBtn.type = 'button';
-    feedbackBtn.className = 'semantic-find-status-feedback';
-    feedbackBtn.title = 'Report this to the author';
-    feedbackBtn.setAttribute('aria-label', 'Report this to the author');
-    if (tone === 'error') resetFeedbackButton(feedbackBtn);
-    else feedbackBtn.hidden = true;
-
-    const continueBtn = document.createElement('button');
-    continueBtn.type = 'button';
-    continueBtn.className = 'semantic-find-status-continue';
-    continueBtn.title = 'Continue search';
-    continueBtn.setAttribute('aria-label', 'Continue search');
-    continueBtn.textContent = 'Continue';
-    continueBtn.hidden = true;
-
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'semantic-find-status-close';
-    closeBtn.title = 'Dismiss';
-    closeBtn.setAttribute('aria-label', 'Dismiss');
-    closeBtn.textContent = '×';
-
-    actions.append(feedbackBtn, continueBtn, closeBtn);
-    el.append(textEl, actions);
+    const el = globalThis.IL_overlay.createStatus({
+      label: head,
+      detail: body,
+      tone,
+      feedbackHidden: tone !== 'error',
+    });
+    const feedbackBtn = el.querySelector('.semantic-find-status-feedback');
+    if (tone === 'error' && feedbackBtn instanceof HTMLButtonElement) resetFeedbackButton(feedbackBtn);
     list.appendChild(el);
 
     statusEntries.push({
@@ -2261,19 +2228,12 @@
     return uiShadow?.querySelector(sel) ?? null;
   }
 
-  function resolveBarTheme() {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  }
-
   function applyBarTheme(bar) {
-    if (!bar) return;
-    bar.setAttribute('data-theme', resolveBarTheme());
+    globalThis.IL_overlay.applyTheme(bar);
   }
 
   function watchBarTheme(bar) {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const onScheme = () => applyBarTheme(bar);
-    mq.addEventListener('change', onScheme);
+    globalThis.IL_overlay.watchTheme(bar);
   }
 
   // ---------- 输入历史（对齐站内 queryHistory：聚焦/输入弹出、过滤、点选回填并搜索） ----------
@@ -2645,7 +2605,8 @@
     uiShadow = host.attachShadow({ mode: 'open' });
 
     try {
-      const [cssText, html] = await Promise.all([
+      const [overlayCss, cssText, html] = await Promise.all([
+        globalThis.IL_overlay.loadCss(),
         fetch(chrome.runtime.getURL('ui/semantic-find-bar.css')).then((r) => {
           if (!r.ok) throw new Error(`failed to load find bar css (${r.status})`);
           return r.text();
@@ -2657,7 +2618,7 @@
       ]);
 
       const style = document.createElement('style');
-      style.textContent = HOST_CSS + '\n' + cssText;
+      style.textContent = HOST_CSS + '\n' + overlayCss + '\n' + cssText;
       uiShadow.appendChild(style);
 
       const wrap = document.createElement('div');

@@ -41,7 +41,7 @@
       margin: 0 auto;
       padding: 16px 24px;
     }
-    .top-icon { width: 40px; height: 40px; border-radius: 8px; }
+    .top-icon { flex-shrink: 0; width: 40px; height: 40px; border-radius: 8px; }
     .top-name { font-size: 22px; font-weight: 600; }
     main { max-width: 680px; margin: 0 auto; padding: 28px 24px 64px; }
     h2 {
@@ -58,7 +58,7 @@
       padding: 12px 0;
       border-bottom: 1px solid var(--line);
     }
-    .row-text { min-width: 0; }
+    .row-text { flex: 1; min-width: 0; }
     .row-title { font-size: 16px; }
     .row-desc { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
     button {
@@ -85,13 +85,13 @@
     </div>
   </header>
   <main>
-    <h2 id="storage_heading"></h2>
+    <h2>Storage</h2>
     <div class="row">
       <div class="row-text">
-        <div id="cache_title" class="row-title"></div>
+        <div class="row-title">Analysis cache</div>
         <p id="cache_desc" class="row-desc"></p>
       </div>
-      <button type="button" id="cache_clear"></button>
+      <button type="button" id="cache_clear">Clear</button>
     </div>
   </main>
   <script src="cache/ring-store.js"></script>

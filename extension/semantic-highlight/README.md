@@ -91,7 +91,7 @@ pack.sh / dev-env.sh / PUBLISH.md
 config.prod.js         # 上架默认 / 官方域名（源头）；--release 打进包
 config.dev.js          # Dev 门面 *.workers.dev（源头）
 config.js              # gitignore；dev-env 生成
-_locales/              # 本插件独有文案（名称/描述/右键菜单/设置页）
+_locales/              # 商店名称与短描述
 ui/                    # Find bar 权威源
 semantic/              # DocumentAdapter + semantic find（page/pdf + find.js）
 pdf/viewer.html        # 查看器页面骨架（脚本清单是本插件的）
@@ -107,8 +107,11 @@ page/collectTextMap.js      # DOM → 文本映射
 page/splitTextToChunks.js   # SYNC ← client
 page/scrollGeometry.js      # 滚动容器 ↔ 文档 Y
 page/progressAxis.js        # 进度图段 Y / 增量铺线
+page/overlay.js             # 进度图 / 状态条主题与 DOM
+ui/overlay.css              # 进度图 / 状态条外壳
+sw/inject.js                # 网页 content 注入重试
 pdf/                        # 宿主页入口、暂存、viewer 渲染、file-access 引导
-_locales/                   # 上面这些共享页面的文案；构建时与插件自己的 _locales 合并（插件同名 key 优先）
+_locales/                   # 本地 PDF 权限说明；构建时与插件自己的 _locales 合并（插件同名 key 优先）
 vendor/Readability.js
 vendor/pdfjs/               # pdfjs-dist 3.11.174 legacy 官方非压缩（pdf.js + pdf.worker.js + LICENSE）
 ```

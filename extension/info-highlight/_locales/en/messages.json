@@ -1,10 +1,10 @@
 {
   "extName": {
-    "message": "Semantic Highlight",
+    "message": "Info Highlight",
     "description": "Extension name shown in the store and chrome://extensions"
   },
   "extDescription": {
-    "message": "Search and highlight relevant words by meaning, adding a semantic heatmap to webpages — helping you read, not reading for you.",
+    "message": "Highlight the informative words. Read faster.",
     "description": "Short extension description in the store listing"
   }
 }

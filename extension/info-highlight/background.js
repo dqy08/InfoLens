@@ -1,10 +1,12 @@
 /**
- * 工具栏点击 → 注入 content（activeTab 手势）。已注入则 toggle。
+ * 工具栏点击 / 右键菜单 → 注入 content（activeTab 手势）。已注入则 toggle。
  * 分析：本机 WebGPU（已就绪）或 IH_CONFIG.apiBase/api/analyze。
  * PDF：整条流程在 pdf/sw.js（共享），本文件只负责在网页管线里的何处插入它。
  */
 
 importScripts('sw/restricted-url.js');
+importScripts('sw/install-dot.js');
+importScripts('sw/inject.js');
 importScripts('config.js');
 importScripts('pdf/stash-db.js');
 importScripts('pdf/sw.js');
@@ -33,6 +35,7 @@ const CONTENT_JS = [
   'textIndex.js',
   'scrollGeometry.js',
   'progressAxis.js',
+  'overlay.js',
   'page-map.js',
   'tokenTip.js',
   'analyzeRun.js',
@@ -56,48 +59,99 @@ async function toggleIfInjected(tabId) {
   }
 }
 
-async function injectOnce(tabId) {
-  await chrome.scripting.insertCSS({
-    target: { tabId, frameIds: [0] },
-    files: CONTENT_CSS,
-  });
-  await chrome.scripting.executeScript({
-    target: { tabId, frameIds: [0] },
-    files: CONTENT_JS,
-  });
+function clearBadge(tabId) {
+  const title = chrome.runtime.getManifest().action?.default_title || 'Info Highlight';
+  void chrome.action.setBadgeText({ text: '', tabId });
+  void chrome.action.setTitle({ title, tabId });
+}
+
+async function setBadgeError(tabId, brief) {
+  try {
+    await chrome.action.setBadgeBackgroundColor({ color: '#c0392b', tabId });
+    await chrome.action.setBadgeText({ text: '!', tabId });
+    await chrome.action.setTitle({ title: `Info Highlight: ${brief}`, tabId });
+  } catch {
+    /* ignore */
+  }
 }
 
 async function activateTab(tab) {
   if (!tab?.id) return;
   // optional file:// request 必须在手势同步阶段启动；前面不能有 await
   const fileHostPromise = IL_pdfSw.isFileUrl(tab.url) ? IL_pdfSw.requestFileHostFromGesture() : null;
-  const fresh = await chrome.tabs.get(tab.id);
-  const url = fresh.url || tab.url || '';
-  if (IL_pdfSw.isOwnViewerUrl(url)) {
-    chrome.runtime.sendMessage({ type: 'ih-pdf-toggle', tabId: tab.id }, () => {
-      void chrome.runtime.lastError;
-    });
-    return;
+  IL_setActionIconDotted(false);
+  try {
+    const fresh = await chrome.tabs.get(tab.id);
+    const url = fresh.url || tab.url || '';
+    if (IL_pdfSw.isOwnViewerUrl(url)) {
+      chrome.runtime.sendMessage({ type: 'ih-pdf-toggle', tabId: tab.id }, () => {
+        void chrome.runtime.lastError;
+      });
+      clearBadge(tab.id);
+      return;
+    }
+    if (IL_isRestrictedUrl(url)) {
+      console.warn('[Info Highlight] cannot run on this page:', url);
+      await setBadgeError(tab.id, 'bad page');
+      return;
+    }
+    const access = await IL_pdfSw.ensureFileUrlAccess(url, fileHostPromise);
+    if (!access.ok) {
+      await setBadgeError(tab.id, access.brief);
+      return;
+    }
+    if (IL_pdfSw.isPdfUrl(url)) {
+      await IL_pdfSw.injectEntry(tab.id);
+      clearBadge(tab.id);
+      return;
+    }
+    // 无 .pdf 后缀时先由页内按 Content-Type / 魔数确认，再退回网页管线
+    if (await IL_pdfSw.injectEntryAndOffered(tab.id)) {
+      clearBadge(tab.id);
+      return;
+    }
+    if (await toggleIfInjected(tab.id)) {
+      clearBadge(tab.id);
+      return;
+    }
+    const okTab = await IL_injectWithRetry(tab.id, { css: CONTENT_CSS, js: CONTENT_JS }, { logLabel: 'Info Highlight' });
+    console.info('[Info Highlight] injected into', okTab.url);
+    clearBadge(tab.id);
+  } catch (err) {
+    try {
+      if (await IL_pdfSw.injectEntryAndOffered(tab.id)) {
+        clearBadge(tab.id);
+        return;
+      }
+    } catch (pdfErr) {
+      console.error('[Info Highlight] pdf-entry inject failed', pdfErr);
+    }
+    console.error('[Info Highlight] inject failed', err);
+    await setBadgeError(tab.id, 'inject');
   }
-  if (IL_isRestrictedUrl(url)) {
-    console.warn('[Info Highlight] cannot run on this page:', url);
-    return;
-  }
-  if (!(await IL_pdfSw.ensureFileUrlAccess(url, fileHostPromise)).ok) return;
-  if (IL_pdfSw.isPdfUrl(url)) {
-    await IL_pdfSw.injectEntry(tab.id);
-    return;
-  }
-  // 无 .pdf 后缀时先由页内按 Content-Type / 魔数确认，再退回网页管线
-  if (await IL_pdfSw.injectEntryAndOffered(tab.id)) return;
-  if (await toggleIfInjected(tab.id)) return;
-  await injectOnce(tab.id);
 }
 
+const CONTEXT_MENU_ID = 'ih-highlight';
+
 chrome.action.onClicked.addListener((tab) => {
-  activateTab(tab).catch((err) => {
-    console.error('[Info Highlight] activate failed', err);
+  void activateTab(tab);
+});
+
+chrome.runtime.onInstalled.addListener((details) => {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: CONTEXT_MENU_ID,
+      title: 'Info Highlight',
+      contexts: ['page', 'selection'],
+    });
   });
+
+  IL_maybeShowInstallDot(details);
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== CONTEXT_MENU_ID || !tab?.id) return;
+  void activateTab(tab);
 });
 
 const ERROR_BODY_SNIPPET = 500;
@@ -322,7 +376,9 @@ async function maybeOfferInitOnce() {
     console.warn('[Info Highlight] WebGPU probe failed', err);
     await IH_localState.set({ webgpuOk: false });
     if (st.pref === IH_localState.PREF_LOCAL) {
-      throw new Error(`本机 WebGPU 探测失败：${err?.message || err}。已按「仅本机」不使用云端。`);
+      throw new Error(
+        `On-device WebGPU probe failed: ${String(err?.message || err)}. On-device only is selected, so cloud will not be used.`,
+      );
     }
     return;
   }
@@ -349,8 +405,12 @@ function engineFrom(st) {
 
 function localOnlyBlockReason(st) {
   if (st.pref !== IH_localState.PREF_LOCAL) return '';
-  if (st.webgpuOk === false) return '本机 WebGPU 不可用，已按「仅本机」不使用云端。';
-  if (!st.ready) return '本机模型未就绪，已按「仅本机」不使用云端。请先初始化本机模型。';
+  if (st.webgpuOk === false) {
+    return 'On-device WebGPU is unavailable. On-device only is selected, so cloud will not be used.';
+  }
+  if (!st.ready) {
+    return 'On-device model is not ready. On-device only is selected, so cloud will not be used. Prepare the on-device model first.';
+  }
   return '';
 }
 
@@ -400,7 +460,7 @@ async function handleAnalyze(text) {
     tokens = await IH_analyzeCache.tokens(text, () => fetchTokens(engine, text));
   } catch (err) {
     if (st.pref === IH_localState.PREF_LOCAL) {
-      throw new Error(`本机分析失败：${err?.message || err}`);
+      throw new Error(`On-device analysis failed: ${String(err?.message || err)}`);
     }
     throw err;
   }
@@ -417,10 +477,10 @@ async function handleAgree() {
   const gen = initGeneration;
   try {
     const webgpu = await probeAndStore();
-    if (!webgpu) throw new Error('WebGPU 不可用');
+    if (!webgpu) throw new Error('WebGPU is unavailable');
     const res = await initEngine();
     if (!res?.ok) throw new Error(res?.error || 'local model init failed');
-    if (gen !== initGeneration) throw new Error('已取消');
+    if (gen !== initGeneration) throw new Error('Cancelled');
     const st = await IH_localState.get();
     const pref = st.pref === IH_localState.PREF_CLOUD ? IH_localState.PREF_AUTO : st.pref;
     await IH_localState.set({ pref, ready: true });

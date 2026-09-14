@@ -14,14 +14,16 @@
     throw new Error('IH_localState missing — inject state.js before init.js');
   }
 
+  const LEAD_LOCAL_ONLY =
+    'You chose on-device analysis only, so the page is not uploaded. The first run downloads about 800 MB of weights (Gemma 3 270M q4) and keeps them here.';
+
   let localOnly = false;
   globalThis.IH_localState.get().then((st) => {
     localOnly = st.pref === globalThis.IH_localState.PREF_LOCAL;
     hubSel.value = globalThis.IH_localState.normalizeHub(st.hub);
     if (!localOnly) return;
-    refuseBtn.textContent = '取消';
-    leadEl.textContent =
-      '你选择了仅本机分析，正文不会上传。首次需下载约 800 MB 权重（Gemma 3 270M q4），之后留在本机。';
+    refuseBtn.textContent = 'Cancel';
+    leadEl.textContent = LEAD_LOCAL_ONLY;
   });
 
   hubSel.addEventListener('change', () => {
@@ -68,17 +70,17 @@
       bar.hidden = false;
       bar.max = info.total;
       bar.value = info.loaded;
-      setStatus(`下载 ${file} · ${formatBytes(info.loaded)} / ${formatBytes(info.total)}`);
+      setStatus(`Downloading ${file} · ${formatBytes(info.loaded)} / ${formatBytes(info.total)}`);
       return;
     }
     if (status === 'initiate' || status === 'download') {
       bar.hidden = false;
       bar.removeAttribute('value');
-      setStatus(file ? `准备 ${file}` : '准备下载');
+      setStatus(file ? `Preparing ${file}` : 'Preparing download');
       return;
     }
     if (status === 'done') {
-      setStatus(file ? `已获取 ${file}` : '下载完成');
+      setStatus(file ? `Got ${file}` : 'Download complete');
     }
   }
 
@@ -90,19 +92,19 @@
     agreeBtn.disabled = true;
     refuseBtn.disabled = true;
     hubSel.disabled = true;
-    setStatus('正在准备本机模型…');
+    setStatus('Preparing on-device model…');
     try {
       const granted = await chrome.permissions.request({
         origins: globalThis.IH_localState.hubOrigins(hubSel.value),
       });
-      if (!granted) throw new Error('未授权下载本机模型');
+      if (!granted) throw new Error('Download was not authorized');
       await new Promise((resolve, reject) => {
         chrome.runtime.sendMessage({ type: 'ih-local-set-hub', hub: hubSel.value }, (res) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
             return;
           }
-          if (!res?.ok) reject(new Error(res?.error || '切换下载源失败'));
+          if (!res?.ok) reject(new Error(res?.error || 'Failed to switch download source'));
           else resolve(res);
         });
       });
@@ -119,15 +121,13 @@
         return;
       }
       if (!res?.ok) {
-        setStatus(res?.error || '初始化失败');
+        setStatus(res?.error || 'Setup failed');
         restoreActions();
         return;
       }
-      setStatus(
-        localOnly
-          ? '本机模型已就绪，可关闭此窗口。之后点工具栏只会在本机分析。'
-          : '本机模型已就绪，可关闭此窗口。之后点工具栏会优先用本机分析。',
-      );
+      setStatus(localOnly
+        ? 'On-device model is ready. You can close this window. Later toolbar clicks will analyze on this device only.'
+        : 'On-device model is ready. You can close this window. Later toolbar clicks will prefer this device.');
       doneButtons();
     });
   });

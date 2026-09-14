@@ -84,6 +84,9 @@ test('相同请求命中缓存后按当前文档位置重新映射', async () =>
   runInThisContext(readFileSync(join(dir, '../../shared/page/textIndex.js'), 'utf8'), {
     filename: 'textIndex.js',
   });
+  runInThisContext(readFileSync(join(dir, '../../shared/page/progressAxis.js'), 'utf8'), {
+    filename: 'progressAxis.js',
+  });
   runInThisContext(readFileSync(join(dir, '../page-map.js'), 'utf8'), {
     filename: 'page-map.js',
   });

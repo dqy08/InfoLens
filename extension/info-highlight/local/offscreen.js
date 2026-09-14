@@ -118,7 +118,7 @@ async function analyzeText(text) {
       const cpLen = globalThis.IH_localScoring.utf16ToCpOffsets(text, [[0, text.length]])[0][1];
       if (lastEnd < cpLen) {
         console.warn(
-          `[Info Highlight] 文本过长，已截断至前 ${MAX_LENGTH} token (${cpLen} char -> ${lastEnd} char)`,
+          `[Info Highlight] text truncated to first ${MAX_LENGTH} tokens (${cpLen} char -> ${lastEnd} char)`,
         );
       }
     }

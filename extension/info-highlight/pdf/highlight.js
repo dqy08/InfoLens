@@ -32,8 +32,8 @@
     void runBatch(generation += 1);
   }
 
-  function finish(lastAlignErr) {
-    R.afterPaint(
+  async function finish(lastAlignErr) {
+    await R.afterPaint(
       session,
       lastAlignErr,
       'No tokens mapped onto the PDF text layer',
@@ -47,7 +47,7 @@
     return R.runJob(still, {
       fail(err) {
         clear();
-        globalThis.IH_showError(err?.message || err);
+        return globalThis.IH_showError(err?.message || err);
       },
       idle() { busy = false; },
     }, work);
@@ -57,13 +57,13 @@
     const still = () => myGeneration === generation;
     await job(myGeneration, async () => {
       if (!session) {
-        session = R.beginSession(extractPdfPage(), 'PDF has no text to analyze');
+        session = await R.beginSession(extractPdfPage(), 'PDF has no text to analyze');
       }
       const end = Math.min(session.next + R.MAX_SEGMENTS_PER_RUN, session.segs.length);
       const lastAlignErr = await R.paintRange(session, session.next, end, still, { overlay: true });
       if (!still()) return;
       session.next = end;
-      finish(lastAlignErr);
+      await finish(lastAlignErr);
     });
   }
 
@@ -76,7 +76,7 @@
     } catch (error) {
       if (!still()) return;
       clear();
-      globalThis.IH_showError(error?.message || error);
+      await globalThis.IH_showError(error?.message || error);
       return;
     }
     if (!session || mapped.text !== session.mapped.text) {
@@ -88,7 +88,7 @@
     session.painted = 0;
     const done = session.next;
     globalThis.IH_clearHighlights();
-    globalThis.IH_bindProgress(mapped, session.segs);
+    await globalThis.IH_bindProgress(mapped, session.segs);
     if (done === 0) {
       await runBatch(myGeneration);
       return;
@@ -96,7 +96,7 @@
     await job(myGeneration, async () => {
       const lastAlignErr = await R.paintRange(session, 0, done, still, { overlay: true });
       if (!still()) return;
-      finish(lastAlignErr);
+      await finish(lastAlignErr);
     });
   }
 

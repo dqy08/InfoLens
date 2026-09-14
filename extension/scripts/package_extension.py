@@ -112,12 +112,12 @@ def check_js(root: Path, files: list[Path]) -> None:
         raise SystemExit("pack: node is required for syntax checking")
     for path in files:
         rel = path.relative_to(root)
+        if path.name.endswith(".min.js") or path.name.endswith(".min.mjs"):
+            raise SystemExit(f"pack: minified JavaScript is not allowed: {rel}")
         if "vendor" in rel.parts:
             continue
         if path.suffix != ".js":
             continue
-        if path.name.endswith(".min.js"):
-            raise SystemExit(f"pack: minified JavaScript is not allowed: {path.relative_to(root)}")
         text = path.read_text(encoding="utf-8")
         if re.search(r"(?m)^(?:import|export)\s", text):
             result = subprocess.run(

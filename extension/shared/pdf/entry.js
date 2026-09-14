@@ -183,7 +183,7 @@
     host.dataset.ilExtensionId = chrome.runtime.id;
     const btn = document.createElement('button');
     btn.type = 'button';
-    const DEFAULT_LABEL = chrome.i18n.getMessage('pdfEntryLabel') || 'Open with PDF viewer';
+    const DEFAULT_LABEL = 'Open with InfoLens PDF viewer';
     btn.textContent = DEFAULT_LABEL;
     btn.addEventListener('click', () => {
       void (async () => {

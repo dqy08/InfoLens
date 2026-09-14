@@ -174,6 +174,7 @@ module.exports = {
                 copyHtmlWithIncludesAndPageMeta('attribution.html', 'attribution.html', 'attribution'),
                 copyHtmlWithIncludesAndPageMeta('causal_flow.html', 'causal_flow.html', 'causalFlow'),
                 { from: 'privacy-policy.html', to: 'privacy-policy.html' },
+                { from: 'privacy-policy-info-highlight.html', to: 'privacy-policy-info-highlight.html' },
                 {
                     from: 'uninstall.html',
                     to: 'uninstall.html',

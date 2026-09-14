@@ -66,34 +66,44 @@ def extension_names() -> list[str]:
 
 
 def copy_info_highlight_transformers(source: Path, output: Path) -> None:
-    """Info Highlight 本机 WebGPU 需要 transformers.js 与 ORT wasm，从 npm 产物拷进包。"""
+    """Info Highlight 本机 WebGPU：transformers.web.js + 官方非压缩 ORT（勿打 *.min.js / *.min.mjs）。"""
     if source.name != "info-highlight":
         return
-    dist = source / "node_modules" / "@huggingface" / "transformers" / "dist"
-    names = (
-        "transformers.js",
-        "ort-wasm-simd-threaded.jsep.wasm",
-        "ort-wasm-simd-threaded.jsep.mjs",
-        "ort.bundle.min.mjs",
-    )
+    tf_web = source / "node_modules" / "@huggingface" / "transformers" / "dist" / "transformers.web.js"
+    ort_dist = source / "node_modules" / "onnxruntime-web" / "dist"
     dest = output / "vendor" / "transformers"
     dest.mkdir(parents=True, exist_ok=True)
+    if not tf_web.is_file():
+        raise SystemExit(
+            "build: info-highlight 缺少 @huggingface/transformers，"
+            "请先在 extension/info-highlight 执行 npm install"
+        )
+    text = tf_web.read_text(encoding="utf-8")
+    old_common = 'from "onnxruntime-common"'
+    old_web = 'from "onnxruntime-web"'
+    if old_common not in text or old_web not in text:
+        raise SystemExit("build: transformers.web.js 不再把 ORT 作为 external，无法换成非压缩包")
+    (dest / "transformers.js").write_text(
+        text.replace(old_common, 'from "./ort.webgpu.mjs"').replace(old_web, 'from "./ort.webgpu.mjs"'),
+        encoding="utf-8",
+    )
     missing = []
-    for name in names:
-        src = dist / name
-        if not src.is_file() and name == "ort.bundle.min.mjs":
-            src = source / "node_modules" / "onnxruntime-web" / "dist" / name
+    for name in (
+        "ort.webgpu.mjs",
+        "ort-wasm-simd-threaded.jsep.wasm",
+        "ort-wasm-simd-threaded.jsep.mjs",
+    ):
+        src = ort_dist / name
         if not src.is_file():
             missing.append(name)
             continue
         copy(src, dest / name)
     if missing:
         raise SystemExit(
-            "build: info-highlight 缺少 @huggingface/transformers，"
-            "请先在 extension/info-highlight 执行 npm install"
+            "build: info-highlight 缺少 onnxruntime-web 非压缩产物"
             f"（缺 {', '.join(missing)}）"
         )
-    print("build: vendor/transformers <- @huggingface/transformers/dist")
+    print("build: vendor/transformers <- transformers.web.js + onnxruntime-web/ort.webgpu.mjs")
 
 
 def build(name: str, release: bool) -> Path:

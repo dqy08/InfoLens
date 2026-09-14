@@ -46,13 +46,13 @@
     await R.runJob(still, {
       fail(err) {
         clearAll();
-        globalThis.IH_showError(err?.message || err);
         active = true;
+        return globalThis.IH_showError(err?.message || err);
       },
       idle() { busy = false; },
     }, async () => {
       if (!session) {
-        session = R.beginSession(globalThis.IH_extractPage(), 'No article text');
+        session = await R.beginSession(globalThis.IH_extractPage(), 'No article text');
         globalThis.IH_tokenTip.bind(session.mapped);
       }
       const end = Math.min(session.next + R.MAX_SEGMENTS_PER_RUN, session.segs.length);
@@ -61,8 +61,8 @@
       });
       if (!still()) return;
       session.next = end;
-      R.afterPaint(session, lastAlignErr, 'No tokens mapped onto the page', () => {
-        globalThis.IH_showPaused(continuePaused);
+      await R.afterPaint(session, lastAlignErr, 'No tokens mapped onto the page', () => {
+        return globalThis.IH_showPaused(continuePaused);
       });
       active = true;
     });

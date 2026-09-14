@@ -4,9 +4,9 @@ Chrome MV3 extension: click the toolbar icon to heatmap surprisal on the current
 
 This is a separate plugin from Semantic Highlight (`extension/semantic-highlight/`). Shared page/PDF runtime sources live in `extension/shared/`. Build assembles them into a standalone extension artifact.
 
-The `_locales` this plugin declares via `default_locale` is not in this directory: the shared PDF pages own their strings, so build merges `extension/shared/_locales/` into the artifact. Add a `_locales/` here only for strings specific to this plugin (its own keys win on conflict).
+Store name/description live in `_locales/`. Build merges `extension/shared/_locales/` (local file access help) into the artifact; this plugin's keys win on conflict.
 
-Toolbar icon is a 5-row red mosaic (`icons/render-icons.py`); same RGB as the heatmap.
+Toolbar icon is a 4-row red mosaic (`icons/render-icons.py`); same RGB as the heatmap.
 
 ## Load
 
@@ -17,7 +17,7 @@ Toolbar icon is a 5-row red mosaic (`icons/render-icons.py`); same RGB as the he
 Chrome → `chrome://extensions` → Developer mode → Load unpacked → select `extension/dist/info-highlight/`。
 普通 http(s) 文章或 PDF → 点工具栏图标。再点清除。
 
-本机 WebGPU 分析依赖 `@huggingface/transformers`（构建时拷进包，不进 git）：
+本机 WebGPU 分析依赖 `@huggingface/transformers`（构建时拷进包，官方非压缩 ORT，不进 git）：
 
 ```bash
 cd extension/info-highlight && npm install
