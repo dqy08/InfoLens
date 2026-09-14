@@ -5,7 +5,7 @@
  *
  * 段：切分力度 = 语义 800 字节 × 倍数。每次送 1 段前文 + 本段（1:1），只画本段。
  * 骑在段界上的 BPE token：offset 裁进本段，不画进前文、也不丢掉本段侧。
- * 进度图：竖轴默认 4–8 bit；分析中亮空框，段回了加线；不自动跟滚。
+ * 进度图：竖轴默认 4–8 bit；分析中亮空框，段回了加线；后一段从上一线终点起；不自动跟滚。
  */
 (() => {
   /** SYNC: client/src/shared/core/constants.ts → SEMANTIC_CHUNK_BYTES */
@@ -17,7 +17,38 @@
   /** SYNC: extension/semantic-highlight/semantic/find.js → HL_UNDERLINE（命名空间 ih-，避免和语义插件互踩） */
   const HL_UNDERLINE = 'ih-underline';
   const HOST_ID = 'ih-progress-host';
-  const ERROR_ID = 'ih-error';
+  const HOST_CSS = `
+:host {
+  all: initial;
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 2147483646;
+  display: block;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+}
+.semantic-find-bar-host {
+  position: static;
+  margin: 0;
+  padding: 0;
+  width: 338px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+.semantic-match-progress {
+  margin-top: 0;
+  height: 36px;
+}
+.semantic-match-progress[hidden] + .semantic-find-status-list > :first-child {
+  margin-top: 0;
+}
+`;
   /** SYNC: client/src/shared/cross/surprisalMath.ts → REFERENCE_MAX_SURPRISAL_BITS */
   const MAX_SURPRISAL_BITS = 18;
   const PROGRESS_BITS_MIN = 4;
@@ -29,6 +60,13 @@
   const SELECT_HOLD_MS = 1000;
   /** shared/page/scrollGeometry.js：滚动容器与文档 Y 的换算 */
   const geo = () => globalThis.IL_scrollGeometry;
+  const progressAxis = globalThis.IL_progressAxis;
+  if (!progressAxis) throw new Error('IL_progressAxis missing — inject progressAxis.js first');
+
+  function requireOverlay() {
+    if (!globalThis.IL_overlay) throw new Error('IL_overlay missing — inject overlay.js first');
+    return globalThis.IL_overlay;
+  }
 
   function requireFns() {
     if (typeof globalThis.IL_findArticleRoot !== 'function') {
@@ -297,45 +335,47 @@
   function shortError(msg) {
     let t = String(msg || 'Analyze failed').replace(/\s+/g, ' ').trim();
     if (/Failed to fetch|NetworkError|ERR_CONNECTION/i.test(t)) {
-      t = 'Cannot reach http://localhost:5001';
+      t = 'Cannot reach the analyze server';
     }
     return t.length > 120 ? t.slice(0, 119) + '…' : t;
   }
 
-  function noticeEl() {
-    const host = ensureHost();
-    let el = host.querySelector('#' + ERROR_ID);
-    if (!el) {
-      el = document.createElement('div');
-      el.id = ERROR_ID;
-      host.appendChild(el);
-    }
-    el.replaceChildren();
-    el.removeAttribute('hidden');
-    return el;
+  async function noticeList() {
+    await ensureHost();
+    const list = ui$('ih-status-list');
+    if (!list) throw new Error('ih-status-list missing');
+    return list;
   }
 
-  function showError(msg) {
-    const el = noticeEl();
-    el.classList.remove('is-paused');
-    el.textContent = shortError(msg);
+  async function showError(msg) {
+    const list = await noticeList();
+    list.replaceChildren(requireOverlay().createStatus({
+      label: 'Failed',
+      detail: shortError(msg),
+      tone: 'error',
+      continueHidden: true,
+      feedbackHidden: true,
+      onClose: clearError,
+    }));
   }
 
-  /** SYNC: extension/semantic-highlight/semantic/find.js → showFindStatus('Paused', 'Continue to search more') */
-  function showPaused(onContinue) {
-    const el = noticeEl();
-    el.classList.add('is-paused');
-    const text = document.createElement('span');
-    text.textContent = 'Paused · Continue to search more';
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = 'Continue';
-    btn.addEventListener('click', onContinue);
-    el.append(text, btn);
+  async function showPaused(onContinue) {
+    const list = await noticeList();
+    list.replaceChildren(requireOverlay().createStatus({
+      label: 'Paused',
+      detail: 'Continue to highlight more',
+      continueHidden: false,
+      feedbackHidden: true,
+      onContinue: () => {
+        clearError();
+        onContinue();
+      },
+      onClose: clearError,
+    }));
   }
 
   function clearError() {
-    document.getElementById(ERROR_ID)?.remove();
+    ui$('ih-status-list')?.replaceChildren();
   }
 
   /** @type {{ text: string, pieces: Array<{ node: Text, start: number, end: number }>, root: Element } | null} */
@@ -344,8 +384,6 @@
   let progressIdx = null;
   /** @type {{ start: number, end: number, bits: number }[]} */
   let progressRows = [];
-  /** 全文段（码点），供邻段 Y 衔接；未分析的也量 */
-  let progressSegs = [];
   let progressSearching = false;
   let progressEnabled = false;
   chrome.storage?.local?.get({ show_progress: false }, (res) => {
@@ -366,9 +404,18 @@
   let selectHoldTimer = 0;
   let hostWired = false;
   let windowFollowBound = false;
+  /** @type {ShadowRoot | null} */
+  let uiShadow = null;
+  /** @type {Promise<HTMLElement> | null} */
+  let hostReady = null;
+  let hostEpoch = 0;
   /** @type {Element | null} */
   let innerScrollBound = null;
   let viewportRaf = 0;
+
+  function ui$(id) {
+    return uiShadow?.getElementById(id) ?? null;
+  }
 
   function findScrollRoot() {
     return geo().findScrollRoot(progressMapped?.root);
@@ -378,63 +425,34 @@
     return geo().axisYRange(progressMapped?.root, findScrollRoot());
   }
 
-  function clientRectNearCp(cp0) {
-    if (!progressMapped || !progressIdx || cp0 < 0) return null;
-    const fullCp = progressIdx.utf16ToCp(progressMapped.text.length);
-    if (cp0 >= fullCp) return null;
-    const u0 = progressIdx.cpToUtf16(cp0);
-    const u1 = progressIdx.cpToUtf16(Math.min(fullCp, cp0 + 128));
-    for (const range of rangesFromUtf16(progressMapped.pieces, progressMapped.text, u0, u1)) {
-      if (!/\S/.test(range.toString())) continue;
-      for (const r of range.getClientRects()) {
-        if (r.width >= 1 && r.height >= 1) return r;
-      }
-    }
-    return null;
+  /** 本插件的码点 → Range；几何见 shared/page/progressAxis.js */
+  function rangesFromChunkCp(cp0, cp1) {
+    if (!progressMapped || !progressIdx || cp1 <= cp0) return [];
+    return rangesFromUtf16(
+      progressMapped.pieces,
+      progressMapped.text,
+      progressIdx.cpToUtf16(cp0),
+      progressIdx.cpToUtf16(cp1),
+    );
   }
 
   function measureChunkContentY(chunk, scrollRoot) {
-    const hit = progressYCache.get(chunk.start);
-    if (hit) return hit;
-    const startRect = clientRectNearCp(chunk.start);
-    const endRect = clientRectNearCp(Math.max(chunk.start, chunk.end - 1));
-    if (!startRect && !endRect) return null;
-    const top = startRect || endRect;
-    const bot = endRect || startRect;
-    let y0 = geo().contentYFromClientY(top.top, scrollRoot);
-    let y1 = geo().contentYFromClientY(bot.bottom, scrollRoot);
-    if (y1 < y0) {
-      const t = y0;
-      y0 = y1;
-      y1 = t;
-    }
-    const row = { y0, y1 };
-    progressYCache.set(chunk.start, row);
-    return row;
+    return progressAxis.measureChunkContentY(chunk, scrollRoot, progressYCache, rangesFromChunkCp);
   }
 
-  function measureNextContentY(chunk, scrollRoot) {
-    for (const row of progressSegs) {
-      if (row.start > chunk.start) return measureChunkContentY(row, scrollRoot);
+  function tiledProgress(scrollRoot) {
+    const rows = [];
+    for (const chunk of progressRows) {
+      const cy = measureChunkContentY(chunk, scrollRoot);
+      if (cy) rows.push({ chunk, cy });
     }
-    return null;
-  }
-
-  /** 进度图横轴占用的文档 Y：与竖线 abut 一致（接到下一段顶，含图/空档）。 */
-  function axisYFromBoxes(cy, nextCy) {
-    if (!cy) return null;
-    if (nextCy && nextCy.y0 > cy.y0) return { y0: cy.y0, y1: nextCy.y0 };
-    return cy;
+    return progressAxis.tileProgressRows(rows);
   }
 
   function chunksCoveringContentY(contentY, scrollRoot) {
     const hits = [];
-    for (const chunk of progressRows) {
-      const cy = axisYFromBoxes(
-        measureChunkContentY(chunk, scrollRoot),
-        measureNextContentY(chunk, scrollRoot),
-      );
-      if (cy && cy.y0 <= contentY && contentY <= cy.y1) hits.push(chunk);
+    for (const { chunk, axisY } of tiledProgress(scrollRoot)) {
+      if (axisY.y0 <= contentY && contentY <= axisY.y1) hits.push(chunk);
     }
     return hits;
   }
@@ -462,11 +480,11 @@
   }
 
   function applyProgressSelectedClass() {
-    const lines = document.getElementById('ih-progress-lines');
+    const lines = ui$('ih-progress-lines');
     if (!(lines instanceof SVGGElement)) return;
     for (const el of lines.children) {
       if (!(el instanceof SVGGElement) || el.dataset.progressStart == null) continue;
-      el.querySelector('.ih-progress-line')?.classList.toggle(
+      el.querySelector('.semantic-match-progress-line')?.classList.toggle(
         'is-selected',
         selectedStarts.has(Number(el.dataset.progressStart)),
       );
@@ -502,9 +520,9 @@
   }
 
   function chartEls() {
-    const chart = document.getElementById('ih-progress');
-    const lines = document.getElementById('ih-progress-lines');
-    const band = document.getElementById('ih-progress-viewport');
+    const chart = ui$('ih-progress');
+    const lines = ui$('ih-progress-lines');
+    const band = ui$('ih-progress-viewport');
     if (!(chart instanceof SVGSVGElement) || !(lines instanceof SVGGElement) || !(band instanceof SVGRectElement)) {
       return null;
     }
@@ -527,23 +545,20 @@
     for (const chunkStart of [previous, start]) {
       if (chunkStart == null) continue;
       const group = [...ui.lines.children].find((el) => el.dataset.progressStart === String(chunkStart));
-      group?.querySelector('.ih-progress-line')?.classList.toggle('is-hovered', chunkStart === start);
-      group?.querySelector('.ih-progress-label')?.toggleAttribute('hidden', chunkStart !== start);
+      group?.querySelector('.semantic-match-progress-line')?.classList.toggle('is-hovered', chunkStart === start);
+      group?.querySelector('.semantic-match-progress-label')?.toggleAttribute('hidden', chunkStart !== start);
     }
   }
 
-  function upsertProgressLine(layout, chunk, cy, nextCy, group) {
+  function upsertProgressLine(layout, chunk, axisY, group) {
     const ui = chartEls();
     if (!ui) return;
     const { x0, x1, y0, y1, axis } = layout;
     if (!axis) return;
-    if (!nextCy) nextCy = measureNextContentY(chunk, axis.scrollRoot);
     const degree = Math.max(
       0,
       Math.min(1, (chunk.bits - PROGRESS_BITS_MIN) / (PROGRESS_BITS_MAX - PROGRESS_BITS_MIN)),
     );
-    const axisY = axisYFromBoxes(cy, nextCy);
-    const abut = !!(nextCy && nextCy.y0 > cy.y0);
     const yStart = Math.max(axis.y0, Math.min(axis.y1, axisY.y0));
     const yEnd = Math.max(axis.y0, Math.min(axis.y1, axisY.y1));
     const start = geo().xFromContentY(yStart, x0, x1, axis);
@@ -552,15 +567,15 @@
       group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       group.dataset.progressStart = String(chunk.start);
       const lineEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      lineEl.classList.add('ih-progress-line');
+      lineEl.classList.add('semantic-match-progress-line');
       group.appendChild(lineEl);
       const labelEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      labelEl.classList.add('ih-progress-label');
+      labelEl.classList.add('semantic-match-progress-label');
       labelEl.setAttribute('text-anchor', 'middle');
       labelEl.setAttribute('hidden', '');
       group.appendChild(labelEl);
       const hitEl = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      hitEl.classList.add('ih-progress-hit');
+      hitEl.classList.add('semantic-match-progress-hit-area');
       hitEl.addEventListener('mouseenter', () => setHoveredProgress(chunk.start));
       hitEl.addEventListener('mouseleave', () => {
         if (hoveredStart === chunk.start) setHoveredProgress(null);
@@ -568,12 +583,12 @@
       group.appendChild(hitEl);
       ui.lines.appendChild(group);
     }
-    const line = /** @type {SVGPathElement} */ (group.querySelector('.ih-progress-line'));
-    const label = /** @type {SVGTextElement} */ (group.querySelector('.ih-progress-label'));
-    const hitArea = /** @type {SVGRectElement} */ (group.querySelector('.ih-progress-hit'));
+    const line = /** @type {SVGPathElement} */ (group.querySelector('.semantic-match-progress-line'));
+    const label = /** @type {SVGTextElement} */ (group.querySelector('.semantic-match-progress-label'));
+    const hitArea = /** @type {SVGRectElement} */ (group.querySelector('.semantic-match-progress-hit-area'));
     line.classList.toggle('is-selected', selectedStarts.has(chunk.start));
     line.classList.toggle('is-hovered', hoveredStart === chunk.start);
-    const lineEnd = abut ? Math.max(start, end) : Math.max(start + PROGRESS_MIN_WIDTH_PX, end);
+    const lineEnd = end > start ? end : start + PROGRESS_MIN_WIDTH_PX;
     const y = y0 - (y0 - y1) * degree;
     line.setAttribute('d', `M${start} ${y}H${lineEnd}`);
     label.setAttribute('x', String((start + lineEnd) / 2));
@@ -695,17 +710,10 @@
         .map((el) => [Number(el.dataset.progressStart), el]),
     );
     const liveStarts = new Set();
-    const rows = [];
-    if (layout.axis) {
-      for (const chunk of progressRows) {
-        const cy = measureChunkContentY(chunk, layout.axis.scrollRoot);
-        if (cy) rows.push({ chunk, cy });
-      }
-    }
-    for (let i = 0; i < rows.length; i++) {
-      const { chunk, cy } = rows[i];
+    const tiled = layout.axis ? tiledProgress(layout.axis.scrollRoot) : [];
+    for (const { chunk, axisY } of tiled) {
       liveStarts.add(chunk.start);
-      upsertProgressLine(layout, chunk, cy, rows[i + 1]?.cy, groupsByStart.get(chunk.start));
+      upsertProgressLine(layout, chunk, axisY, groupsByStart.get(chunk.start));
     }
     for (const [start, group] of groupsByStart) {
       if (!liveStarts.has(start)) group.remove();
@@ -728,23 +736,47 @@
     revealAtContentY(geo().contentYFromX(x, 4, width - 4, axis));
   }
 
-  function ensureHost() {
-    let host = document.getElementById(HOST_ID);
-    if (host) return host;
-    host = document.createElement('div');
+  function attachExistingHost(host) {
+    uiShadow = host.shadowRoot;
+    if (!uiShadow) throw new Error('ih-progress-host shadow missing');
+    return host;
+  }
+
+  async function buildHost(epoch) {
+    const css = await requireOverlay().loadCss();
+    if (epoch !== hostEpoch) throw new Error('ih-progress-host cleared');
+    const existing = document.getElementById(HOST_ID);
+    if (existing) return attachExistingHost(existing);
+    const host = document.createElement('div');
     host.id = HOST_ID;
+    const shadow = host.attachShadow({ mode: 'open' });
+    uiShadow = shadow;
+    const style = document.createElement('style');
+    style.textContent = css + '\n' + HOST_CSS;
+    const wrap = document.createElement('div');
+    wrap.className = 'semantic-find-bar-host';
+    const uiOverlay = requireOverlay();
+    uiOverlay.applyTheme(wrap);
+    uiOverlay.watchTheme(wrap);
     const chart = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     chart.id = 'ih-progress';
+    chart.classList.add('semantic-match-progress');
     chart.setAttribute('viewBox', '0 0 100 100');
     chart.setAttribute('aria-label', 'Information progress');
     chart.setAttribute('hidden', '');
     const band = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     band.id = 'ih-progress-viewport';
+    band.classList.add('semantic-match-progress-viewport');
     band.setAttribute('hidden', '');
     const lines = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     lines.id = 'ih-progress-lines';
     chart.append(band, lines);
-    host.appendChild(chart);
+    const list = document.createElement('div');
+    list.id = 'ih-status-list';
+    list.className = 'semantic-find-status-list';
+    wrap.append(chart, list);
+    shadow.append(style, wrap);
+    if (epoch !== hostEpoch) throw new Error('ih-progress-host cleared');
     document.documentElement.appendChild(host);
     if (!hostWired) {
       hostWired = true;
@@ -753,28 +785,37 @@
     return host;
   }
 
+  async function ensureHost() {
+    const existing = document.getElementById(HOST_ID);
+    if (existing) return attachExistingHost(existing);
+    if (!hostReady) {
+      const epoch = hostEpoch;
+      hostReady = buildHost(epoch);
+      hostReady.catch(() => {
+        if (epoch === hostEpoch) hostReady = null;
+      });
+    }
+    return hostReady;
+  }
+
   /**
    * @param {{ text: string, pieces: Array<{ node: Text, start: number, end: number }>, root: Element }} mapped
    * @param {{ start: number, end: number }[]} segs
    */
-  function bindProgress(mapped, segs) {
+  async function bindProgress(mapped, segs) {
     progressMapped = mapped;
     progressIdx = globalThis.IL_createTextIndex(mapped.text);
     progressYCache = new Map();
     progressRows = [];
-    progressSegs = segs.map((s) => ({
-      start: progressIdx.utf16ToCp(s.start),
-      end: progressIdx.utf16ToCp(s.end),
-    }));
     selectedStarts = new Set();
     hoveredStart = null;
-    ensureHost();
+    await ensureHost();
     renderProgress();
   }
 
-  function setProgressSearching(on) {
+  async function setProgressSearching(on) {
     progressSearching = !!on;
-    ensureHost();
+    await ensureHost();
     renderProgress();
   }
 
@@ -801,7 +842,6 @@
     progressMapped = null;
     progressIdx = null;
     progressRows = [];
-    progressSegs = [];
     progressYCache = new Map();
     selectedStarts = new Set();
     hoveredStart = null;
@@ -815,6 +855,9 @@
     }
     unbindFollow();
     hostWired = false;
+    uiShadow = null;
+    hostEpoch += 1;
+    hostReady = null;
     clearUnderline();
     document.getElementById(HOST_ID)?.remove();
   }

@@ -5,6 +5,8 @@
  */
 
 importScripts('sw/restricted-url.js');
+importScripts('sw/install-dot.js');
+importScripts('sw/inject.js');
 importScripts('config.js');
 importScripts('pdf/stash-db.js');
 importScripts('pdf/sw.js');
@@ -19,60 +21,14 @@ const CONTENT_JS = [
   'splitTextToChunks.js',
   'textIndex.js',
   'scrollGeometry.js',
+  'progressAxis.js',
+  'overlay.js',
   'semantic/page-document.js',
   'cache/ring-store.js',
   'semantic/analyzeCache.js',
   'semantic/find.js',
   'content.js',
 ];
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-/** 等到 status=complete；已 complete 则立即返回最新 tab */
-async function waitTabComplete(tabId, timeoutMs = 20000) {
-  const cur = await chrome.tabs.get(tabId);
-  if (cur.status === 'complete') return cur;
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      reject(new Error(`tab ${tabId} load timeout (${timeoutMs}ms)`));
-    }, timeoutMs);
-
-    function onUpdated(id, info) {
-      if (id !== tabId || info.status !== 'complete') return;
-      clearTimeout(timer);
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      chrome.tabs.get(tabId).then(resolve, reject);
-    }
-    chrome.tabs.onUpdated.addListener(onUpdated);
-  });
-}
-
-function isTransientFrameError(err) {
-  const msg = String(err?.message || err);
-  return (
-    msg.includes('Frame with ID') ||
-    msg.includes('No frame with id') ||
-    msg.includes('Frame does not exist') ||
-    msg.includes('The tab was closed') ||
-    msg.includes('cannot be scripted now')
-  );
-}
-
-async function injectOnce(tabId) {
-  // 显式 frameIds:[0]，避免对已消失子 frame 误操作；主文档未就绪时由上层重试
-  await chrome.scripting.insertCSS({
-    target: { tabId, frameIds: [0] },
-    files: CONTENT_CSS,
-  });
-  await chrome.scripting.executeScript({
-    target: { tabId, frameIds: [0] },
-    files: CONTENT_JS,
-  });
-}
 
 /** 页内已有实例则只 open（叉掉后再点只是显示，不重注入） */
 async function openIfInjected(tabId, query) {
@@ -93,52 +49,19 @@ async function openIfInjected(tabId, query) {
   }
 }
 
-async function injectWithRetry(tabId) {
-  let lastErr;
-  for (let attempt = 1; attempt <= 4; attempt++) {
-    try {
-      const tab = await waitTabComplete(tabId);
-      if (IL_isRestrictedUrl(tab.url)) {
-        throw new Error(`restricted page: ${tab.url || '(no url)'}`);
-      }
-      // 丢弃休眠的 tab：先激活再注
-      if (tab.discarded) {
-        await chrome.tabs.reload(tabId);
-        await waitTabComplete(tabId);
-      }
-      await injectOnce(tabId);
-      return tab;
-    } catch (err) {
-      lastErr = err;
-      if (!isTransientFrameError(err) || attempt === 4) throw err;
-      console.warn(`[InfoLens] inject attempt ${attempt} failed, retry…`, err?.message || err);
-      await sleep(100 * attempt);
-    }
-  }
-  throw lastErr;
+function clearBadge(tabId) {
+  void chrome.action.setBadgeText({ text: '', tabId });
+  void chrome.action.setTitle({ title: 'InfoLens Semantic Find', tabId });
 }
 
-async function setBadgeError(brief) {
+async function setBadgeError(tabId, brief) {
   try {
-    await chrome.action.setBadgeBackgroundColor({ color: '#c0392b' });
-    await chrome.action.setBadgeText({ text: '!' });
-    await chrome.action.setTitle({ title: `InfoLens: ${brief}` });
-    setTimeout(() => {
-      chrome.action.setBadgeText({ text: '' });
-      chrome.action.setTitle({ title: 'InfoLens Semantic Find' });
-    }, 5000);
+    await chrome.action.setBadgeBackgroundColor({ color: '#c0392b', tabId });
+    await chrome.action.setBadgeText({ text: '!', tabId });
+    await chrome.action.setTitle({ title: `InfoLens: ${brief}`, tabId });
   } catch {
     /* ignore */
   }
-}
-
-function actionIcons(dotted) {
-  const src = chrome.runtime.getManifest().action.default_icon;
-  if (!dotted) return src;
-  return {
-    16: src['16'].replace(/\.png$/, '-dot.png'),
-    32: src['32'].replace(/\.png$/, '-dot.png'),
-  };
 }
 
 /**
@@ -153,7 +76,7 @@ async function activateTab(tab, opts = {}) {
 
   // optional file:// request 必须在手势同步阶段启动；前面不能有 await
   const fileHostPromise = IL_pdfSw.isFileUrl(freshUrl) ? IL_pdfSw.requestFileHostFromGesture() : null;
-  void chrome.action.setIcon({ path: actionIcons(false) });
+  IL_setActionIconDotted(false);
 
   // 手势当下立刻读一次 url；无 url 时仍尝试 get（activeTab 授权后）
   try {
@@ -167,46 +90,46 @@ async function activateTab(tab, opts = {}) {
         .catch(() => {
           /* 查看器页未加载完/未监听则忽略 */
         });
-      await chrome.action.setBadgeText({ text: '' });
+      clearBadge(tab.id);
       return;
     }
 
     if (IL_isRestrictedUrl(freshUrl)) {
       console.warn('[InfoLens] cannot run on this page:', freshUrl);
-      await setBadgeError('bad page');
+      await setBadgeError(tab.id, 'bad page');
       return;
     }
     if (await openIfInjected(tab.id, query)) {
-      await chrome.action.setBadgeText({ text: '' });
+      clearBadge(tab.id);
       return;
     }
     const access = await IL_pdfSw.ensureFileUrlAccess(freshUrl, fileHostPromise);
     if (!access.ok) {
-      await setBadgeError(access.brief);
+      await setBadgeError(tab.id, access.brief);
       return;
     }
     if (IL_pdfSw.isPdfUrl(freshUrl)) {
       await IL_pdfSw.injectEntry(tab.id);
-      await chrome.action.setBadgeText({ text: '' });
+      clearBadge(tab.id);
       return;
     }
 
     // 无 .pdf 后缀时，先由页内按 Content-Type / 魔数确认；不能等普通注入失败，
     // 因为 Chrome 的 PDF 宿主页在部分版本仍允许注入 content.js，届时会误开搜索条。
     if (await IL_pdfSw.injectEntryAndOffered(tab.id)) {
-      await chrome.action.setBadgeText({ text: '' });
+      clearBadge(tab.id);
       return;
     }
 
-    const okTab = await injectWithRetry(tab.id);
+    const okTab = await IL_injectWithRetry(tab.id, { css: CONTENT_CSS, js: CONTENT_JS }, { logLabel: 'InfoLens' });
     console.info('[InfoLens] injected into', okTab.url);
     if (query) await openIfInjected(tab.id, query);
-    await chrome.action.setBadgeText({ text: '' });
+    clearBadge(tab.id);
   } catch (err) {
     // 无 .pdf 后缀的 PDF（如 arxiv）：content 注入常失败；仅当页内确认是 PDF 并挂上入口才算成功
     try {
       if (await IL_pdfSw.injectEntryAndOffered(tab.id)) {
-        await chrome.action.setBadgeText({ text: '' });
+        clearBadge(tab.id);
         return;
       }
     } catch (pdfErr) {
@@ -214,7 +137,7 @@ async function activateTab(tab, opts = {}) {
     }
     console.error('[InfoLens] inject failed', err);
     console.error('[InfoLens] tip: use a normal http(s) article tab (not chrome://, PDF, Web Store); reload extension, then click again after the page finishes loading.');
-    await setBadgeError('inject');
+    await setBadgeError(tab.id, 'inject');
   }
 }
 
@@ -244,16 +167,12 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: CONTEXT_MENU_ID,
-      title: chrome.i18n.getMessage('contextMenuSearch') || 'Search with Semantic Highlight',
+      title: 'Search with Semantic Highlight',
       contexts: ['page', 'selection'],
     });
   });
 
-  // 商店用户：仅新安装打点。unpacked Reload 也打，方便本地看。升级暂不打。
-  const unpacked = !('update_url' in chrome.runtime.getManifest());
-  if (details.reason === 'install' || (unpacked && details.reason === 'update')) {
-    void chrome.action.setIcon({ path: actionIcons(true) });
-  }
+  IL_maybeShowInstallDot(details);
   if (details.reason === 'install' || details.reason === 'update') {
     const body = { event: details.reason, version: chrome.runtime.getManifest().version };
     if (details.reason === 'update' && details.previousVersion) {

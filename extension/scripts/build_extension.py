@@ -65,6 +65,47 @@ def extension_names() -> list[str]:
     return sorted(p.name for p in EXTENSIONS.iterdir() if (p / "manifest.json").is_file())
 
 
+def copy_info_highlight_transformers(source: Path, output: Path) -> None:
+    """Info Highlight 本机 WebGPU：transformers.web.js + 官方非压缩 ORT（勿打 *.min.js / *.min.mjs）。"""
+    if source.name != "info-highlight":
+        return
+    tf_web = source / "node_modules" / "@huggingface" / "transformers" / "dist" / "transformers.web.js"
+    ort_dist = source / "node_modules" / "onnxruntime-web" / "dist"
+    dest = output / "vendor" / "transformers"
+    dest.mkdir(parents=True, exist_ok=True)
+    if not tf_web.is_file():
+        raise SystemExit(
+            "build: info-highlight 缺少 @huggingface/transformers，"
+            "请先在 extension/info-highlight 执行 npm install"
+        )
+    text = tf_web.read_text(encoding="utf-8")
+    old_common = 'from "onnxruntime-common"'
+    old_web = 'from "onnxruntime-web"'
+    if old_common not in text or old_web not in text:
+        raise SystemExit("build: transformers.web.js 不再把 ORT 作为 external，无法换成非压缩包")
+    (dest / "transformers.js").write_text(
+        text.replace(old_common, 'from "./ort.webgpu.mjs"').replace(old_web, 'from "./ort.webgpu.mjs"'),
+        encoding="utf-8",
+    )
+    missing = []
+    for name in (
+        "ort.webgpu.mjs",
+        "ort-wasm-simd-threaded.jsep.wasm",
+        "ort-wasm-simd-threaded.jsep.mjs",
+    ):
+        src = ort_dist / name
+        if not src.is_file():
+            missing.append(name)
+            continue
+        copy(src, dest / name)
+    if missing:
+        raise SystemExit(
+            "build: info-highlight 缺少 onnxruntime-web 非压缩产物"
+            f"（缺 {', '.join(missing)}）"
+        )
+    print("build: vendor/transformers <- transformers.web.js + onnxruntime-web/ort.webgpu.mjs")
+
+
 def build(name: str, release: bool) -> Path:
     source = EXTENSIONS / name
     output = EXTENSIONS / "dist" / name
@@ -81,6 +122,7 @@ def build(name: str, release: bool) -> Path:
     for shared_rel, packaged_rel in shared.items():
         copy(SHARED / shared_rel, output / packaged_rel)
     merge_locales(source, output)
+    copy_info_highlight_transformers(source, output)
     # config.js 由源头变体生成：--release 固定 prod，否则用 dev-env.sh 生成的 config.js。
     prod = source / "config.prod.js"
     if prod.is_file():

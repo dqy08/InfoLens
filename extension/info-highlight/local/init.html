@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>On-device model setup</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fg: #1f1f1f;
+      --muted: #5e5e5e;
+      --bg: #fff;
+      --line: #e1e3e1;
+      --btn-border: #747775;
+      --bar: #1a73e8;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #e3e3e3;
+        --muted: #c4c7c5;
+        --bg: #1f1f1f;
+        --line: #444746;
+        --btn-border: #8e918f;
+        --bar: #8ab4f8;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font: 16px/1.45 system-ui, sans-serif;
+      color: var(--fg);
+      background: var(--bg);
+    }
+    main { max-width: 520px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 12px; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+    button {
+      font: inherit;
+      font-weight: 500;
+      height: 36px;
+      padding: 0 16px;
+      border: 1px solid var(--btn-border);
+      border-radius: 16px;
+      background: transparent;
+      color: var(--fg);
+      cursor: pointer;
+    }
+    button:hover:not(:disabled) { filter: brightness(1.08); }
+    button:disabled { opacity: 0.45; cursor: default; }
+    label.hub {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 16px 0 0;
+      color: var(--fg);
+    }
+    label.hub > span { flex: 1; min-width: 0; }
+    select {
+      flex-shrink: 0;
+      font: inherit;
+      height: 36px;
+      padding: 0 8px;
+      border: 1px solid var(--btn-border);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--fg);
+    }
+    #status { margin-top: 16px; min-height: 1.5em; }
+    progress {
+      display: block;
+      width: 100%;
+      height: 8px;
+      margin-top: 12px;
+    }
+    progress[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>On-device model setup</h1>
+    <p id="lead">When this computer has WebGPU, Gemma 3 270M (q4) can score information density in the browser, so the heatmap does not have to go to the cloud every time. The first run downloads about 800 MB of weights and keeps them here.</p>
+    <label class="hub">
+      <span>Download source</span>
+      <select id="model_hub" aria-label="Weight download source">
+        <option value="huggingface">Official</option>
+        <option value="modelscope">China</option>
+      </select>
+    </label>
+    <p id="status"></p>
+    <progress id="bar" hidden></progress>
+    <div class="actions">
+      <button type="button" id="agree">Agree and prepare</button>
+      <button type="button" id="refuse">Use cloud only</button>
+      <button type="button" id="hide" hidden>Hide</button>
+      <button type="button" id="close" hidden>Close</button>
+    </div>
+  </main>
+  <script src="state.js"></script>
+  <script src="init.js"></script>
+</body>
+</html>

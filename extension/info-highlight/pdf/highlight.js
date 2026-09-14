@@ -1,12 +1,17 @@
 /**
- * PDF 信息量标记：viewer 提供阅读序全文和 textLayer 节点；缩放重建 textLayer 后，
- * 重新建立映射并从本地分析缓存恢复绘制。
+ * PDF 信息量标记：viewer 提供阅读序全文和 textLayer 节点。
+ * 分批分析见 analyzeRun.js。缩放重建 textLayer 后：正文不变则换新节点，已分析段从缓存画回，暂停点保留。
  */
 (() => {
-  const MAX_SEGMENTS_PER_RUN = 32;
+  if (!globalThis.IH_analyzeRun) {
+    throw new Error('IH_analyzeRun missing — inject analyzeRun.js before highlight.js');
+  }
+  const R = globalThis.IH_analyzeRun;
   let generation = 0;
   let busy = false;
   let enabled = true;
+  /** @type {{ mapped: { text: string, pieces: unknown[], root: Element }, segs: { start: number, end: number, text: string }[], next: number, painted: number } | null} */
+  let session = null;
 
   function extractPdfPage() {
     const data = globalThis.IL_pdfTextLayer.read();
@@ -15,70 +20,97 @@
     return { text: data.pageText, pieces, root: globalThis.IL_pdfTextLayer.pagesRoot(data) };
   }
 
-  function sendAnalyze(text) {
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({ type: 'ih-analyze', text }, (response) => {
-        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-        if (!response?.ok) return reject(new Error(response?.error || 'Analyze failed'));
-        resolve(response.data);
-      });
-    });
-  }
-
-  async function analyzeSegment(text, segs, index) {
-    if (!/\S/.test(segs[index].text)) return [];
-    const window = globalThis.IH_segmentWindow(text, segs, index);
-    const tokens = await globalThis.IH_analyzeCache.tokens(window.requestText, async (requestText) => {
-      const result = (await sendAnalyze(requestText))?.result?.bpe_strings;
-      if (!Array.isArray(result)) throw new Error('Analyze returned no tokens');
-      return result;
-    });
-    return globalThis.IH_tokensInSegment(tokens, window);
-  }
-
   function clear() {
+    session = null;
     globalThis.IH_clearHighlights();
     globalThis.IH_clearProgress();
     globalThis.IH_clearError();
   }
 
-  async function run(myGeneration) {
+  function continuePaused() {
+    if (busy || !session || !enabled) return;
+    void runBatch(generation += 1);
+  }
+
+  async function finish(lastAlignErr) {
+    await R.afterPaint(
+      session,
+      lastAlignErr,
+      'No tokens mapped onto the PDF text layer',
+      () => globalThis.IH_showPaused(continuePaused),
+    );
+  }
+
+  function job(myGeneration, work) {
+    const still = () => myGeneration === generation;
     busy = true;
-    try {
-      const mapped = extractPdfPage();
-      const segs = globalThis.IH_splitSegments(mapped.text);
-      if (!segs.length) throw new Error('PDF has no text to analyze');
-      clear();
-      globalThis.IH_bindProgress(mapped, segs);
-      globalThis.IH_setProgressSearching(true);
-      let painted = 0;
-      for (let i = 0; i < segs.length; i++) {
-        if (myGeneration !== generation) return;
-        const tokens = await analyzeSegment(mapped.text, segs, i);
-        if (myGeneration !== generation) return;
-        painted += globalThis.IH_paintTokens(tokens, mapped, { append: true, overlay: true });
-        globalThis.IH_appendProgress(tokens, segs[i]);
-        if ((i + 1) % MAX_SEGMENTS_PER_RUN === 0) await new Promise(requestAnimationFrame);
-      }
-      if (!painted) throw new Error('No tokens mapped onto the PDF text layer');
-    } catch (error) {
-      if (myGeneration === generation) {
+    return R.runJob(still, {
+      fail(err) {
         clear();
-        globalThis.IH_showError(error?.message || error);
+        return globalThis.IH_showError(err?.message || err);
+      },
+      idle() { busy = false; },
+    }, work);
+  }
+
+  async function runBatch(myGeneration) {
+    const still = () => myGeneration === generation;
+    await job(myGeneration, async () => {
+      if (!session) {
+        session = await R.beginSession(extractPdfPage(), 'PDF has no text to analyze');
       }
-    } finally {
-      if (myGeneration === generation) {
-        globalThis.IH_setProgressSearching(false);
-        busy = false;
-      }
+      const end = Math.min(session.next + R.MAX_SEGMENTS_PER_RUN, session.segs.length);
+      const lastAlignErr = await R.paintRange(session, session.next, end, still, { overlay: true });
+      if (!still()) return;
+      session.next = end;
+      await finish(lastAlignErr);
+    });
+  }
+
+  /** 同文换节点：把已提交的段画回新 textLayer，暂停点不动。 */
+  async function remount(myGeneration) {
+    const still = () => myGeneration === generation;
+    let mapped;
+    try {
+      mapped = extractPdfPage();
+    } catch (error) {
+      if (!still()) return;
+      clear();
+      await globalThis.IH_showError(error?.message || error);
+      return;
     }
+    if (!session || mapped.text !== session.mapped.text) {
+      session = null;
+      await runBatch(myGeneration);
+      return;
+    }
+    session.mapped = mapped;
+    session.painted = 0;
+    const done = session.next;
+    globalThis.IH_clearHighlights();
+    await globalThis.IH_bindProgress(mapped, session.segs);
+    if (done === 0) {
+      await runBatch(myGeneration);
+      return;
+    }
+    await job(myGeneration, async () => {
+      const lastAlignErr = await R.paintRange(session, 0, done, still, { overlay: true });
+      if (!still()) return;
+      await finish(lastAlignErr);
+    });
   }
 
   function restart() {
     if (!enabled) return;
-    const next = ++generation;
-    if (busy) busy = false;
-    void run(next);
+    session = null;
+    void runBatch(generation += 1);
+  }
+
+  function onRerendered() {
+    if (!enabled) return;
+    const myGeneration = generation += 1;
+    if (session) void remount(myGeneration);
+    else void runBatch(myGeneration);
   }
 
   function toggle() {
@@ -90,6 +122,7 @@
     generation += 1;
     busy = false;
     clear();
+    R.releaseLocalEngine();
   }
 
   chrome.runtime.onMessage.addListener((message) => {
@@ -100,8 +133,6 @@
   });
 
   window.addEventListener('il-pdf-ready', restart);
-  // The old Range objects point to removed text nodes after zoom, so all highlights
-  // must be recreated against the new text layer.
-  window.addEventListener('il-pdf-rerendered', restart);
+  window.addEventListener('il-pdf-rerendered', onRerendered);
   if (window.__IL_PDF_DATA__) restart();
 })();

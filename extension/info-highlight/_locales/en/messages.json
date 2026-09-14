@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "Info Highlight",
+    "description": "Extension name shown in the store and chrome://extensions"
+  },
+  "extDescription": {
+    "message": "Highlight the informative words. Read faster.",
+    "description": "Short extension description in the store listing"
+  }
+}

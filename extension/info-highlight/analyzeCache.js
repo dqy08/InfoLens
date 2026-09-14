@@ -1,5 +1,5 @@
 /**
- * 页内分析缓存：同一请求文本不再打网。
+ * 分析缓存：同一请求文本不再打网。
  * 一条 = 接口返回的请求相对 token（offset + 概率）。调用方命中后再映射到当前文档。
  * 悬停用的 raw / pred_topk 只在未命中的返回值里，不写盘。
  * 按 textHash 存；淘汰记账见 shared/cache/ring-store.js。
@@ -8,7 +8,7 @@
 globalThis.IH_analyzeCache ||= (function () {
   const PREFIX = 'ih_ac/';
   /** 影响缓存准确性时加一。 */
-  const PLUGIN_CACHE_VERSION = 3;
+  const PLUGIN_CACHE_VERSION = 5;
 
   const store = globalThis.IL_createRingStore({
     prefix: PREFIX,
@@ -88,6 +88,7 @@ globalThis.IH_analyzeCache ||= (function () {
   }
 
   return {
+    PREFIX,
     key,
     MAX_ENTRIES: store.MAX_ENTRIES,
     tokens,

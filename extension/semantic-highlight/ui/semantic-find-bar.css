@@ -1,5 +1,6 @@
 @charset "UTF-8";
-/* 权威源：改 Find bar 样式只改本文件；同步到 client 时手工对齐 client/src/css/components/_semantic-find-bar.scss（含主题变量若有变更） */
+/* 权威源：改 Find bar 样式只改本文件；进度图 / 状态条在 shared/ui/overlay.css。
+ * 同步到 client 时手工对齐 client/src/css/components/_semantic-find-bar.scss（含主题变量若有变更） */
 .semantic-find-bar-host {
   z-index: 30;
   display: flex;
@@ -67,185 +68,9 @@
   inset: -12px;
   z-index: -1;
 }
-.semantic-match-progress {
-  /* 高度唯一源；SVG viewBox 由 content.js 按 clientHeight 写入 */
-  height: 36px;
-  margin-top: 6px;
-  box-sizing: border-box;
-  overflow: visible;
-  color: #9aa0a6;
-  border: 1.5px solid #5f6368;
-  border-radius: 10px;
-  background: #3c4043;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.28);
-  pointer-events: auto;
-  cursor: pointer;
-}
-.semantic-match-progress[hidden] {
-  display: none;
-}
-.semantic-match-progress-viewport {
-  fill: rgba(0, 0, 0, 0.22);
-  pointer-events: none;
-}
-.semantic-match-progress-viewport[hidden] {
-  display: none;
-}
-/* 进度下提示条 / Failed·Note 状态条共用外壳 */
-.semantic-find-strip {
-  margin-top: 6px;
-  box-sizing: border-box;
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 6px 4px 6px 10px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  font-size: 12px;
-  line-height: 1.35;
-  border: 1.5px solid #5f6368;
-  border-radius: 10px;
-  background: #3c4043;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.28);
-  pointer-events: auto;
-}
-.semantic-find-strip[hidden] {
-  display: none;
-}
-.semantic-find-status-list {
-  display: flex;
-  flex-direction: column;
-}
-.semantic-find-status-list:empty {
-  display: none;
-}
+/* 进度图 / 状态条外壳：shared/ui/overlay.css */
 .semantic-find-backend-notice {
   color: #9aa0a6;
-}
-.semantic-find-status {
-  width: 100%;
-  flex-direction: column;
-  align-items: stretch;
-  color: #9aa0a6;
-}
-.semantic-find-status.is-error {
-  color: #e8eaed;
-}
-.semantic-find-status-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-}
-.semantic-find-backend-notice-text,
-.semantic-find-status-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  user-select: text;
-}
-.semantic-find-status-text {
-  cursor: text;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.semantic-find-status-label {
-  color: #9aa0a6;
-  user-select: text;
-}
-.semantic-find-status-label.is-error {
-  color: #f28b82;
-}
-.semantic-find-strip .semantic-find-status-feedback,
-.semantic-find-strip .semantic-find-status-close {
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: #9aa0a6;
-  cursor: pointer;
-  user-select: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 0;
-  font-size: 0;
-}
-.semantic-find-strip .semantic-find-status-close {
-  font-size: 14px;
-  line-height: 18px;
-}
-.semantic-find-status-continue {
-  flex-shrink: 0;
-  height: 18px;
-  margin: 0;
-  padding: 0 6px;
-  border: none;
-  border-radius: 9px;
-  background: transparent;
-  color: #8ab4f8;
-  cursor: pointer;
-  user-select: none;
-  font: inherit;
-  font-size: 12px;
-  line-height: 18px;
-  white-space: nowrap;
-}
-.semantic-find-status-continue[hidden],
-.semantic-find-strip .semantic-find-status-feedback[hidden] {
-  display: none;
-}
-.semantic-find-strip .semantic-find-status-feedback svg {
-  display: block;
-  width: 12px;
-  height: 12px;
-}
-.semantic-find-strip .semantic-find-status-feedback:hover:not(:disabled),
-.semantic-find-strip .semantic-find-status-close:hover,
-.semantic-find-status-continue:hover {
-  color: #e8eaed;
-  background: rgba(255, 255, 255, 0.1);
-}
-.semantic-find-strip .semantic-find-status-feedback:disabled {
-  cursor: default;
-}
-.semantic-find-strip .semantic-find-status-feedback.is-thanks {
-  color: #e74c3c;
-  background: transparent;
-  pointer-events: none;
-}
-.semantic-match-progress-line {
-  fill: none;
-  stroke: rgba(255, 71, 64, 0.7);
-  stroke-width: 2;
-  stroke-linecap: butt;
-}
-.semantic-match-progress-line.is-gray {
-  stroke: rgba(154, 160, 166, 0.7);
-  stroke-width: 1.5;
-}
-.semantic-match-progress-line.is-selected {
-  stroke: #1e6fff;
-  stroke-width: 4;
-}
-.semantic-match-progress-line.is-hovered {
-  stroke-width: 4;
-}
-.semantic-match-progress-label {
-  fill: currentColor;
-  font-family: inherit;
-  font-size: 10px;
-  pointer-events: none;
-}
-.semantic-match-progress-label[hidden] {
-  display: none;
-}
-.semantic-match-progress-hit-area {
-  fill: transparent;
-  pointer-events: all;
-  cursor: pointer;
 }
 .semantic-find-bar:has(.semantic-find-input:focus), .semantic-find-bar.is-input-active, .semantic-find-bar.is-searching {
   background-image: linear-gradient(#3c4043, #3c4043), var(--semantic-ai-gradient);
@@ -545,66 +370,9 @@
   background-image: linear-gradient(#fff, #fff), var(--semantic-ai-gradient);
   box-shadow: 0 1px 3px rgba(60, 64, 67, 0.22), 0 4px 12px var(--semantic-ai-glow);
 }
-:root[data-theme=light] .semantic-match-progress,
-.semantic-find-bar-host[data-theme=light] .semantic-match-progress {
-  color: #80868b;
-  border-color: #dadce0;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.22), 0 4px 8px rgba(60, 64, 67, 0.15);
-}
-:root[data-theme=light] .semantic-match-progress-viewport,
-.semantic-find-bar-host[data-theme=light] .semantic-match-progress-viewport {
-  fill: rgba(0, 0, 0, 0.06);
-}
-:root[data-theme=light] .semantic-find-strip,
-.semantic-find-bar-host[data-theme=light] .semantic-find-strip {
-  border-color: #dadce0;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.22), 0 4px 8px rgba(60, 64, 67, 0.15);
-}
 :root[data-theme=light] .semantic-find-backend-notice,
 .semantic-find-bar-host[data-theme=light] .semantic-find-backend-notice {
   color: #80868b;
-}
-:root[data-theme=light] .semantic-find-status,
-.semantic-find-bar-host[data-theme=light] .semantic-find-status {
-  color: #80868b;
-}
-:root[data-theme=light] .semantic-find-status.is-error,
-.semantic-find-bar-host[data-theme=light] .semantic-find-status.is-error {
-  color: #202124;
-}
-:root[data-theme=light] .semantic-find-status-label,
-.semantic-find-bar-host[data-theme=light] .semantic-find-status-label {
-  color: #80868b;
-}
-:root[data-theme=light] .semantic-find-status-label.is-error,
-.semantic-find-bar-host[data-theme=light] .semantic-find-status-label.is-error {
-  color: #d93025;
-}
-:root[data-theme=light] .semantic-find-strip .semantic-find-status-feedback,
-:root[data-theme=light] .semantic-find-strip .semantic-find-status-close,
-.semantic-find-bar-host[data-theme=light] .semantic-find-strip .semantic-find-status-feedback,
-.semantic-find-bar-host[data-theme=light] .semantic-find-strip .semantic-find-status-close {
-  color: #80868b;
-}
-:root[data-theme=light] .semantic-find-status-continue,
-.semantic-find-bar-host[data-theme=light] .semantic-find-status-continue {
-  color: #1a73e8;
-}
-:root[data-theme=light] .semantic-find-strip .semantic-find-status-feedback:hover:not(:disabled),
-:root[data-theme=light] .semantic-find-strip .semantic-find-status-close:hover,
-:root[data-theme=light] .semantic-find-status-continue:hover,
-.semantic-find-bar-host[data-theme=light] .semantic-find-strip .semantic-find-status-feedback:hover:not(:disabled),
-.semantic-find-bar-host[data-theme=light] .semantic-find-strip .semantic-find-status-close:hover,
-.semantic-find-bar-host[data-theme=light] .semantic-find-status-continue:hover {
-  color: #202124;
-  background: rgba(60, 64, 67, 0.08);
-}
-:root[data-theme=light] .semantic-find-strip .semantic-find-status-feedback.is-thanks,
-.semantic-find-bar-host[data-theme=light] .semantic-find-strip .semantic-find-status-feedback.is-thanks {
-  color: #e74c3c;
-  background: transparent;
 }
 :root[data-theme=light] .semantic-find-bar .semantic-find-input::placeholder,
 .semantic-find-bar-host[data-theme=light] .semantic-find-bar .semantic-find-input::placeholder {

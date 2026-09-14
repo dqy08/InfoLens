@@ -3,18 +3,14 @@
     throw new Error('IL_analyzeCache missing — inject semantic/analyzeCache.js before options.js');
   }
 
-  const t = (key, substitutions) => chrome.i18n.getMessage(key, substitutions) || key;
   const iconEl = document.getElementById('brand_icon');
   const brandEl = document.getElementById('brand_name');
-  const headingEl = document.getElementById('storage_heading');
-  const cacheTitleEl = document.getElementById('cache_title');
   const descEl = document.getElementById('cache_desc');
   const clearBtn = document.getElementById('cache_clear');
-  if (!iconEl || !brandEl || !headingEl || !cacheTitleEl || !descEl || !clearBtn) {
+  if (!iconEl || !brandEl || !descEl || !clearBtn) {
     throw new Error('options page missing required elements');
   }
 
-  document.documentElement.lang = chrome.i18n.getUILanguage();
   const manifest = chrome.runtime.getManifest();
   const name = manifest.name;
   const iconRel = manifest.icons?.['48'] || manifest.icons?.['32'] || manifest.icons?.['128'];
@@ -24,9 +20,6 @@
   iconEl.src = iconRel;
   iconEl.alt = name;
   brandEl.textContent = name;
-  headingEl.textContent = t('optionsStorageSection');
-  cacheTitleEl.textContent = t('optionsCacheTitle');
-  clearBtn.textContent = t('optionsCacheClear');
 
   function formatBytes(n) {
     if (!Number.isFinite(n) || n < 0) throw new Error(`bad cache size: ${n}`);
@@ -41,8 +34,13 @@
 
   async function refresh() {
     const { entries, bytes } = await globalThis.IL_analyzeCache.usage();
-    descEl.textContent = t('optionsCacheUsage', [String(entries), formatBytes(bytes)]);
+    descEl.textContent = `${entries} entries · ${formatBytes(bytes)}`;
     clearBtn.disabled = entries === 0;
+  }
+
+  function showCacheError(err) {
+    descEl.textContent = err?.message || String(err);
+    clearBtn.disabled = true;
   }
 
   clearBtn.addEventListener('click', async () => {
@@ -56,8 +54,12 @@
     }
   });
 
-  void refresh().catch((err) => {
-    descEl.textContent = err?.message || String(err);
-    clearBtn.disabled = true;
+  void refresh().catch(showCacheError);
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (Object.keys(changes).some((k) => k.startsWith(globalThis.IL_analyzeCache.PREFIX))) {
+      void refresh().catch(showCacheError);
+    }
   });
 })();

@@ -98,7 +98,7 @@ globalThis.IH_tokenTip ||= (function () {
   overflow-wrap: anywhere;
 }
 
-/* SYNC: extension/info-highlight/content.css → [prefers-color-scheme: light] 进度图 / 状态条 */
+/* 浮层浅色：与 shared/ui/overlay.css 进度图 / 状态条同一套边框底色 */
 @media (prefers-color-scheme: light) {
   .panel {
     border-color: #dadce0;
@@ -191,7 +191,16 @@ globalThis.IH_tokenTip ||= (function () {
     return panel;
   }
 
-  /** 同样走内联：宿主页的 `div {…}` 能盖掉影子树里的 :host 规则 */
+  /** 从文档摘掉宿主；不靠 display:none（页面 `div { display:… !important }` 能盖过内联）。 */
+  function dropHost() {
+    host?.remove();
+    host = null;
+    shadow = null;
+    panel = null;
+    boxEls = [];
+    document.querySelectorAll(`#${TIP_ID}`).forEach((el) => el.remove());
+  }
+
   function hide() {
     shown = null;
     pointer = null;
@@ -199,7 +208,7 @@ globalThis.IH_tokenTip ||= (function () {
       cancelAnimationFrame(raf);
       raf = 0;
     }
-    if (host) host.style.display = 'none';
+    dropHost();
   }
 
   function appendRow(parent, label, value) {
@@ -282,7 +291,6 @@ globalThis.IH_tokenTip ||= (function () {
     const bits = globalThis.IH_tokenBits(tok);
     if (bits != null) appendRow(el, 'information:', `${sig3(bits)} bits`);
     appendTopk(el, tok);
-    host.style.display = 'block';
   }
 
   /** 默认贴命中字的右下；越界则翻到左 / 上 */
@@ -357,7 +365,7 @@ globalThis.IH_tokenTip ||= (function () {
 
   function update() {
     raf = 0;
-    if (!enabled || !pointer || !mapped) return;
+    if (!enabled || !pointer || !mapped) return hide();
     const { x, y } = pointer;
     const pos = document.caretPositionFromPoint(x, y);
     const node = pos?.offsetNode;
@@ -392,6 +400,7 @@ globalThis.IH_tokenTip ||= (function () {
     if (typeof document.caretPositionFromPoint !== 'function') return;
     document.addEventListener('pointermove', onMove, { capture: true, passive: true });
     document.addEventListener('scroll', hide, { capture: true, passive: true });
+    document.documentElement.addEventListener('pointerleave', hide, { capture: true, passive: true });
     window.addEventListener('resize', hide);
   }
 
@@ -406,13 +415,9 @@ globalThis.IH_tokenTip ||= (function () {
   function clear() {
     document.removeEventListener('pointermove', onMove, { capture: true });
     document.removeEventListener('scroll', hide, { capture: true });
+    document.documentElement.removeEventListener('pointerleave', hide, { capture: true });
     window.removeEventListener('resize', hide);
     hide();
-    host?.remove();
-    host = null;
-    shadow = null;
-    panel = null;
-    boxEls = [];
     mapped = null;
     idx = null;
     pieceOf = new Map();
