@@ -343,7 +343,7 @@ html[data-theme='dark'] .nav-landing-card {
   background-repeat: no-repeat;
 }
 
-.nav-landing-card[data-nav-page='analysis'] .nav-landing-card-shot {
+.nav-landing-card[data-nav-page='infoHighlight'] .nav-landing-card-shot {
   background-image: url('../../assets/images/highlight.png');
   background-color: var(--bg-hover, #f0f0f0);
 }
@@ -488,7 +488,7 @@ html[data-theme='dark'] .nav-landing-card[data-nav-page='causalFlow'] .nav-landi
   background-color: var(--bg-hover, #2a2a2a);
 }
 
-html[data-theme='dark'] .nav-landing-card[data-nav-page='analysis'] .nav-landing-card-shot {
+html[data-theme='dark'] .nav-landing-card[data-nav-page='infoHighlight'] .nav-landing-card-shot {
   background-image: url('../../assets/images/highlight-dark.png');
   background-color: var(--bg-hover, #2a2a2a);
 }

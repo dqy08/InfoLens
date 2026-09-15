@@ -168,7 +168,7 @@ module.exports = {
                 // Demo JSON files now live under data/demo and are served by the backend,
                 // so we only need to copy the HTML shell into the dist folder.
                 copyHtmlWithIncludesAndPageMeta('index.html', 'index.html', 'home'),
-                copyHtmlWithIncludesAndPageMeta('analysis.html', 'analysis.html', 'analysis'),
+                copyHtmlWithIncludesAndPageMeta('analysis.html', 'analysis.html', 'infoHighlight'),
                 { from: 'compare.html', to: 'compare.html' },
                 copyHtmlWithIncludesAndPageMeta('chat.html', 'chat.html', 'chat'),
                 copyHtmlWithIncludesAndPageMeta('attribution.html', 'attribution.html', 'attribution'),

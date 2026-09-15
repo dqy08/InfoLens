@@ -16,7 +16,7 @@ import { SettingsMenuManager } from '../../shared/cross/settingsMenuManager';
 import { initializeCommonApp } from '../../shared/bootstrap';
 import { DEFAULT_DEMO_URL_PARAM } from '../../shared/cross/contentUrl';
 
-/** 首页主角卡片。`?hero=` 值为 `data-nav-page`：causalFlow | analysis | semanticHighlight。缺省 causalFlow。 */
+/** 首页主角卡片。`?hero=` 值为 `data-nav-page`：causalFlow | infoHighlight | semanticHighlight。缺省 causalFlow。 */
 const HOME_HERO_URL_PARAM = 'hero';
 /** 商店入口主机名：无查询串；落到此后转到主站并带上插件主角。 */
 const HOME_HERO_ENTRY_HOST = 'extension.info-lens.app';

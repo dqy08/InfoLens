@@ -1,5 +1,5 @@
 {
-  "navPageKeys": ["causalFlow", "analysis", "semanticHighlight"],
+  "navPageKeys": ["causalFlow", "infoHighlight", "semanticHighlight"],
   "pages": {
     "home": {
       "title": "Info Lens",
@@ -7,7 +7,7 @@
       "heartline": "A ❤️ would mean a lot!",
       "formula": "LLM × Linguistics × Information Theory"
     },
-    "analysis": {
+    "infoHighlight": {
       "title": "Info Highlight",
       "subtitle": "- highlight the 'informative' parts",
       "href": "analysis.html"
