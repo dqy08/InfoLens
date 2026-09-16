@@ -50,27 +50,40 @@ test('eventKey: 时间在前，event 在 key 里；更新的 ms 字典序更靠�
   assert.ok(newerUninstall < olderInstall);
 });
 
-test('buildEventRecord: update 才带 previous_version', () => {
+test('buildEventRecord: update 才带 previous_version；缺 extension 默认 semantic-highlight', () => {
   const inst = buildEventRecord({ event: 'install', version: '0.6.5', previous_version: '0.6.4' });
   assert.equal(inst.event, 'install');
   assert.equal(inst.version, '0.6.5');
+  assert.equal(inst.extension, 'semantic-highlight');
   assert.equal(inst.previous_version, undefined);
   assert.match(inst.saved_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
 
   const upd = buildEventRecord({ event: 'update', version: '0.6.5', previous_version: '0.6.4' });
   assert.equal(upd.previous_version, '0.6.4');
+
+  const ih = buildEventRecord({ event: 'install', version: '0.1.0', extension: 'info-highlight' });
+  assert.equal(ih.extension, 'info-highlight');
+
+  const bad = buildEventRecord({ event: 'install', version: '0.1.0', extension: 'other' });
+  assert.equal(bad.extension, null);
 });
 
-test('handlePostExtensionEvents: 非法 event / 缺 version 拒收', async () => {
+test('handlePostExtensionEvents: 非法 event / 缺 version / 非法 extension 拒收', async () => {
   const STATE = mockState();
   const badEvent = await handlePostExtensionEvents(postReq({ event: 'other', version: '0.6.5' }), { STATE }, json);
   assert.equal(badEvent.status, 400);
   const noVer = await handlePostExtensionEvents(postReq({ event: 'install' }), { STATE }, json);
   assert.equal(noVer.status, 400);
+  const badExt = await handlePostExtensionEvents(
+    postReq({ event: 'install', version: '0.1.0', extension: 'other' }),
+    { STATE },
+    json
+  );
+  assert.equal(badExt.status, 400);
   assert.equal(Object.keys(STATE.data).length, 0);
 });
 
-test('handlePostExtensionEvents: 每条事件单独落盘', async () => {
+test('handlePostExtensionEvents: 每条事件单独落盘；可带 extension', async () => {
   const STATE = mockState();
   const inst = await handlePostExtensionEvents(
     postReq({ event: 'install', version: '0.6.5' }),
@@ -78,12 +91,12 @@ test('handlePostExtensionEvents: 每条事件单独落盘', async () => {
     json
   );
   const upd = await handlePostExtensionEvents(
-    postReq({ event: 'update', version: '0.6.6', previous_version: '0.6.5' }),
+    postReq({ event: 'update', version: '0.6.6', previous_version: '0.6.5', extension: 'semantic-highlight' }),
     { STATE },
     json
   );
   const visit = await handlePostExtensionEvents(
-    postReq({ event: 'uninstall', version: '0.6.6' }),
+    postReq({ event: 'uninstall', version: '0.1.0', extension: 'info-highlight' }),
     { STATE },
     json
   );
@@ -97,8 +110,12 @@ test('handlePostExtensionEvents: 每条事件单独落盘', async () => {
   assert.equal(keys.filter((k) => k.includes(':uninstall:')).length, 1);
   const records = Object.values(STATE.data).map((raw) => JSON.parse(raw));
   assert.equal(records.filter((r) => r.event === 'install').length, 1);
+  const installRec = records.find((r) => r.event === 'install');
+  assert.equal(installRec.extension, 'semantic-highlight');
   const updateRec = records.find((r) => r.event === 'update');
   assert.equal(updateRec.previous_version, '0.6.5');
+  const uninstallRec = records.find((r) => r.event === 'uninstall');
+  assert.equal(uninstallRec.extension, 'info-highlight');
 });
 
 test('handleListExtensionEvents: 最新在前，支持单条 key', async () => {

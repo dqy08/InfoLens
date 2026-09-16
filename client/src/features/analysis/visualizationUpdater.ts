@@ -75,6 +75,8 @@ export interface VisualizationDependencies {
     surprisalColorScale: d3.ScaleSequential<string>;
     /** 语义/密度模式切换时同步 Analyze·上传·保存·metrics 等 chrome 显隐 */
     syncModeChrome?: (semanticEnabled: boolean) => void;
+    /** 即将换一批正文结果（demo / analyze / 改字 / digit merge）时，停掉扫描播放 */
+    onResultPaintReset?: () => void;
 }
 
 /** 语义分析原始数据（独立存储） */
@@ -575,6 +577,7 @@ export class VisualizationUpdater {
      * 文本修改时清除独立存储的数据（避免展示与输入不一致）
      */
     public clearDataOnTextChange(): void {
+        this.deps.onResultPaintReset?.();
         this.currentState.infoDensityData = null;
         this.currentState.semanticData = null;
         this.currentState.rawApiResponse = null;
@@ -620,6 +623,7 @@ export class VisualizationUpdater {
      * 清除语义分析相关数据并重绘（直方图、debug、正文着色），使界面与「无语义搜索结果」一致
      */
     public clearSemanticState(): void {
+        this.deps.onResultPaintReset?.();
         const plainTextFallback = this.resolvePlainTextFallback();
         this.currentState.semanticData = null;
         const rawScoreNormedItem = document.getElementById('raw_score_normed_histogram_item');
@@ -637,6 +641,7 @@ export class VisualizationUpdater {
      * digit merge 用户偏好变化时：对信息密度与整段语义从可重算数据源刷新；分块语义无副本则保持当前展示不变
      */
     public applyDigitsMergeSetting(): void {
+        this.deps.onResultPaintReset?.();
         const digitMerge = getDigitsMergeEnabled();
         const info = this.currentState.infoDensityData;
         if (info?.result) {
@@ -702,6 +707,7 @@ export class VisualizationUpdater {
         options: { enableSave?: boolean } = {}
     ): void {
         const { enableSave = true } = options;
+        this.deps.onResultPaintReset?.();
 
         const abortDueToInvalidResponse = (message: string) => {
             console.error(message);
@@ -855,6 +861,7 @@ export class VisualizationUpdater {
         text?: string,
         signalFitResult?: signalFitResult | null
     ): boolean {
+        this.deps.onResultPaintReset?.();
         const chunkInfos = res?.chunkInfos;
         const semanticTokens = res?.token_attention;
         const currentText = text ?? '';

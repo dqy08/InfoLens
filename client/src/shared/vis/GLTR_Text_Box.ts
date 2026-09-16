@@ -172,6 +172,9 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
     // Minimap 管理器
     private minimapManager?: ScrollbarMinimap;
 
+    /** 扫描播放当前 token；非 null 时抑制鼠标 hover，并在 SVG 重建后恢复描边 */
+    private playbackHoverIndex: number | null = null;
+
     private _refreshBaseRectColorsOrFullRender = (): void => {
         if (this.svgOverlayManager && this.currentRenderData) {
             const rectCount = this.svgOverlayManager.getRectCache().size;
@@ -367,6 +370,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
             if (this.cachedPositions && this.cachedPositions.length > 0) {
                 await this.renderMinimap(this.cachedPositions, rd);
             }
+            this.applyPlaybackHoverClass();
             return;
         }
 
@@ -441,6 +445,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
         this.currentSvgOverlay = svg;
         // 将SVG添加到容器（在文本节点之后）
         baseNode.appendChild(svg);
+        this.applyPlaybackHoverClass();
 
         // 写入位置缓存，供后续 chunk 增量更新复用
         this.cachedPositions = positions;
@@ -670,6 +675,8 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
 
         // 重置增量渲染缓存，避免下次 _renderWithSvgOverlay 误走增量路径（SVG 已脱离 DOM）
         this.currentSvgOverlay = undefined;
+        this.playbackHoverIndex = null;
+        this.base.classed('playback-active', false);
         this.cachedPositions = undefined;
         this.cachedPositionsText = undefined;
         this.cachedPositionsTokenCount = 0;
@@ -995,6 +1002,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
         };
 
         const handleMouseEnter = (event: MouseEvent) => {
+            if (this.playbackHoverIndex != null) return;
             // 按住主键拖动（框选）时不再弹出 tooltip，避免挡正文选中
             if ((event.buttons & 1) !== 0) return;
             this.eventHandler.trigger(GLTR_Text_Box.events.tokenHovered, <GLTR_HoverEvent>{
@@ -1006,6 +1014,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
         };
 
         const handleMouseLeave = (event: MouseEvent) => {
+            if (this.playbackHoverIndex != null) return;
             this.eventHandler.trigger(GLTR_Text_Box.events.tokenHovered, <GLTR_HoverEvent>{
                 hovered: false,
                 // hovered=false 时 tooltip 不会读取 semantic；避免在 mouseleave 上额外计算
@@ -1016,6 +1025,7 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
 
         /** 从当前 token 开始按下主键（框选起点）时立即收起 tooltip */
         const handleMouseDown = (event: MouseEvent) => {
+            if (this.playbackHoverIndex != null) return;
             if (event.button !== 0) return;
             this.eventHandler.trigger(GLTR_Text_Box.events.tokenHovered, <GLTR_HoverEvent>{
                 hovered: false,
@@ -1481,6 +1491,41 @@ export class GLTR_Text_Box extends VComponent<FrontendAnalyzeResult> {
                 this.highlightManager.clearHighlight();
             }
         }
+    }
+
+    getTokenGroupElement(tokenIndex: number): SVGGElement | null {
+        const svg = this.currentSvgOverlay;
+        if (!svg) return null;
+        return svg.querySelector(`g.token-group[data-token-index="${tokenIndex}"]`);
+    }
+
+    /**
+     * 扫描播放：用与 :hover 相同的描边框住当前 token；底色不动。
+     * `null` 清除。
+     */
+    setPlaybackHoverToken(tokenIndex: number | null): void {
+        this.playbackHoverIndex = tokenIndex;
+        this.base.classed('playback-active', tokenIndex != null);
+        this.applyPlaybackHoverClass();
+    }
+
+    private applyPlaybackHoverClass(): void {
+        const svg = this.currentSvgOverlay;
+        if (!svg) return;
+        svg.querySelectorAll('g.token-group.token-playback-hover').forEach((g) => {
+            g.classList.remove('token-playback-hover');
+        });
+        if (this.playbackHoverIndex == null) return;
+        this.getTokenGroupElement(this.playbackHoverIndex)?.classList.add('token-playback-hover');
+    }
+
+    /** 仅当当前 token 不在视口内时滚动（nearest），不改变已可见位置。 */
+    ensureTokenVisible(tokenIndex: number): void {
+        this.getTokenGroupElement(tokenIndex)?.scrollIntoView({
+            block: 'nearest',
+            inline: 'nearest',
+            behavior: 'auto',
+        });
     }
 
     /**

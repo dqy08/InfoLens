@@ -87,10 +87,10 @@ import { ToolTip, type ToolTipUpdateAugment } from '../../../shared/vis/ToolTip'
 import { formatTopkTooltipProbabilityPercent } from '../../cross/topkChartUtils';
 import {
     CSS_PSEUDO_FULLSCREEN_CHANGE_EVENT,
-    dagResultsSurfaceFullscreenExpanded,
-    detachDagPseudoFullscreenIfPresent,
-    runDagFullscreenToggleWithPseudoWorkaround,
-} from './genAttributeDagFullscreenWorkaround';
+    elementFullscreenExpanded,
+    detachPseudoFullscreenIfPresent,
+    runFullscreenToggleWithPseudoWorkaround,
+} from '../../ui/elementFullscreenWorkaround';
 import {
     clampLinearArcAdjacentGap,
     LINEAR_ARC_ADJACENT_GAP_DEFAULT,
@@ -3923,10 +3923,10 @@ export function initGenAttributeDagView(
         .attr('title', 'Fullscreen')
         .text('⛶');
 
-    // 全屏：以 Fullscreen API 为主；伪全屏仅作浏览器不支持时的降级（详见 genAttributeDagFullscreenWorkaround.ts）
+    // 全屏：以 Fullscreen API 为主；伪全屏仅作浏览器不支持时的降级（详见 elementFullscreenWorkaround.ts）
 
     function updateFullscreenBtnIcon(): void {
-        const active = dagResultsSurfaceFullscreenExpanded(rootEl);
+        const active = elementFullscreenExpanded(rootEl);
         fullscreenBtn.text(active ? '×' : '⛶').attr('title', active ? 'Exit fullscreen' : 'Fullscreen');
     }
 
@@ -3938,7 +3938,7 @@ export function initGenAttributeDagView(
     fullscreenBtn.on('click', (event) => {
         event.stopPropagation();
         void (async (): Promise<void> => {
-            await runDagFullscreenToggleWithPseudoWorkaround({
+            await runFullscreenToggleWithPseudoWorkaround({
                 rootEl,
                 onNativeExitFailure: reportFullscreenFailure,
             });
@@ -3992,7 +3992,7 @@ export function initGenAttributeDagView(
         cancelLightningFadeRaf();
         lightningSound.dispose();
         recursiveEdgeAnimation.dispose();
-        detachDagPseudoFullscreenIfPresent(rootEl);
+        detachPseudoFullscreenIfPresent(rootEl);
         ro.disconnect();
         document.removeEventListener('fullscreenchange', refreshFullscreenChrome);
         document.removeEventListener(CSS_PSEUDO_FULLSCREEN_CHANGE_EVENT, refreshFullscreenChrome);

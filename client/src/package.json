@@ -19,6 +19,7 @@
     "test:dagFocusAttribution": "npx tsx tests/prediction_attribution/genAttributeDagFocusAttribution.test.ts",
     "test:dagLayoutTransition": "npx tsx tests/prediction_attribution/genAttributeDagLayoutTransition.test.ts",
     "test:resolveApiBase": "npx tsx tests/api/resolveApiBase.test.ts",
+    "test:tokenSurprisalPlayback": "npx tsx tests/vis/tokenSurprisalPlayback.test.ts",
     "prebuild": "node scripts/updateIntroHTML.js",
     "prebuild:dev": "node scripts/updateIntroHTML.js",
     "wp": "npm run build:dev",

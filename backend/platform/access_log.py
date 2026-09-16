@@ -97,9 +97,12 @@ def log_cached_demo(path: str):
     log_request("🎯 cached demo", f"file='{path}'")
 
 
-def log_analyze_request(text: str, stream_mode: bool = False, client_ip: str = None):
+def log_analyze_request(
+    text: str, stream_mode: bool = False, client_ip: str = None, privacy_mode: bool = False,
+):
     """
-    记录收到分析请求
+    记录收到分析请求。
+    privacy_mode=True 时不落 text 内容与明文 IP，仅记字符数和 IP 摘要。
     
     Returns:
         int: 请求ID
@@ -111,15 +114,19 @@ def log_analyze_request(text: str, stream_mode: bool = False, client_ip: str = N
         _request_counter += 1
         request_id = _request_counter
     
-    preview_length = 100
-    raw = text if text else ""
-    text_preview = _log_str_preview(raw, preview_length)
     char_count = len(text) if text else 0
     byte_count = len(text.encode('utf-8')) if text else 0
     mode_str = "(stream)" if stream_mode else ""
 
-    details = f"req_id={request_id}, text='{text_preview}', chars={char_count}, bytes={byte_count}"
-    log_request(f"📥 收到请求{mode_str}", details, client_ip)
+    if privacy_mode:
+        visitor = f"visitor=#{_visitor_seq_no(client_ip)}"
+        details = f"req_id={request_id}, chars={char_count}, bytes={byte_count}"
+        log_request(f"📥 收到请求{mode_str}（隐私模式）", details, client_ip=visitor)
+    else:
+        preview_length = 100
+        text_preview = _log_str_preview(text if text else "", preview_length)
+        details = f"req_id={request_id}, text='{text_preview}', chars={char_count}, bytes={byte_count}"
+        log_request(f"📥 收到请求{mode_str}", details, client_ip)
 
     _hit_api("analyze")
     return request_id

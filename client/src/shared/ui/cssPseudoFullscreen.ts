@@ -2,7 +2,7 @@
  * WORKAROUND：CSS 伪全屏（fixed + 锁 body 滚动）
  *
  * 不参与 Fullscreen API。供「原生 `requestFullscreen` 不可用或拒绝」时降级使用；
- * 业务层应始终先尝试标准 API，再把本模块当作兜底（见 `genAttributeDagFullscreenWorkaround.ts`）。
+ * 业务层应始终先尝试标准 API，再把本模块当作兜底（见 `elementFullscreenWorkaround.ts`）。
  *
  * 样式类名 {@link CSS_PSEUDO_FULLSCREEN_TARGET_CLASS} 须与页面 SCSS 一致。
  */

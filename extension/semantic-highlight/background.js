@@ -6,10 +6,13 @@
 
 importScripts('sw/restricted-url.js');
 importScripts('sw/install-dot.js');
+importScripts('sw/lifecycle-events.js');
 importScripts('sw/inject.js');
 importScripts('config.js');
 importScripts('pdf/stash-db.js');
 importScripts('pdf/sw.js');
+
+const EXTENSION_ID = 'semantic-highlight';
 
 const CONTENT_CSS = ['content.css'];
 const CONTENT_JS = [
@@ -142,26 +145,8 @@ async function activateTab(tab, opts = {}) {
 }
 
 const CONTEXT_MENU_ID = 'il-semantic-search';
-const UNINSTALL_SURVEY_URL = 'https://info-lens.app/uninstall.html';
 
-function setUninstallSurveyUrl() {
-  const version = chrome.runtime.getManifest().version;
-  chrome.runtime.setUninstallURL(
-    `${UNINSTALL_SURVEY_URL}?v=${encodeURIComponent(version)}`
-  );
-}
-
-setUninstallSurveyUrl();
-
-function postKeepalive(path, body, apiBase) {
-  const base = String(apiBase || IL_CONFIG?.apiBase || 'https://api.info-lens.app').replace(/\/$/, '');
-  void fetch(`${base}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    keepalive: true,
-  });
-}
+IL_setUninstallSurveyUrl(EXTENSION_ID);
 
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.contextMenus.removeAll(() => {
@@ -173,13 +158,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   });
 
   IL_maybeShowInstallDot(details);
-  if (details.reason === 'install' || details.reason === 'update') {
-    const body = { event: details.reason, version: chrome.runtime.getManifest().version };
-    if (details.reason === 'update' && details.previousVersion) {
-      body.previous_version = details.previousVersion;
-    }
-    postKeepalive('/api/extension-events', body);
-  }
+  IL_reportInstallOrUpdate(details, EXTENSION_ID, IL_CONFIG?.apiBase);
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -423,13 +402,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg?.type === 'il-extension-feedback') {
-    postKeepalive(
+    IL_postKeepalive(
       '/api/extension-feedback',
       {
         ...(msg.body && typeof msg.body === 'object' ? msg.body : {}),
         extension_version: chrome.runtime.getManifest().version,
       },
-      msg.apiBase
+      msg.apiBase || IL_CONFIG?.apiBase
     );
     return;
   }

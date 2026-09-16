@@ -144,7 +144,7 @@ def _load_project_with_error_handling(model):
     return p, None, None
 
 
-def _log_request(text, stream_mode=False, client_ip=None):
+def _log_request(text, stream_mode=False, client_ip=None, privacy_mode=False):
     """
     打印请求日志
     
@@ -152,7 +152,7 @@ def _log_request(text, stream_mode=False, client_ip=None):
         int: 请求ID
     """
     from backend.platform.access_log import log_analyze_request
-    return log_analyze_request(text, stream_mode, client_ip)
+    return log_analyze_request(text, stream_mode, client_ip, privacy_mode)
 
 
 def _log_response(res, char_count, elapsed_time, stream_mode=False, request_id=None, wait_time=None):
@@ -187,6 +187,7 @@ def analyze(analyze_request):
             - model: 模型名称
             - text: 要分析的文本
             - stream: 可选，如果为 True 则返回 SSE 流式响应（带进度信息）
+            - privacy_mode: 可选，True 时请求日志不落 text 与明文 IP
 
     Returns:
         如果 stream=True: SSE 响应对象
@@ -203,10 +204,13 @@ def analyze(analyze_request):
         return _error_response("", "", "Missing text", 400)
 
     client_ip = get_client_ip()
+    privacy_mode = bool(analyze_request.get("privacy_mode", False))
     logged: dict = {"request_id": None}
 
     def log_fn():
-        logged["request_id"] = _log_request(text, stream_mode=bool(stream), client_ip=client_ip)
+        logged["request_id"] = _log_request(
+            text, stream_mode=bool(stream), client_ip=client_ip, privacy_mode=privacy_mode
+        )
 
     def local_fn():
         from backend.platform.app_context import get_app_context
@@ -317,7 +321,10 @@ def _generate_analyze_events(analyze_request, client_ip, request_id=None):
     try:
         char_count = len(text) if text else 0
         if request_id is None:
-            request_id = _log_request(text, stream_mode=True, client_ip=client_ip)
+            privacy_mode = bool(analyze_request.get("privacy_mode", False))
+            request_id = _log_request(
+                text, stream_mode=True, client_ip=client_ip, privacy_mode=privacy_mode
+            )
 
         # 创建线程安全的进度队列
         progress_queue = queue.Queue()

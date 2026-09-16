@@ -36,6 +36,13 @@ import {
 } from '../../shared/prediction_attribution/causal_flow/genAttributeDagAttentionPlayback';
 import type { GenAttrDemoUiOptions } from '../../shared/storage/genAttributeRunCache';
 import {
+    PLAYBACK_STEP_MS_DEFAULT,
+    PLAYBACK_STEP_MS_MIN,
+    PLAYBACK_STEP_MS_MAX,
+    clampPlaybackStepMs,
+    readStoredPlaybackStepMs,
+} from '../../shared/storage/playbackStepMs';
+import {
     DEFAULT_EXCLUDE_GENERATED_PATTERNS_TEXT,
     DEFAULT_EXCLUDE_PROMPT_PATTERNS_TEXT,
 } from '../../shared/prediction_attribution/core/attributionExcludePromptPatternsStorage';
@@ -115,9 +122,10 @@ export const GEN_ATTR_DAG_MEASURE_WIDTH_DEFAULT = 500;
 export const GEN_ATTR_DAG_MEASURE_WIDTH_MIN = 200;
 export const GEN_ATTR_DAG_MEASURE_WIDTH_MAX = 4000;
 
-export const GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT = 200;
-export const GEN_ATTR_DAG_PLAYBACK_STEP_MS_MIN = 0;
-export const GEN_ATTR_DAG_PLAYBACK_STEP_MS_MAX = 10000;
+export const GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT = PLAYBACK_STEP_MS_DEFAULT;
+export const GEN_ATTR_DAG_PLAYBACK_STEP_MS_MIN = PLAYBACK_STEP_MS_MIN;
+export const GEN_ATTR_DAG_PLAYBACK_STEP_MS_MAX = PLAYBACK_STEP_MS_MAX;
+export { clampPlaybackStepMs as clampDagPlaybackStepMs, readStoredPlaybackStepMs };
 
 export const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_DEFAULT = 7;
 export const GEN_ATTR_DAG_PLAYBACK_TOTAL_S_MIN = 1;
@@ -224,18 +232,8 @@ export function readStoredDagLinearArcAdjacentGap(): number {
         { clamp: clampLinearArcAdjacentGap },
     );
 }
-export function clampDagPlaybackStepMs(n: number): number {
-    return Math.max(
-        GEN_ATTR_DAG_PLAYBACK_STEP_MS_MIN,
-        Math.min(GEN_ATTR_DAG_PLAYBACK_STEP_MS_MAX, Math.round(n))
-    );
-}
 export function readStoredDagPlaybackStepMs(): number {
-    return lsReadNumber(
-        GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY,
-        GEN_ATTR_DAG_PLAYBACK_STEP_MS_DEFAULT,
-        { clamp: clampDagPlaybackStepMs },
-    );
+    return readStoredPlaybackStepMs(GEN_ATTR_DAG_PLAYBACK_STEP_MS_STORAGE_KEY);
 }
 export function clampDagPlaybackTotalS(n: number): number {
     const stepped =

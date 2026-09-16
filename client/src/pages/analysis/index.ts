@@ -53,11 +53,27 @@ import { saveHistory, initQueryHistoryDropdown } from '../../shared/cross/queryH
 import { removeByQuery as removeSemanticCacheByQuery } from '../../shared/cross/semanticResultCache';
 import { playAnalysisCompleteSound } from '../../shared/cross/soundNotification';
 import { getSemanticMatchThreshold, setSemanticMatchThreshold } from '../../shared/cross/semanticThresholdManager';
-import { lsGet, lsSet, lsWriteBool } from '../../shared/storage/localStorageHelpers';
+import { lsGet, lsSet, lsWriteBool, lsWriteNumber } from '../../shared/storage/localStorageHelpers';
 import { SEMANTIC_MATCH_THRESHOLD } from '../../shared/core/constants';
 import { SemanticSearchController } from '../../shared/controllers/semanticSearchController';
 import { getSemanticAnalysisEnabled } from '../../shared/cross/semanticAnalysisManager';
 import { initDensityAttributionSidebar } from '../../shared/prediction_attribution/density_sidebar/densityAttributionSidebar';
+import {
+    createTokenSurprisalPlaybackController,
+    surprisalPlaybackDwellsMs,
+    tokenSurprisalBits,
+} from '../../shared/vis/tokenSurprisalPlayback';
+import {
+    clampPlaybackStepMs,
+    readStoredPlaybackStepMs,
+} from '../../shared/storage/playbackStepMs';
+import {
+    CSS_PSEUDO_FULLSCREEN_CHANGE_EVENT,
+    elementFullscreenExpanded,
+    runFullscreenToggleWithPseudoWorkaround,
+} from '../../shared/ui/elementFullscreenWorkaround';
+
+const INFO_DENSITY_PLAYBACK_STEP_MS_STORAGE_KEY = 'info_radar_info_density_playback_step_ms';
 
 const current = {
     sidebar: {
@@ -202,10 +218,273 @@ window.onload = () => {
     // 创建GLTR文本可视化实例
     const lmf = new GLTR_Text_Box(d3.select("#results"), eventHandler);
 
-    // 直接设置为 fract_p 模式，minimap状态将在settingsMenuManager初始化后设置
+    const playStepMsNode = document.getElementById(
+        'info_density_playback_step_ms'
+    ) as HTMLInputElement | null;
+    const readStoredPlayStepMs = (): number =>
+        readStoredPlaybackStepMs(INFO_DENSITY_PLAYBACK_STEP_MS_STORAGE_KEY);
+    if (playStepMsNode) playStepMsNode.value = String(readStoredPlayStepMs());
+    const readPlayStepMs = (): number => {
+        const raw = parseInt(playStepMsNode?.value ?? '', 10);
+        const ms = Number.isFinite(raw) ? clampPlaybackStepMs(raw) : readStoredPlayStepMs();
+        if (playStepMsNode) playStepMsNode.value = String(ms);
+        return ms;
+    };
+    playStepMsNode?.addEventListener('change', () => {
+        lsWriteNumber(INFO_DENSITY_PLAYBACK_STEP_MS_STORAGE_KEY, readPlayStepMs());
+    });
+
+    const panelEl = document.querySelector('.right_panel') as HTMLElement | null;
+    const playBtn = d3.select('#info_density_panel_play_btn');
+    const panelRefreshBtn = document.getElementById(
+        'info_density_panel_refresh_btn'
+    ) as HTMLButtonElement | null;
+    const panelFullscreenBtn = document.getElementById(
+        'info_density_panel_fullscreen_btn'
+    ) as HTMLButtonElement | null;
+
+    const stageOverlay = document.getElementById('info_density_token_stage_overlay');
+    const stageEl = document.getElementById('info_density_token_stage');
+    const stageTokenEl = document.getElementById('info_density_token_stage_token');
+    const stagePlayNode = document.getElementById(
+        'info_density_token_stage_play_btn'
+    ) as HTMLButtonElement | null;
+    const stageRefreshBtn = document.getElementById(
+        'info_density_token_stage_refresh_btn'
+    ) as HTMLButtonElement | null;
+    const stageFullscreenBtn = document.getElementById(
+        'info_density_token_stage_fullscreen_btn'
+    ) as HTMLButtonElement | null;
+    const stageOpenBtn = document.getElementById(
+        'info_density_token_stage_open_btn'
+    ) as HTMLButtonElement | null;
+    const stagePlayBtn = stagePlayNode ? d3.select(stagePlayNode) : null;
+
+    const isTokenStageOpen = (): boolean => !!stageOverlay && !stageOverlay.hasAttribute('hidden');
+
+    const STAGE_SIDE_CHARS = 20;
+
+    const keepAfterLastNewline = (s: string): string => {
+        const i = Math.max(s.lastIndexOf('\n'), s.lastIndexOf('\r'));
+        return i < 0 ? s : s.slice(i + 1);
+    };
+
+    const keepBeforeFirstNewline = (s: string): string => {
+        const i = s.search(/[\n\r]/);
+        return i < 0 ? s : s.slice(0, i);
+    };
+
+    const stripNewlines = (s: string): string => s.replace(/[\n\r]+/g, '');
+
+    const paintStageToken = (index: number | null): void => {
+        if (!stageTokenEl) return;
+        const prevEl = stageTokenEl.querySelector('[data-stage-tok="prev"]');
+        const curEl = stageTokenEl.querySelector('[data-stage-tok="cur"]');
+        const nextEl = stageTokenEl.querySelector('[data-stage-tok="next"]');
+        const paint = (el: Element | null, text: string): void => {
+            if (el) el.textContent = text;
+        };
+        if (!isTokenStageOpen() || index === null) {
+            paint(prevEl, '');
+            paint(curEl, '');
+            paint(nextEl, '');
+            return;
+        }
+        const rd = lmf.getCurrentAnalyzeResult();
+        const tok = rd?.bpe_strings[index];
+        if (!rd || !tok) {
+            paint(prevEl, '');
+            paint(curEl, '');
+            paint(nextEl, '');
+            return;
+        }
+        const [start, end] = tok.offset;
+        const src = rd.originalText;
+        if (src && end > start) {
+            paint(prevEl, keepAfterLastNewline(src.slice(Math.max(0, start - STAGE_SIDE_CHARS), start)));
+            paint(curEl, stripNewlines(src.slice(start, end)));
+            paint(nextEl, keepBeforeFirstNewline(src.slice(end, end + STAGE_SIDE_CHARS)));
+            return;
+        }
+        paint(prevEl, '');
+        paint(curEl, stripNewlines(tok.raw ?? ''));
+        paint(nextEl, '');
+    };
+
+    let suppressStageCloseEsc = false;
+    const paintFullscreenBtn = (btn: HTMLButtonElement | null, on: boolean): void => {
+        if (!btn) return;
+        btn.textContent = on ? '×' : '⛶';
+        btn.title = on ? tr('Exit fullscreen') : tr('Fullscreen');
+    };
+    const syncFullscreenButton = (): void => {
+        paintFullscreenBtn(stageFullscreenBtn, !!stageEl && document.fullscreenElement === stageEl);
+        paintFullscreenBtn(
+            panelFullscreenBtn,
+            !!panelEl && elementFullscreenExpanded(panelEl)
+        );
+    };
+    const reportFullscreenFailure = (err: unknown): void => {
+        const detail = err instanceof Error && err.message ? err.message : '';
+        const base = tr('Fullscreen unavailable');
+        showToast(detail ? `${base}: ${detail}` : base, 'error');
+    };
+
+    const closeTokenStage = (): void => {
+        if (stageEl && document.fullscreenElement === stageEl) {
+            void document.exitFullscreen();
+        }
+        stageOverlay?.setAttribute('hidden', '');
+        paintStageToken(null);
+    };
+
+    const syncPlayButton = (): void => {
+        const rd = lmf.getCurrentAnalyzeResult();
+        const canPlay = !!rd?.bpe_strings.length;
+        const playing = playback.getPhase() === 'playing';
+        playBtn.attr('hidden', canPlay ? null : true);
+        playBtn.property('disabled', !canPlay);
+        playBtn.classed('gen-attr-dag-play--propagation-hint', canPlay && !playing);
+        playBtn
+            .text(playing ? '⏸' : '▶')
+            .attr('title', playing ? tr('Pause') : tr('Step replay (▶)'));
+        if (stagePlayBtn) {
+            stagePlayBtn.property('disabled', !canPlay);
+            stagePlayBtn.classed('gen-attr-dag-play--propagation-hint', canPlay && !playing);
+            stagePlayBtn
+                .text(playing ? '⏸' : '▶')
+                .attr('title', playing ? tr('Pause') : tr('Step replay (▶)'));
+        }
+        if (stageRefreshBtn) {
+            stageRefreshBtn.disabled = !canPlay;
+            stageRefreshBtn.title = tr('Refresh');
+        }
+        if (panelRefreshBtn) {
+            panelRefreshBtn.hidden = !canPlay;
+            panelRefreshBtn.disabled = !canPlay;
+            panelRefreshBtn.title = tr('Refresh');
+        }
+        if (panelFullscreenBtn) panelFullscreenBtn.hidden = !canPlay;
+    };
+
+    const playback = createTokenSurprisalPlaybackController({
+        onShowToken: (tokenIndex) => {
+            lmf.setPlaybackHoverToken(tokenIndex);
+            lmf.ensureTokenVisible(tokenIndex);
+            paintStageToken(tokenIndex);
+        },
+        onClear: () => {
+            lmf.setPlaybackHoverToken(null);
+            paintStageToken(null);
+        },
+        onPhaseChange: syncPlayButton,
+    });
+
+    const openTokenStage = (): void => {
+        if (!stageOverlay) return;
+        stageOverlay.removeAttribute('hidden');
+        paintStageToken(playback.getIndex());
+        syncPlayButton();
+        syncFullscreenButton();
+    };
+
+    const playbackDwellsMs = (rd: FrontendAnalyzeResult): number[] =>
+        surprisalPlaybackDwellsMs(rd.bpe_strings.map(tokenSurprisalBits), readPlayStepMs());
+
+    const togglePlayback = (): void => {
+        const rd = lmf.getCurrentAnalyzeResult();
+        if (!rd?.bpe_strings.length) return;
+        if (playback.getPhase() === 'idle') {
+            toolTip.visibility = false;
+        }
+        playback.toggle(playbackDwellsMs(rd));
+    };
+
+    const restartPlayback = (): void => {
+        const rd = lmf.getCurrentAnalyzeResult();
+        if (!rd?.bpe_strings.length) return;
+        toolTip.visibility = false;
+        // ↻：回到开头并停住（显示首 token）；仅 ▶ 继续往下扫
+        playback.resetPaused(playbackDwellsMs(rd));
+    };
+
+    playBtn.on('click', (event) => {
+        event.stopPropagation();
+        if (playBtn.property('disabled')) return;
+        togglePlayback();
+    });
+    stagePlayBtn?.on('click', (event) => {
+        event.stopPropagation();
+        if (stagePlayBtn.property('disabled')) return;
+        togglePlayback();
+    });
+    const onRefreshClick = (btn: HTMLButtonElement | null) => (event: Event): void => {
+        event.stopPropagation();
+        if (!btn || btn.disabled) return;
+        restartPlayback();
+    };
+    stageRefreshBtn?.addEventListener('click', onRefreshClick(stageRefreshBtn));
+    panelRefreshBtn?.addEventListener('click', onRefreshClick(panelRefreshBtn));
+    stageOpenBtn?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (isTokenStageOpen()) closeTokenStage();
+        else openTokenStage();
+    });
+    stageOverlay?.addEventListener('click', () => closeTokenStage());
+    stageEl?.addEventListener('click', (event) => event.stopPropagation());
+    stageFullscreenBtn?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (!stageEl) return;
+        void (async () => {
+            try {
+                if (document.fullscreenElement === stageEl) {
+                    await document.exitFullscreen();
+                } else {
+                    if (document.fullscreenElement) await document.exitFullscreen();
+                    if (typeof stageEl.requestFullscreen !== 'function') {
+                        showToast(tr('Fullscreen unavailable'), 'error');
+                        return;
+                    }
+                    await stageEl.requestFullscreen();
+                }
+            } catch (err: unknown) {
+                reportFullscreenFailure(err);
+            }
+            syncFullscreenButton();
+        })();
+    });
+    panelFullscreenBtn?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (!panelEl) return;
+        void (async () => {
+            await runFullscreenToggleWithPseudoWorkaround({
+                rootEl: panelEl,
+                onNativeExitFailure: reportFullscreenFailure,
+            });
+            syncFullscreenButton();
+        })();
+    });
+    const onFullscreenChromeChange = (): void => {
+        syncFullscreenButton();
+        if (document.fullscreenElement !== stageEl) {
+            suppressStageCloseEsc = true;
+            setTimeout(() => {
+                suppressStageCloseEsc = false;
+            }, 200);
+        }
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChromeChange);
+    document.addEventListener(CSS_PSEUDO_FULLSCREEN_CHANGE_EVENT, onFullscreenChromeChange);
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !isTokenStageOpen() || suppressStageCloseEsc) return;
+        if (document.fullscreenElement === stageEl) return;
+        closeTokenStage();
+    });
+
     lmf.updateOptions({
         gltrMode: GLTR_Mode.fract_p,
-        enableMinimap: false  // 临时值，将在settingsMenuManager初始化后更新
+        enableMinimap: false,  // 临时值，将在settingsMenuManager初始化后更新
+        onFullTextLayerRenderComplete: syncPlayButton,
     }, true);
 
     // 创建高亮控制器
@@ -243,6 +522,7 @@ window.onload = () => {
         appStateManager,
         surprisalColorScale: tokenSurprisalColorScale as d3.ScaleSequential<string>,
         syncModeChrome: syncAnalyzeModeChrome,
+        onResultPaintReset: () => playback.stop(),
     });
 
     addDigitsMergeRenderListener(() => {
@@ -725,6 +1005,7 @@ window.onload = () => {
             textDirtyForPlainSync = false;
             // dirty 表示已清分析数据；以用户编辑为准同步（showPlainText 会负责显示 #all_result）
             lmf.showPlainText(textInputController.getTextValue());
+            syncPlayButton();
         });
     }
     // 初始化时更新业务逻辑相关的按钮状态

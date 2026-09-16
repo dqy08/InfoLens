@@ -6,6 +6,7 @@
 
 importScripts('sw/restricted-url.js');
 importScripts('sw/install-dot.js');
+importScripts('sw/lifecycle-events.js');
 importScripts('sw/inject.js');
 importScripts('config.js');
 importScripts('pdf/stash-db.js');
@@ -14,11 +15,15 @@ importScripts('cache/ring-store.js');
 importScripts('analyzeCache.js');
 importScripts('local/state.js');
 
+const EXTENSION_ID = 'info-highlight';
+
 if (!globalThis.IH_CONFIG || typeof IH_CONFIG.apiBase !== 'string' || !IH_CONFIG.apiBase) {
   throw new Error('IH_CONFIG.apiBase missing — inject config.js before background.js');
 }
 if (!globalThis.IH_localState) throw new Error('IH_localState missing');
 if (!globalThis.IH_analyzeCache) throw new Error('IH_analyzeCache missing');
+
+IL_setUninstallSurveyUrl(EXTENSION_ID);
 
 function analyzeUrl() {
   return `${String(IH_CONFIG.apiBase).replace(/\/$/, '')}/api/analyze`;
@@ -147,6 +152,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   });
 
   IL_maybeShowInstallDot(details);
+  IL_reportInstallOrUpdate(details, EXTENSION_ID, IH_CONFIG.apiBase);
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -169,7 +175,11 @@ async function postAnalyze(text) {
     res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'default', text }),
+      body: JSON.stringify({
+        model: 'default',
+        text,
+        privacy_mode: IH_CONFIG.privacyMode !== false,
+      }),
     });
   } catch (err) {
     const msg = String(err?.message || err);

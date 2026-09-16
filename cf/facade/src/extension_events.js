@@ -1,6 +1,7 @@
 /**
  * 扩展生命周期事件流水（install / update / uninstall）。
  * POST /api/extension-events（公开）；GET /facade-extension-events（ADMIN_TOKEN）。
+ * body.extension：semantic-highlight | info-highlight；缺省按 semantic-highlight（兼容旧客户端）。
  */
 
 import { clipStr, utcSavedAt } from './extension_feedback.js';
@@ -9,6 +10,9 @@ export const EVENTS_PATH = '/api/extension-events';
 export const EVENTS_ADMIN_PATH = '/facade-extension-events';
 export const EVENT_KEY_PREFIX = 'event:';
 
+export const EXTENSION_IDS = new Set(['semantic-highlight', 'info-highlight']);
+export const DEFAULT_EXTENSION = 'semantic-highlight';
+
 const ALLOWED_EVENTS = new Set(['install', 'update', 'uninstall']);
 
 export function eventKey(event, id8, ms = Date.now()) {
@@ -16,15 +20,24 @@ export function eventKey(event, id8, ms = Date.now()) {
   return `${EVENT_KEY_PREFIX}${inv}:${event}:${id8}`;
 }
 
+/** 缺省或空 → DEFAULT；非法非空 → null（调用方拒收）。 */
+export function normalizeExtension(v) {
+  const id = clipStr(v, 64);
+  if (!id) return DEFAULT_EXTENSION;
+  return EXTENSION_IDS.has(id) ? id : null;
+}
+
 export function buildEventRecord(body) {
   const d = body && typeof body === 'object' ? body : {};
   const event = String(d.event || '').trim();
   const version = clipStr(d.version, 32);
   const previous_version = event === 'update' ? clipStr(d.previous_version, 32) : null;
+  const extension = normalizeExtension(d.extension);
   return {
     saved_at: utcSavedAt(),
     event,
     version,
+    extension,
     ...(previous_version ? { previous_version } : {}),
   };
 }
@@ -60,8 +73,8 @@ export async function handlePostExtensionEvents(request, env, json) {
   }
 
   const record = buildEventRecord(body);
-  if (!ALLOWED_EVENTS.has(record.event) || !record.version) {
-    return json(request, { success: false, message: 'invalid event or version' }, 400);
+  if (!ALLOWED_EVENTS.has(record.event) || !record.version || !record.extension) {
+    return json(request, { success: false, message: 'invalid event, version, or extension' }, 400);
   }
 
   const key = eventKey(record.event, newId8());

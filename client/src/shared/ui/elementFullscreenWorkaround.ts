@@ -2,10 +2,10 @@
  * WORKAROUND（仅作降级，非主路径）
  *
  * 部分浏览器（尤其 iPhone Safari）对普通元素 {@link HTMLElement.requestFullscreen} 不支持或会拒绝。
- * 主交互仍是标准 Fullscreen API（见 {@link runDagFullscreenToggleWithPseudoWorkaround} 内优先 `requestFullscreen`）；
+ * 主交互仍是标准 Fullscreen API（见 {@link runFullscreenToggleWithPseudoWorkaround} 内优先 `requestFullscreen`）；
  * 仅当原生不可用 / `catch` 时，委托给 `cssPseudoFullscreen.ts` 做 CSS fixed 伪全屏。
  *
- * 与 DAG 图布局、LMF 文本、zoom 等无关 —— 只影响 results 表面是否铺满视口。
+ * 与具体业务（DAG / 信息密度文本）无关 —— 只影响目标元素是否铺满视口。
  */
 
 import {
@@ -13,17 +13,17 @@ import {
     cssPseudoFullscreenExit,
     cssPseudoFullscreenIsActive,
     CSS_PSEUDO_FULLSCREEN_CHANGE_EVENT,
-} from '../../../shared/ui/cssPseudoFullscreen';
+} from './cssPseudoFullscreen';
 
 export { CSS_PSEUDO_FULLSCREEN_CHANGE_EVENT };
 
-/** #results 是否处于「展开」：原生全屏到该元素，或伪全屏激活到该元素 */
-export function dagResultsSurfaceFullscreenExpanded(rootEl: HTMLElement): boolean {
+/** 是否处于「展开」：原生全屏到该元素，或伪全屏激活到该元素 */
+export function elementFullscreenExpanded(rootEl: HTMLElement): boolean {
     return document.fullscreenElement === rootEl || cssPseudoFullscreenIsActive(rootEl);
 }
 
 /** 组件卸载时调用；无伪全屏时为空操作 */
-export function detachDagPseudoFullscreenIfPresent(rootEl: HTMLElement): void {
+export function detachPseudoFullscreenIfPresent(rootEl: HTMLElement): void {
     cssPseudoFullscreenExit(rootEl);
 }
 
@@ -42,15 +42,15 @@ async function enterRootElFullscreen(rootEl: HTMLElement): Promise<void> {
 
 /**
  * 处理全屏按钮一次点击：先走标准 API，失败或未实现时再走伪全屏。
- * 不负责刷新按钮图标 / `syncSvgSize` —— 调用方在 await 后统一 `refreshFullscreenChrome()` 即可。
+ * 不负责刷新按钮图标 —— 调用方在 await 后统一刷新即可。
  */
-export async function runDagFullscreenToggleWithPseudoWorkaround(options: {
+export async function runFullscreenToggleWithPseudoWorkaround(options: {
     rootEl: HTMLElement;
     onNativeExitFailure: (e: unknown) => void;
 }): Promise<void> {
     const { rootEl, onNativeExitFailure } = options;
 
-    if (dagResultsSurfaceFullscreenExpanded(rootEl)) {
+    if (elementFullscreenExpanded(rootEl)) {
         if (document.fullscreenElement === rootEl) {
             try {
                 await document.exitFullscreen();

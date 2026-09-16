@@ -41,7 +41,7 @@ function postReq(body) {
   });
 }
 
-test('buildUninstallSurveyRecord: 卸载问卷只收白名单原因与评论', () => {
+test('buildUninstallSurveyRecord: 卸载问卷只收白名单原因与评论；缺 extension 默认旧插件', () => {
   const rec = buildUninstallSurveyRecord({
     reasons: ['unused', 'bogus', 'unused', 'privacy'],
     comment: '  too noisy  ',
@@ -51,7 +51,15 @@ test('buildUninstallSurveyRecord: 卸载问卷只收白名单原因与评论', (
   assert.deepEqual(rec.reasons, ['unused', 'privacy']);
   assert.equal(rec.comment, 'too noisy');
   assert.equal(rec.extension_version, '0.6.5');
+  assert.equal(rec.extension, 'semantic-highlight');
   assert.match(rec.saved_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+
+  const ih = buildUninstallSurveyRecord({
+    reasons: ['unused'],
+    extension: 'info-highlight',
+    version: '0.1.0',
+  });
+  assert.equal(ih.extension, 'info-highlight');
 });
 
 test('uninstallSurveyKey: 倒序排序前缀正确', () => {

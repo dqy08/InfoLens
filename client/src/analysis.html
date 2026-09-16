@@ -95,6 +95,22 @@
                                     data-i18n="text,title">Save</button>
                             </div>
                         </div>
+                        <div class="gen-attr-dag-measure-width-row options-row">
+                            <span class="options-group gen-attr-dag-replay-speed-row options-group--emphasis">
+                                <label class="options-label" for="info_density_playback_step_ms" data-i18n>Play speed</label>
+                                <span class="gen-attr-dag-replay-value-wrap">
+                                    <input type="number" id="info_density_playback_step_ms" class="gen-attr-dag-measure-width-input"
+                                        value="200" min="0" max="10000" step="10"
+                                        title="Milliseconds per surprisal bit. Playback (▶) multiplies this by each token’s information content. Saved locally; applied when you press play."
+                                        data-i18n="title">
+                                    <span class="options-label">ms</span>
+                                </span>
+                            </span>
+                            <span class="options-group options-group-right">
+                                <button type="button" id="info_density_token_stage_open_btn" class="refresh-btn"
+                                    title="Token stage" data-i18n="title">▣</button>
+                            </span>
+                        </div>
                         <div class="options-row semantic-analysis-enable-row">
                             <span class="options-group">
                                 <label class="options-label" for="semantic_analysis_toggle">
@@ -166,7 +182,13 @@
 
         <div class="resizer" id="resizer"></div>
 
-        <section class="right_panel">
+        <section class="right_panel gen-attr-surface-chrome">
+            <button type="button" id="info_density_panel_fullscreen_btn"
+                class="refresh-btn gen-attr-dag-fullscreen" hidden title="Fullscreen">⛶</button>
+            <button type="button" id="info_density_panel_refresh_btn"
+                class="refresh-btn gen-attr-dag-refresh" hidden title="Refresh">↻</button>
+            <button type="button" id="info_density_panel_play_btn"
+                class="refresh-btn gen-attr-dag-play" hidden title="Step replay (▶)">▶</button>
             <div id="results">
                 <div id="major_tooltip" class="tooltip">
                     <div class="currentToken"></div>
@@ -179,6 +201,22 @@
     </main>
 
     <div id="toast" class="toast"></div>
+
+    <div id="info_density_token_stage_overlay" class="info-density-token-stage-overlay" hidden>
+        <div id="info_density_token_stage" class="info-density-token-stage gen-attr-surface-chrome">
+            <button type="button" id="info_density_token_stage_fullscreen_btn"
+                class="refresh-btn gen-attr-dag-fullscreen" title="Fullscreen">⛶</button>
+            <button type="button" id="info_density_token_stage_refresh_btn"
+                class="refresh-btn gen-attr-dag-refresh" title="Refresh">↻</button>
+            <button type="button" id="info_density_token_stage_play_btn"
+                class="refresh-btn gen-attr-dag-play" title="Step replay (▶)">▶</button>
+            <div id="info_density_token_stage_token" class="info-density-token-stage-token">
+                <span data-stage-tok="prev" class="info-density-token-stage-side"></span>
+                <span data-stage-tok="cur" class="info-density-token-stage-cur"></span>
+                <span data-stage-tok="next" class="info-density-token-stage-side"></span>
+            </div>
+        </div>
+    </div>
 
     <!-- INCLUDE partials/attribution-sidebar.html -->
 

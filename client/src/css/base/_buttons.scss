@@ -109,6 +109,48 @@
   // 移除旋转动画，只保留按下效果
 }
 
+// ▶ / ↯ / ⛶：与 refresh-btn 同底，仅换图标字与可点强调色
+.refresh-btn.gen-attr-dag-play,
+.refresh-btn.gen-attr-dag-refresh,
+.refresh-btn.gen-attr-dag-fullscreen {
+  font-family: var(--font-icon);
+  font-size: var(--font-icon-size);
+  line-height: 1;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.refresh-btn.gen-attr-dag-play.gen-attr-dag-play--propagation-hint:not(:disabled) {
+  color: var(--accent-color);
+}
+
+// 从右到左：⛶ → ↻ → ▶（Causal Flow / 文本区 / 逐词舞台同一排）
+.gen-attr-surface-chrome {
+  > button.gen-attr-dag-play,
+  > button.gen-attr-dag-refresh,
+  > button.gen-attr-dag-fullscreen {
+    position: absolute;
+    top: 12px;
+    z-index: 2;
+
+    &[hidden] {
+      display: none !important;
+    }
+  }
+
+  > button.gen-attr-dag-fullscreen {
+    right: 12px;
+  }
+
+  > button.gen-attr-dag-refresh {
+    right: 48px;
+  }
+
+  > button.gen-attr-dag-play {
+    right: 84px;
+  }
+}
+
 // 通用按钮样式（保持向后兼容，但特定类按钮会覆盖这些样式）
 button {
   -webkit-transition-duration: 0.15s;

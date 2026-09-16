@@ -1,9 +1,11 @@
 /**
  * 扩展卸载问卷调查（流失分析）。
  * POST /api/extension-uninstall-survey（公开）；GET /facade-extension-uninstall-survey（ADMIN_TOKEN）。
+ * body.extension：与 extension_events 同约定；缺省 semantic-highlight。
  */
 
 import { clipStr, utcSavedAt } from './extension_feedback.js';
+import { normalizeExtension } from './extension_events.js';
 
 export const UNINSTALL_SURVEY_PATH = '/api/extension-uninstall-survey';
 export const UNINSTALL_SURVEY_ADMIN_PATH = '/facade-extension-uninstall-survey';
@@ -41,8 +43,10 @@ export function buildUninstallSurveyRecord(body) {
   const reasons = clipUninstallReasons(d.reasons);
   const comment = clipStr(d.comment, 2000);
   const saved_at = utcSavedAt();
+  const extension = normalizeExtension(d.extension);
   return {
     saved_at,
+    extension,
     ...(reasons.length ? { reasons } : {}),
     ...(comment ? { comment } : {}),
     extension_version: clipStr(d.extension_version || d.version, 32),
@@ -71,6 +75,9 @@ export async function handlePostUninstallSurvey(request, env, json) {
   }
 
   const record = buildUninstallSurveyRecord(body);
+  if (!record.extension) {
+    return json(request, { success: false, message: 'invalid extension' }, 400);
+  }
   if (!record.reasons?.length && !record.comment) {
     return json(request, { success: true, stored: false });
   }

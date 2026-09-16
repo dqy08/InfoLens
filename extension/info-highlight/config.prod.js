@@ -4,4 +4,6 @@
  */
 var IH_CONFIG = {
   apiBase: 'https://api.info-lens.app',
+  /** 正式入口：服务端不落 text 与明文 IP */
+  privacyMode: true,
 };

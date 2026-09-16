@@ -468,40 +468,6 @@ $gen-attr-cached-demos-panel-width: 21em;
     }
   }
 
-  // #results 已有 .attribution-inspector-surface { position: relative }
-  // 与历史下拉里 ↑ / × 一致：等宽 `--font-icon`（见 start.scss）
-  #results.gen-attr-results-surface.LMF > button.gen-attr-dag-play,
-  #results.gen-attr-results-surface.LMF > button.gen-attr-dag-refresh,
-  #results.gen-attr-results-surface.LMF > button.gen-attr-dag-fullscreen {
-    position: absolute;
-    top: 12px;
-    z-index: 2;
-    font-family: var(--font-icon);
-    font-size: var(--font-icon-size);
-    line-height: 1;
-    user-select: none;
-    -webkit-user-select: none;
-  }
-
-  // 从右到左：⛶ (fullscreen) → ↻ (refresh) → ▶ / ↯ (play: step replay / propagation)
-  #results.gen-attr-results-surface.LMF > button.gen-attr-dag-fullscreen {
-    right: 12px;
-  }
-
-  #results.gen-attr-results-surface.LMF > button.gen-attr-dag-refresh {
-    right: 48px;
-  }
-
-  #results.gen-attr-results-surface.LMF > button.gen-attr-dag-play {
-    right: 84px;
-  }
-
-  // ▶ / ↯ 可点且未在播：固定强调色（气泡已承担首次引导，不再脉动）
-  #results.gen-attr-results-surface.LMF
-    > button.gen-attr-dag-play.gen-attr-dag-play--propagation-hint:not(:disabled) {
-    color: var(--accent-color);
-  }
-
   // ▶ / ↯ 首次可点教练气泡（各一次；对齐 play 按钮 right: 84px）
   #results.gen-attr-results-surface.LMF > .gen-attr-dag-play-coachmark {
     position: absolute;
@@ -747,11 +713,6 @@ body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row
 }
 
 .gen-attr-dag-replay-speed-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-
   > #gen_attr_dag_disable_smart_step_time_wrap,
   > .gen-attr-dag-replay-auto-zoom-label {
     font-weight: normal;
@@ -766,21 +727,6 @@ body.gen-attribute-page .input-section .textarea-wrapper.chat-prompt-actions-row
   min-width: unset;
   max-width: none;
   text-align: left;
-}
-
-.gen-attr-dag-replay-value-wrap {
-  align-items: center;
-  gap: 4px;
-
-  // 仅非 hidden 时设 flex，否则会覆盖浏览器对 [hidden] 的 display:none（两列输入会同时出现）
-  &:not([hidden]) {
-    display: inline-flex;
-  }
-}
-
-// --- WORKAROUND：伪全屏时锁 body 滚动（同 ts/ui/cssPseudoFullscreen.ts） ---
-body.css-pseudo-fullscreen-body-lock {
-  overflow: hidden;
 }
 
 // 保持在本文件末尾；说明见 responsive.narrow-ios-form-font

@@ -38,6 +38,10 @@ body {
   width: 100%;
   max-width: 100vw;  // 确保body不超过视口宽度
   // 注意：height 和 min-height 已移至响应式媒体查询中
+
+  &.css-pseudo-fullscreen-body-lock {
+    overflow: hidden;
+  }
 }
 
 a {
@@ -317,6 +321,11 @@ select {
     // 添加轻微的脉冲动画效果
     animation: textPulse 2s ease-in-out infinite;
   }
+
+  // 扫描播放期间不响应 token 鼠标，避免与描边抢 hover
+  &.playback-active .svg-overlay g.token-group {
+    pointer-events: none;
+  }
 }
 
 // 截断后的文本（被丢弃部分）灰色文字
@@ -370,29 +379,15 @@ select {
   z-index: 1;  // 在文本下方
   pointer-events: none;  // 默认不拦截鼠标事件
   
-  // token group：当group hover时，其内部所有rect一起发光
+  // token group：当 group hover / 扫描播放时，其内部所有 rect 一起描边
   g.token-group {
     pointer-events: auto;  // group区域可交互
     cursor: pointer;
-    
-    // 当group hover时，为所有rect添加蓝色描边（无发光）
-    &:hover rect {
-      // 发光效果已关闭（历史代码备份）
-      // filter:
-      //   drop-shadow(0 0 2px rgba(30, 111, 255, 1))
-      //   drop-shadow(0 0 5px rgba(30, 111, 255, 0.85))
-      //   drop-shadow(0 0 10px rgba(30, 111, 255, 0.7));
-      stroke: var(--accent-stroke);
-      stroke-width: 2.5px;
-    }
-    
-    // 如果group内的rect同时有bin-highlighted类，hover时也仅保留蓝色描边
-    &:hover rect.bin-highlighted {
-      // 发光效果已关闭（历史代码备份）
-      // filter:
-      //   drop-shadow(0 0 2px rgba(30, 111, 255, 1))
-      //   drop-shadow(0 0 5px rgba(30, 111, 255, 0.85))
-      //   drop-shadow(0 0 10px rgba(30, 111, 255, 0.7));
+
+    &:hover rect,
+    &.token-playback-hover rect,
+    &:hover rect.bin-highlighted,
+    &.token-playback-hover rect.bin-highlighted {
       stroke: var(--accent-stroke);
       stroke-width: 2.5px;
     }

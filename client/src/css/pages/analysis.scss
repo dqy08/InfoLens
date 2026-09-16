@@ -20,6 +20,118 @@
   }
 }
 
+.right_panel.gen-attr-surface-chrome {
+  background: var(--text-area-bg);
+}
+
+.right_panel.gen-attr-surface-chrome:fullscreen,
+.right_panel.gen-attr-surface-chrome.css-pseudo-fullscreen-target {
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  background: var(--text-area-bg);
+  overflow: auto;
+  box-sizing: border-box;
+}
+
+.right_panel.gen-attr-surface-chrome.css-pseudo-fullscreen-target {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+}
+
+// 整块阅读区下移一行（含绝对定位的 token 层）；底色仍是 --text-area-bg
+.right_panel.gen-attr-surface-chrome > #results {
+  padding-top: 18pt;
+  background: var(--text-area-bg);
+}
+
+#info_density_token_stage_open_btn {
+  font-family: var(--font-icon);
+  font-size: var(--font-icon-size);
+  line-height: 1;
+}
+
+.info-density-token-stage-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+
+  &[hidden] {
+    display: none !important;
+  }
+}
+
+.info-density-token-stage {
+  position: relative;
+  box-sizing: border-box;
+  width: min(22rem, 90vw);
+  height: min(14rem, 46vh);
+  overflow: hidden;
+  background: var(--bg-color);
+  color: var(--text-color);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+
+  &:fullscreen,
+  &:-webkit-full-screen {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+}
+
+.info-density-token-stage-token {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 2.5rem 1.25rem 1.25rem;
+  font-size: 1.75rem;
+  line-height: 1.25;
+  pointer-events: none;
+}
+
+.info-density-token-stage-cur,
+.info-density-token-stage-side {
+  min-width: 0;
+  white-space: pre;
+}
+
+.info-density-token-stage-side {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: color-mix(in srgb, var(--text-color) 32%, transparent);
+
+  &[data-stage-tok="prev"] {
+    justify-self: end;
+    text-align: right;
+  }
+
+  &[data-stage-tok="next"] {
+    justify-self: start;
+    text-align: left;
+  }
+}
+
+.info-density-token-stage-cur {
+  justify-self: center;
+  text-align: center;
+}
+
+.info-density-token-stage:fullscreen .info-density-token-stage-token,
+.info-density-token-stage:-webkit-full-screen .info-density-token-stage-token {
+  font-size: clamp(2.5rem, 8vw, 6rem);
+  padding: 4rem 2rem 2rem;
+}
+
 // 介绍区域样式
 .intro-section {
   margin-bottom: 15px;

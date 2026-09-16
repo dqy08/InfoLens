@@ -4,4 +4,6 @@
  */
 var IH_CONFIG = {
   apiBase: 'http://localhost:5001',
+  /** 开发入口：服务端可落完整 text 日志 */
+  privacyMode: false,
 };
