@@ -144,8 +144,8 @@ export const translations: Translations = {
         'Refresh': '刷新',
         'Pause': '暂停',
         'Step replay (▶)': '步进回放（▶）',
-        'Milliseconds per surprisal bit. Playback (▶) multiplies this by each token’s information content. Saved locally; applied when you press play.':
-            '每个信息量单位（bit）的毫秒数。播放（▶）时乘以各 token 的信息量。本地保存；点击播放时生效。',
+        'Milliseconds at the reference max surprisal (18 bit; range 200–5000). Lower surprisal maps linearly down to 100ms. Saved locally; applied when you press play.':
+            '参照最大惊讶度（18 bit）对应的毫秒数（200–5000）。更低惊讶度线性映射到最低 100ms。本地保存；点击播放时生效。',
         'Simulate attention': '模拟 attention',
         'When checked, step replay (▶) expands prompt and gen steps into attention scan + FFN animation. Requires step replay without Causal Flow focus. Saved locally.':
             '勾选后，步进重放（▶）将 prompt 与生成步展开为 attention 扫描 + FFN 动画。需在非因果流模式下使用 ▶。本地保存。',

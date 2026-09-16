@@ -1,5 +1,5 @@
 /**
- * 网页 / PDF 共用：向 SW 要 token、按段画、对齐失败跳过。
+ * 网页 / PDF 共用：向 SW 要 token、按段画、对齐失败跳过；一轮结束上报用量。
  */
 globalThis.IH_analyzeRun ||= (function () {
   /** SYNC: extension/semantic-highlight/semantic/find.js → MAX_CHUNKS_PER_SEARCH */
@@ -18,7 +18,11 @@ globalThis.IH_analyzeRun ||= (function () {
           reject(new Error(res?.error || 'Analyze failed'));
           return;
         }
-        resolve(res.data);
+        resolve({
+          data: res.data,
+          inferred: !!res.inferred,
+          engine: res.engine === 'local' || res.engine === 'cloud' ? res.engine : null,
+        });
       });
     });
   }
@@ -29,12 +33,65 @@ globalThis.IH_analyzeRun ||= (function () {
     });
   }
 
+  /** 一轮结束后上报；未尝试任何段时不发。 */
+  function reportUsage(report) {
+    if (!report || report.segments < 1) return;
+    chrome.runtime.sendMessage(
+      {
+        type: 'ih-usage-report',
+        engine: report.engine,
+        outcome: report.outcome || 'ok',
+        segments: report.segments,
+        segments_ok: report.segments_ok,
+        cached: report.cached,
+      },
+      () => {
+        void chrome.runtime.lastError;
+      },
+    );
+  }
+
+  function newUsageReport() {
+    return { segments: 0, segments_ok: 0, cached: 0, engine: null, outcome: null };
+  }
+
+  /** @param {boolean | null} inferred 仅 `false` 计为 cache hit；`null` 表示未知（失败路径） */
+  function noteAttempt(report, inferred, engine) {
+    if (!report) return;
+    report.segments += 1;
+    if (inferred === false) report.cached += 1;
+    if (engine) report.engine = engine;
+  }
+
+  /**
+   * @returns {Promise<
+   *   | { kind: 'empty' }
+   *   | { kind: 'ok', tokens: unknown[], inferred: boolean, engine: string | null }
+   *   | { kind: 'align_fail', err: Error, inferred: boolean, engine: string | null }
+   *   | { kind: 'error', err: Error, inferred: boolean, engine: string | null }
+   * >}
+   */
   async function analyzeSegment(text, segs, i) {
-    if (!/\S/.test(segs[i].text)) return [];
+    if (!/\S/.test(segs[i].text)) return { kind: 'empty' };
     const win = globalThis.IH_segmentWindow(text, segs, i);
-    const tokens = (await sendAnalyze(win.requestText))?.result?.bpe_strings;
-    if (!Array.isArray(tokens)) throw new Error('Analyze returned no tokens');
-    return globalThis.IH_tokensInSegment(tokens, win);
+    const { data, inferred, engine } = await sendAnalyze(win.requestText);
+    const raw = data?.result?.bpe_strings;
+    if (!Array.isArray(raw)) {
+      return { kind: 'error', err: new Error('Analyze returned no tokens'), inferred, engine };
+    }
+    try {
+      return {
+        kind: 'ok',
+        tokens: globalThis.IH_tokensInSegment(raw, win),
+        inferred,
+        engine,
+      };
+    } catch (err) {
+      if (String(err?.message || err).includes(ALIGN_FAIL)) {
+        return { kind: 'align_fail', err, inferred, engine };
+      }
+      throw err;
+    }
   }
 
   function applyTokens(session, tokens, i, opts) {
@@ -52,24 +109,36 @@ globalThis.IH_analyzeRun ||= (function () {
    * @param {number} to
    * @param {() => boolean} still
    * @param {{ overlay?: boolean, onTokens?: (tokens: unknown[], i: number) => void }} [opts]
+   * @param {{ segments: number, segments_ok: number, cached: number, engine: string | null }} report
    * @returns {Promise<Error | undefined>}
    */
-  async function paintRange(session, from, to, still, opts) {
+  async function paintRange(session, from, to, still, opts, report) {
     let lastAlignErr;
     for (let i = from; i < to; i++) {
       if (!still()) return lastAlignErr;
-      let tokens;
+      let got;
       try {
-        tokens = await analyzeSegment(session.mapped.text, session.segs, i);
+        got = await analyzeSegment(session.mapped.text, session.segs, i);
       } catch (err) {
         if (!still()) return lastAlignErr;
-        if (!String(err?.message || err).includes(ALIGN_FAIL)) throw err;
-        console.warn('[Info Highlight] skip segment', i, err);
-        lastAlignErr = err;
-        continue;
+        // SW/通道失败：计入尝试，但不记 cached（inferred 未知）
+        noteAttempt(report, null, null);
+        throw err;
       }
       if (!still()) return lastAlignErr;
-      applyTokens(session, tokens, i, opts);
+      if (got.kind === 'empty') {
+        applyTokens(session, [], i, opts);
+        continue;
+      }
+      noteAttempt(report, got.inferred, got.engine);
+      if (got.kind === 'error') throw got.err;
+      if (got.kind === 'align_fail') {
+        console.warn('[Info Highlight] skip segment', i, got.err);
+        lastAlignErr = got.err;
+        continue;
+      }
+      if (report) report.segments_ok += 1;
+      applyTokens(session, got.tokens, i, opts);
     }
     return lastAlignErr;
   }
@@ -94,18 +163,25 @@ globalThis.IH_analyzeRun ||= (function () {
   /**
    * @param {() => boolean} still
    * @param {{ fail: (err: unknown) => void | Promise<void>, idle: () => void }} hooks
-   * @param {() => Promise<void>} job
+   * @param {(report: ReturnType<typeof newUsageReport>) => Promise<void>} job
    */
   async function runJob(still, { fail, idle }, job) {
     globalThis.IH_clearError();
     await globalThis.IH_setProgressSearching(true);
+    const report = newUsageReport();
     try {
-      await job();
+      await job(report);
+      report.outcome = still() ? 'ok' : 'cancelled';
     } catch (err) {
-      if (!still()) return;
-      await fail(err);
+      if (!still()) {
+        report.outcome = 'cancelled';
+      } else {
+        report.outcome = 'failed';
+        await fail(err);
+      }
     } finally {
-      if (!still()) return;
+      // 取消也要收尾：上报、清 busy、卸本地引擎（避免 busy 卡住）
+      reportUsage(report);
       idle();
       releaseLocalEngine();
     }

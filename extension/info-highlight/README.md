@@ -49,3 +49,5 @@ npm test
 ```
 
 The package command builds with `--release`（固定 `config.prod.js`）, runs tests, and writes `extension/dist/info-highlight-v<version>.zip`.
+
+上传与提交审核见 [PUBLISH.md](./PUBLISH.md)（Chrome Web Store API）。

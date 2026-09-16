@@ -465,9 +465,13 @@ async function handleAnalyze(text) {
   const blocked = localOnlyBlockReason(st);
   if (blocked) throw new Error(blocked);
   const engine = engineFrom(st);
+  let inferred = false;
   let tokens;
   try {
-    tokens = await IH_analyzeCache.tokens(text, () => fetchTokens(engine, text));
+    tokens = await IH_analyzeCache.tokens(text, async () => {
+      inferred = true;
+      return fetchTokens(engine, text);
+    });
   } catch (err) {
     if (st.pref === IH_localState.PREF_LOCAL) {
       throw new Error(`On-device analysis failed: ${String(err?.message || err)}`);
@@ -475,12 +479,42 @@ async function handleAnalyze(text) {
     throw err;
   }
   return {
-    request: { text },
-    result: {
-      model: engine === 'local' ? IH_localState.MODEL_ID : undefined,
-      bpe_strings: tokens,
+    data: {
+      request: { text },
+      result: {
+        model: engine === 'local' ? IH_localState.MODEL_ID : undefined,
+        bpe_strings: tokens,
+      },
     },
+    inferred,
+    engine,
   };
+}
+
+async function postUsageReport(body) {
+  let engine = body?.engine;
+  if (engine !== 'local' && engine !== 'cloud') {
+    engine = await resolveEngine();
+  }
+  const outcome = body?.outcome;
+  if (outcome !== 'ok' && outcome !== 'failed' && outcome !== 'cancelled') return;
+  const segments = Math.max(0, Math.min(512, Number(body?.segments) || 0));
+  if (segments < 1) return;
+  const segments_ok = Math.max(0, Math.min(segments, Number(body?.segments_ok) || 0));
+  const cached = Math.max(0, Math.min(segments, Number(body?.cached) || 0));
+  IL_postKeepalive(
+    '/api/extension-usage',
+    {
+      extension: EXTENSION_ID,
+      version: chrome.runtime.getManifest().version,
+      engine,
+      outcome,
+      segments,
+      segments_ok,
+      cached,
+    },
+    IH_CONFIG.apiBase,
+  );
 }
 
 async function handleAgree() {
@@ -589,6 +623,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg?.type === 'ih-usage-report') {
+    postUsageReport(msg)
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
+
   if (msg?.type !== 'ih-analyze') return;
   const text = typeof msg.text === 'string' ? msg.text : '';
   if (!text) {
@@ -596,7 +637,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return;
   }
   handleAnalyze(text)
-    .then((data) => sendResponse({ ok: true, data }))
+    .then(({ data, inferred, engine }) => sendResponse({ ok: true, data, inferred, engine }))
     .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
   return true;
 });

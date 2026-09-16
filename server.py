@@ -44,6 +44,7 @@ from backend.api.folder import (  # noqa: F401
 )
 from backend.api.fetch_url import fetch_url  # noqa: F401
 from backend.api.client_activity import client_activity_report  # noqa: F401
+from backend.api.extension_usage import extension_usage_report  # noqa: F401
 from backend.api.analyze_semantic import (  # noqa: F401
     analyze_semantic,
     analyze_semantic_relevance,

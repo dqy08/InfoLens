@@ -1,9 +1,14 @@
 /**
- * 信息密度 token 扫描播放：停留 = surprisal(bits) × 单步 ms（与 CosFlow 传播链 step 节奏同构）。
+ * 信息密度 token 扫描播放：surprisal 相对 {@link REFERENCE_MAX_SURPRISAL_BITS}
+ * 线性映射到 [dwellMinMs, stepMs]。
  */
 
 import type { FrontendToken } from '../api/GLTR_API';
 import { calculateSurprisal } from '../core/Util';
+import { REFERENCE_MAX_SURPRISAL_BITS } from '../cross/surprisalMath';
+
+/** 惊讶度 → 0 时的固定停留 ms */
+export const SURPRISAL_PLAYBACK_DWELL_MIN_MS = 100;
 
 export type TokenSurprisalPlaybackPhase = 'idle' | 'playing' | 'paused';
 
@@ -24,15 +29,23 @@ export function tokenSurprisalBits(token: FrontendToken): number {
 }
 
 /**
- * 各 token 停留 ms：`round(surprisal × stepMs)`。全为 0 时每步 `stepMs`。
+ * 各 token 停留 ms：正权重按 `surprisal / REFERENCE_MAX_SURPRISAL_BITS`（封顶 1）
+ * 线性映射到 `[SURPRISAL_PLAYBACK_DWELL_MIN_MS, stepMs]`。
+ * 权重 0 为 0（跳过）；全为 0 时每步 `stepMs`。
  */
 export function surprisalPlaybackDwellsMs(surprisals: readonly number[], stepMs: number): number[] {
     const n = surprisals.length;
     if (n === 0) return [];
-    const step = Math.max(0, Math.round(stepMs));
+    const dwellMin = SURPRISAL_PLAYBACK_DWELL_MIN_MS;
+    const step = Math.max(dwellMin, Math.round(stepMs));
     const weights = surprisals.map((s) => (Number.isFinite(s) && s > 0 ? s : 0));
     if (!weights.some((w) => w > 0)) return weights.map(() => step);
-    return weights.map((w) => Math.round(w * step));
+    const span = step - dwellMin;
+    return weights.map((w) => {
+        if (!(w > 0)) return 0;
+        const t = Math.min(1, w / REFERENCE_MAX_SURPRISAL_BITS);
+        return Math.round(dwellMin + t * span);
+    });
 }
 
 export type TokenSurprisalPlaybackController = {

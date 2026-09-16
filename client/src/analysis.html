@@ -100,8 +100,8 @@
                                 <label class="options-label" for="info_density_playback_step_ms" data-i18n>Play speed</label>
                                 <span class="gen-attr-dag-replay-value-wrap">
                                     <input type="number" id="info_density_playback_step_ms" class="gen-attr-dag-measure-width-input"
-                                        value="200" min="0" max="10000" step="10"
-                                        title="Milliseconds per surprisal bit. Playback (▶) multiplies this by each token’s information content. Saved locally; applied when you press play."
+                                        value="1000" min="200" max="5000" step="10"
+                                        title="Milliseconds at the reference max surprisal (18 bit; range 200–5000). Lower surprisal maps linearly down to 100ms. Saved locally; applied when you press play."
                                         data-i18n="title">
                                     <span class="options-label">ms</span>
                                 </span>

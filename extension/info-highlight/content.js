@@ -50,7 +50,7 @@
         return globalThis.IH_showError(err?.message || err);
       },
       idle() { busy = false; },
-    }, async () => {
+    }, async (report) => {
       if (!session) {
         session = await R.beginSession(globalThis.IH_extractPage(), 'No article text');
         globalThis.IH_tokenTip.bind(session.mapped);
@@ -58,7 +58,7 @@
       const end = Math.min(session.next + R.MAX_SEGMENTS_PER_RUN, session.segs.length);
       const lastAlignErr = await R.paintRange(session, session.next, end, still, {
         onTokens: (tokens) => globalThis.IH_tokenTip.add(tokens),
-      });
+      }, report);
       if (!still()) return;
       session.next = end;
       await R.afterPaint(session, lastAlignErr, 'No tokens mapped onto the page', () => {

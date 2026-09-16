@@ -64,7 +64,8 @@ import {
     tokenSurprisalBits,
 } from '../../shared/vis/tokenSurprisalPlayback';
 import {
-    clampPlaybackStepMs,
+    clampInfoDensityPlaybackStepMs,
+    INFO_DENSITY_PLAYBACK_STEP_MS_DEFAULT,
     readStoredPlaybackStepMs,
 } from '../../shared/storage/playbackStepMs';
 import {
@@ -222,11 +223,17 @@ window.onload = () => {
         'info_density_playback_step_ms'
     ) as HTMLInputElement | null;
     const readStoredPlayStepMs = (): number =>
-        readStoredPlaybackStepMs(INFO_DENSITY_PLAYBACK_STEP_MS_STORAGE_KEY);
+        readStoredPlaybackStepMs(
+            INFO_DENSITY_PLAYBACK_STEP_MS_STORAGE_KEY,
+            INFO_DENSITY_PLAYBACK_STEP_MS_DEFAULT,
+            clampInfoDensityPlaybackStepMs
+        );
     if (playStepMsNode) playStepMsNode.value = String(readStoredPlayStepMs());
     const readPlayStepMs = (): number => {
         const raw = parseInt(playStepMsNode?.value ?? '', 10);
-        const ms = Number.isFinite(raw) ? clampPlaybackStepMs(raw) : readStoredPlayStepMs();
+        const ms = Number.isFinite(raw)
+            ? clampInfoDensityPlaybackStepMs(raw)
+            : readStoredPlayStepMs();
         if (playStepMsNode) playStepMsNode.value = String(ms);
         return ms;
     };

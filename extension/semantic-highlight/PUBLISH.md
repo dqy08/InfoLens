@@ -63,9 +63,12 @@ https://developers.google.com/oauthplayground
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 GOOGLE_REFRESH_TOKEN=...
-CHROME_EXTENSION_ID=jnjglfjkbopeiodpcgmlhkfhldjfcdda
 CHROME_PUBLISHER_ID=...
+CHROME_EXTENSION_ID_SEMANTIC_HIGHLIGHT=jnjglfjkbopeiodpcgmlhkfhldjfcdda
+CHROME_EXTENSION_ID_INFO_HIGHLIGHT=gemajnklkebeikmfphiddpjfimahacdk
 ```
+
+本流程只用 `CHROME_EXTENSION_ID_SEMANTIC_HIGHLIGHT`。Info Highlight 见 [../info-highlight/PUBLISH.md](../info-highlight/PUBLISH.md)。
 
 代理（国内连 Google 通常需要；端口按本机 Clash / mihomo）：
 
@@ -114,7 +117,7 @@ curl -sS -x "$http_proxy" \
   -H "Authorization: Bearer ${ACCESS}" \
   -H "x-goog-api-version: 2" \
   -X POST -T "$ZIP" \
-  "https://chromewebstore.googleapis.com/upload/v2/publishers/${CHROME_PUBLISHER_ID}/items/${CHROME_EXTENSION_ID}:upload"
+  "https://chromewebstore.googleapis.com/upload/v2/publishers/${CHROME_PUBLISHER_ID}/items/${CHROME_EXTENSION_ID_SEMANTIC_HIGHLIGHT}:upload"
 
 # 提交发布（进入审核）
 curl -sS -x "$http_proxy" \
@@ -122,7 +125,7 @@ curl -sS -x "$http_proxy" \
   -H "x-goog-api-version: 2" \
   -H "Content-Type: application/json" \
   -X POST \
-  "https://chromewebstore.googleapis.com/v2/publishers/${CHROME_PUBLISHER_ID}/items/${CHROME_EXTENSION_ID}:publish"
+  "https://chromewebstore.googleapis.com/v2/publishers/${CHROME_PUBLISHER_ID}/items/${CHROME_EXTENSION_ID_SEMANTIC_HIGHLIGHT}:publish"
 ```
 
 期望结果：

@@ -26,25 +26,31 @@ function assertEq<T>(desc: string, actual: T, expected: T) {
     assert(`${desc} (got ${String(actual)})`, actual === expected);
 }
 
-console.log('1. surprisalPlaybackDwellsMs');
-assertEq('空', surprisalPlaybackDwellsMs([], 200).length, 0);
+console.log('1. surprisalPlaybackDwellsMs（相对 REFERENCE_MAX=18 bit）');
+assertEq('空', surprisalPlaybackDwellsMs([], 1000).length, 0);
 
 {
-    const equal = surprisalPlaybackDwellsMs([0, 0, 0], 200);
-    assert('全 0 每步 stepMs', equal[0] === 200 && equal[1] === 200 && equal[2] === 200);
+    const equal = surprisalPlaybackDwellsMs([0, 0, 0], 1000);
+    assert('全 0 每步 stepMs', equal[0] === 1000 && equal[1] === 1000 && equal[2] === 1000);
 }
 
 {
-    const dwells = surprisalPlaybackDwellsMs([1, 3], 200);
-    assertEq('1 bit → 200ms', dwells[0], 200);
-    assertEq('3 bit → 600ms', dwells[1], 600);
+    const dwells = surprisalPlaybackDwellsMs([18, 9], 1000);
+    assertEq('18 bit → stepMs', dwells[0], 1000);
+    assertEq('9 bit → 中点', dwells[1], 550);
 }
 
 {
-    const dwells = surprisalPlaybackDwellsMs([10, 0, 10], 200);
+    const dwells = surprisalPlaybackDwellsMs([0.001, 36], 1000);
+    assert('近 0 → 近 dwellMin', Math.abs(dwells[0]! - 100) < 1);
+    assertEq('超过参照上界仍封顶 stepMs', dwells[1], 1000);
+}
+
+{
+    const dwells = surprisalPlaybackDwellsMs([10, 0, 10], 1000);
     assertEq('零权重为 0', dwells[1], 0);
-    assertEq('10 bit → 2000ms', dwells[0], 2000);
-    assertEq('10 bit 之二', dwells[2], 2000);
+    assertEq('10 bit → 600ms', dwells[0], 600);
+    assertEq('10 bit 之二', dwells[2], 600);
 }
 
 console.log('2. tokenSurprisalBits');

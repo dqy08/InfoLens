@@ -55,12 +55,14 @@
 
   async function runBatch(myGeneration) {
     const still = () => myGeneration === generation;
-    await job(myGeneration, async () => {
+    await job(myGeneration, async (report) => {
       if (!session) {
         session = await R.beginSession(extractPdfPage(), 'PDF has no text to analyze');
       }
       const end = Math.min(session.next + R.MAX_SEGMENTS_PER_RUN, session.segs.length);
-      const lastAlignErr = await R.paintRange(session, session.next, end, still, { overlay: true });
+      const lastAlignErr = await R.paintRange(
+        session, session.next, end, still, { overlay: true }, report,
+      );
       if (!still()) return;
       session.next = end;
       await finish(lastAlignErr);
@@ -93,8 +95,10 @@
       await runBatch(myGeneration);
       return;
     }
-    await job(myGeneration, async () => {
-      const lastAlignErr = await R.paintRange(session, 0, done, still, { overlay: true });
+    await job(myGeneration, async (report) => {
+      const lastAlignErr = await R.paintRange(
+        session, 0, done, still, { overlay: true }, report,
+      );
       if (!still()) return;
       await finish(lastAlignErr);
     });

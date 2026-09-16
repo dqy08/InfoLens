@@ -393,6 +393,53 @@ paths:
         500:
           description: failed to fetch or extract text from URL
 
+  /extension-usage:
+    post:
+      tags:
+        - all
+      summary: anonymous extension analysis-run usage (no page content)
+      operationId: server.extension_usage_report
+      parameters:
+        - in: body
+          name: usage_body
+          required: true
+          schema:
+            type: object
+            required:
+              - extension
+              - engine
+              - outcome
+            properties:
+              extension:
+                type: string
+                description: info-highlight
+              engine:
+                type: string
+                description: local | cloud
+              outcome:
+                type: string
+                description: ok | failed | cancelled
+              segments:
+                type: integer
+                description: segments attempted in this run (≤32 for normal batches)
+              segments_ok:
+                type: integer
+              cached:
+                type: integer
+                description: segments served from local analyze cache (no inference)
+              version:
+                type: string
+      responses:
+        200:
+          description: counted in visit_stats.api
+          schema:
+            type: object
+            properties:
+              success:
+                type: boolean
+        400:
+          description: invalid body
+
   /client-activity:
     post:
       tags:
