@@ -4,6 +4,11 @@
  */
 const IL_UNINSTALL_SURVEY_URL = 'https://info-lens.app/uninstall.html';
 
+/** config.reportUsage === false 时跳过 install/update/用量等上报（dev 用）。缺省视为开启。 */
+globalThis.IL_reportsEnabled = function IL_reportsEnabled(config) {
+  return config?.reportUsage !== false;
+};
+
 globalThis.IL_postKeepalive = function IL_postKeepalive(path, body, apiBase) {
   const base = String(apiBase || 'https://api.info-lens.app').replace(/\/$/, '');
   void fetch(`${base}${path}`, {

@@ -64,4 +64,8 @@ test('IL_setUninstallSurveyUrl / IL_reportInstallOrUpdate 带 ext 与 extension'
   );
   assert.equal(calls.fetch[1].body.extension, 'semantic-highlight');
   assert.equal(calls.fetch[1].body.previous_version, '0.0.9');
+
+  assert.equal(sandbox.IL_reportsEnabled(undefined), true);
+  assert.equal(sandbox.IL_reportsEnabled({ reportUsage: true }), true);
+  assert.equal(sandbox.IL_reportsEnabled({ reportUsage: false }), false);
 });

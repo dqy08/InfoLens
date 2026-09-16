@@ -13,6 +13,7 @@
  *   - GET /api/v2/analyze-semantic-version → 相关度 / keywords 缓存 epoch（扩展打开栏时问；不打上游）
  * - /api/extension-events → STATE KV（流水：install / update / uninstall + extension）；读：GET /facade-extension-events
  * - /api/extension-feedback → STATE KV（技术诊断与崩溃报告）；读：GET /facade-extension-feedback
+ * - /api/extension-local-init → STATE KV（阶段性：Info Highlight 本地权重初始化结果）；读：GET /facade-extension-local-init
  * - /api/extension-uninstall-survey → STATE KV（卸载问卷调查 + extension）；读：GET /facade-extension-uninstall-survey
  * - keywords 双轨（扩展审核慢于 Worker，过渡期内并存）：
  *   - 旧扩展：/api/analyze-semantic-keywords → 仍 HF/Home 梯度归因（COMPUTE_PATHS，勿接到 v2）
@@ -47,6 +48,12 @@ import {
   handlePostExtensionEvents,
   handleListExtensionEvents,
 } from './extension_events.js';
+import {
+  LOCAL_INIT_PATH,
+  LOCAL_INIT_ADMIN_PATH,
+  handlePostExtensionLocalInit,
+  handleListExtensionLocalInit,
+} from './extension_local_init.js';
 import {
   UNINSTALL_SURVEY_PATH,
   UNINSTALL_SURVEY_ADMIN_PATH,
@@ -406,6 +413,9 @@ async function handleRequest(request, env) {
   if (url.pathname === EVENTS_ADMIN_PATH) {
     return handleListExtensionEvents(request, env, json, requireAdmin);
   }
+  if (url.pathname === LOCAL_INIT_ADMIN_PATH) {
+    return handleListExtensionLocalInit(request, env, json, requireAdmin);
+  }
   if (url.pathname === UNINSTALL_SURVEY_ADMIN_PATH) {
     return handleListUninstallSurveys(request, env, json, requireAdmin);
   }
@@ -424,6 +434,9 @@ async function handleRequest(request, env) {
   }
   if (path === FEEDBACK_PATH) {
     return handlePostExtensionFeedback(request, env, json);
+  }
+  if (path === LOCAL_INIT_PATH) {
+    return handlePostExtensionLocalInit(request, env, json);
   }
   if (path === UNINSTALL_SURVEY_PATH) {
     return handlePostUninstallSurvey(request, env, json);

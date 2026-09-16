@@ -28,10 +28,10 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 
 ```bash
 ./extension/semantic-highlight/dev-env.sh prod    # apiBase=api.info-lens.app
-./extension/semantic-highlight/dev-env.sh dev     # apiBase=*.workers.dev
+./extension/semantic-highlight/dev-env.sh dev     # apiBase=*.workers.dev（不上报）
 ```
 
-构建会把源目录的 `config.js` 拷进产物（缺失则回落 `config.prod.js`），并打印用了哪份；
+`dev` 设 `reportUsage: false`。构建会把源目录的 `config.js` 拷进产物（缺失则回落 `config.prod.js`），并打印用了哪份；
 `dev-env.sh` 切完会自动重新构建（浏览器加载的是产物，不构建则重载无效）。
 上架构建带 `--release`，固定用 `config.prod.js`，不受本地切换状态影响。
 

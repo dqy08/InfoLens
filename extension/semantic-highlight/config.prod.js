@@ -6,6 +6,8 @@ var IL_CONFIG = {
   apiBase: 'https://api.info-lens.app',
   /** 正式入口：服务端不落 query/text 与明文 IP */
   privacyMode: true,
+  /** 安装/更新上报 */
+  reportUsage: true,
   /** SYNC: client/src/shared/core/constants.ts → SEMANTIC_MATCH_THRESHOLD */
   matchThreshold: 0.1,
   /**

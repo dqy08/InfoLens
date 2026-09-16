@@ -33,10 +33,10 @@ clone 后至少要装一次，再 `dev-env.sh` / `build_extension.py`。选项�
 
 ```bash
 ./extension/info-highlight/dev-env.sh prod    # apiBase=api.info-lens.app
-./extension/info-highlight/dev-env.sh dev     # apiBase=http://localhost:5001
+./extension/info-highlight/dev-env.sh dev     # apiBase=*.workers.dev（不上报）
 ```
 
-`dev` 需要本机 `http://localhost:5001/api/analyze` 已起来。
+`dev` 与官方域名同一 Worker；`reportUsage: false`，不写 install/update/用量。
 构建会把源目录的 `config.js` 拷进产物（缺失则回落 `config.prod.js`），并打印用了哪份；
 `dev-env.sh` 切完会自动重新构建（浏览器加载的是产物，不构建则重载无效）。
 上架构建带 `--release`，固定用 `config.prod.js`，不受本地切换状态影响。

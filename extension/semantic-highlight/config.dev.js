@@ -7,6 +7,8 @@ var IL_CONFIG = {
   apiBase: 'https://infolens-api.xiaoyundqy.workers.dev',
   /** 开发入口：服务端可落完整 query/text 日志 */
   privacyMode: false,
+  /** 不上报 install/update，避免污染线上统计 */
+  reportUsage: false,
   /** SYNC: client/src/shared/core/constants.ts → SEMANTIC_MATCH_THRESHOLD */
   matchThreshold: 0.1,
   /**

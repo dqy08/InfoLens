@@ -1,7 +1,7 @@
 #!/bin/bash
 # 切换 apiBase（unpacked 开发版）：
 #   prod  = 官方域名 api.info-lens.app
-#   dev   = 本机 backend localhost:5001
+#   dev   = *.workers.dev（同一 Worker；reportUsage=false）
 # config.js 由本脚本生成（gitignore）；源头为 config.{prod,dev}.js。
 # 浏览器加载的是构建产物，故切完立即重新构建，否则重载扩展不会生效。
 # 上架包由 pack.sh 带 --release 固定用 config.prod.js，不依赖本脚本状态。
@@ -18,7 +18,7 @@ case "${1:-}" in
     ;;
   dev)
     cp config.dev.js config.js
-    apiBase=localhost:5001
+    apiBase=infolens-api.xiaoyundqy.workers.dev
     ;;
   *)
     echo "用法: $0 prod|dev" >&2

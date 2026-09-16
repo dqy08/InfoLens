@@ -23,7 +23,7 @@ if (!globalThis.IH_CONFIG || typeof IH_CONFIG.apiBase !== 'string' || !IH_CONFIG
 if (!globalThis.IH_localState) throw new Error('IH_localState missing');
 if (!globalThis.IH_analyzeCache) throw new Error('IH_analyzeCache missing');
 
-IL_setUninstallSurveyUrl(EXTENSION_ID);
+if (IL_reportsEnabled(IH_CONFIG)) IL_setUninstallSurveyUrl(EXTENSION_ID);
 
 function analyzeUrl() {
   return `${String(IH_CONFIG.apiBase).replace(/\/$/, '')}/api/analyze`;
@@ -152,7 +152,9 @@ chrome.runtime.onInstalled.addListener((details) => {
   });
 
   IL_maybeShowInstallDot(details);
-  IL_reportInstallOrUpdate(details, EXTENSION_ID, IH_CONFIG.apiBase);
+  if (IL_reportsEnabled(IH_CONFIG)) {
+    IL_reportInstallOrUpdate(details, EXTENSION_ID, IH_CONFIG.apiBase);
+  }
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -492,6 +494,7 @@ async function handleAnalyze(text) {
 }
 
 async function postUsageReport(body) {
+  if (!IL_reportsEnabled(IH_CONFIG)) return;
   let engine = body?.engine;
   if (engine !== 'local' && engine !== 'cloud') {
     engine = await resolveEngine();
@@ -517,8 +520,30 @@ async function postUsageReport(body) {
   );
 }
 
+async function postLocalInitReport({ outcome, duration_ms, error }) {
+  if (!IL_reportsEnabled(IH_CONFIG)) return;
+  if (outcome !== 'ok' && outcome !== 'failed' && outcome !== 'cancelled') return;
+  const st = await IH_localState.get();
+  const hub =
+    st.hub === IH_localState.HUB_HUGGINGFACE || st.hub === IH_localState.HUB_MODELSCOPE
+      ? st.hub
+      : null;
+  const body = {
+    extension: EXTENSION_ID,
+    version: chrome.runtime.getManifest().version,
+    outcome,
+    duration_ms: Math.max(0, Math.round(Number(duration_ms) || 0)),
+    hub,
+  };
+  if (outcome !== 'ok' && error) body.error = String(error).slice(0, 500);
+  IL_postKeepalive('/api/extension-local-init', body, IH_CONFIG.apiBase);
+}
+
 async function handleAgree() {
   const gen = initGeneration;
+  const t0 = Date.now();
+  let outcome = 'ok';
+  let error = null;
   try {
     const webgpu = await probeAndStore();
     if (!webgpu) throw new Error('WebGPU is unavailable');
@@ -530,8 +555,14 @@ async function handleAgree() {
     await IH_localState.set({ pref, ready: true });
     await IH_analyzeCache.dropAll();
     resolveInitWaiters('local');
+  } catch (err) {
+    const msg = String(err?.message || err);
+    outcome = msg === 'Cancelled' ? 'cancelled' : 'failed';
+    error = msg;
+    throw err;
   } finally {
     initBusy = false;
+    void postLocalInitReport({ outcome, duration_ms: Date.now() - t0, error });
   }
 }
 

@@ -20,9 +20,10 @@
     <p>This happens only when you invoke the extension on the page you are viewing at that moment. The extension does not access any other tabs or pages.</p>
     <p>Separately, and without page content: installing or updating sends the extension id and version; uninstalling opens a short survey page which records that an uninstall occurred (extension id and version only). If you submit the survey, we receive the reasons and comment you typed.</p>
     <p>Also without page content: after each analysis run (up to 32 text segments, including when you cancel mid-run or the run fails), the extension sends a small usage ping—extension id, version, whether analysis used on-device or cloud, outcome, how many segments were attempted / succeeded, and how many were served from the local analysis cache (no new inference). This ping never includes page text or the page URL.</p>
+    <p>Also without page content: when an on-device model setup finishes (success, failure, or cancel), the extension may send a one-shot setup log—extension id, version, outcome, duration, download source (Hugging Face or ModelScope), and a short error string if it failed. No page text.</p>
 
     <h2>How We Use It</h2>
-    <p>The page text is used solely to compute information-density scores and return a heatmap overlay on that page. On-device analysis does the same computation locally and does not send the page text to our server. Version events, optional survey answers, and anonymous analysis-run counts are used only to operate and improve the extension. No other use is made of this data.</p>
+    <p>The page text is used solely to compute information-density scores and return a heatmap overlay on that page. On-device analysis does the same computation locally and does not send the page text to our server. Version events, optional survey answers, anonymous analysis-run counts, and on-device setup logs are used only to operate and improve the extension. No other use is made of this data.</p>
 
     <h2>Data We Do Not Collect</h2>
     <p>We do not collect or store: names, email addresses, passwords, financial information, health information, personal communications, or any other personally identifiable information. We do not track your browsing history across pages or sessions.</p>
@@ -31,7 +32,7 @@
     <ul>
         <li>Page text sent to our server is processed transiently to generate the heatmap and is not stored on our server after the response is returned.</li>
         <li>Our server keeps a temporary, in-memory counter to distinguish visitor sessions for basic operational purposes (e.g., diagnosing issues). This counter is not written to disk, is not linked to any other data, and is cleared whenever the server restarts.</li>
-        <li>Optional uninstall-survey answers are stored so we can improve the product. Install/update/uninstall events store the extension id and version. Analysis-run usage pings store only the counters described above (no page content).</li>
+        <li>Optional uninstall-survey answers are stored so we can improve the product. Install/update/uninstall events store the extension id and version. Analysis-run usage pings store only the counters described above (no page content). On-device setup logs store the fields described above (no page content).</li>
         <li>Heatmap results, display preferences, and on-device model status are saved locally in your browser (via the extension's local storage). Model weights, if you download them, stay in the browser cache on your device. You can clear both from the extension's options page. This data never leaves your device except as described above for cloud analysis.</li>
     </ul>
 

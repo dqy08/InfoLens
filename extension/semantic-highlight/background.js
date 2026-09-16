@@ -146,7 +146,7 @@ async function activateTab(tab, opts = {}) {
 
 const CONTEXT_MENU_ID = 'il-semantic-search';
 
-IL_setUninstallSurveyUrl(EXTENSION_ID);
+if (IL_reportsEnabled(IL_CONFIG)) IL_setUninstallSurveyUrl(EXTENSION_ID);
 
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.contextMenus.removeAll(() => {
@@ -158,7 +158,9 @@ chrome.runtime.onInstalled.addListener((details) => {
   });
 
   IL_maybeShowInstallDot(details);
-  IL_reportInstallOrUpdate(details, EXTENSION_ID, IL_CONFIG?.apiBase);
+  if (IL_reportsEnabled(IL_CONFIG)) {
+    IL_reportInstallOrUpdate(details, EXTENSION_ID, IL_CONFIG?.apiBase);
+  }
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
