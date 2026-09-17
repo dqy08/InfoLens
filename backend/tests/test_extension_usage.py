@@ -290,5 +290,24 @@ class ExtensionUsageTest(unittest.TestCase):
         self.assertNotIn('also no', details)
 
 
+class BumpApiNTest(unittest.TestCase):
+    def test_rejects_non_positive_int(self):
+        from collections import defaultdict
+        from backend.platform import visit_stats
+
+        old = visit_stats._API
+        visit_stats._API = defaultdict(int)
+        try:
+            visit_stats.bump_api('k', n=-1)
+            visit_stats.bump_api('k', n=True)
+            visit_stats.bump_api('k', n=1.5)
+            visit_stats.bump_api('k', n=0)
+            self.assertEqual(visit_stats._API['k'], 0)
+            visit_stats.bump_api('k', n=3)
+            self.assertEqual(visit_stats._API['k'], 3)
+        finally:
+            visit_stats._API = old
+
+
 if __name__ == '__main__':
     unittest.main()

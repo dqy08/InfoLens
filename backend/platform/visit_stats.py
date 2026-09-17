@@ -557,7 +557,8 @@ def record_activity_report(
 def bump_api(kind: str, n: int = 1):
     if _stats_disabled:
         return
-    if n == 0:
+    # bool 是 int 子类；只收真正的正整数。
+    if type(n) is not int or n <= 0:
         return
     with _LOCK:
         _API[kind] += n
