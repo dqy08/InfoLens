@@ -63,7 +63,7 @@
       session.next = end;
       await R.afterPaint(session, lastAlignErr, 'No tokens mapped onto the page', () => {
         return globalThis.IH_showPaused(continuePaused);
-      });
+      }, report);
       active = true;
     });
   }
