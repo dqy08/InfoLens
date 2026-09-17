@@ -349,7 +349,7 @@ test('buildAnalysisFailRecord: 收下 detail；忽略页面字段', () => {
     version: '0.1.4',
     engine: 'local',
     outcome: 'failed',
-    error: 'No tokens mapped onto the page (in=12 lvl=12 empty=0 align=0 painted=0)',
+    error: 'No tokens mapped onto the page (in=12 skip_lvl=12 empty=0 align=0 painted=0)',
     segments: 3,
     duration_ms: 1840,
     detail: {
@@ -403,7 +403,7 @@ test('handlePostExtensionAnalysisFail: 写入 detail；admin GET 原样返回', 
       engine: 'cloud',
       segments: 2,
       duration_ms: 900,
-      error: 'No tokens mapped onto the page (in=8 lvl=0 empty=8 align=0 painted=0)',
+      error: 'No tokens mapped onto the page (in=8 skip_lvl=0 empty=8 align=0 painted=0)',
       detail: {
         tokens_in: 8,
         tokens_skip_level: 0,

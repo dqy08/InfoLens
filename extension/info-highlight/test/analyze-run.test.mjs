@@ -135,7 +135,7 @@ test('afterPaint：painted===0 挂 detail 且 error 仍以 emptyMsg 开头', asy
     (err) => {
       assert.match(err.message, /^No tokens mapped onto the page /);
       assert.match(err.message, /in=12/);
-      assert.match(err.message, /lvl=12/);
+      assert.match(err.message, /skip_lvl=12/);
       assert.match(err.message, /painted=0/);
       return true;
     },

@@ -120,7 +120,7 @@ globalThis.IH_analyzeRun ||= (function () {
 
   function formatPaintFailSummary(d) {
     if (!d) return '';
-    return `(in=${d.tokens_in} lvl=${d.tokens_skip_level} empty=${d.tokens_skip_empty_range} align=${d.align_fail_n} painted=${d.painted})`;
+    return `(in=${d.tokens_in} skip_lvl=${d.tokens_skip_level} empty=${d.tokens_skip_empty_range} align=${d.align_fail_n} painted=${d.painted})`;
   }
 
   /** @param {boolean | null} inferred 仅 `false` 计为 cache hit；`null` 表示未知（失败路径） */
