@@ -7,6 +7,7 @@
 importScripts('sw/restricted-url.js');
 importScripts('sw/install-dot.js');
 importScripts('sw/lifecycle-events.js');
+importScripts('sw/client-id.js');
 importScripts('sw/inject.js');
 importScripts('config.js');
 importScripts('pdf/stash-db.js');
@@ -23,7 +24,9 @@ if (!globalThis.IH_CONFIG || typeof IH_CONFIG.apiBase !== 'string' || !IH_CONFIG
 if (!globalThis.IH_localState) throw new Error('IH_localState missing');
 if (!globalThis.IH_analyzeCache) throw new Error('IH_analyzeCache missing');
 
-if (IL_reportsEnabled(IH_CONFIG)) IL_setUninstallSurveyUrl(EXTENSION_ID);
+if (IL_reportsEnabled(IH_CONFIG)) {
+  IL_prepareClientIdReporting(EXTENSION_ID, IH_CONFIG.apiBase);
+}
 
 function analyzeUrl() {
   return `${String(IH_CONFIG.apiBase).replace(/\/$/, '')}/api/analyze`;
@@ -545,20 +548,19 @@ async function postUsageReport(body) {
   const segments_ok = Math.max(0, Math.min(segments, Number(body?.segments_ok) || 0));
   const cached = Math.max(0, Math.min(segments, Number(body?.cached) || 0));
   const duration_ms = clampDurationMs(body?.duration_ms);
-  IL_postKeepalive(
-    '/api/extension-usage',
-    {
-      extension: EXTENSION_ID,
-      version: chrome.runtime.getManifest().version,
-      engine,
-      outcome,
-      segments,
-      segments_ok,
-      cached,
-      duration_ms,
-    },
-    IH_CONFIG.apiBase,
-  );
+  const client_id = await IL_getClientId(IH_CONFIG.apiBase).catch(() => null);
+  const payload = {
+    extension: EXTENSION_ID,
+    version: chrome.runtime.getManifest().version,
+    engine,
+    outcome,
+    segments,
+    segments_ok,
+    cached,
+    duration_ms,
+  };
+  if (client_id) payload.client_id = client_id;
+  IL_postKeepalive('/api/extension-usage', payload, IH_CONFIG.apiBase);
   if (outcome === 'failed') {
     void postAnalysisFailReport({
       engine,

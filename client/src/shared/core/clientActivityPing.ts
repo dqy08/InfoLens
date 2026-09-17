@@ -2,6 +2,7 @@ import { apiUrl } from '../api/resolveApiBase';
 import { AdminManager } from '../cross/adminManager';
 import { applyOnlineCount } from '../cross/onlineCountDisplay';
 import { isSessionActive } from './activitySession';
+import { readClientId } from './clientId';
 
 /** 活跃秒采样间隔 */
 const TICK_MS = 1000;
@@ -64,6 +65,8 @@ export function initClientActivityPing(apiPrefix: string | null | undefined): vo
             total_active_sec: totalActiveSec,
             delta_active_sec: deltaActiveSec,
         };
+        const clientId = readClientId();
+        if (clientId) payload.client_id = clientId;
         if (includeClientOs) {
             payload.client_os = detectInitialClientOs();
             payload.client_origin = location.hostname;

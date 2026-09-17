@@ -1,5 +1,6 @@
 """API 工具函数"""
 import os
+import re
 import traceback
 from functools import wraps
 
@@ -8,6 +9,18 @@ from flask import request, jsonify
 from backend.platform.format import round_to_sig_figs
 
 __all__ = ["round_to_sig_figs"]
+
+# 产品级匿名 client_id（UUID）；非法则视为缺失，不影响其它字段。
+_CLIENT_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def optional_client_id(v):
+    """合法则返回小写 UUID，否则 None。"""
+    raw = str(v or "").strip()
+    return raw.lower() if _CLIENT_ID_RE.fullmatch(raw) else None
 
 
 def get_demo_directory(create=False):

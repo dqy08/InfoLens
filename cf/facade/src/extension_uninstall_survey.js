@@ -6,6 +6,7 @@
 
 import { clipStr, utcSavedAt } from './extension_feedback.js';
 import { normalizeExtension } from './extension_events.js';
+import { normalizeClientId } from './client_id.js';
 
 export const UNINSTALL_SURVEY_PATH = '/api/extension-uninstall-survey';
 export const UNINSTALL_SURVEY_ADMIN_PATH = '/facade-extension-uninstall-survey';
@@ -44,6 +45,7 @@ export function buildUninstallSurveyRecord(body) {
   const comment = clipStr(d.comment, 2000);
   const saved_at = utcSavedAt();
   const extension = normalizeExtension(d.extension);
+  const client_id = normalizeClientId(d.client_id);
   return {
     saved_at,
     extension,
@@ -51,6 +53,7 @@ export function buildUninstallSurveyRecord(body) {
     ...(comment ? { comment } : {}),
     extension_version: clipStr(d.extension_version || d.version, 32),
     user_agent: clipStr(d.user_agent, 400),
+    ...(client_id ? { client_id } : {}),
   };
 }
 

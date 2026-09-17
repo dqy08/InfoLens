@@ -135,6 +135,35 @@ class ExtensionUsageTest(unittest.TestCase):
 
     @patch('backend.api.extension_usage.log_request')
     @patch('backend.api.extension_usage.bump_api')
+    def test_client_id_in_log(self, bump, log):
+        cid = 'a1b2c3d4-e5f6-4789-8abc-def012345678'
+        out = extension_usage_report({
+            'extension': 'info-highlight',
+            'engine': 'local',
+            'outcome': 'ok',
+            'segments': 1,
+            'client_id': cid,
+        })
+        self.assertEqual(out, {'success': True})
+        details = log.call_args.args[1]
+        self.assertIn(f'cid={cid}', details)
+
+    @patch('backend.api.extension_usage.log_request')
+    @patch('backend.api.extension_usage.bump_api')
+    def test_invalid_client_id_ignored(self, _bump, log):
+        out = extension_usage_report({
+            'extension': 'info-highlight',
+            'engine': 'cloud',
+            'outcome': 'ok',
+            'segments': 1,
+            'client_id': 'not-a-uuid',
+        })
+        self.assertEqual(out, {'success': True})
+        details = log.call_args.args[1]
+        self.assertNotIn('cid=', details)
+
+    @patch('backend.api.extension_usage.log_request')
+    @patch('backend.api.extension_usage.bump_api')
     def test_error_text_not_in_usage_log(self, _bump, log):
         out = extension_usage_report({
             'extension': 'info-highlight',

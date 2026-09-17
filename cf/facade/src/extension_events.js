@@ -5,6 +5,7 @@
  */
 
 import { clipStr, utcSavedAt } from './extension_feedback.js';
+import { normalizeClientId } from './client_id.js';
 
 export const EVENTS_PATH = '/api/extension-events';
 export const EVENTS_ADMIN_PATH = '/facade-extension-events';
@@ -33,12 +34,14 @@ export function buildEventRecord(body) {
   const version = clipStr(d.version, 32);
   const previous_version = event === 'update' ? clipStr(d.previous_version, 32) : null;
   const extension = normalizeExtension(d.extension);
+  const client_id = normalizeClientId(d.client_id);
   return {
     saved_at: utcSavedAt(),
     event,
     version,
     extension,
     ...(previous_version ? { previous_version } : {}),
+    ...(client_id ? { client_id } : {}),
   };
 }
 

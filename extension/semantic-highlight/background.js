@@ -7,6 +7,7 @@
 importScripts('sw/restricted-url.js');
 importScripts('sw/install-dot.js');
 importScripts('sw/lifecycle-events.js');
+importScripts('sw/client-id.js');
 importScripts('sw/inject.js');
 importScripts('config.js');
 importScripts('pdf/stash-db.js');
@@ -146,7 +147,9 @@ async function activateTab(tab, opts = {}) {
 
 const CONTEXT_MENU_ID = 'il-semantic-search';
 
-if (IL_reportsEnabled(IL_CONFIG)) IL_setUninstallSurveyUrl(EXTENSION_ID);
+if (IL_reportsEnabled(IL_CONFIG)) {
+  IL_prepareClientIdReporting(EXTENSION_ID, IL_CONFIG?.apiBase);
+}
 
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.contextMenus.removeAll(() => {

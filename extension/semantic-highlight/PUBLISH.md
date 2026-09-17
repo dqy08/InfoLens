@@ -135,10 +135,10 @@ curl -sS -x "$http_proxy" \
 
 ### 4. 打 tag
 
-提交商店用的那次 commit 打附注 tag（与历史 `chrome-0.6.6` 同形）：
+提交商店用的那次 commit 打附注 tag：
 
 ```bash
-git tag -a chrome-<version> -m "chrome-<version>"
+git tag -a semantic-highlight-<version> -m "semantic-highlight-<version>"
 ```
 
 ---

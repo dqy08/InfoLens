@@ -143,6 +143,46 @@
             el.textContent = t[el.getAttribute('data-i18n')] || '';
         });
 
+        const CLIENT_ID_RE =
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        function readAidCookie() {
+            for (const part of document.cookie.split(';')) {
+                const i = part.indexOf('=');
+                if (i < 0) continue;
+                if (part.slice(0, i).trim() !== 'il_aid') continue;
+                try {
+                    return decodeURIComponent(part.slice(i + 1).trim());
+                } catch {
+                    return part.slice(i + 1).trim();
+                }
+            }
+            return '';
+        }
+        function writeAidCookie(id) {
+            const parts = [
+                'il_aid=' + encodeURIComponent(id),
+                'Path=/',
+                'Max-Age=63072000',
+            ];
+            if (location.protocol === 'https:') parts.push('Secure', 'SameSite=None');
+            else parts.push('SameSite=Lax');
+            const h = location.hostname.toLowerCase();
+            if (h === 'info-lens.app' || h.endsWith('.info-lens.app')) {
+                parts.push('Domain=.info-lens.app');
+            }
+            document.cookie = parts.join('; ');
+        }
+        // 已有 Cookie 为准；只有缺失时才采信插件带来的 ?cid，避免外部链接改写访客 id。
+        const fromCookie = readAidCookie();
+        const cidParam = (params.get('cid') || '').trim();
+        let clientId = '';
+        if (CLIENT_ID_RE.test(fromCookie)) {
+            clientId = fromCookie.toLowerCase();
+        } else if (CLIENT_ID_RE.test(cidParam)) {
+            clientId = cidParam.toLowerCase();
+            writeAidCookie(clientId);
+        }
+
         const form = document.getElementById('uninstall-form');
         const errEl = document.getElementById('form-error');
         const thanksEl = document.getElementById('thanks');
@@ -150,10 +190,12 @@
         const apiBase = ((meta && meta.content) || 'https://api.info-lens.app').replace(/\/+$/, '');
         const version = (params.get('v') || '').trim();
         if (version) {
+            const evBody = { event: 'uninstall', version, extension };
+            if (clientId) evBody.client_id = clientId;
             void fetch(`${apiBase}/api/extension-events`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ event: 'uninstall', version, extension }),
+                body: JSON.stringify(evBody),
                 keepalive: true,
             });
         }
@@ -169,16 +211,18 @@
             }
             form.hidden = true;
             thanksEl.hidden = false;
+            const surveyBody = {
+                reasons,
+                comment,
+                version: params.get('v') || '',
+                extension,
+                user_agent: navigator.userAgent,
+            };
+            if (clientId) surveyBody.client_id = clientId;
             void fetch(`${apiBase}/api/extension-uninstall-survey`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    reasons,
-                    comment,
-                    version: params.get('v') || '',
-                    extension,
-                    user_agent: navigator.userAgent,
-                }),
+                body: JSON.stringify(surveyBody),
                 keepalive: true,
             });
         });

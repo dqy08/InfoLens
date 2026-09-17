@@ -1,6 +1,6 @@
 from urllib.parse import unquote
 
-from backend.api.utils import request_has_valid_admin
+from backend.api.utils import optional_client_id, request_has_valid_admin
 from backend.platform.access_log import log_request
 from backend.platform.online_presence import WINDOW_SEC, get_online_now, record_heartbeat
 from backend.platform.visit_stats import normalize_page_key, record_activity_report, record_gen_attr_opt_sec
@@ -56,8 +56,10 @@ def client_activity_report(activity_body=None):
             if isinstance(raw_opts, dict):
                 record_gen_attr_opt_sec(dlt, {k: bool(v) for k, v in raw_opts.items() if isinstance(k, str)})
         if _sparse_page_activity_log_cum(cum):
+            client_id = optional_client_id(d.get("client_id"))
+            cid_bit = f" cid={client_id}" if client_id else ""
             log_request(
                 "📄 页面活跃",
-                f"path(sampled)={log_path!r} total_sec={cum} delta_sec={dlt}",
+                f"path(sampled)={log_path!r} total_sec={cum} delta_sec={dlt}{cid_bit}",
             )
     return _activity_response()

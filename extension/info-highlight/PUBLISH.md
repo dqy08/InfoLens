@@ -71,7 +71,7 @@ curl -sS -x "$http_proxy" \
 ### 4. 打 tag
 
 ```bash
-git tag -a chrome-<version> -m "chrome-<version>"
+git tag -a info-highlight-<version> -m "info-highlight-<version>"
 ```
 
-（与 Semantic 共用 `chrome-<version>` 形；两插件版本号勿撞车。）
+Semantic Highlight 用 `semantic-highlight-<version>`。

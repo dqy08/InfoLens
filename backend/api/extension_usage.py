@@ -1,5 +1,6 @@
 """扩展分析轮次用量（不含页面正文）：计入 visit_stats.api。"""
 
+from backend.api.utils import optional_client_id
 from backend.platform.access_log import log_request
 from backend.platform.visit_stats import bump_api
 
@@ -50,6 +51,7 @@ def extension_usage_report(usage_body=None):
     cached = min(_nonneg_int(d.get("cached")), segments)
     version = str(d.get("version") or "").strip()[:32]
     duration_ms = _optional_duration_ms(d.get("duration_ms"))
+    client_id = optional_client_id(d.get("client_id"))
 
     bump_api("info_highlight_run")
     bump_api(f"info_highlight_run__{engine}")
@@ -68,5 +70,7 @@ def extension_usage_report(usage_body=None):
         details += f" v={version}"
     if duration_ms is not None:
         details += f" dur={duration_ms}"
+    if client_id:
+        details += f" cid={client_id}"
     log_request("📊 扩展分析轮次", details)
     return {"success": True}

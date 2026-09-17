@@ -18,10 +18,10 @@
         <li>The visible text of the article/body content of the page you are currently viewing</li>
     </ul>
     <p>This data is sent only when you actively invoke the extension on the page you are viewing at that moment. The extension does not run in the background and does not access any other tabs or pages.</p>
-    <p>Separately, and without page content: installing or updating sends the extension id and version; uninstalling opens a short survey page which records that an uninstall occurred (extension id and version only). If you submit the survey, we receive the reasons and comment you typed. If you tap the in-product report button, we receive the error text, current page URL, query, extension version, and browser user agent.</p>
+    <p>Separately, and without page content: we use an anonymous client id (a random UUID). It is stored as a first-party cookie on <code>info-lens.app</code> (shared with our website and our other Info Lens extensions) and cached in the extension’s local storage. Installing, updating, uninstall events, and optional survey answers may include this id together with the extension id and version. If you submit the uninstall survey, we receive the reasons and comment you typed. The id is not linked to your name, email, or Google account. If you tap the in-product report button, we receive the error text, current page URL, query, extension version, and browser user agent.</p>
 
     <h2>How We Use It</h2>
-    <p>The query and page text are used solely to compute semantic similarity and matching words, which the extension then highlights on the page. Version events, optional reports, and optional survey answers are used only to operate and improve the extension. No other use is made of this data.</p>
+    <p>The query and page text are used solely to compute semantic similarity and matching words, which the extension then highlights on the page. Version events, optional reports, optional survey answers, and the anonymous client id are used only to operate and improve the product. No other use is made of this data.</p>
 
     <h2>Data We Do Not Collect</h2>
     <p>We do not collect or store: names, email addresses, passwords, financial information, health information, personal communications, or any other personally identifiable information. We do not track your browsing history across pages or sessions.</p>
@@ -29,8 +29,8 @@
     <h2>Data Storage &amp; Retention</h2>
     <ul>
         <li>Query text and page content are processed to generate search results. We do not keep them on our server after the response is returned.</li>
-        <li>Optional error reports and uninstall-survey answers are stored so we can diagnose issues and improve the product. Install/update/uninstall events store the extension id and version.</li>
-        <li>Your recent search queries and a local analysis cache are saved in your browser (via the extension's local storage) so searches can be reused. You can clear the cache from the options page. This data never leaves your device except as described above.</li>
+        <li>Optional error reports and uninstall-survey answers are stored so we can diagnose issues and improve the product. Install/update/uninstall events may store the extension id, version, and anonymous client id.</li>
+        <li>Your recent search queries and a local analysis cache are saved in your browser (via the extension's local storage) so searches can be reused. You can clear the cache from the options page. Clearing site data for <code>info-lens.app</code> resets the anonymous client id cookie.</li>
     </ul>
 
     <h2>Third-Party Sharing</h2>

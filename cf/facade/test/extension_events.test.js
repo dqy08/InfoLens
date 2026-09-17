@@ -64,6 +64,14 @@ test('buildEventRecord: update 才带 previous_version；缺 extension 默认 se
   const ih = buildEventRecord({ event: 'install', version: '0.1.0', extension: 'info-highlight' });
   assert.equal(ih.extension, 'info-highlight');
 
+  const withCid = buildEventRecord({
+    event: 'install',
+    version: '0.1.0',
+    extension: 'info-highlight',
+    client_id: 'A1B2C3D4-E5F6-4789-8ABC-DEF012345678',
+  });
+  assert.equal(withCid.client_id, 'a1b2c3d4-e5f6-4789-8abc-def012345678');
+
   const bad = buildEventRecord({ event: 'install', version: '0.1.0', extension: 'other' });
   assert.equal(bad.extension, null);
 });

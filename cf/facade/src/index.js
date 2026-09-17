@@ -11,6 +11,7 @@
  *   - /api/v2/analyze-semantic-relevance → Hy3 多切片（新扩展/新前端，texts 数组，新版本主力）
  *   - /api/v2/analyze-semantic-keywords → Hy3（新扩展）
  *   - GET /api/v2/analyze-semantic-version → 相关度 / keywords 缓存 epoch（扩展打开栏时问；不打上游）
+ * - /api/client-id → 产品级匿名 client_id（Cookie il_aid，Domain=.info-lens.app）；两插件与官网共用
  * - /api/extension-events → STATE KV（流水：install / update / uninstall + extension）；读：GET /facade-extension-events
  * - /api/extension-feedback → STATE KV（技术诊断与崩溃报告）；读：GET /facade-extension-feedback
  * - /api/extension-local-init → STATE KV（阶段性：Info Highlight 本地权重初始化结果）；读：GET /facade-extension-local-init
@@ -67,6 +68,7 @@ import {
   handlePostUninstallSurvey,
   handleListUninstallSurveys,
 } from './extension_uninstall_survey.js';
+import { CLIENT_ID_PATH, handleClientId } from './client_id.js';
 const HOP_BY_HOP = new Set([
   'connection',
   'keep-alive',
@@ -405,6 +407,9 @@ async function handleRequest(request, env) {
   const url = new URL(request.url);
 
   if (request.method === 'OPTIONS') {
+    if (url.pathname === CLIENT_ID_PATH) {
+      return handleClientId(request);
+    }
     return new Response(null, { status: 204, headers: corsHeaders(request) });
   }
 
@@ -439,6 +444,9 @@ async function handleRequest(request, env) {
   }
 
   // 扩展打点、反馈、本地初始化、分析失败调试、卸载问卷：边缘写 KV，不碰 HF/Home
+  if (path === CLIENT_ID_PATH) {
+    return handleClientId(request);
+  }
   if (path === EVENTS_PATH) {
     return handlePostExtensionEvents(request, env, json);
   }
