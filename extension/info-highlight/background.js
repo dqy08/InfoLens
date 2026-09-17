@@ -15,6 +15,7 @@ importScripts('pdf/sw.js');
 importScripts('cache/ring-store.js');
 importScripts('analyzeCache.js');
 importScripts('local/state.js');
+importScripts('init-window-bounds.js');
 
 const EXTENSION_ID = 'info-highlight';
 
@@ -23,6 +24,7 @@ if (!globalThis.IH_CONFIG || typeof IH_CONFIG.apiBase !== 'string' || !IH_CONFIG
 }
 if (!globalThis.IH_localState) throw new Error('IH_localState missing');
 if (!globalThis.IH_analyzeCache) throw new Error('IH_analyzeCache missing');
+if (!globalThis.IH_initWindowBounds) throw new Error('IH_initWindowBounds missing');
 
 if (IL_reportsEnabled(IH_CONFIG)) {
   IL_prepareClientIdReporting(EXTENSION_ID, IH_CONFIG.apiBase);
@@ -368,6 +370,35 @@ async function refuseLocal() {
   resolveInitWaiters('cloud');
 }
 
+async function abandonInitWindow() {
+  const id = initWindowId;
+  initWindowId = null;
+  if (id == null) return;
+  try {
+    await chrome.windows.remove(id);
+  } catch {
+    /* already gone */
+  }
+}
+
+async function createInitPopupWindow(create) {
+  const win = await chrome.windows.create(create);
+  if (win?.id == null) throw new Error('Init window create returned no id');
+  initWindowId = win.id;
+  if (create.left == null || create.top == null) return initWindowId;
+  try {
+    await chrome.windows.update(win.id, { left: create.left, top: create.top, focused: true });
+  } catch (err) {
+    if (!IH_initWindowBounds.isBoundsError(err)) throw err;
+    try {
+      await chrome.windows.update(win.id, { focused: true });
+    } catch (err2) {
+      if (!IH_initWindowBounds.isBoundsError(err2)) throw err2;
+    }
+  }
+  return initWindowId;
+}
+
 async function openInitWindow() {
   if (initWindowId != null) {
     try {
@@ -389,19 +420,30 @@ async function openInitWindow() {
   };
   try {
     const host = await chrome.windows.getLastFocused();
-    if (Number.isFinite(host.left) && Number.isFinite(host.top) && host.width > 0 && host.height > 0) {
-      create.left = Math.round(host.left + (host.width - width) / 2);
-      create.top = Math.round(host.top + (host.height - height) / 2);
+    const pos = IH_initWindowBounds.clampPopupToHost(host, width, height);
+    if (pos) {
+      create.left = pos.left;
+      create.top = pos.top;
     }
   } catch {
     /* 没有宿主窗口时让浏览器自己放 */
   }
-  const win = await chrome.windows.create(create);
-  if (win.id != null && create.left != null && create.top != null) {
-    await chrome.windows.update(win.id, { left: create.left, top: create.top, focused: true });
+  try {
+    return await createInitPopupWindow(create);
+  } catch (err) {
+    const canRetryWithoutPos =
+      IH_initWindowBounds.isBoundsError(err) && create.left != null && create.top != null;
+    await abandonInitWindow();
+    if (!canRetryWithoutPos) throw err;
+    delete create.left;
+    delete create.top;
+    try {
+      return await createInitPopupWindow(create);
+    } catch (err2) {
+      await abandonInitWindow();
+      throw err2;
+    }
   }
-  initWindowId = win.id;
-  return initWindowId;
 }
 
 async function openInitAndWait() {
@@ -443,7 +485,15 @@ async function maybeOfferInitOnce() {
     return;
   }
   if (!webgpu) return;
-  await openInitAndWait();
+  try {
+    await openInitAndWait();
+  } catch (err) {
+    if (IH_initWindowBounds.isBoundsError(err)) {
+      console.warn('[Info Highlight] Init popup bounds rejected; skip offering', err);
+      return;
+    }
+    throw err;
+  }
 }
 
 function maybeOfferInit() {
@@ -592,7 +642,7 @@ async function handleLinger(msg) {
 }
 
 /** 阶段性调试：分析失败原因（可随门面通道一起删除）。不写入 /api/extension-usage。 */
-async function postAnalysisFailReport({ engine, error, segments, duration_ms }) {
+async function postAnalysisFailReport({ engine, error, segments, duration_ms, detail }) {
   if (!IL_reportsEnabled(IH_CONFIG)) return;
   const msg = String(error || '').slice(0, 500);
   if (!msg) return;
@@ -606,6 +656,7 @@ async function postAnalysisFailReport({ engine, error, segments, duration_ms }) 
   if (engine === 'local' || engine === 'cloud') body.engine = engine;
   const n = Math.max(0, Math.min(512, Number(segments) || 0));
   if (n >= 1) body.segments = n;
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) body.detail = detail;
   IL_postKeepalive('/api/extension-analysis-fail', body, IH_CONFIG.apiBase);
 }
 
@@ -623,6 +674,7 @@ async function postUsageReport(body) {
   const cached = Math.max(0, Math.min(segments, Number(body?.cached) || 0));
   const duration_ms = clampDurationMs(body?.duration_ms);
   const client_id = await IL_getClientId(IH_CONFIG.apiBase).catch(() => null);
+  // 正式用量 POST 只计数字段；error/detail 不得进入 keepalive body
   const payload = {
     extension: EXTENSION_ID,
     version: chrome.runtime.getManifest().version,
@@ -641,6 +693,7 @@ async function postUsageReport(body) {
       error: body?.error || body?.message,
       segments,
       duration_ms,
+      detail: body?.detail,
     });
   }
 }
