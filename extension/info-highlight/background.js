@@ -493,6 +493,23 @@ async function handleAnalyze(text) {
   };
 }
 
+/** 阶段性调试：分析失败原因（可随门面通道一起删除）。不写入 /api/extension-usage。 */
+async function postAnalysisFailReport({ engine, error, segments }) {
+  if (!IL_reportsEnabled(IH_CONFIG)) return;
+  const msg = String(error || '').slice(0, 500);
+  if (!msg) return;
+  const body = {
+    extension: EXTENSION_ID,
+    version: chrome.runtime.getManifest().version,
+    outcome: 'failed',
+    error: msg,
+  };
+  if (engine === 'local' || engine === 'cloud') body.engine = engine;
+  const n = Math.max(0, Math.min(512, Number(segments) || 0));
+  if (n >= 1) body.segments = n;
+  IL_postKeepalive('/api/extension-analysis-fail', body, IH_CONFIG.apiBase);
+}
+
 async function postUsageReport(body) {
   if (!IL_reportsEnabled(IH_CONFIG)) return;
   let engine = body?.engine;
@@ -518,6 +535,13 @@ async function postUsageReport(body) {
     },
     IH_CONFIG.apiBase,
   );
+  if (outcome === 'failed') {
+    void postAnalysisFailReport({
+      engine,
+      error: body?.error || body?.message,
+      segments,
+    });
+  }
 }
 
 async function postLocalInitReport({ outcome, duration_ms, error }) {
