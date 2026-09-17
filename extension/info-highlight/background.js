@@ -163,7 +163,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
   if (details.reason === 'install') {
     void chrome.tabs.create({
-      url: chrome.runtime.getURL('options.html?prepare=1'),
+      url: chrome.runtime.getURL('options.html') + '?prepare=1',
     });
   }
 });
