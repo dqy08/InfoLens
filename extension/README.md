@@ -16,3 +16,5 @@ python3 extension/scripts/build_extension.py semantic-highlight
 | [Semantic Highlight](./semantic-highlight/README.md) | `jnjglfjkbopeiodpcgmlhkfhldjfcdda` | [打开](https://chromewebstore.google.com/detail/jnjglfjkbopeiodpcgmlhkfhldjfcdda) |
 
 上架：各自目录下的 `PUBLISH.md`；本机 `.env` 里用 `CHROME_EXTENSION_ID_INFO_HIGHLIGHT` / `CHROME_EXTENSION_ID_SEMANTIC_HIGHLIGHT`（Publisher 共用）。
+
+门面与官网：推送 GitHub `main` 后由 [Deploy edge](../.github/workflows/deploy-edge.yml) 自动部署，一般不必再手动部署。

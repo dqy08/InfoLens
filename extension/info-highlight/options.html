@@ -94,6 +94,84 @@
       background: transparent;
       color: var(--fg);
     }
+    .row-slider {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+    .row-slider-top {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .row-slider-value {
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    input[type="range"] {
+      width: 100%;
+      margin: 0;
+      accent-color: #ff4740;
+      cursor: pointer;
+    }
+    /* 强度滑条自绘：避免 accent-color 的悬停变色，以及浅色 accent 把右侧轨道衬白 */
+    input[type="range"].ih-intensity {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 16px;
+      background: transparent;
+    }
+    input[type="range"].ih-intensity:focus {
+      outline: none;
+    }
+    input[type="range"].ih-intensity::-webkit-slider-runnable-track {
+      height: 4px;
+      border-radius: 2px;
+      background: linear-gradient(
+        to right,
+        var(--ih-intensity-accent, #ff4740) 0 var(--ih-intensity-pct, 100%),
+        var(--line) var(--ih-intensity-pct, 100%) 100%
+      );
+    }
+    input[type="range"].ih-intensity::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      margin-top: -6px;
+      border: none;
+      border-radius: 50%;
+      background: var(--ih-intensity-accent, #ff4740);
+      box-shadow: none;
+    }
+    input[type="range"].ih-intensity::-moz-range-track {
+      height: 4px;
+      border: none;
+      border-radius: 2px;
+      background: var(--line);
+    }
+    input[type="range"].ih-intensity::-moz-range-progress {
+      height: 4px;
+      border-radius: 2px;
+      background: var(--ih-intensity-accent, #ff4740);
+    }
+    input[type="range"].ih-intensity::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border: none;
+      border-radius: 50%;
+      background: var(--ih-intensity-accent, #ff4740);
+      box-shadow: none;
+    }
+    .row-nested {
+      padding-left: 12px;
+      border-left: 2px solid var(--line);
+      margin-left: 4px;
+    }
+    .row-nested[hidden] { display: none; }
     main h2:not(:first-of-type) { margin-top: 28px; }
   </style>
 </head>
@@ -120,6 +198,33 @@
       </div>
       <input type="checkbox" id="show_token_tip" checked>
     </label>
+    <div class="row row-slider">
+      <div class="row-slider-top">
+        <div class="row-text">
+          <div class="row-title">Highlight intensity</div>
+          <p class="row-desc">How strong the red highlight looks.</p>
+        </div>
+        <span class="row-slider-value" id="ih_depth_value"></span>
+      </div>
+      <input type="range" class="ih-intensity" id="ih_max_highlight_alpha" min="5" max="100" step="1" aria-label="Highlight intensity">
+    </div>
+    <label class="row">
+      <div class="row-text">
+        <div class="row-title">One-tone highlight</div>
+        <p class="row-desc">A single highlight level instead of a gradient. (Warning — it depends on a threshold that does not generalize across model changes.)</p>
+      </div>
+      <input type="checkbox" id="ih_two_tier">
+    </label>
+    <div class="row row-slider row-nested" id="ih_threshold_row" hidden>
+      <div class="row-slider-top">
+        <div class="row-text">
+          <div class="row-title">Highlight threshold</div>
+          <p class="row-desc">Minimum information density to highlight.</p>
+        </div>
+        <span class="row-slider-value" id="ih_threshold_value"></span>
+      </div>
+      <input type="range" id="ih_highlight_threshold_pct" min="0" max="100" step="1" aria-label="Highlight threshold">
+    </div>
     <h2>Analysis</h2>
     <div class="row">
       <div class="row-text">
@@ -160,6 +265,7 @@
   <script src="cache/ring-store.js"></script>
   <script src="analyzeCache.js"></script>
   <script src="local/state.js"></script>
+  <script src="highlightStyle.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

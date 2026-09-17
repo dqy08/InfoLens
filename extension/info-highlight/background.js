@@ -44,6 +44,7 @@ const CONTENT_JS = [
   'scrollGeometry.js',
   'progressAxis.js',
   'overlay.js',
+  'highlightStyle.js',
   'page-map.js',
   'tokenTip.js',
   'analyzeRun.js',
@@ -157,6 +158,11 @@ chrome.runtime.onInstalled.addListener((details) => {
   IL_maybeShowInstallDot(details);
   if (IL_reportsEnabled(IH_CONFIG)) {
     IL_reportInstallOrUpdate(details, EXTENSION_ID, IH_CONFIG.apiBase);
+  }
+  if (details.reason === 'install') {
+    void chrome.tabs.create({
+      url: chrome.runtime.getURL('options.html?prepare=1'),
+    });
   }
 });
 
@@ -383,8 +389,10 @@ async function openInitAndWait() {
       initWindowId = null;
       void (async () => {
         const st = await IH_localState.get();
+        // 下载中关掉（Hide）继续后台；已就绪则只关窗。其余等同拒绝，避免下一段分析再弹。
         if (st.ready || initBusy) return;
-        await resolveInitWithoutReady();
+        if (initWaiters.length === 0) return;
+        await refuseLocal();
       })();
     }
     chrome.windows.onRemoved.addListener(onRemoved);

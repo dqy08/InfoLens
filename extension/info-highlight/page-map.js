@@ -9,11 +9,15 @@
  * 进度图：竖轴默认 4–8 bit；分析中亮空框，段回了加线；后一段从上一线终点起；不自动跟滚。
  */
 (() => {
+  if (!globalThis.IH_highlightStyle) {
+    throw new Error('IH_highlightStyle missing — inject highlightStyle.js first');
+  }
+  const HS = globalThis.IH_highlightStyle;
   /** SYNC: client/src/shared/core/constants.ts → SEMANTIC_CHUNK_BYTES */
   const UNIT_BYTES = 800;
   const UNIT_MULTIPLIER = 2;
   const CONTEXT_UNITS = 1;
-  const TOKEN_LEVELS = 16;
+  const TOKEN_LEVELS = HS.TOKEN_LEVELS;
   const HL_PREFIX = 'ih-token-';
   /** SYNC: extension/semantic-highlight/semantic/find.js → HL_UNDERLINE（命名空间 ih-，避免和语义插件互踩） */
   const HL_UNDERLINE = 'ih-underline';
@@ -51,7 +55,7 @@
 }
 `;
   /** SYNC: client/src/shared/cross/surprisalMath.ts → REFERENCE_MAX_SURPRISAL_BITS */
-  const MAX_SURPRISAL_BITS = 18;
+  const MAX_SURPRISAL_BITS = HS.MAX_SURPRISAL_BITS;
   const PROGRESS_BITS_MIN = 4;
   const PROGRESS_BITS_MAX = 8;
   /** SYNC: extension/semantic-highlight/semantic/find.js → PROGRESS_MIN_WIDTH_PX / VIEWPORT_FOCUS_Y_RATIO / CHUNK_START_MAX_Y_RATIO */
@@ -224,9 +228,32 @@
    */
   let tokenOverlayEls = [];
 
+  /** @type {{ tokens: unknown[], mapped: { text: string, pieces: unknown[], root?: Element } | null, overlay: boolean }} */
+  let paintBuf = { tokens: [], mapped: null, overlay: false };
+
+  /** @type {{ twoTier: boolean, thresholdPct: number, maxAlphaDepth: number }} */
+  let highlightPrefs = HS.normalizePrefs(HS.STORAGE_DEFAULTS);
+
+  function applyTokenColors() {
+    HS.applyCssVars(
+      document.documentElement,
+      HS.depthToMaxAlpha(highlightPrefs.maxAlphaDepth),
+      highlightPrefs.twoTier,
+    );
+  }
+
   function clearTokenOverlays() {
     for (const el of tokenOverlayEls) el.remove();
     tokenOverlayEls = [];
+  }
+
+  /** 清 token 画布（Highlight + PDF 线），保留进度下划线与 paintBuf */
+  function clearTokenPaints() {
+    clearTokenOverlays();
+    if (!CSS.highlights) return;
+    for (let i = 0; i < TOKEN_LEVELS; i++) {
+      CSS.highlights.get(HL_PREFIX + i)?.clear();
+    }
   }
 
   /** 线相对 root 定位；粗细与上移由 pdf/viewer.css 按 --il-pdf-scale 给 */
@@ -246,18 +273,20 @@
     el.style.left = `${pos.x}px`;
     el.style.top = `${pos.y}px`;
     el.style.width = `${rect.width}px`;
-    el.style.backgroundColor = `rgba(255, 71, 64, ${(level + 1) / TOKEN_LEVELS})`;
+    const a = HS.alphaForLevel(
+      level,
+      HS.depthToMaxAlpha(highlightPrefs.maxAlphaDepth),
+      highlightPrefs.twoTier,
+    );
+    el.style.backgroundColor = `rgba(${HS.SURPRISAL_RED_RGB}, ${a})`;
     ctx.root.appendChild(el);
     tokenOverlayEls.push(el);
   }
 
   function clearHighlights() {
-    clearTokenOverlays();
-    if (!CSS.highlights) return;
-    for (let i = 0; i < TOKEN_LEVELS; i++) {
-      CSS.highlights.get(HL_PREFIX + i)?.clear();
-    }
+    clearTokenPaints();
     clearUnderline();
+    paintBuf = { tokens: [], mapped: null, overlay: false };
   }
 
   /**
@@ -275,9 +304,7 @@
   function tokenLevel(tok) {
     const bits = tokenBits(tok);
     if (bits == null) return -1;
-    const t = Math.max(0, Math.min(1, bits / MAX_SURPRISAL_BITS));
-    const level = Math.min(TOKEN_LEVELS - 1, Math.floor(t * TOKEN_LEVELS));
-    return level < 1 ? -1 : level;
+    return HS.tokenLevelFromBits(bits, highlightPrefs);
   }
 
   /** @param {Array<{ real_topk?: [number, number] | null }>} tokens */
@@ -293,6 +320,14 @@
     return n ? sum / n : null;
   }
 
+  function repaintFromBuffer() {
+    const { tokens, mapped, overlay } = paintBuf;
+    if (!mapped || !tokens.length) return;
+    clearTokenPaints();
+    paintBuf = { tokens: [], mapped: null, overlay: false };
+    paintTokens(tokens, mapped, { append: false, overlay });
+  }
+
   /**
    * @param {Array<{ offset: [number, number], raw?: string, real_topk?: [number, number] | null }>} tokens
    * @param {{ text: string, pieces: Array<{ node: Text, start: number, end: number }>, root?: Element }} mapped
@@ -301,7 +336,14 @@
    */
   function paintTokens(tokens, mapped, opts) {
     ensureHighlightRegistry();
-    if (!opts?.append) clearHighlights();
+    if (!opts?.append) {
+      clearTokenPaints();
+      paintBuf = { tokens: [], mapped: null, overlay: false };
+    }
+    paintBuf.mapped = mapped;
+    paintBuf.overlay = !!opts?.overlay;
+    for (const tok of tokens) paintBuf.tokens.push(tok);
+
     const overlay = opts?.overlay ? tokenOverlayContext(mapped.root) : null;
     const idx = globalThis.IL_createTextIndex(mapped.text);
     let painted = 0;
@@ -332,6 +374,44 @@
     }
     return painted;
   }
+
+  function applyHighlightPrefs(raw) {
+    const next = HS.normalizePrefs(raw);
+    const levelChanged =
+      next.twoTier !== highlightPrefs.twoTier
+      || next.thresholdPct !== highlightPrefs.thresholdPct;
+    const alphaChanged = next.maxAlphaDepth !== highlightPrefs.maxAlphaDepth;
+    highlightPrefs = next;
+    applyTokenColors();
+    if (levelChanged || (alphaChanged && paintBuf.overlay)) {
+      repaintFromBuffer();
+    }
+  }
+
+  const prefsReady = new Promise((resolve) => {
+    const get = chrome.storage?.local?.get;
+    if (typeof get !== 'function') {
+      resolve();
+      return;
+    }
+    get.call(chrome.storage.local, HS.STORAGE_DEFAULTS, (res) => {
+      applyHighlightPrefs(res);
+      resolve();
+    });
+  });
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area && area !== 'local') return;
+    if (
+      !(HS.KEY_TWO_TIER in changes)
+      && !(HS.KEY_THRESHOLD_PCT in changes)
+      && !(HS.KEY_MAX_ALPHA_DEPTH in changes)
+    ) {
+      return;
+    }
+    chrome.storage.local.get(HS.STORAGE_DEFAULTS, (res) => {
+      applyHighlightPrefs(res);
+    });
+  });
 
   function shortError(msg) {
     let t = String(msg || 'Analyze failed').replace(/\s+/g, ' ').trim();
@@ -804,6 +884,7 @@
    * @param {{ start: number, end: number }[]} segs
    */
   async function bindProgress(mapped, segs) {
+    await prefsReady;
     progressMapped = mapped;
     progressIdx = globalThis.IL_createTextIndex(mapped.text);
     progressYCache = new Map();
