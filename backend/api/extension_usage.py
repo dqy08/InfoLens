@@ -7,6 +7,7 @@ _EXTENSIONS = frozenset({"info-highlight"})
 _ENGINES = frozenset({"local", "cloud"})
 _OUTCOMES = frozenset({"ok", "failed", "cancelled"})
 _MAX_SEGMENTS = 512
+_MAX_DURATION_MS = 86_400_000
 
 
 def _nonneg_int(v, default=0) -> int:
@@ -17,6 +18,21 @@ def _nonneg_int(v, default=0) -> int:
     if n < 0:
         return default
     return min(n, _MAX_SEGMENTS)
+
+
+def _optional_duration_ms(v):
+    """非法/缺失视为缺省（None），不 400。"""
+    if v is None or v == "":
+        return None
+    if isinstance(v, bool):
+        return None
+    try:
+        n = int(round(float(v)))
+    except (TypeError, ValueError):
+        return None
+    if n < 0:
+        return None
+    return min(n, _MAX_DURATION_MS)
 
 
 def extension_usage_report(usage_body=None):
@@ -33,6 +49,7 @@ def extension_usage_report(usage_body=None):
     segments_ok = min(_nonneg_int(d.get("segments_ok")), segments)
     cached = min(_nonneg_int(d.get("cached")), segments)
     version = str(d.get("version") or "").strip()[:32]
+    duration_ms = _optional_duration_ms(d.get("duration_ms"))
 
     bump_api("info_highlight_run")
     bump_api(f"info_highlight_run__{engine}")
@@ -49,5 +66,7 @@ def extension_usage_report(usage_body=None):
     )
     if version:
         details += f" v={version}"
+    if duration_ms is not None:
+        details += f" dur={duration_ms}"
     log_request("📊 扩展分析轮次", details)
     return {"success": True}

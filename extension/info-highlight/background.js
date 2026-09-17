@@ -493,8 +493,17 @@ async function handleAnalyze(text) {
   };
 }
 
+/** 防止异常时钟或挂死上报炸开；约 24h。与 local-init duration 同档。 */
+const MAX_DURATION_MS = 86_400_000;
+
+function clampDurationMs(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(Math.round(n), MAX_DURATION_MS);
+}
+
 /** 阶段性调试：分析失败原因（可随门面通道一起删除）。不写入 /api/extension-usage。 */
-async function postAnalysisFailReport({ engine, error, segments }) {
+async function postAnalysisFailReport({ engine, error, segments, duration_ms }) {
   if (!IL_reportsEnabled(IH_CONFIG)) return;
   const msg = String(error || '').slice(0, 500);
   if (!msg) return;
@@ -503,6 +512,7 @@ async function postAnalysisFailReport({ engine, error, segments }) {
     version: chrome.runtime.getManifest().version,
     outcome: 'failed',
     error: msg,
+    duration_ms: clampDurationMs(duration_ms),
   };
   if (engine === 'local' || engine === 'cloud') body.engine = engine;
   const n = Math.max(0, Math.min(512, Number(segments) || 0));
@@ -522,6 +532,7 @@ async function postUsageReport(body) {
   if (segments < 1) return;
   const segments_ok = Math.max(0, Math.min(segments, Number(body?.segments_ok) || 0));
   const cached = Math.max(0, Math.min(segments, Number(body?.cached) || 0));
+  const duration_ms = clampDurationMs(body?.duration_ms);
   IL_postKeepalive(
     '/api/extension-usage',
     {
@@ -532,6 +543,7 @@ async function postUsageReport(body) {
       segments,
       segments_ok,
       cached,
+      duration_ms,
     },
     IH_CONFIG.apiBase,
   );
@@ -540,6 +552,7 @@ async function postUsageReport(body) {
       engine,
       error: body?.error || body?.message,
       segments,
+      duration_ms,
     });
   }
 }

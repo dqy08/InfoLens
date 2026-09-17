@@ -21,6 +21,8 @@ const EXTENSION = 'info-highlight';
 const OUTCOME = 'failed';
 const ENGINES = new Set(['local', 'cloud']);
 const MAX_SEGMENTS = 512;
+/** 防止异常时钟或挂死上报炸开；约 24h。与 local-init / usage 同档。 */
+const MAX_DURATION_MS = 86_400_000;
 
 export function analysisFailKey(id8, ms = Date.now()) {
   const inv = String(1e15 - ms).padStart(16, '0');
@@ -49,6 +51,13 @@ function clampSegments(v) {
   return Math.min(Math.round(n), MAX_SEGMENTS);
 }
 
+function clampDurationMs(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.min(Math.round(n), MAX_DURATION_MS);
+}
+
 export function buildAnalysisFailRecord(body) {
   const d = body && typeof body === 'object' ? body : {};
   const extension = clipStr(d.extension, 64);
@@ -65,6 +74,7 @@ export function buildAnalysisFailRecord(body) {
     outcome,
     error,
     segments: clampSegments(d.segments),
+    duration_ms: clampDurationMs(d.duration_ms),
   };
 }
 

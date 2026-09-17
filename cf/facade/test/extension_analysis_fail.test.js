@@ -70,6 +70,7 @@ test('buildAnalysisFailRecord: 裁剪、只收 failed、忽略页面字段、err
     outcome: 'failed',
     error: 'On-device analysis failed: Cannot reach https://api.info-lens.app/api/analyze',
     segments: 3.2,
+    duration_ms: 12_345.6,
     page_url: 'https://news.example/article',
     page_text: 'full article body must never be stored',
   });
@@ -79,6 +80,7 @@ test('buildAnalysisFailRecord: 裁剪、只收 failed、忽略页面字段、err
   assert.equal(rec.version.length, 32);
   assert.equal(rec.version.endsWith('…'), true);
   assert.equal(rec.segments, 3);
+  assert.equal(rec.duration_ms, 12346);
   assert.equal(rec.error, 'On-device analysis failed: Cannot reach [url]');
   assert.equal('page_url' in rec, false);
   assert.equal('page_text' in rec, false);
@@ -95,6 +97,7 @@ test('buildAnalysisFailRecord: 裁剪、只收 failed、忽略页面字段、err
   assert.equal(fromMessage.error, 'HTTP 502');
   assert.equal(fromMessage.engine, null);
   assert.equal(fromMessage.segments, null);
+  assert.equal(fromMessage.duration_ms, null);
 
   const long = buildAnalysisFailRecord({
     extension: 'info-highlight',
@@ -167,6 +170,7 @@ test('handlePostExtensionAnalysisFail: 非法字段拒收；合法写入', async
       version: '0.1.3',
       engine: 'cloud',
       segments: 4,
+      duration_ms: 900,
       error: 'HTTP 500: expected application/json, got text/html',
     }),
     { STATE },
@@ -181,6 +185,7 @@ test('handlePostExtensionAnalysisFail: 非法字段拒收；合法写入', async
   assert.equal(rec.outcome, 'failed');
   assert.equal(rec.engine, 'cloud');
   assert.equal(rec.segments, 4);
+  assert.equal(rec.duration_ms, 900);
   assert.equal(rec.error, 'HTTP 500: expected application/json, got text/html');
   assert.equal('page_url' in rec, false);
 });

@@ -43,6 +43,7 @@ globalThis.IH_analyzeRun ||= (function () {
       segments: report.segments,
       segments_ok: report.segments_ok,
       cached: report.cached,
+      duration_ms: Math.max(0, Math.round(Number(report.duration_ms) || 0)),
     };
     if (report.outcome === 'failed' && report.error) {
       msg.error = String(report.error).slice(0, 500);
@@ -53,7 +54,15 @@ globalThis.IH_analyzeRun ||= (function () {
   }
 
   function newUsageReport() {
-    return { segments: 0, segments_ok: 0, cached: 0, engine: null, outcome: null, error: null };
+    return {
+      segments: 0,
+      segments_ok: 0,
+      cached: 0,
+      engine: null,
+      outcome: null,
+      error: null,
+      duration_ms: 0,
+    };
   }
 
   /** @param {boolean | null} inferred 仅 `false` 计为 cache hit；`null` 表示未知（失败路径） */
@@ -110,7 +119,7 @@ globalThis.IH_analyzeRun ||= (function () {
    * @param {number} to
    * @param {() => boolean} still
    * @param {{ overlay?: boolean, onTokens?: (tokens: unknown[], i: number) => void }} [opts]
-   * @param {{ segments: number, segments_ok: number, cached: number, engine: string | null, error?: string | null }} report
+   * @param {{ segments: number, segments_ok: number, cached: number, engine: string | null, error?: string | null, duration_ms?: number }} report
    * @returns {Promise<Error | undefined>}
    */
   async function paintRange(session, from, to, still, opts, report) {
@@ -170,6 +179,7 @@ globalThis.IH_analyzeRun ||= (function () {
     globalThis.IH_clearError();
     await globalThis.IH_setProgressSearching(true);
     const report = newUsageReport();
+    const t0 = Date.now();
     try {
       await job(report);
       report.outcome = still() ? 'ok' : 'cancelled';
@@ -182,7 +192,8 @@ globalThis.IH_analyzeRun ||= (function () {
         await fail(err);
       }
     } finally {
-      // 取消也要收尾：上报、清 busy、卸本地引擎（避免 busy 卡住）
+      // 取消/失败/成功都带墙钟；取消也要收尾：上报、清 busy、卸本地引擎
+      report.duration_ms = Math.max(0, Date.now() - t0);
       reportUsage(report);
       idle();
       releaseLocalEngine();
