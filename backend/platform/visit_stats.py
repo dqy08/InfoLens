@@ -46,6 +46,20 @@ _STATS_API_ORDER = (
     "info_highlight_run__cached",
     "info_highlight_run__cancelled",
     "info_highlight_run__failed",
+    "info_highlight_run__local__dur_lt_500",
+    "info_highlight_run__local__dur_500_1s",
+    "info_highlight_run__local__dur_1_2s",
+    "info_highlight_run__local__dur_2_5s",
+    "info_highlight_run__local__dur_ge_5s",
+    "info_highlight_run__local__dur_sum_ms",
+    "info_highlight_run__local__dur_n",
+    "info_highlight_run__cloud__dur_lt_500",
+    "info_highlight_run__cloud__dur_500_1s",
+    "info_highlight_run__cloud__dur_1_2s",
+    "info_highlight_run__cloud__dur_2_5s",
+    "info_highlight_run__cloud__dur_ge_5s",
+    "info_highlight_run__cloud__dur_sum_ms",
+    "info_highlight_run__cloud__dur_n",
     "chat",
     "causal_flow",
     "prediction_attribute",
@@ -540,11 +554,13 @@ def record_activity_report(
             _PAGE_SEC[page_key] += delta_active_sec
 
 
-def bump_api(kind: str):
+def bump_api(kind: str, n: int = 1):
     if _stats_disabled:
         return
+    if n == 0:
+        return
     with _LOCK:
-        _API[kind] += 1
+        _API[kind] += n
 
 
 def record_gen_attr_opt_sec(delta_sec: int, opts: dict[str, bool]) -> None:
