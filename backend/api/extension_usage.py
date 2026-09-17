@@ -74,10 +74,8 @@ def extension_usage_report(usage_body=None):
         bump_api("info_highlight_run__failed")
     if cached > 0:
         bump_api("info_highlight_run__cached")
-    if duration_ms is not None:
+    if outcome == "ok" and duration_ms is not None:
         bump_api(f"info_highlight_run__{engine}__{_duration_bucket(duration_ms)}")
-        bump_api(f"info_highlight_run__{engine}__dur_sum_ms", n=duration_ms)
-        bump_api(f"info_highlight_run__{engine}__dur_n")
 
     details = (
         f"ext={extension} eng={engine} outcome={outcome} "

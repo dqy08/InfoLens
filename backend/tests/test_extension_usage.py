@@ -13,32 +13,15 @@ def _dur_kinds(kinds):
     return [k for k in kinds if '__dur_' in k]
 
 
-def _kw_n(call):
-    if 'n' in call.kwargs:
-        return call.kwargs['n']
-    if len(call.args) > 1:
-        return call.args[1]
-    return 1
-
-
 class ExtensionUsageTest(unittest.TestCase):
     def _assert_no_duration_bumps(self, bump):
         self.assertEqual(_dur_kinds(_bump_kinds(bump)), [])
 
-    def _assert_duration_bumps(self, bump, engine, duration_ms, bucket):
-        kinds = _bump_kinds(bump)
-        prefix = f'info_highlight_run__{engine}__'
-        bucket_key = prefix + bucket
-        sum_key = prefix + 'dur_sum_ms'
-        n_key = prefix + 'dur_n'
+    def _assert_duration_bucket(self, bump, engine, bucket):
         self.assertEqual(
-            _dur_kinds(kinds),
-            [bucket_key, sum_key, n_key],
+            _dur_kinds(_bump_kinds(bump)),
+            [f'info_highlight_run__{engine}__{bucket}'],
         )
-        by_key = {c.args[0]: c for c in bump.call_args_list}
-        self.assertEqual(_kw_n(by_key[bucket_key]), 1)
-        self.assertEqual(_kw_n(by_key[sum_key]), duration_ms)
-        self.assertEqual(_kw_n(by_key[n_key]), 1)
 
     @patch('backend.api.extension_usage.log_request')
     @patch('backend.api.extension_usage.bump_api')
@@ -123,14 +106,14 @@ class ExtensionUsageTest(unittest.TestCase):
             kinds[:2],
             ['info_highlight_run', 'info_highlight_run__local'],
         )
-        self._assert_duration_bumps(bump, 'local', 1234, 'dur_1_2s')
+        self._assert_duration_bucket(bump, 'local', 'dur_1_2s')
         details = log.call_args.args[1]
         self.assertIn('dur=1234', details)
         self.assertIn('v=0.1.3', details)
 
     @patch('backend.api.extension_usage.log_request')
     @patch('backend.api.extension_usage.bump_api')
-    def test_duration_ms_cloud_bucket_and_sum(self, bump, _log):
+    def test_duration_ms_cloud_bucket(self, bump, _log):
         out = extension_usage_report({
             'extension': 'info-highlight',
             'engine': 'cloud',
@@ -150,7 +133,7 @@ class ExtensionUsageTest(unittest.TestCase):
                 'info_highlight_run__cloud__dur_2_5s',
             ],
         )
-        self._assert_duration_bumps(bump, 'cloud', 2500, 'dur_2_5s')
+        self._assert_duration_bucket(bump, 'cloud', 'dur_2_5s')
 
     @patch('backend.api.extension_usage.log_request')
     @patch('backend.api.extension_usage.bump_api')
@@ -181,7 +164,7 @@ class ExtensionUsageTest(unittest.TestCase):
                     kinds[:2],
                     ['info_highlight_run', 'info_highlight_run__local'],
                 )
-                self._assert_duration_bumps(bump, 'local', duration_ms, bucket)
+                self._assert_duration_bucket(bump, 'local', bucket)
 
     @patch('backend.api.extension_usage.log_request')
     @patch('backend.api.extension_usage.bump_api')
@@ -240,7 +223,23 @@ class ExtensionUsageTest(unittest.TestCase):
         self.assertEqual(out, {'success': True})
         details = log.call_args.args[1]
         self.assertIn('dur=86400000', details)
-        self._assert_duration_bumps(bump, 'local', 86_400_000, 'dur_ge_5s')
+        self._assert_duration_bucket(bump, 'local', 'dur_ge_5s')
+
+    @patch('backend.api.extension_usage.log_request')
+    @patch('backend.api.extension_usage.bump_api')
+    def test_failed_or_cancelled_duration_not_histogrammed(self, bump, _log):
+        for outcome in ('failed', 'cancelled'):
+            with self.subTest(outcome=outcome):
+                bump.reset_mock()
+                out = extension_usage_report({
+                    'extension': 'info-highlight',
+                    'engine': 'local',
+                    'outcome': outcome,
+                    'segments': 1,
+                    'duration_ms': 2500,
+                })
+                self.assertEqual(out, {'success': True})
+                self._assert_no_duration_bumps(bump)
 
     @patch('backend.api.extension_usage.log_request')
     @patch('backend.api.extension_usage.bump_api')
@@ -288,25 +287,7 @@ class ExtensionUsageTest(unittest.TestCase):
         self.assertIn('dur=10', details)
         self.assertNotIn('should never appear', details)
         self.assertNotIn('also no', details)
-
-
-class BumpApiNTest(unittest.TestCase):
-    def test_rejects_non_positive_int(self):
-        from collections import defaultdict
-        from backend.platform import visit_stats
-
-        old = visit_stats._API
-        visit_stats._API = defaultdict(int)
-        try:
-            visit_stats.bump_api('k', n=-1)
-            visit_stats.bump_api('k', n=True)
-            visit_stats.bump_api('k', n=1.5)
-            visit_stats.bump_api('k', n=0)
-            self.assertEqual(visit_stats._API['k'], 0)
-            visit_stats.bump_api('k', n=3)
-            self.assertEqual(visit_stats._API['k'], 3)
-        finally:
-            visit_stats._API = old
+        self._assert_no_duration_bumps(_bump)
 
 
 if __name__ == '__main__':

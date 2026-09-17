@@ -51,15 +51,11 @@ _STATS_API_ORDER = (
     "info_highlight_run__local__dur_1_2s",
     "info_highlight_run__local__dur_2_5s",
     "info_highlight_run__local__dur_ge_5s",
-    "info_highlight_run__local__dur_sum_ms",
-    "info_highlight_run__local__dur_n",
     "info_highlight_run__cloud__dur_lt_500",
     "info_highlight_run__cloud__dur_500_1s",
     "info_highlight_run__cloud__dur_1_2s",
     "info_highlight_run__cloud__dur_2_5s",
     "info_highlight_run__cloud__dur_ge_5s",
-    "info_highlight_run__cloud__dur_sum_ms",
-    "info_highlight_run__cloud__dur_n",
     "chat",
     "causal_flow",
     "prediction_attribute",
@@ -554,14 +550,11 @@ def record_activity_report(
             _PAGE_SEC[page_key] += delta_active_sec
 
 
-def bump_api(kind: str, n: int = 1):
+def bump_api(kind: str):
     if _stats_disabled:
         return
-    # bool 是 int 子类；只收真正的正整数。
-    if type(n) is not int or n <= 0:
-        return
     with _LOCK:
-        _API[kind] += n
+        _API[kind] += 1
 
 
 def record_gen_attr_opt_sec(delta_sec: int, opts: dict[str, bool]) -> None:
