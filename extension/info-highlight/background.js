@@ -257,6 +257,8 @@ async function ensureOffscreen() {
 
 let localInflight = 0;
 let unloadQueued = false;
+/** 礼貌卸载没关上时的原因，留给 10s 后的残留上报。 */
+let lingerBlocked = 'none';
 
 async function sendToEngine(payload) {
   await ensureOffscreen();
@@ -265,23 +267,46 @@ async function sendToEngine(payload) {
   return res;
 }
 
+async function hasOffscreen() {
+  return !!(chrome.offscreen.hasDocument && (await chrome.offscreen.hasDocument()));
+}
+
+function idleBlockReason() {
+  if (localInflight > 0) return 'inflight';
+  if (initBusy) return 'init';
+  if (offerLock) return 'offer';
+  return 'none';
+}
+
 async function destroyOffscreen() {
   if (creating) await creating;
-  if (chrome.offscreen.hasDocument && (await chrome.offscreen.hasDocument())) {
+  if (await hasOffscreen()) {
     await chrome.offscreen.closeDocument();
   }
 }
 
 async function closeOffscreenIfIdle() {
   if (creating) await creating;
-  if (localInflight > 0 || initBusy || offerLock) return;
+  if (idleBlockReason() !== 'none') return;
   unloadQueued = false;
   await destroyOffscreen();
+}
+
+/** 分析已结束仍占着页：藏页自己 10s 后喊一声。新的 analyze/init 会撤掉这块表。 */
+function armLingerIfOpen() {
+  void (async () => {
+    if (!(await hasOffscreen())) return;
+    lingerBlocked = idleBlockReason();
+    chrome.runtime.sendMessage({ type: 'ih-local-engine', cmd: 'linger-watch' }, () => {
+      void chrome.runtime.lastError;
+    });
+  })();
 }
 
 async function queueUnload() {
   unloadQueued = true;
   await closeOffscreenIfIdle();
+  armLingerIfOpen();
 }
 
 async function dropLocalModel() {
@@ -475,7 +500,10 @@ async function fetchTokens(engine, text) {
       return tokens;
     } finally {
       localInflight -= 1;
-      if (unloadQueued) await closeOffscreenIfIdle();
+      if (unloadQueued) {
+        await closeOffscreenIfIdle();
+        armLingerIfOpen();
+      }
     }
   }
   const data = await postAnalyze(text);
@@ -523,6 +551,44 @@ function clampDurationMs(v) {
   const n = Number(v);
   if (!Number.isFinite(n) || n < 0) return 0;
   return Math.min(Math.round(n), MAX_DURATION_MS);
+}
+
+/** 阶段性调试：分析结束 10s 后 offscreen 仍在（可随门面通道一起删除）。 */
+async function postLocalEngineLinger(payload) {
+  if (!IL_reportsEnabled(IH_CONFIG)) return;
+  const body = {
+    extension: EXTENSION_ID,
+    version: chrome.runtime.getManifest().version,
+    event: 'unload_linger',
+    loaded: !!payload.loaded,
+    wait_ms: clampDurationMs(payload.wait_ms),
+    blocked: payload.blocked === 'inflight' || payload.blocked === 'init' || payload.blocked === 'offer'
+      ? payload.blocked
+      : 'none',
+  };
+  const heap = Number(payload.js_heap_bytes);
+  if (Number.isFinite(heap) && heap >= 0) body.js_heap_bytes = Math.round(heap);
+  const client_id = await IL_getClientId(IH_CONFIG.apiBase).catch(() => null);
+  if (client_id) body.client_id = client_id;
+  IL_postKeepalive('/api/extension-local-engine', body, IH_CONFIG.apiBase);
+}
+
+/**
+ * 藏页在 unload 后还活过 10s。正在推理/初始化则当新任务，不动。
+ * 其余情况写 KV 再强关，不再看 offerLock。
+ */
+async function handleLinger(msg) {
+  if (localInflight > 0 || initBusy) return;
+  if (!(await hasOffscreen())) return;
+  void postLocalEngineLinger({
+    loaded: msg?.loaded,
+    js_heap_bytes: msg?.js_heap_bytes,
+    wait_ms: msg?.wait_ms,
+    blocked: lingerBlocked,
+  });
+  unloadQueued = false;
+  lingerBlocked = 'none';
+  await destroyOffscreen();
 }
 
 /** 阶段性调试：分析失败原因（可随门面通道一起删除）。不写入 /api/extension-usage。 */
@@ -657,6 +723,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     || msg?.type === 'ih-local-progress'
     || msg?.type === 'ih-local-init-outcome'
   ) return;
+
+  if (msg?.type === 'ih-local-linger') {
+    handleLinger(msg)
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
 
   if (msg?.type === 'ih-local-status') {
     handleStatus()

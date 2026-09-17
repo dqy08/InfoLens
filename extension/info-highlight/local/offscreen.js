@@ -170,21 +170,61 @@ function progressToInit(info) {
   chrome.runtime.sendMessage({ type: 'ih-local-progress', info }).catch(() => {});
 }
 
+/** 分析结束 10s 后若本页还在，喊 SW 写 KV 并强关。analyze/init 会撤表。 */
+const LINGER_MS = 10_000;
+let lingerTimer = 0;
+let lingerArmedAt = 0;
+
+function jsHeapBytes() {
+  const n = globalThis.performance?.memory?.usedJSHeapSize;
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+}
+
+function disarmLinger() {
+  if (lingerTimer) {
+    clearTimeout(lingerTimer);
+    lingerTimer = 0;
+  }
+  lingerArmedAt = 0;
+}
+
+function armLinger() {
+  disarmLinger();
+  lingerArmedAt = Date.now();
+  lingerTimer = setTimeout(() => {
+    lingerTimer = 0;
+    const wait_ms = Date.now() - lingerArmedAt;
+    lingerArmedAt = 0;
+    chrome.runtime.sendMessage({
+      type: 'ih-local-linger',
+      loaded: !!(model && tokenizer),
+      js_heap_bytes: jsHeapBytes(),
+      wait_ms,
+    }).catch(() => {});
+  }, LINGER_MS);
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type !== 'ih-local-engine') return;
   const cmd = msg.cmd;
   enqueue(async () => {
     if (cmd === 'probe') return { ok: true, webgpu: await probe() };
     if (cmd === 'init') {
+      disarmLinger();
       await init(msg.hub, (info) => progressToInit(info));
       return { ok: true };
     }
     if (cmd === 'analyze') {
+      disarmLinger();
       const result = await analyzeText(msg.text);
       return { ok: true, result };
     }
     if (cmd === 'status') {
       return { ok: true, loaded: !!(model && tokenizer) };
+    }
+    if (cmd === 'linger-watch') {
+      armLinger();
+      return { ok: true };
     }
     throw new Error(`unknown engine cmd: ${cmd}`);
   })
