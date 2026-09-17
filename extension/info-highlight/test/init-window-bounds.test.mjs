@@ -47,3 +47,20 @@ test('omit when host missing or invalid', () => {
   assert.equal(B.clampPopupToHost({ left: 0, top: 0, width: 0, height: 800 }, WIDTH, HEIGHT), null);
   assert.equal(B.clampPopupToHost({ left: 0, top: 0, width: 800, height: NaN }, WIDTH, HEIGHT), null);
 });
+
+test('isBoundsError matches Chrome ≥50% messages', () => {
+  const yes = [
+    new Error('Invalid value for bounds. Bounds must be at least 50% onscreen.'),
+    'Bounds must be 50% on a screen',
+    'Window bounds must be 50 % within a screen',
+  ];
+  for (const err of yes) assert.equal(B.isBoundsError(err), true, String(err));
+  const no = [
+    '',
+    new Error('Init window create returned no id'),
+    'No window with id: 12',
+    'Invalid bounds size',
+    'Must be 50% visible',
+  ];
+  for (const err of no) assert.equal(B.isBoundsError(err), false, String(err));
+});

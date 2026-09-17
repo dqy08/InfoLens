@@ -465,19 +465,11 @@ async function maybeOfferInitOnce() {
 
 function maybeOfferInit() {
   if (!offerLock) {
-    offerLock = maybeOfferInitOnce()
-      .catch((err) => {
-        if (IH_initWindowBounds.isBoundsError(err)) {
-          console.warn('[Info Highlight] Init popup bounds rejected; skip offering', err);
-          return;
-        }
-        throw err;
-      })
-      .finally(async () => {
-        offerLock = null;
-        const st = await IH_localState.get();
-        if (!st.ready) await closeOffscreenIfIdle();
-      });
+    offerLock = maybeOfferInitOnce().finally(async () => {
+      offerLock = null;
+      const st = await IH_localState.get();
+      if (!st.ready) await closeOffscreenIfIdle();
+    });
   }
   return offerLock;
 }
