@@ -32,12 +32,13 @@
     void runBatch(generation += 1);
   }
 
-  async function finish(lastAlignErr) {
+  async function finish(lastAlignErr, report) {
     await R.afterPaint(
       session,
       lastAlignErr,
       'No tokens mapped onto the PDF text layer',
       () => globalThis.IH_showPaused(continuePaused),
+      report,
     );
   }
 
@@ -65,7 +66,7 @@
       );
       if (!still()) return;
       session.next = end;
-      await finish(lastAlignErr);
+      await finish(lastAlignErr, report);
     });
   }
 
@@ -100,7 +101,7 @@
         session, 0, done, still, { overlay: true }, report,
       );
       if (!still()) return;
-      await finish(lastAlignErr);
+      await finish(lastAlignErr, report);
     });
   }
 

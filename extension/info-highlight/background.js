@@ -518,7 +518,7 @@ function clampDurationMs(v) {
 }
 
 /** 阶段性调试：分析失败原因（可随门面通道一起删除）。不写入 /api/extension-usage。 */
-async function postAnalysisFailReport({ engine, error, segments, duration_ms }) {
+async function postAnalysisFailReport({ engine, error, segments, duration_ms, detail }) {
   if (!IL_reportsEnabled(IH_CONFIG)) return;
   const msg = String(error || '').slice(0, 500);
   if (!msg) return;
@@ -532,6 +532,7 @@ async function postAnalysisFailReport({ engine, error, segments, duration_ms }) 
   if (engine === 'local' || engine === 'cloud') body.engine = engine;
   const n = Math.max(0, Math.min(512, Number(segments) || 0));
   if (n >= 1) body.segments = n;
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) body.detail = detail;
   IL_postKeepalive('/api/extension-analysis-fail', body, IH_CONFIG.apiBase);
 }
 
@@ -549,6 +550,7 @@ async function postUsageReport(body) {
   const cached = Math.max(0, Math.min(segments, Number(body?.cached) || 0));
   const duration_ms = clampDurationMs(body?.duration_ms);
   const client_id = await IL_getClientId(IH_CONFIG.apiBase).catch(() => null);
+  // 正式用量 POST 只计数字段；error/detail 不得进入 keepalive body
   const payload = {
     extension: EXTENSION_ID,
     version: chrome.runtime.getManifest().version,
@@ -567,6 +569,7 @@ async function postUsageReport(body) {
       error: body?.error || body?.message,
       segments,
       duration_ms,
+      detail: body?.detail,
     });
   }
 }

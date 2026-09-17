@@ -297,17 +297,26 @@
    * @param {Array<{ offset: [number, number], raw?: string, real_topk?: [number, number] | null }>} tokens
    * @param {{ text: string, pieces: Array<{ node: Text, start: number, end: number }>, root?: Element }} mapped
    * @param {{ append?: boolean, overlay?: boolean }} [opts] overlay：PDF 画红线，不用 ::highlight 底色
-   * @returns {number}
+   * @returns {{ painted: number, tokens_in: number, tokens_skip_level: number, tokens_skip_empty_range: number }}
    */
   function paintTokens(tokens, mapped, opts) {
     ensureHighlightRegistry();
     if (!opts?.append) clearHighlights();
     const overlay = opts?.overlay ? tokenOverlayContext(mapped.root) : null;
     const idx = globalThis.IL_createTextIndex(mapped.text);
-    let painted = 0;
-    for (const tok of tokens) {
+    const list = Array.isArray(tokens) ? tokens : [];
+    const stats = {
+      painted: 0,
+      tokens_in: list.length,
+      tokens_skip_level: 0,
+      tokens_skip_empty_range: 0,
+    };
+    for (const tok of list) {
       const level = tokenLevel(tok);
-      if (level < 0) continue;
+      if (level < 1) {
+        stats.tokens_skip_level += 1;
+        continue;
+      }
       const off = tok.offset;
       if (!Array.isArray(off) || off.length < 2) {
         throw new Error('Analyze token missing offset');
@@ -316,21 +325,24 @@
       const u1 = idx.cpToUtf16(off[1]);
       const h = overlay ? null : CSS.highlights.get(HL_PREFIX + level);
       if (!overlay && !h) throw new Error(`highlight missing: ${HL_PREFIX}${level}`);
+      let n = 0;
       for (const range of rangesFromUtf16(mapped.pieces, mapped.text, u0, u1)) {
         if (!/\S/.test(range.toString())) continue;
         if (!overlay) {
           h.add(range);
-          painted += 1;
+          n += 1;
           continue;
         }
         for (const r of range.getClientRects()) {
           if (r.width < 1 || r.height < 1) continue;
           appendTokenUnderline(r, level, overlay);
-          painted += 1;
+          n += 1;
         }
       }
+      if (n === 0) stats.tokens_skip_empty_range += 1;
+      else stats.painted += n;
     }
-    return painted;
+    return stats;
   }
 
   function shortError(msg) {

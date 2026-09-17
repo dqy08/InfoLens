@@ -6,6 +6,7 @@ import {
   analysisFailKey,
   redactUrls,
   buildAnalysisFailRecord,
+  parseAnalysisFailDetail,
   handlePostExtensionAnalysisFail,
   handleListExtensionAnalysisFail,
 } from '../src/extension_analysis_fail.js';
@@ -84,6 +85,7 @@ test('buildAnalysisFailRecord: 裁剪、只收 failed、忽略页面字段、err
   assert.equal(rec.error, 'On-device analysis failed: Cannot reach [url]');
   assert.equal('page_url' in rec, false);
   assert.equal('page_text' in rec, false);
+  assert.equal('detail' in rec, false);
   assert.match(rec.saved_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
 
   const fromMessage = buildAnalysisFailRecord({
@@ -272,4 +274,163 @@ test('worker 路由：POST 写入 KV 并 redact URL；admin GET 需 token', asyn
   const listBody = await okList.json();
   assert.equal(listBody.count, 1);
   assert.equal(listBody.items[0].record.error, 'Cannot reach [url]');
+});
+
+test('parseAnalysisFailDetail: allowlist、clamp、丢掉垃圾', () => {
+  assert.equal(parseAnalysisFailDetail(null), null);
+  assert.equal(parseAnalysisFailDetail(['nope']), null);
+  assert.equal(parseAnalysisFailDetail('not-json'), null);
+  assert.equal(parseAnalysisFailDetail({ page_url: 'https://news.example/a', page_text: 'secret' }), null);
+
+  const ok = parseAnalysisFailDetail({
+    segments: 3.2,
+    segments_ok: 2,
+    align_fail_n: 1,
+    tokens_in: 12,
+    tokens_skip_level: 10,
+    tokens_skip_empty_range: 2,
+    painted: 0,
+    mapped_chars: 1800,
+    mapped_pieces: 14,
+    highlights_ok: true,
+    last_align_err: 'token offset align failed at https://evil.test/x',
+    page_url: 'https://news.example/article',
+    page_text: 'full article',
+    nested: { tokens_in: 99 },
+    extra_blob: 'x'.repeat(4000),
+  });
+  assert.deepEqual(ok, {
+    segments: 3,
+    segments_ok: 2,
+    align_fail_n: 1,
+    tokens_in: 12,
+    tokens_skip_level: 10,
+    tokens_skip_empty_range: 2,
+    painted: 0,
+    mapped_chars: 1800,
+    mapped_pieces: 14,
+    highlights_ok: true,
+    last_align_err: 'token offset align failed at [url]',
+  });
+  assert.equal('page_url' in ok, false);
+  assert.equal('page_text' in ok, false);
+  assert.equal('nested' in ok, false);
+  assert.equal('extra_blob' in ok, false);
+
+  assert.equal(parseAnalysisFailDetail({ tokens_in: -1 }), null);
+  assert.equal(parseAnalysisFailDetail({ tokens_in: { n: 1 } }), null);
+  assert.equal(parseAnalysisFailDetail({ tokens_in: true }), null);
+  assert.equal(parseAnalysisFailDetail({ highlights_ok: 'yes' }), null);
+  assert.equal(parseAnalysisFailDetail({ last_align_err: { msg: 'nope' } }), null);
+
+  const clamped = parseAnalysisFailDetail({
+    segments: 9999,
+    tokens_in: 1e20,
+    highlights_ok: false,
+  });
+  assert.equal(clamped.segments, 512);
+  assert.equal(clamped.tokens_in, 10_000_000);
+  assert.equal(clamped.highlights_ok, false);
+
+  const longErr = parseAnalysisFailDetail({ last_align_err: `see https://example.com/x ${'z'.repeat(400)}` });
+  assert.equal(longErr.last_align_err.length, 200);
+  assert.equal(longErr.last_align_err.endsWith('…'), true);
+  assert.equal(longErr.last_align_err.includes('https://'), false);
+
+  const fromJson = parseAnalysisFailDetail(JSON.stringify({ tokens_in: 4, painted: 0, highlights_ok: true }));
+  assert.deepEqual(fromJson, { tokens_in: 4, painted: 0, highlights_ok: true });
+
+  assert.equal(parseAnalysisFailDetail(`{"tokens_in":1,${' "x":1,'.repeat(200)}"painted":0}`), null);
+});
+
+test('buildAnalysisFailRecord: 收下 detail；忽略页面字段', () => {
+  const rec = buildAnalysisFailRecord({
+    extension: 'info-highlight',
+    version: '0.1.4',
+    engine: 'local',
+    outcome: 'failed',
+    error: 'No tokens mapped onto the page (in=12 lvl=12 empty=0 align=0 painted=0)',
+    segments: 3,
+    duration_ms: 1840,
+    detail: {
+      segments: 3,
+      segments_ok: 3,
+      align_fail_n: 0,
+      tokens_in: 12,
+      tokens_skip_level: 12,
+      tokens_skip_empty_range: 0,
+      painted: 0,
+      mapped_chars: 1820,
+      mapped_pieces: 14,
+      highlights_ok: true,
+    },
+    page_url: 'https://news.example/article',
+    page_text: 'must never be stored',
+  });
+  assert.equal(rec.error.startsWith('No tokens mapped onto the page'), true);
+  assert.deepEqual(rec.detail, {
+    segments: 3,
+    segments_ok: 3,
+    align_fail_n: 0,
+    tokens_in: 12,
+    tokens_skip_level: 12,
+    tokens_skip_empty_range: 0,
+    painted: 0,
+    mapped_chars: 1820,
+    mapped_pieces: 14,
+    highlights_ok: true,
+  });
+  assert.equal('page_url' in rec, false);
+  assert.equal('page_text' in rec, false);
+
+  const noDetail = buildAnalysisFailRecord({
+    extension: 'info-highlight',
+    version: '0.1.4',
+    outcome: 'failed',
+    error: 'HTTP 500',
+    detail: 'garbage-not-json',
+  });
+  assert.equal('detail' in noDetail, false);
+});
+
+test('handlePostExtensionAnalysisFail: 写入 detail；admin GET 原样返回', async () => {
+  const STATE = mockState();
+  const ok = await handlePostExtensionAnalysisFail(
+    postReq({
+      extension: 'info-highlight',
+      outcome: 'failed',
+      version: '0.1.4',
+      engine: 'cloud',
+      segments: 2,
+      duration_ms: 900,
+      error: 'No tokens mapped onto the page (in=8 lvl=0 empty=8 align=0 painted=0)',
+      detail: {
+        tokens_in: 8,
+        tokens_skip_level: 0,
+        tokens_skip_empty_range: 8,
+        painted: 0,
+        mapped_chars: 400,
+        mapped_pieces: 3,
+        highlights_ok: true,
+        page_text: 'secret',
+      },
+    }),
+    { STATE },
+    json,
+  );
+  assert.equal(ok.status, 200);
+  const rec = JSON.parse(Object.values(STATE.data)[0]);
+  assert.equal(rec.detail.tokens_skip_empty_range, 8);
+  assert.equal(rec.detail.highlights_ok, true);
+  assert.equal('page_text' in rec.detail, false);
+
+  const list = await handleListExtensionAnalysisFail(
+    new Request('https://example.test/facade-extension-analysis-fail?limit=10'),
+    { STATE },
+    json,
+    () => null,
+  );
+  assert.equal(list.status, 200);
+  assert.equal(list.body.items[0].record.detail.tokens_in, 8);
+  assert.equal(list.body.items[0].record.detail.painted, 0);
 });

@@ -6,7 +6,8 @@
  *
  * 隐私：
  * - 不存 page_url / page_text / 页面正文等专用字段。
- * - error 文本里的明显 URL（含 http(s)/file/data/blob/chrome-extension 等）一律打成 [url]。
+ * - error / detail.last_align_err 里的明显 URL（含 http(s)/file/data/blob/chrome-extension 等）一律打成 [url]。
+ * - detail 只收画 token 时的计数/布尔/短字符串（allowlist）；未知大字段丢弃。
  *
  * POST /api/extension-analysis-fail（公开）；GET /facade-extension-analysis-fail（ADMIN_TOKEN）。
  */
@@ -23,6 +24,22 @@ const ENGINES = new Set(['local', 'cloud']);
 const MAX_SEGMENTS = 512;
 /** 防止异常时钟或挂死上报炸开；约 24h。与 local-init / usage 同档。 */
 const MAX_DURATION_MS = 86_400_000;
+/** mapped_chars / tokens_in 等可比 segments 大一个数量级。 */
+const MAX_DETAIL_COUNT = 10_000_000;
+const MAX_ALIGN_ERR = 200;
+const MAX_DETAIL_JSON = 800;
+const DETAIL_COUNT_KEYS = [
+  'segments',
+  'segments_ok',
+  'align_fail_n',
+  'tokens_in',
+  'tokens_skip_level',
+  'tokens_skip_empty_range',
+  'painted',
+  'mapped_chars',
+  'mapped_pieces',
+];
+const DETAIL_SEGMENT_KEYS = new Set(['segments', 'segments_ok', 'align_fail_n']);
 
 export function analysisFailKey(id8, ms = Date.now()) {
   const inv = String(1e15 - ms).padStart(16, '0');
@@ -58,6 +75,49 @@ function clampDurationMs(v) {
   return Math.min(Math.round(n), MAX_DURATION_MS);
 }
 
+function clampDetailCount(v, max) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'boolean' || (typeof v === 'object' && v !== null)) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.min(Math.round(n), max);
+}
+
+/**
+ * painted===0 诊断：只收 allowlist 键。未知字段、嵌套对象、超长 JSON 一律丢掉。
+ * @param {unknown} raw
+ * @returns {Record<string, number | boolean | string> | null}
+ */
+export function parseAnalysisFailDetail(raw) {
+  let d = raw;
+  if (typeof d === 'string') {
+    const clipped = clipStr(redactUrls(d), MAX_DETAIL_JSON);
+    if (!clipped || clipped.endsWith('…')) return null;
+    try {
+      d = JSON.parse(clipped);
+    } catch {
+      return null;
+    }
+  }
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
+
+  const out = {};
+  for (const key of DETAIL_COUNT_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(d, key)) continue;
+    const max = DETAIL_SEGMENT_KEYS.has(key) ? MAX_SEGMENTS : MAX_DETAIL_COUNT;
+    const n = clampDetailCount(d[key], max);
+    if (n != null) out[key] = n;
+  }
+  if (Object.prototype.hasOwnProperty.call(d, 'highlights_ok') && typeof d.highlights_ok === 'boolean') {
+    out.highlights_ok = d.highlights_ok;
+  }
+  if (typeof d.last_align_err === 'string') {
+    const s = clipStr(redactUrls(d.last_align_err), MAX_ALIGN_ERR);
+    if (s) out.last_align_err = s;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 export function buildAnalysisFailRecord(body) {
   const d = body && typeof body === 'object' ? body : {};
   const extension = clipStr(d.extension, 64);
@@ -66,7 +126,7 @@ export function buildAnalysisFailRecord(body) {
   const engineRaw = clipStr(d.engine, 16);
   const engine = engineRaw && ENGINES.has(engineRaw) ? engineRaw : null;
   const error = clipStr(redactUrls(d.error || d.message), 500);
-  return {
+  const rec = {
     saved_at: utcSavedAt(),
     extension,
     version,
@@ -76,6 +136,9 @@ export function buildAnalysisFailRecord(body) {
     segments: clampSegments(d.segments),
     duration_ms: clampDurationMs(d.duration_ms),
   };
+  const detail = parseAnalysisFailDetail(d.detail);
+  if (detail) rec.detail = detail;
+  return rec;
 }
 
 function newId8() {
