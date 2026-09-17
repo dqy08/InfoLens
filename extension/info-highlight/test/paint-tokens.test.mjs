@@ -64,6 +64,7 @@ globalThis.CSS = {
 globalThis.document = {
   createRange: () => new FakeRange(),
   createElement: () => ({ style: {}, className: '' }),
+  documentElement: { style: { setProperty() {} } },
 };
 globalThis.IL_progressAxis = {
   measureChunkContentY() {},
@@ -84,6 +85,9 @@ globalThis.chrome = {
 
 runInThisContext(readFileSync(join(dir, '../../shared/page/textIndex.js'), 'utf8'), {
   filename: 'textIndex.js',
+});
+runInThisContext(readFileSync(join(dir, '../highlightStyle.js'), 'utf8'), {
+  filename: 'highlightStyle.js',
 });
 runInThisContext(readFileSync(join(dir, '../page-map.js'), 'utf8'), {
   filename: 'page-map.js',
