@@ -2,8 +2,8 @@
  * token 色阶：16 档。命名空间 ih-token-*，避免与 Semantic Highlight 的 il-token-* 互踩。
  * SYNC: extension/semantic-highlight/content.css → --il-token-* / ::highlight(il-token-*)
  * SYNC: SurprisalColorConfig → SURPRISAL_RED_RGB
- * SYNC: surprisalColorWeakenManager → WEAKENED_SURPRISAL_MAX_ALPHA(0.5)
- * alpha = (level/16) * 0.5；level 0 无色
+ * 默认 alpha = (level/16) * 0.5（≈ weaken）；page-map 经 highlightStyle.applyCssVars 按用户 maxAlpha 覆盖。
+ * level 0 无色
  */
 :root {
   --ih-token-0: rgba(255, 71, 64, 0);

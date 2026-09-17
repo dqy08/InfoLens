@@ -5,9 +5,18 @@
   if (!globalThis.IH_localState) {
     throw new Error('IH_localState missing — inject state.js before options.js');
   }
+  if (!globalThis.IH_highlightStyle) {
+    throw new Error('IH_highlightStyle missing — inject highlightStyle.js before options.js');
+  }
+
+  const HS = globalThis.IH_highlightStyle;
 
   /** 复选框 id 即 chrome.storage.local 的键；值为默认值 */
-  const TOGGLES = { show_progress: false, show_token_tip: true };
+  const TOGGLES = {
+    show_progress: false,
+    show_token_tip: true,
+    [HS.KEY_TWO_TIER]: HS.STORAGE_DEFAULTS[HS.KEY_TWO_TIER],
+  };
 
   const ids = [
     'brand_icon', 'brand_name',
@@ -15,6 +24,8 @@
     'webgpu_desc', 'model_desc',
     'local_init', 'model_clear',
     'cache_desc', 'cache_clear',
+    'ih_threshold_row', 'ih_threshold_value', 'ih_highlight_threshold_pct',
+    'ih_depth_value', 'ih_max_highlight_alpha',
   ];
   const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
   if (ids.some((id) => !el[id])) {
@@ -31,16 +42,70 @@
   el.brand_icon.src = iconRel;
   el.brand_icon.alt = name;
 
+  function syncTwoTierUi(on) {
+    el.ih_threshold_row.hidden = !on;
+  }
+
+  function syncThresholdLabel(pct) {
+    el.ih_threshold_value.textContent = HS.formatThresholdLabel(pct);
+  }
+
+  /** 滑条 accent 合成到页面底色上，观感接近正文里的高亮红 */
+  function intensityAccent(depth) {
+    const a = HS.depthToMaxAlpha(depth);
+    const bg = getComputedStyle(document.body).backgroundColor;
+    const m = bg.match(/\d+/g);
+    if (!m || m.length < 3) return `rgba(${HS.SURPRISAL_RED_RGB}, ${a})`;
+    const [br, bgG, bb] = m.map(Number);
+    const [r, g, b] = HS.SURPRISAL_RED_RGB.split(',').map((s) => Number(s.trim()));
+    return `rgb(${Math.round(br * (1 - a) + r * a)}, ${Math.round(bgG * (1 - a) + g * a)}, ${Math.round(bb * (1 - a) + b * a)})`;
+  }
+
+  function syncDepthLabel(depth) {
+    el.ih_depth_value.textContent = HS.formatDepthLabel(depth);
+    const input = el.ih_max_highlight_alpha;
+    const min = Number(input.min);
+    const max = Number(input.max);
+    const pct = max === min ? 100 : ((depth - min) / (max - min)) * 100;
+    input.style.setProperty('--ih-intensity-accent', intensityAccent(depth));
+    input.style.setProperty('--ih-intensity-pct', `${pct}%`);
+  }
+
   for (const [key, fallback] of Object.entries(TOGGLES)) {
     const box = document.getElementById(key);
     if (!box) throw new Error(`options page missing checkbox: ${key}`);
     chrome.storage.local.get({ [key]: fallback }, (res) => {
       box.checked = !!res[key];
+      if (key === HS.KEY_TWO_TIER) syncTwoTierUi(box.checked);
     });
     box.addEventListener('change', () => {
       chrome.storage.local.set({ [key]: box.checked });
+      if (key === HS.KEY_TWO_TIER) syncTwoTierUi(box.checked);
     });
   }
+
+  chrome.storage.local.get(HS.STORAGE_DEFAULTS, (res) => {
+    const prefs = HS.normalizePrefs(res);
+    el.ih_highlight_threshold_pct.value = String(prefs.thresholdPct);
+    syncThresholdLabel(prefs.thresholdPct);
+    el.ih_max_highlight_alpha.value = String(prefs.maxAlphaDepth);
+    syncDepthLabel(prefs.maxAlphaDepth);
+    syncTwoTierUi(prefs.twoTier);
+  });
+
+  el.ih_highlight_threshold_pct.addEventListener('input', () => {
+    const pct = HS.clampThresholdPct(el.ih_highlight_threshold_pct.value);
+    el.ih_highlight_threshold_pct.value = String(pct);
+    syncThresholdLabel(pct);
+    chrome.storage.local.set({ [HS.KEY_THRESHOLD_PCT]: pct });
+  });
+
+  el.ih_max_highlight_alpha.addEventListener('input', () => {
+    const depth = HS.clampMaxAlphaDepth(el.ih_max_highlight_alpha.value);
+    el.ih_max_highlight_alpha.value = String(depth);
+    syncDepthLabel(depth);
+    chrome.storage.local.set({ [HS.KEY_MAX_ALPHA_DEPTH]: depth });
+  });
 
   function modelStatusText(st, webgpu) {
     if (st.ready) return 'Ready (Gemma 3 270M)';
@@ -91,7 +156,7 @@
     });
   });
 
-  el.local_init.addEventListener('click', () => {
+  function startPrepare() {
     el.local_init.disabled = true;
     const pref = el.analyze_pref.value === 'cloud' ? 'auto' : el.analyze_pref.value;
     chrome.runtime.sendMessage({ type: 'ih-local-set-pref', pref }, () => {
@@ -99,7 +164,19 @@
         loadBackend();
       });
     });
+  }
+
+  el.local_init.addEventListener('click', () => {
+    startPrepare();
   });
+
+  {
+    const q = new URLSearchParams(location.search);
+    if (q.get('prepare') === '1') {
+      history.replaceState(null, '', chrome.runtime.getURL('options.html'));
+      startPrepare();
+    }
+  }
 
   el.model_clear.addEventListener('click', () => {
     if (!confirm('Clear the on-device model? Using it next time will download about 800 MB again.')) return;
