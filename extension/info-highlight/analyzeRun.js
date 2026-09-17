@@ -33,26 +33,36 @@ globalThis.IH_analyzeRun ||= (function () {
     });
   }
 
-  /** 一轮结束后上报；未尝试任何段时不发。 */
+  /** 一轮结束后上报；未尝试任何段时不发。失败时附带截断后的 error（不含页面 URL/正文）。 */
   function reportUsage(report) {
     if (!report || report.segments < 1) return;
-    chrome.runtime.sendMessage(
-      {
-        type: 'ih-usage-report',
-        engine: report.engine,
-        outcome: report.outcome || 'ok',
-        segments: report.segments,
-        segments_ok: report.segments_ok,
-        cached: report.cached,
-      },
-      () => {
-        void chrome.runtime.lastError;
-      },
-    );
+    const msg = {
+      type: 'ih-usage-report',
+      engine: report.engine,
+      outcome: report.outcome || 'ok',
+      segments: report.segments,
+      segments_ok: report.segments_ok,
+      cached: report.cached,
+      duration_ms: Math.max(0, Math.round(Number(report.duration_ms) || 0)),
+    };
+    if (report.outcome === 'failed' && report.error) {
+      msg.error = String(report.error).slice(0, 500);
+    }
+    chrome.runtime.sendMessage(msg, () => {
+      void chrome.runtime.lastError;
+    });
   }
 
   function newUsageReport() {
-    return { segments: 0, segments_ok: 0, cached: 0, engine: null, outcome: null };
+    return {
+      segments: 0,
+      segments_ok: 0,
+      cached: 0,
+      engine: null,
+      outcome: null,
+      error: null,
+      duration_ms: 0,
+    };
   }
 
   /** @param {boolean | null} inferred 仅 `false` 计为 cache hit；`null` 表示未知（失败路径） */
@@ -109,7 +119,7 @@ globalThis.IH_analyzeRun ||= (function () {
    * @param {number} to
    * @param {() => boolean} still
    * @param {{ overlay?: boolean, onTokens?: (tokens: unknown[], i: number) => void }} [opts]
-   * @param {{ segments: number, segments_ok: number, cached: number, engine: string | null }} report
+   * @param {{ segments: number, segments_ok: number, cached: number, engine: string | null, error?: string | null, duration_ms?: number }} report
    * @returns {Promise<Error | undefined>}
    */
   async function paintRange(session, from, to, still, opts, report) {
@@ -169,6 +179,7 @@ globalThis.IH_analyzeRun ||= (function () {
     globalThis.IH_clearError();
     await globalThis.IH_setProgressSearching(true);
     const report = newUsageReport();
+    const t0 = Date.now();
     try {
       await job(report);
       report.outcome = still() ? 'ok' : 'cancelled';
@@ -177,10 +188,12 @@ globalThis.IH_analyzeRun ||= (function () {
         report.outcome = 'cancelled';
       } else {
         report.outcome = 'failed';
+        report.error = String(err?.message || err).slice(0, 500);
         await fail(err);
       }
     } finally {
-      // 取消也要收尾：上报、清 busy、卸本地引擎（避免 busy 卡住）
+      // 取消/失败/成功都带墙钟；取消也要收尾：上报、清 busy、卸本地引擎
+      report.duration_ms = Math.max(0, Date.now() - t0);
       reportUsage(report);
       idle();
       releaseLocalEngine();

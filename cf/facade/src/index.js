@@ -14,6 +14,7 @@
  * - /api/extension-events → STATE KV（流水：install / update / uninstall + extension）；读：GET /facade-extension-events
  * - /api/extension-feedback → STATE KV（技术诊断与崩溃报告）；读：GET /facade-extension-feedback
  * - /api/extension-local-init → STATE KV（阶段性：Info Highlight 本地权重初始化结果）；读：GET /facade-extension-local-init
+ * - /api/extension-analysis-fail → STATE KV（阶段性调试：Info Highlight 分析失败原因，不含用量计数）；读：GET /facade-extension-analysis-fail
  * - /api/extension-uninstall-survey → STATE KV（卸载问卷调查 + extension）；读：GET /facade-extension-uninstall-survey
  * - keywords 双轨（扩展审核慢于 Worker，过渡期内并存）：
  *   - 旧扩展：/api/analyze-semantic-keywords → 仍 HF/Home 梯度归因（COMPUTE_PATHS，勿接到 v2）
@@ -54,6 +55,12 @@ import {
   handlePostExtensionLocalInit,
   handleListExtensionLocalInit,
 } from './extension_local_init.js';
+import {
+  ANALYSIS_FAIL_PATH,
+  ANALYSIS_FAIL_ADMIN_PATH,
+  handlePostExtensionAnalysisFail,
+  handleListExtensionAnalysisFail,
+} from './extension_analysis_fail.js';
 import {
   UNINSTALL_SURVEY_PATH,
   UNINSTALL_SURVEY_ADMIN_PATH,
@@ -416,6 +423,9 @@ async function handleRequest(request, env) {
   if (url.pathname === LOCAL_INIT_ADMIN_PATH) {
     return handleListExtensionLocalInit(request, env, json, requireAdmin);
   }
+  if (url.pathname === ANALYSIS_FAIL_ADMIN_PATH) {
+    return handleListExtensionAnalysisFail(request, env, json, requireAdmin);
+  }
   if (url.pathname === UNINSTALL_SURVEY_ADMIN_PATH) {
     return handleListUninstallSurveys(request, env, json, requireAdmin);
   }
@@ -428,7 +438,7 @@ async function handleRequest(request, env) {
     return json(request, { ok: false, error: 'not_found' }, 404);
   }
 
-  // 扩展打点、反馈、卸载问卷：边缘写 KV，不碰 HF/Home
+  // 扩展打点、反馈、本地初始化、分析失败调试、卸载问卷：边缘写 KV，不碰 HF/Home
   if (path === EVENTS_PATH) {
     return handlePostExtensionEvents(request, env, json);
   }
@@ -437,6 +447,9 @@ async function handleRequest(request, env) {
   }
   if (path === LOCAL_INIT_PATH) {
     return handlePostExtensionLocalInit(request, env, json);
+  }
+  if (path === ANALYSIS_FAIL_PATH) {
+    return handlePostExtensionAnalysisFail(request, env, json);
   }
   if (path === UNINSTALL_SURVEY_PATH) {
     return handlePostUninstallSurvey(request, env, json);

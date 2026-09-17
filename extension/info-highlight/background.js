@@ -97,7 +97,7 @@ async function activateTab(tab) {
     }
     if (IL_isRestrictedUrl(url)) {
       console.warn('[Info Highlight] cannot run on this page:', url);
-      await setBadgeError(tab.id, 'bad page');
+      await setBadgeError(tab.id, "can't run here — this page is protected");
       return;
     }
     const access = await IL_pdfSw.ensureFileUrlAccess(url, fileHostPromise);
@@ -256,13 +256,18 @@ async function sendToEngine(payload) {
   return res;
 }
 
+async function destroyOffscreen() {
+  if (creating) await creating;
+  if (chrome.offscreen.hasDocument && (await chrome.offscreen.hasDocument())) {
+    await chrome.offscreen.closeDocument();
+  }
+}
+
 async function closeOffscreenIfIdle() {
   if (creating) await creating;
   if (localInflight > 0 || initBusy || offerLock) return;
   unloadQueued = false;
-  if (chrome.offscreen.hasDocument && (await chrome.offscreen.hasDocument())) {
-    await chrome.offscreen.closeDocument();
-  }
+  await destroyOffscreen();
 }
 
 async function queueUnload() {
@@ -271,13 +276,19 @@ async function queueUnload() {
 }
 
 async function dropLocalModel() {
-  if (creating) await creating;
-  if (chrome.offscreen.hasDocument && (await chrome.offscreen.hasDocument())) {
-    await chrome.offscreen.closeDocument();
-  }
+  await destroyOffscreen();
   await IH_localState.dropModelCache();
   await IH_localState.set({ ready: false });
   await IH_analyzeCache.dropAll();
+}
+
+/** 只打断还在下载的初始化；已经 init 成功则忽略。半成品留在 Cache。 */
+async function cancelLocalInit() {
+  if (!initCancellable) return;
+  initCancellable = false;
+  initGeneration += 1;
+  initBusy = false;
+  await destroyOffscreen();
 }
 
 async function probeAndStore() {
@@ -297,6 +308,7 @@ let initGeneration = 0;
 let initWindowId = null;
 let offerLock = null;
 let initBusy = false;
+let initCancellable = false;
 
 function resolveInitWaiters(engine) {
   const waiters = initWaiters;
@@ -493,6 +505,33 @@ async function handleAnalyze(text) {
   };
 }
 
+/** 防止异常时钟或挂死上报炸开；约 24h。与 local-init duration 同档。 */
+const MAX_DURATION_MS = 86_400_000;
+
+function clampDurationMs(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(Math.round(n), MAX_DURATION_MS);
+}
+
+/** 阶段性调试：分析失败原因（可随门面通道一起删除）。不写入 /api/extension-usage。 */
+async function postAnalysisFailReport({ engine, error, segments, duration_ms }) {
+  if (!IL_reportsEnabled(IH_CONFIG)) return;
+  const msg = String(error || '').slice(0, 500);
+  if (!msg) return;
+  const body = {
+    extension: EXTENSION_ID,
+    version: chrome.runtime.getManifest().version,
+    outcome: 'failed',
+    error: msg,
+    duration_ms: clampDurationMs(duration_ms),
+  };
+  if (engine === 'local' || engine === 'cloud') body.engine = engine;
+  const n = Math.max(0, Math.min(512, Number(segments) || 0));
+  if (n >= 1) body.segments = n;
+  IL_postKeepalive('/api/extension-analysis-fail', body, IH_CONFIG.apiBase);
+}
+
 async function postUsageReport(body) {
   if (!IL_reportsEnabled(IH_CONFIG)) return;
   let engine = body?.engine;
@@ -505,6 +544,7 @@ async function postUsageReport(body) {
   if (segments < 1) return;
   const segments_ok = Math.max(0, Math.min(segments, Number(body?.segments_ok) || 0));
   const cached = Math.max(0, Math.min(segments, Number(body?.cached) || 0));
+  const duration_ms = clampDurationMs(body?.duration_ms);
   IL_postKeepalive(
     '/api/extension-usage',
     {
@@ -515,9 +555,18 @@ async function postUsageReport(body) {
       segments,
       segments_ok,
       cached,
+      duration_ms,
     },
     IH_CONFIG.apiBase,
   );
+  if (outcome === 'failed') {
+    void postAnalysisFailReport({
+      engine,
+      error: body?.error || body?.message,
+      segments,
+      duration_ms,
+    });
+  }
 }
 
 async function postLocalInitReport({ outcome, duration_ms, error }) {
@@ -544,25 +593,33 @@ async function handleAgree() {
   const t0 = Date.now();
   let outcome = 'ok';
   let error = null;
+  const assertNotCancelled = () => {
+    if (gen !== initGeneration) throw new Error('Cancelled');
+  };
+  initCancellable = true;
   try {
+    assertNotCancelled();
     const webgpu = await probeAndStore();
+    assertNotCancelled();
     if (!webgpu) throw new Error('WebGPU is unavailable');
     const res = await initEngine();
+    initCancellable = false;
     if (!res?.ok) throw new Error(res?.error || 'local model init failed');
-    if (gen !== initGeneration) throw new Error('Cancelled');
     const st = await IH_localState.get();
     const pref = st.pref === IH_localState.PREF_CLOUD ? IH_localState.PREF_AUTO : st.pref;
     await IH_localState.set({ pref, ready: true });
     await IH_analyzeCache.dropAll();
     resolveInitWaiters('local');
   } catch (err) {
-    const msg = String(err?.message || err);
-    outcome = msg === 'Cancelled' ? 'cancelled' : 'failed';
-    error = msg;
-    throw err;
+    const cancelled = gen !== initGeneration || String(err?.message || err) === 'Cancelled';
+    outcome = cancelled ? 'cancelled' : 'failed';
+    error = cancelled ? 'Cancelled' : String(err?.message || err);
+    throw cancelled ? new Error('Cancelled') : err;
   } finally {
+    initCancellable = false;
     initBusy = false;
     void postLocalInitReport({ outcome, duration_ms: Date.now() - t0, error });
+    chrome.runtime.sendMessage({ type: 'ih-local-init-outcome', outcome }).catch(() => {});
   }
 }
 
@@ -585,7 +642,11 @@ async function handleStatus() {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (IL_pdfSw.handleMessage(msg, sender, sendResponse)) return true;
-  if (msg?.type === 'ih-local-engine' || msg?.type === 'ih-local-progress') return;
+  if (
+    msg?.type === 'ih-local-engine'
+    || msg?.type === 'ih-local-progress'
+    || msg?.type === 'ih-local-init-outcome'
+  ) return;
 
   if (msg?.type === 'ih-local-status') {
     handleStatus()
@@ -626,13 +687,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleAgree()
       .then(() => sendResponse({ ok: true }))
       .catch(async (err) => {
-        try {
-          await resolveInitWithoutReady();
-        } catch {
-          resolveInitWaiters('cloud');
+        const cancelled = String(err?.message || err) === 'Cancelled';
+        if (!cancelled) {
+          try {
+            await resolveInitWithoutReady();
+          } catch {
+            resolveInitWaiters('cloud');
+          }
         }
-        sendResponse({ ok: false, error: String(err?.message || err) });
+        sendResponse({ ok: false, cancelled, error: String(err?.message || err) });
       });
+    return true;
+  }
+  if (msg?.type === 'ih-local-cancel-init') {
+    cancelLocalInit()
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
     return true;
   }
   if (msg?.type === 'ih-local-refuse') {

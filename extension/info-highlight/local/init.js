@@ -2,12 +2,13 @@
   const agreeBtn = document.getElementById('agree');
   const refuseBtn = document.getElementById('refuse');
   const hideBtn = document.getElementById('hide');
+  const cancelBtn = document.getElementById('cancel');
   const closeBtn = document.getElementById('close');
   const statusEl = document.getElementById('status');
   const bar = document.getElementById('bar');
   const leadEl = document.getElementById('lead');
   const hubSel = document.getElementById('model_hub');
-  if (!agreeBtn || !refuseBtn || !hideBtn || !closeBtn || !statusEl || !bar || !leadEl || !hubSel) {
+  if (!agreeBtn || !refuseBtn || !hideBtn || !cancelBtn || !closeBtn || !statusEl || !bar || !leadEl || !hubSel) {
     throw new Error('init page missing required elements');
   }
   if (!globalThis.IH_localState) {
@@ -18,6 +19,7 @@
     'You chose on-device analysis only, so the page is not uploaded. The first run downloads about 800 MB of weights (Gemma 3 270M q4) and keeps them here.';
 
   let localOnly = false;
+  let wantProgress = false;
   globalThis.IH_localState.get().then((st) => {
     localOnly = st.pref === globalThis.IH_localState.PREF_LOCAL;
     hubSel.value = globalThis.IH_localState.normalizeHub(st.hub);
@@ -44,15 +46,32 @@
     agreeBtn.hidden = true;
     refuseBtn.hidden = true;
     hideBtn.hidden = true;
+    cancelBtn.hidden = true;
     closeBtn.hidden = false;
     bar.hidden = true;
+    wantProgress = false;
   }
 
   function restoreActions() {
+    agreeBtn.hidden = false;
+    refuseBtn.hidden = false;
     agreeBtn.disabled = false;
     refuseBtn.disabled = false;
     hubSel.disabled = false;
     hideBtn.hidden = true;
+    cancelBtn.hidden = true;
+    cancelBtn.disabled = false;
+    bar.hidden = true;
+    wantProgress = false;
+  }
+
+  function showDownloading() {
+    agreeBtn.hidden = true;
+    refuseBtn.hidden = true;
+    hideBtn.hidden = false;
+    cancelBtn.hidden = false;
+    cancelBtn.disabled = false;
+    wantProgress = true;
   }
 
   function formatBytes(n) {
@@ -63,7 +82,7 @@
   }
 
   function onProgress(info) {
-    if (!info || typeof info !== 'object') return;
+    if (!wantProgress || !info || typeof info !== 'object') return;
     const status = info.status;
     const file = info.file || info.name || '';
     if (status === 'progress' && Number.isFinite(info.loaded) && Number.isFinite(info.total) && info.total > 0) {
@@ -113,10 +132,15 @@
       restoreActions();
       return;
     }
-    hideBtn.hidden = false;
+    showDownloading();
     chrome.runtime.sendMessage({ type: 'ih-local-agree' }, (res) => {
       if (chrome.runtime.lastError) {
         setStatus(chrome.runtime.lastError.message);
+        restoreActions();
+        return;
+      }
+      if (res?.cancelled) {
+        setStatus('Download stopped.');
         restoreActions();
         return;
       }
@@ -142,6 +166,19 @@
   });
 
   hideBtn.addEventListener('click', () => window.close());
+
+  cancelBtn.addEventListener('click', () => {
+    cancelBtn.disabled = true;
+    wantProgress = false;
+    setStatus('Stopping download…');
+    chrome.runtime.sendMessage({ type: 'ih-local-cancel-init' }, (res) => {
+      if (chrome.runtime.lastError || !res?.ok) {
+        setStatus(chrome.runtime.lastError?.message || res?.error || 'Failed to stop download');
+        cancelBtn.disabled = false;
+        wantProgress = true;
+      }
+    });
+  });
 
   closeBtn.addEventListener('click', () => window.close());
 })();

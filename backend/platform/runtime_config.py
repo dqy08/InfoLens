@@ -69,9 +69,10 @@ RUNTIME_CONFIGS = {
             "chunk_size": 1024
         },
         # 本地 Apple Silicon
+        # Gemma 270M MPS：2048 token 整除时 256≈512（1.48s vs 1.47s），128 慢约 20%；4k+ 时 512 才快约 10%。
         "local_mps": {
             "max_token_length": 2000,
-            "chunk_size": 512
+            "chunk_size": 256
         }
     },
     # # Qwen3-1.7B
