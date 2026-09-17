@@ -139,6 +139,10 @@
   }
 
   chrome.runtime.onMessage.addListener((msg) => {
+    if (msg?.type === 'ih-local-init-outcome') {
+      loadBackend();
+      return;
+    }
     if (msg?.type !== 'ih-local-progress') return;
     const info = msg.info;
     el.local_init.disabled = true;

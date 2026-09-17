@@ -98,12 +98,17 @@ function injectPageMeta(html, pageKey, doc) {
                 navKey === 'causalFlow'
                     ? null
                     : `<div class="nav-landing-card-shot" aria-hidden="true"></div>`;
-            const badge =
+            const badgeText =
                 navKey === 'causalFlow'
-                    ? `<span class="nav-landing-card-badge" title="Go to demo on RedNote: xhslink.com" data-i18n="text,title">1M+ plays on RedNote</span>`
+                    ? '1M+ plays on RedNote'
                     : navKey === 'semanticHighlight'
-                        ? `<span class="nav-landing-card-badge" title="Go to demo on RedNote: xhslink.com" data-i18n="text,title">500 likes/stars on RedNote</span>`
-                        : '';
+                        ? '500 likes/stars on RedNote'
+                        : navKey === 'infoHighlight'
+                            ? '1K+ likes/stars on RedNote'
+                            : '';
+            const badge = badgeText
+                ? `<span class="nav-landing-card-badge" title="Go to demo on RedNote: xhslink.com" data-i18n="text,title">${badgeText}</span>`
+                : '';
 
             if (navKey === 'causalFlow') {
                 const re = new RegExp(

@@ -99,7 +99,7 @@ async function activateTab(tab, opts = {}) {
 
     if (IL_isRestrictedUrl(freshUrl)) {
       console.warn('[InfoLens] cannot run on this page:', freshUrl);
-      await setBadgeError(tab.id, 'bad page');
+      await setBadgeError(tab.id, "can't run here — this page is protected");
       return;
     }
     if (await openIfInjected(tab.id, query)) {

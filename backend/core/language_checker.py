@@ -35,6 +35,23 @@ def scoring_payload_offsets(
     return token_offsets[start:end], start == 0
 
 
+def right_pad_chunk(
+    input_ids: torch.Tensor,
+    chunk_size: int,
+    pad_id: int,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """把 [batch, L] 右补到 chunk_size。mask: 1=真实 token，0=pad。"""
+    batch, cur = input_ids.shape
+    if cur > chunk_size:
+        raise ValueError(f"chunk length {cur} exceeds chunk_size {chunk_size}")
+    mask = torch.ones(batch, chunk_size, dtype=torch.long, device=input_ids.device)
+    if cur == chunk_size:
+        return input_ids, mask
+    mask[:, cur:] = 0
+    pad = input_ids.new_full((batch, chunk_size - cur), int(pad_id))
+    return torch.cat([input_ids, pad], dim=1), mask
+
+
 def ensure_bos_prefix(
     token_ids: torch.Tensor,
     token_offsets: List[Tuple[int, int]],
@@ -238,6 +255,8 @@ class QwenLM(AbstractLanguageChecker):
         """
         分块推理并即时处理：核心内存优化逻辑
         利用 KV Cache 分段计算 Logits，计算完立即释放，避免保留全量 Logits。
+        每一块右补到 chunk_size，softmax/topk 在固定形状上算，再用 valid_len 切片；
+        避免 MPS 按不同长度各留一份词表工作区。
 
         数值说明：在 float16（如 MPS）上，在「仅前缀 forward」vs「整段 forward」同位置 logits 的逐元素对比，可能出现微小差异；
         float16（MPS/CUDA）可能因实现路径出现约 1%的 量级差，非掩码错误。CPU float32 下则完全一致。
@@ -255,6 +274,12 @@ class QwenLM(AbstractLanguageChecker):
         DeviceManager.clear_cache(self.device)
         
         full_input_ids = token_ids
+        pad_id = self.tokenizer.pad_token_id
+        if pad_id is None:
+            pad_id = self.tokenizer.eos_token_id
+        if pad_id is None:
+            pad_id = 0
+        pad_id = int(pad_id)
         
         # 因果 LM：logits[i] 预测 input_ids[i+1]；首 token 无左文，不在此循环中计分
         
@@ -267,19 +292,30 @@ class QwenLM(AbstractLanguageChecker):
             for i in range(total_chunks):
                 start_idx = i * chunk_size
                 end_idx = min((i + 1) * chunk_size, seq_len)
-                current_chunk_len = end_idx - start_idx
-                
-                # 准备输入（统一逻辑，避免边界 token 重复）
-                if i == 0:
-                    input_chunk = full_input_ids[:, :end_idx]
+                input_chunk = full_input_ids[:, start_idx:end_idx]
+                input_chunk, chunk_mask = right_pad_chunk(input_chunk, chunk_size, pad_id)
+                past_len = 0 if past_key_values is None else past_key_values.get_seq_length()
+                if past_len:
+                    attention_mask = torch.cat(
+                        [
+                            torch.ones(
+                                input_chunk.shape[0],
+                                past_len,
+                                dtype=chunk_mask.dtype,
+                                device=input_chunk.device,
+                            ),
+                            chunk_mask,
+                        ],
+                        dim=1,
+                    )
                 else:
-                    input_chunk = full_input_ids[:, start_idx:end_idx]
+                    attention_mask = chunk_mask
                 
-                # 1. 运行推理
                 outputs = self.model(
-                    input_ids=input_chunk, 
-                    past_key_values=past_key_values, 
-                    use_cache=True
+                    input_ids=input_chunk,
+                    attention_mask=attention_mask,
+                    past_key_values=past_key_values,
+                    use_cache=True,
                 )
                 
                 past_key_values = outputs.past_key_values
@@ -293,27 +329,27 @@ class QwenLM(AbstractLanguageChecker):
                 valid_len = chunk_targets.shape[1]
                 if valid_len == 0:
                     continue
-                # 最后一块覆盖到序列末尾时，最后一个 logit 位预测的是「下一 token」，需裁掉
-                current_logits = logits[:, :valid_len, :]
-                
-                # 2. 处理当前块的 Softmax 和 TopK
-                probs_chunk = torch.softmax(current_logits, dim=2)
+                # softmax/topk 用满块形状；valid_len 可能短于块长（最后一块裁掉「预测下一 token」的那一位）
+                probs_chunk = torch.softmax(logits, dim=2)
                 
                 # 提取真实概率
-                chunk_target_probs = torch.gather(probs_chunk, 2, chunk_targets.unsqueeze(-1))
+                chunk_target_probs = torch.gather(
+                    probs_chunk[:, :valid_len, :], 2, chunk_targets.unsqueeze(-1)
+                )
                 real_probs_list.extend(chunk_target_probs.flatten().detach().cpu().float().numpy().tolist())
                 
                 # 提取 TopK
                 # 由于 chunk_size 已确保小于 MPS_TOPK_BUG_THRESHOLD，所以直接计算
                 topk_vals, topk_inds = torch.topk(probs_chunk, k=effective_topk, dim=2)
                 chunk_pred_topk = self._decode_topk_tokens(
-                    topk_vals, topk_inds, effective_topk, valid_len
+                    topk_vals[:, :valid_len, :],
+                    topk_inds[:, :valid_len, :],
+                    effective_topk,
+                    valid_len,
                 )
                 pred_topk_list.extend(chunk_pred_topk)
                 
-                # 3. 立即释放内存
                 del logits
-                del current_logits
                 del probs_chunk
                 del chunk_target_probs
                 # outputs 会在下一次循环时被覆盖，无需手动处理
