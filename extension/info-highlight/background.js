@@ -42,6 +42,7 @@ function analyzeUrl() {
 
 const CONTENT_CSS = ['content.css'];
 const CONTENT_JS = [
+  'drop-stale.js',
   'vendor/Readability.js',
   'extractRootPatches.js',
   'articleRoot.js',
@@ -72,6 +73,11 @@ async function callPageApi(tabId, method) {
       func: (m) => {
         const api = window.__IH_DEMO__;
         if (!api) return false;
+        try {
+          if (typeof api.isLive !== 'function' || !api.isLive()) return false;
+        } catch {
+          return false;
+        }
         if (m === 'start') return api.start();
         api[m]();
         return true;
@@ -146,7 +152,10 @@ async function activateTab(tab) {
       logLabel: 'Info Highlight',
       waitComplete: false,
     });
-    await callPageApi(tab.id, 'toggle');
+    if (!await callPageApi(tab.id, 'toggle')) {
+      await setBadgeError(tab.id, 'inject');
+      return;
+    }
     console.info('[Info Highlight] injected into', okTab.url);
     clearBadge(tab.id);
   } catch (err) {
@@ -171,8 +180,6 @@ function autoMenuTitle(host, on) {
   return on ? `Stop always analyzing ${host}` : `Always analyze ${host}`;
 }
 
-/** 开始加载后等一会再做尝试轮：太早正文还没出来，白跑一趟 */
-const AUTO_LOADING_DELAY_MS = 1500;
 /** 人工点过图标的标签：自动分析别再插手，直到下次导航 */
 const manualTabs = new Set();
 /** tabId -> 导航代数；reset 时 +1，过期的自动分析不再改状态 */
@@ -225,14 +232,13 @@ function resetAutoForTab(tabId) {
 }
 
 /**
- * 命中名单的前台标签即可分析。PDF / file: 不进。
+ * 命中名单的前台、已 complete 的标签即可分析。PDF / file: 不进。
  * 重复触发是幂等的：页内已在跑返回 'busy'、已画好返回 'painted'，都不动它。
- * 加载中失败由页内按 readyState 决定静默与否；这里的注入失败同理，看 tab.status。
  * @param {number} tabId
  */
 async function maybeAutoAnalyze(tabId) {
   const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (!tab?.active || manualTabs.has(tabId)) return;
+  if (!tab?.active || tab.status !== 'complete' || manualTabs.has(tabId)) return;
   const url = tab.url || '';
   const host = IH_autoSites.hostOf(url);
   if (!host || IL_isRestrictedUrl(url) || IL_pdfSw.isPdfUrl(url)) return;
@@ -242,33 +248,33 @@ async function maybeAutoAnalyze(tabId) {
   try {
     const started = await callPageApi(tabId, 'start');
     if (!stillCurrent()) return;
-    if (started === 'busy') return;
-    if (started === 'painted') {
-      IH_actionState.set(tabId, 'on');
+    if (started) {
+      if (started === 'painted') IH_actionState.set(tabId, 'on');
+      if (started !== 'busy') clearBadge(tabId);
+      return;
+    }
+    IH_actionState.set(tabId, 'analyzing');
+    await IL_injectWithRetry(tabId, { css: CONTENT_CSS, js: CONTENT_JS }, {
+      logLabel: 'Info Highlight auto',
+      waitComplete: false,
+      isStale: () => !stillCurrent(),
+    });
+    if (!stillCurrent()) return;
+    const after = await callPageApi(tabId, 'start');
+    if (!stillCurrent()) return;
+    if (after) {
       clearBadge(tabId);
       return;
     }
-    if (!started) {
-      // 注入要等一会，先把图标切成分析中；已注入的那条路由页内自己上报
-      IH_actionState.set(tabId, 'analyzing');
-      await IL_injectWithRetry(tabId, { css: CONTENT_CSS, js: CONTENT_JS }, {
-        logLabel: 'Info Highlight auto',
-        waitComplete: false,
-        isStale: () => !stillCurrent(),
-      });
-      if (!stillCurrent()) return;
-      await callPageApi(tabId, 'start');
-    }
-    if (!stillCurrent()) return;
-    clearBadge(tabId);
+    await setBadgeError(tabId, 'inject');
   } catch (err) {
     if (!stillCurrent()) return;
-    IH_actionState.set(tabId, 'off');
-    if (String(err?.message || err).includes('navigation superseded')) return;
+    if (String(err?.message || err).includes('navigation superseded')) {
+      IH_actionState.set(tabId, 'off');
+      return;
+    }
     console.error('[Info Highlight] auto inject failed', err);
-    // 加载中注入失败多半是 frame 还没就绪，下一轮还会来；加载完了还失败才值得提示
-    const fresh = await chrome.tabs.get(tabId).catch(() => null);
-    if (fresh?.status === 'complete') await setBadgeError(tabId, 'inject');
+    await setBadgeError(tabId, 'inject');
   }
 }
 
@@ -282,46 +288,13 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  // 整页开始加载才 reset。地址变了（DOM 往往也变）与 complete 之后正文变了同一回事：不自动跟。
+  // 整页开始加载才 reset。地址变了或 DOM 变了不自动跟。
   if (changeInfo.status === 'loading') resetAutoForTab(tabId);
   if (tab.active && (changeInfo.url || changeInfo.status === 'loading' || changeInfo.status === 'complete')) {
     void syncAutoMenu(tabId);
   }
-  if (changeInfo.status === 'complete') {
-    // 定稿：已在跑/已画完则在 complete 核对正文；之后不再核
-    void (async () => {
-      await maybeAutoAnalyze(tabId);
-      await maybeRecheckContent(tabId);
-    })();
-    return;
-  }
-  if (changeInfo.status !== 'loading') return;
-  // 加载中先试一次：正文往往已在，没出来也不打扰，等 complete 再来
-  const gen = autoGenByTab.get(tabId) || 0;
-  setTimeout(() => {
-    if ((autoGenByTab.get(tabId) || 0) !== gen) return;
-    void maybeAutoAnalyze(tabId);
-  }, AUTO_LOADING_DELAY_MS);
+  if (changeInfo.status === 'complete') void maybeAutoAnalyze(tabId);
 });
-
-/** complete 时：页内已有分析则对比正文，变了清掉重跑（重复段走缓存）。 */
-async function maybeRecheckContent(tabId) {
-  try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId, frameIds: [0] },
-      func: () => {
-        const api = window.__IH_DEMO__;
-        if (!api || typeof api.recheck !== 'function') return null;
-        return api.recheck();
-      },
-    });
-    if (results?.[0]?.result === 'rerun') {
-      console.info('[Info Highlight] complete recheck: article text changed, re-analyzing');
-    }
-  } catch {
-    /* 未注入或无权 */
-  }
-}
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   IH_actionState.clear(tabId);
@@ -451,9 +424,28 @@ async function ensureOffscreen() {
 
 let localInflight = 0;
 
+function isOffscreenGone(err) {
+  const msg = String(err?.message || err);
+  return /Receiving end does not exist|Could not establish connection|The message port closed|no current offscreen/i.test(msg);
+}
+
 async function sendToEngine(payload) {
-  await ensureOffscreen();
-  const res = await chrome.runtime.sendMessage({ type: 'ih-local-engine', ...payload });
+  const send = async () => {
+    await ensureOffscreen();
+    return chrome.runtime.sendMessage({ type: 'ih-local-engine', ...payload });
+  };
+  try {
+    const res = await send();
+    if (res != null) return res;
+  } catch (err) {
+    if (!isOffscreenGone(err)) throw err;
+  }
+  try {
+    await destroyOffscreen();
+  } catch (err) {
+    if (!isOffscreenGone(err)) throw err;
+  }
+  const res = await send();
   if (res == null) throw new Error('local engine not ready');
   return res;
 }
@@ -828,10 +820,9 @@ async function postLocalEngineLinger(payload) {
 }
 
 /**
- * 上一段结束后闲置 10s：写 KV 并关藏页。正在推理/初始化则当新任务，不动。
+ * 上一段结束后闲置 10s：关藏页。正在推理/初始化/offer 则上报后不动。
  */
 async function handleLinger(msg) {
-  if (localInflight > 0 || initBusy) return;
   if (!(await hasOffscreen())) return;
   const blocked = idleBlockReason();
   void postLocalEngineLinger({
@@ -840,6 +831,7 @@ async function handleLinger(msg) {
     wait_ms: msg?.wait_ms,
     blocked,
   });
+  if (blocked !== 'none') return;
   await destroyOffscreen();
 }
 

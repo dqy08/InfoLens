@@ -3,7 +3,7 @@
 
 Modes:
   off  — default red (idle)
-  on   — same geometry, stronger opacity (analysis done)
+  on   — idle tiles + green check badge (analysis done)
   busy — same geometry, neutral gray (analyzing)
 """
 
@@ -14,11 +14,10 @@ from PIL import Image, ImageDraw
 RGB = (255, 71, 64)
 BUSY_RGB = (148, 148, 148)
 DOT_RGB = (10, 132, 255)  # #0A84FF，与选项页蓝点一致
+CHECK_RGB = (52, 199, 89)  # #34C759
 # Same 16-step ramp as content.css --ih-token-* (weaken max 0.5); boost to 0.95 so 16px stays readable.
 TOKEN_MAX = 0.5
 ICON_MAX = 0.95
-ON_ALPHA_BOOST = 1.85
-ON_ALPHA_FLOOR = 0.55
 PAD = 1
 ROW_H = 2
 ROW_GAP = 2
@@ -33,7 +32,7 @@ ROWS = (
 )
 
 SIZES = (16, 32, 48, 128)
-# Toolbar action sizes only (same as -dot).
+# Toolbar action sizes only (same as -dot / -on).
 ACTION_SIZES = (16, 32)
 
 
@@ -54,10 +53,7 @@ def paint_unit(mode: str = "off") -> Image.Image:
     for words in ROWS:
         x = PAD
         for width, level in words:
-            a = icon_alpha(level)
-            if mode == "on":
-                a = min(1.0, max(ON_ALPHA_FLOOR, a * ON_ALPHA_BOOST))
-            a = round(a * 255)
+            a = round(icon_alpha(level) * 255)
             for dy in range(ROW_H):
                 for dx in range(width):
                     px[x + dx, y + dy] = (*rgb, a)
@@ -83,6 +79,32 @@ def paint_dot(img: Image.Image) -> Image.Image:
     return Image.alpha_composite(out, layer.resize((w, h), Image.Resampling.LANCZOS))
 
 
+def paint_check(img: Image.Image) -> Image.Image:
+    """右下角绿底白勾，按目标尺寸画。"""
+    out = img.convert("RGBA")
+    w, h = out.size
+    scale = 8
+    layer = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    r = w * 4.15 / 16
+    cx = (w - r - 0.35) * scale
+    cy = (h - r - 0.35) * scale
+    r *= scale
+    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(*CHECK_RGB, 255))
+    cr = r * 0.78
+    pts = (
+        (cx - cr * 0.42, cy + cr * 0.05),
+        (cx - cr * 0.08, cy + cr * 0.38),
+        (cx + cr * 0.48, cy - cr * 0.36),
+    )
+    width = max(1, round(r * 0.28))
+    draw.line(pts, fill=(255, 255, 255, 255), width=width, joint="curve")
+    cap = max(1, round(width / 2))
+    for x, y in (pts[0], pts[2]):
+        draw.ellipse((x - cap, y - cap, x + cap, y + cap), fill=(255, 255, 255, 255))
+    return Image.alpha_composite(out, layer.resize((w, h), Image.Resampling.LANCZOS))
+
+
 def main() -> None:
     out = Path(__file__).resolve().parent
     unit = paint_unit("off")
@@ -91,13 +113,13 @@ def main() -> None:
     for size in SIZES:
         unit.resize((size, size), Image.Resampling.NEAREST).save(out / f"icon{size}.png")
         print(f"wrote icon{size}.png")
-    for mode, suffix in (("busy", "-busy"), ("on", "-on")):
-        u = paint_unit(mode)
-        for size in ACTION_SIZES:
-            u.resize((size, size), Image.Resampling.NEAREST).save(out / f"icon{size}{suffix}.png")
-            print(f"wrote icon{size}{suffix}.png")
+    busy = paint_unit("busy")
     for size in ACTION_SIZES:
+        busy.resize((size, size), Image.Resampling.NEAREST).save(out / f"icon{size}-busy.png")
+        print(f"wrote icon{size}-busy.png")
         base = unit.resize((size, size), Image.Resampling.NEAREST)
+        paint_check(base).save(out / f"icon{size}-on.png")
+        print(f"wrote icon{size}-on.png")
         paint_dot(base).save(out / f"icon{size}-dot.png")
         print(f"wrote icon{size}-dot.png")
 

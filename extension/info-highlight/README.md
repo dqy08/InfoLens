@@ -26,7 +26,7 @@ cd extension/info-highlight && npm install
 
 clone 后至少要装一次，再 `dev-env.sh` / `build_extension.py`。选项里可改「自动 / 仅本机 / 仅云端」；本机模型需先在「本地模型初始化」里同意下载。仅本机失败不会改走云端。
 
-右键「Analyze this page」等同点工具栏；「Always analyze example.com」→ 当场申请该 hostname 的 host 权限（子域各算各的），之后该站前台标签自动分析：开始加载 1.5 秒后试一轮，`complete` 再来一轮（页内已在跑或已画好就不动它）。加载完之前失败不报错——多半只是正文还没出来，等下一轮；手动在加载中点图标同一条路。`complete` 时正文定稿：加载中开跑的轮在收尾和 `complete` 时各核一次，把第一篇对齐；之后地址变了或 DOM 变了都不自动跟，要按新正文就点工具栏清掉再点一次。
+右键「Analyze this page」等同点工具栏；「Always analyze example.com」→ 当场申请该 hostname 的 host 权限（子域各算各的），之后该站前台标签在 `complete` 后自动分析一次：马上跑；若 1 秒内已经跑完，再对一次正文，变了就再跑（补查结束前图标保持分析中。页内已在跑或已画好就不动它）。点图标可在加载中注入，抽正文和分析等 `complete`。地址变了或 DOM 变了都不自动跟，要按新正文就点工具栏清掉再点一次。
 PDF 与 `file:` 不进这条路。名单在选项页 Auto analyze 里增删（删时连权限一起撤），那里还可填 `*.example.com` 或 `*`；右键菜单只管精确 hostname，通配项去选项页管。
 
 受限页（`chrome://`、Web Store、…）无操作。无键盘快捷键。
