@@ -68,31 +68,71 @@ const CONTENT_JS = [
 ];
 
 /**
- * 已注入则调页内 API；未注入返回 false（注入后要再调一次，content.js 不自启）。
- * @param {'toggle' | 'start'} method
- * @returns {Promise<false | true | 'busy' | 'painted'>} start 的 'busy' / 'painted' = 页内已有一轮在跑 / 已画好
+ * 本世界 API 活着则可选调用 toggle/start；否则看 DOM 是否还有本扩展上次注入的痕迹。
+ * live / stale / empty。重载后旧隔离世界互不可见，只能靠标记。
+ * SYNC: content.js 的 data-ih-cs；pdf/entry.js 的 #il-pdf-entry[data-il-extension-id]
+ * @param {'toggle' | 'start' | ''} [method]
+ * @returns {Promise<{ state: 'live' | 'stale' | 'empty', result?: unknown }>}
  */
-async function callPageApi(tabId, method) {
+async function pageCsPeek(tabId, method) {
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId, frameIds: [0] },
-      args: [method],
+      args: [method || ''],
       func: (m) => {
-        const api = window.__IH_DEMO__;
-        if (!api) return false;
+        const demo = window.__IH_DEMO__;
+        const pdf = window.__IH_PDF_ENTRY__;
+        let live = false;
         try {
-          if (typeof api.isLive !== 'function' || !api.isLive()) return false;
+          live = typeof demo?.isLive === 'function' && !!demo.isLive();
         } catch {
-          return false;
+          /* 作废 */
         }
-        if (m === 'start') return api.start();
-        api[m]();
-        return true;
+        if (!live) {
+          try {
+            live = typeof pdf?.isLive === 'function' && !!pdf.isLive();
+          } catch {
+            /* 作废 */
+          }
+        }
+        if (live) {
+          if (m === 'start' && typeof demo?.start === 'function') {
+            return { state: 'live', result: demo.start() };
+          }
+          if (m === 'toggle' && typeof demo?.toggle === 'function') {
+            demo.toggle();
+            return { state: 'live', result: true };
+          }
+          return { state: 'live' };
+        }
+        const pdfMine = document.getElementById('il-pdf-entry')?.dataset?.ilExtensionId
+          === chrome.runtime.id;
+        const marked = document.documentElement.hasAttribute('data-ih-cs') || pdfMine;
+        return { state: marked ? 'stale' : 'empty' };
       },
     });
-    return results?.[0]?.result ?? false;
+    const v = results?.[0]?.result;
+    if (v?.state === 'live' || v?.state === 'stale') return v;
+    return { state: 'empty' };
   } catch {
-    return false;
+    return { state: 'empty' };
+  }
+}
+
+/** SYNC: semantic-highlight/semantic/find.js → OTHER_IL_MSG / alert */
+const STALE_PAGE_MSG =
+  'Another Info Highlight is already on this page. Please refresh the page and try again.';
+
+async function refuseStalePage(tabId) {
+  await setBadgeError(tabId, 'refresh this page');
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      func: (msg) => { alert(msg); },
+      args: [STALE_PAGE_MSG],
+    });
+  } catch {
+    /* 页上 alert 不了就只留工具栏感叹号 */
   }
 }
 
@@ -122,9 +162,15 @@ async function activateTab(tab) {
     const url = fresh.url || tab.url || '';
     if (IL_pdfSw.isOwnViewerUrl(url)) {
       IH_actionState.markAnalyzingIfIdle(tab.id);
-      chrome.runtime.sendMessage({ type: 'ih-pdf-toggle', tabId: tab.id }, () => {
-        void chrome.runtime.lastError;
+      const ok = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'ih-pdf-toggle', tabId: tab.id }, (res) => {
+          resolve(!chrome.runtime.lastError && res?.ok === true);
+        });
       });
+      if (!ok) {
+        await refuseStalePage(tab.id);
+        return;
+      }
       clearBadge(tab.id);
       return;
     }
@@ -139,27 +185,42 @@ async function activateTab(tab) {
       return;
     }
     if (IL_pdfSw.isPdfUrl(url)) {
+      const peek = await pageCsPeek(tab.id);
+      if (peek.state === 'stale') {
+        await refuseStalePage(tab.id);
+        return;
+      }
       await IL_pdfSw.injectEntry(tab.id);
       clearBadge(tab.id);
       return;
     }
     // 无 .pdf 后缀时先由页内按 Content-Type / 魔数确认，再退回网页管线
+    {
+      const peek = await pageCsPeek(tab.id, 'toggle');
+      if (peek.state === 'stale') {
+        await refuseStalePage(tab.id);
+        return;
+      }
+      // result 表示页内 demo.toggle 已执行。仅 PDF 入口 live 时没有 result，要落到下面切按钮。
+      if (peek.state === 'live' && peek.result) {
+        manualTabs.add(tab.id);
+        clearBadge(tab.id);
+        return;
+      }
+    }
     if (await IL_pdfSw.injectEntryAndOffered(tab.id)) {
       clearBadge(tab.id);
       return;
     }
     IH_actionState.markAnalyzingIfIdle(tab.id);
     manualTabs.add(tab.id);
-    if (await callPageApi(tab.id, 'toggle')) {
-      clearBadge(tab.id);
-      return;
-    }
     IH_actionState.set(tab.id, 'analyzing');
     const okTab = await IL_injectWithRetry(tab.id, { css: CONTENT_CSS, js: CONTENT_JS }, {
       logLabel: 'Info Highlight',
       waitComplete: false,
     });
-    if (!await callPageApi(tab.id, 'toggle')) {
+    const after = await pageCsPeek(tab.id, 'toggle');
+    if (after.state !== 'live') {
       await setBadgeError(tab.id, 'inject');
       return;
     }
@@ -253,11 +314,16 @@ async function maybeAutoAnalyze(tabId) {
   const gen = autoGenByTab.get(tabId) || 0;
   const stillCurrent = () => (autoGenByTab.get(tabId) || 0) === gen;
   try {
-    const started = await callPageApi(tabId, 'start');
+    const peek = await pageCsPeek(tabId, 'start');
     if (!stillCurrent()) return;
-    if (started) {
+    if (peek.state === 'stale') {
+      await refuseStalePage(tabId);
+      return;
+    }
+    if (peek.state === 'live') {
+      const started = peek.result;
       if (started === 'painted') IH_actionState.set(tabId, 'on');
-      if (started !== 'busy') clearBadge(tabId);
+      if (started && started !== 'busy') clearBadge(tabId);
       return;
     }
     IH_actionState.set(tabId, 'analyzing');
@@ -267,9 +333,9 @@ async function maybeAutoAnalyze(tabId) {
       isStale: () => !stillCurrent(),
     });
     if (!stillCurrent()) return;
-    const after = await callPageApi(tabId, 'start');
+    const after = await pageCsPeek(tabId, 'start');
     if (!stillCurrent()) return;
-    if (after) {
+    if (after.state === 'live' && after.result) {
       clearBadge(tabId);
       return;
     }
@@ -754,7 +820,7 @@ async function fetchTokens(engine, text) {
       if (!res?.ok) throw new Error(res?.error || 'local analyze failed');
       const tokens = res.result?.bpe_strings;
       if (!Array.isArray(tokens)) throw new Error('local analyze returned no tokens');
-      return tokens;
+      return { tokens, model: IH_localState.MODEL_ID };
     } finally {
       localInflight -= 1;
     }
@@ -762,7 +828,9 @@ async function fetchTokens(engine, text) {
   const data = await postAnalyze(text);
   const tokens = data?.result?.bpe_strings;
   if (!Array.isArray(tokens)) throw new Error('Analyze returned no tokens');
-  return tokens;
+  const raw = data?.result?.model;
+  const model = typeof raw === 'string' && raw.trim() ? raw.trim() : analyzeModelForRequest();
+  return { tokens, model };
 }
 
 async function handleAnalyze(text) {
@@ -772,11 +840,14 @@ async function handleAnalyze(text) {
   if (blocked) throw new Error(blocked);
   const engine = engineFrom(st);
   let inferred = false;
+  let model = engine === 'local' ? IH_localState.MODEL_ID : analyzeModelForRequest();
   let tokens;
   try {
     tokens = await IH_analyzeCache.tokens(text, async () => {
       inferred = true;
-      return fetchTokens(engine, text);
+      const got = await fetchTokens(engine, text);
+      if (got.model) model = got.model;
+      return got.tokens;
     });
   } catch (err) {
     if (st.pref === IH_localState.PREF_LOCAL) {
@@ -788,7 +859,7 @@ async function handleAnalyze(text) {
     data: {
       request: { text },
       result: {
-        model: engine === 'local' ? IH_localState.MODEL_ID : undefined,
+        model,
         bpe_strings: tokens,
       },
     },

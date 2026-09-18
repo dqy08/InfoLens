@@ -156,7 +156,7 @@ def _load_project_with_error_handling(model):
     return p, None, None
 
 
-def _log_request(text, stream_mode=False, client_ip=None, privacy_mode=False):
+def _log_request(text, stream_mode=False, client_ip=None, privacy_mode=False, model=None):
     """
     打印请求日志
     
@@ -164,7 +164,7 @@ def _log_request(text, stream_mode=False, client_ip=None, privacy_mode=False):
         int: 请求ID
     """
     from backend.platform.access_log import log_analyze_request
-    return log_analyze_request(text, stream_mode, client_ip, privacy_mode)
+    return log_analyze_request(text, stream_mode, client_ip, privacy_mode, model=model)
 
 
 def _log_response(res, char_count, elapsed_time, stream_mode=False, request_id=None, wait_time=None):
@@ -221,7 +221,11 @@ def analyze(analyze_request):
 
     def log_fn():
         logged["request_id"] = _log_request(
-            text, stream_mode=bool(stream), client_ip=client_ip, privacy_mode=privacy_mode
+            text,
+            stream_mode=bool(stream),
+            client_ip=client_ip,
+            privacy_mode=privacy_mode,
+            model=analyze_request.get("model"),
         )
 
     def local_fn():
@@ -335,7 +339,11 @@ def _generate_analyze_events(analyze_request, client_ip, request_id=None):
         if request_id is None:
             privacy_mode = bool(analyze_request.get("privacy_mode", False))
             request_id = _log_request(
-                text, stream_mode=True, client_ip=client_ip, privacy_mode=privacy_mode
+                text,
+                stream_mode=True,
+                client_ip=client_ip,
+                privacy_mode=privacy_mode,
+                model=analyze_request.get("model"),
             )
 
         # 创建线程安全的进度队列

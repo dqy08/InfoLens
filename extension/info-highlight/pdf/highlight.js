@@ -138,11 +138,14 @@
     R.reportActionState('off');
   }
 
-  chrome.runtime.onMessage.addListener((message) => {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type !== 'ih-pdf-toggle') return;
     chrome.tabs.getCurrent((tab) => {
-      if (tab?.id === message.tabId) toggle();
+      if (tab?.id !== message.tabId) return;
+      toggle();
+      sendResponse({ ok: true });
     });
+    return true;
   });
 
   window.addEventListener('il-pdf-ready', restart);

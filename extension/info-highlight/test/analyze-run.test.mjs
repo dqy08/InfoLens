@@ -18,7 +18,12 @@ globalThis.chrome = {
       messages.push(msg);
       if (msg?.type === 'ih-analyze') {
         const raw = globalThis.__ihAnalyzeTokens || [{ offset: [0, 5], p: 0.01 }];
-        cb({ ok: true, data: { result: { bpe_strings: raw } }, inferred: true, engine: 'cloud' });
+        cb({
+          ok: true,
+          data: { result: { bpe_strings: raw, model: 'qwen3-0.6b' } },
+          inferred: true,
+          engine: 'cloud',
+        });
         return;
       }
       cb?.();
@@ -77,6 +82,12 @@ test.beforeEach(() => {
   globalThis.__ihAlignFail = false;
   globalThis.__ihAnalyzeTokens = [{ offset: [0, 5], p: 0.01 }];
   globalThis.CSS = { highlights: new Map() };
+  globalThis.IH_tokenTip = {
+    models: [],
+    setModel(name) {
+      this.models.push(name);
+    },
+  };
 });
 
 test('paintRange：累加 skip_level / painted，align_fail_n 计入跳过段', async () => {
@@ -109,6 +120,7 @@ test('paintRange：累加 skip_level / painted，align_fail_n 计入跳过段', 
   assert.equal(report.painted, 0);
   assert.equal(session.painted, 0);
   assert.equal(report.align_fail_n, 0);
+  assert.deepEqual(globalThis.IH_tokenTip.models, ['qwen3-0.6b', 'qwen3-0.6b']);
 
   globalThis.__ihAlignFail = true;
   const report2 = newReport();

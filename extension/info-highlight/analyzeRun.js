@@ -18,6 +18,8 @@ globalThis.IH_analyzeRun ||= (function () {
           reject(new Error(res?.error || 'Analyze failed'));
           return;
         }
+        const model = typeof res.data?.result?.model === 'string' ? res.data.result.model.trim() : '';
+        if (model) globalThis.IH_tokenTip?.setModel?.(model);
         resolve({
           data: res.data,
           inferred: !!res.inferred,

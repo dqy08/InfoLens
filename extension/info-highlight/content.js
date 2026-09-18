@@ -3,7 +3,7 @@
  * 点击：按段流式分析并画热力图。再点清除。
  * 进度图：开跑亮空框，段回了加线；不跟滚、不跳最新段。
  * 注入可在加载中；抽正文和分析等 complete。
- * 自动分析：complete 后马上跑；1 秒内已跑完则再对一次正文，变了就再跑。补查结束前图标保持分析中。
+ * 自动分析：complete 后马上跑；第一段结束时正文变了就作废重来。整轮 1 秒内结束则等到 1 秒再对一次。补查结束前图标保持分析中。
  */
 (() => {
   // 注入只挂 API，开跑由 SW 显式调 toggle / start
@@ -87,12 +87,28 @@
         session = await R.beginSession(globalThis.IH_extractPage(), 'No article text');
         globalThis.IH_tokenTip.bind(session.mapped);
       }
-      const end = Math.min(session.next + R.MAX_SEGMENTS_PER_RUN, session.segs.length);
-      const lastAlignErr = await R.paintRange(session, session.next, end, still, {
-        onTokens: (tokens) => globalThis.IH_tokenTip.add(tokens),
-      }, report);
+      const opts = { onTokens: (tokens) => globalThis.IH_tokenTip.add(tokens) };
+      const paintTo = async (to) => {
+        const err = await R.paintRange(session, session.next, to, still, opts, report);
+        if (still()) session.next = to;
+        return err;
+      };
+      const cap = Math.min(session.next + R.MAX_SEGMENTS_PER_RUN, session.segs.length);
+      let lastAlignErr;
+      if (settle && session.next === 0 && cap > 0) {
+        lastAlignErr = await paintTo(1);
+        if (!still()) return;
+        if (pageText() !== session.mapped.text) {
+          session = await R.beginSession(globalThis.IH_extractPage(), 'No article text');
+          globalThis.IH_tokenTip.bind(session.mapped);
+          lastAlignErr = await paintTo(Math.min(R.MAX_SEGMENTS_PER_RUN, session.segs.length));
+        } else if (session.next < cap) {
+          lastAlignErr = await paintTo(cap);
+        }
+      } else {
+        lastAlignErr = await paintTo(cap);
+      }
       if (!still()) return;
-      session.next = end;
       await R.afterPaint(session, lastAlignErr, 'No tokens mapped onto the page', () => {
         return globalThis.IH_showPaused(continuePaused);
       }, report);
@@ -143,5 +159,7 @@
     return true;
   }
 
+  // SYNC: background.js → pageCsPeek 的 data-ih-cs
+  document.documentElement.setAttribute('data-ih-cs', '');
   window.__IH_DEMO__ = { toggle, start, isLive };
 })();
