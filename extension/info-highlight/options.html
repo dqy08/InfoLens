@@ -94,6 +94,17 @@
       background: transparent;
       color: var(--fg);
     }
+    input[type="text"] {
+      flex: 1;
+      min-width: 0;
+      font: inherit;
+      height: 36px;
+      padding: 0 10px;
+      border: 1px solid var(--btn-border);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--fg);
+    }
     .row-slider {
       flex-direction: column;
       align-items: stretch;
@@ -172,6 +183,9 @@
       margin-left: 4px;
     }
     .row-nested[hidden] { display: none; }
+    ul.sites { margin: 0 0 0 4px; padding-left: 12px; list-style: none; border-left: 2px solid var(--line); }
+    ul.sites:empty { display: none; }
+    ul.sites .row-title { word-break: break-all; }
     main h2:not(:first-of-type) { margin-top: 28px; }
   </style>
   <link rel="stylesheet" href="options-new-dots.css" />
@@ -254,6 +268,19 @@
         <button type="button" id="model_clear" disabled>Clear</button>
       </div>
     </div>
+    <h2>Auto analyze</h2>
+    <div class="row" data-option-id="ih_auto_sites">
+      <div class="row-text">
+        <div class="row-title">Sites</div>
+        <p class="row-desc">Analyze once when a tab on these sites comes to the front. Add a site here, or right-click a page and choose “Always analyze …”.</p>
+      </div>
+    </div>
+    <div class="row">
+      <input type="text" id="auto_site_input" placeholder="example.com" aria-label="Site to add" autocomplete="off" spellcheck="false">
+      <button type="button" id="auto_site_add">Add</button>
+    </div>
+    <p id="auto_site_error" class="row-desc" hidden></p>
+    <ul id="auto_sites" class="sites"></ul>
     <h2>Storage</h2>
     <div class="row">
       <div class="row-text">
@@ -266,6 +293,7 @@
   <script src="cache/ring-store.js"></script>
   <script src="analyzeCache.js"></script>
   <script src="local/state.js"></script>
+  <script src="auto-sites.js"></script>
   <script src="highlightStyle.js"></script>
   <script src="sw/action-dot.js"></script>
   <script src="options-attention.js"></script>

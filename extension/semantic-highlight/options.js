@@ -2,6 +2,10 @@
   if (!globalThis.IL_analyzeCache) {
     throw new Error('IL_analyzeCache missing — inject semantic/analyzeCache.js before options.js');
   }
+  if (typeof globalThis.IL_setActionIconDotted !== 'function') {
+    throw new Error('IL_setActionIconDotted missing — inject action-dot.js before options.js');
+  }
+  IL_setActionIconDotted(false);
 
   const iconEl = document.getElementById('brand_icon');
   const brandEl = document.getElementById('brand_name');

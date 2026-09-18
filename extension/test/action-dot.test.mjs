@@ -84,7 +84,7 @@ test('catalog / SEED_SEEN 与选项页 data-option-id 对齐', () => {
   }
 });
 
-test('Info Highlight 本版：升级后 intensity / one-tone 为新；工具栏与选项解耦', async () => {
+test('Info Highlight 本版：升级后 intensity / one-tone / auto-sites 为新；工具栏与选项解耦', async () => {
   const icons = { 16: 'icons/icon16.png', 32: 'icons/icon32.png' };
   const catSandbox = { globalThis: {} };
   catSandbox.globalThis = catSandbox;
@@ -97,6 +97,7 @@ test('Info Highlight 本版：升级后 intensity / one-tone 为新；工具栏�
   assert.ok(seed.includes('show_progress'));
   assert.ok(!seed.includes('ih_max_highlight_alpha'));
   assert.ok(!seed.includes('ih_two_tier'));
+  assert.ok(!seed.includes('ih_auto_sites'));
 
   const env = loadAttention(
     { action: { default_icon: icons }, update_url: 'https://example' },
@@ -107,7 +108,7 @@ test('Info Highlight 本版：升级后 intensity / one-tone 为新；工具栏�
   assert.equal(env.bag.il_options_seen_ids.join(','), seed.join(','));
   assert.equal(env.calls.length, 0); // 选项播种不碰工具栏
   const unseen = await env.sandbox.IL_optionsAttention.unseen(catalog);
-  assert.equal(unseen.slice().sort().join(','), 'ih_max_highlight_alpha,ih_two_tier');
+  assert.equal(unseen.slice().sort().join(','), 'ih_auto_sites,ih_max_highlight_alpha,ih_two_tier');
 });
 
 test('安装视全部为已看；升级无新项也不影响工具栏（由 background 直接打点）', async () => {

@@ -85,6 +85,13 @@
     void runBatch(gen += 1);
   }
 
-  window.__IH_DEMO__ = { toggle };
+  /** 自动分析用：已在跑或已画好则 false，否则开跑并 true */
+  function start() {
+    if (busy || active) return false;
+    void runBatch(gen += 1);
+    return true;
+  }
+
+  window.__IH_DEMO__ = { toggle, start };
   toggle();
 })();

@@ -1,6 +1,6 @@
 /**
  * 选项页「未看过」：il_options_seen_ids。
- * 与工具栏蓝点无关（工具栏只在安装/升级时亮、点一次灭，见 action-dot.js）。
+ * 与工具栏蓝点无关（工具栏只在安装/升级时亮；点工具栏、菜单项或打开选项页才灭，见 action-dot.js）。
  *
  * install：seen = 整份 catalog。
  * update：seen 缺省则按 IL_OPTIONS_SEED_SEEN 播种（见各插件 options-catalog.js）。

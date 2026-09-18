@@ -11,6 +11,7 @@ importScripts('options-catalog.js');
 importScripts('sw/lifecycle-events.js');
 importScripts('sw/client-id.js');
 importScripts('sw/inject.js');
+importScripts('auto-sites.js');
 importScripts('config.js');
 importScripts('pdf/stash-db.js');
 importScripts('pdf/sw.js');
@@ -29,6 +30,7 @@ if (!globalThis.IH_localState) throw new Error('IH_localState missing');
 if (!globalThis.IH_analyzeCache) throw new Error('IH_analyzeCache missing');
 if (!globalThis.IH_initWindowBounds) throw new Error('IH_initWindowBounds missing');
 if (!globalThis.IH_actionState) throw new Error('IH_actionState missing');
+if (!globalThis.IH_autoSites) throw new Error('IH_autoSites missing');
 
 if (IL_reportsEnabled(IH_CONFIG)) {
   IL_prepareClientIdReporting(EXTENSION_ID, IH_CONFIG.apiBase);
@@ -57,18 +59,26 @@ const CONTENT_JS = [
   'content.js',
 ];
 
-async function toggleIfInjected(tabId) {
+/**
+ * 已注入则调页内 API。
+ * @param {'toggle' | 'start'} method
+ * @returns {Promise<false | true | 'noop'>}
+ *   false = 未注入；true = 已调用；'noop' = 已注入但 start 未开跑（已在分析/已画好）
+ */
+async function callPageApi(tabId, method) {
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId, frameIds: [0] },
-      func: () => {
+      args: [method],
+      func: (m) => {
         const api = window.__IH_DEMO__;
         if (!api) return false;
-        api.toggle();
+        if (m === 'start') return api.start() ? true : 'noop';
+        api[m]();
         return true;
       },
     });
-    return !!results?.[0]?.result;
+    return results?.[0]?.result ?? false;
   } catch {
     return false;
   }
@@ -127,7 +137,7 @@ async function activateTab(tab) {
       return;
     }
     IH_actionState.markAnalyzingIfIdle(tab.id);
-    if (await toggleIfInjected(tab.id)) {
+    if (await callPageApi(tab.id, 'toggle')) {
       clearBadge(tab.id);
       return;
     }
@@ -150,21 +160,151 @@ async function activateTab(tab) {
 }
 
 const CONTEXT_MENU_ID = 'ih-highlight';
+const AUTO_MENU_ID = 'ih-auto-site';
+const ANALYZE_MENU_TITLE = 'Analyze this page';
+
+function autoMenuTitle(host, on) {
+  return on ? `Stop always analyzing ${host}` : `Always analyze ${host}`;
+}
+
+/** 分析卡住时别把自动闸门永久占着 */
+const AUTO_BUSY_TIMEOUT_MS = 120000;
+/** tabId -> 已自动跑过的 url；跳过的不记，切回来还会再试 */
+const autoRan = new Map();
+/** 同时只放一个自动分析，避免切标签时并发 */
+let autoBusy = null;
+
+function autoBusyTake(tabId) {
+  if (autoBusy) return false;
+  autoBusy = {
+    tabId,
+    timer: setTimeout(() => {
+      autoBusy = null;
+    }, AUTO_BUSY_TIMEOUT_MS),
+  };
+  return true;
+}
+
+function autoBusyRelease(tabId) {
+  if (autoBusy?.tabId !== tabId) return;
+  clearTimeout(autoBusy.timer);
+  autoBusy = null;
+}
+
+/**
+ * 无 tabs 权限时只看得见已授权站点的 url；看不见即未授权，正好是要显示「添加」的情形。
+ * @param {number} tabId
+ */
+async function syncAutoMenu(tabId) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const host = IH_autoSites.hostOf(tab?.url || '');
+  if (!host) {
+    // 看不见 url（未授权）或非 http(s)：标题用不到，点下去才从 pageUrl 取 host
+    chrome.contextMenus.update(AUTO_MENU_ID, { title: 'Always analyze this site' }, () => {
+      void chrome.runtime.lastError;
+    });
+    return;
+  }
+  const on = await IH_autoSites.has(host);
+  chrome.contextMenus.update(AUTO_MENU_ID, { title: autoMenuTitle(host, on) }, () => {
+    void chrome.runtime.lastError;
+  });
+}
+
+async function toggleAutoSite(info, tabId) {
+  // 菜单项限定 http(s)，取不到 host 说明有别的问题
+  const host = IH_autoSites.hostOf(info.pageUrl || '');
+  if (!host) throw new Error(`auto-site menu on unsupported url: ${info.pageUrl || '(none)'}`);
+  // 手势同步阶段发起；已授权时不弹窗直接 true，故开关两向都先发它
+  const requested = chrome.permissions.request({ origins: [IH_autoSites.originPattern(host)] });
+  const wasOn = await IH_autoSites.has(host);
+  const granted = await requested;
+  if (wasOn) {
+    await IH_autoSites.remove(host);
+    autoRan.delete(tabId);
+  } else if (granted) {
+    await IH_autoSites.add(host);
+    await maybeAutoAnalyze(tabId);
+  }
+  await syncAutoMenu(tabId);
+}
+
+/** 导航开始：丢掉本页自动分析进度，否则 analyzing / 闸门会挡住下一页 */
+function resetAutoForTab(tabId) {
+  autoRan.delete(tabId);
+  autoBusyRelease(tabId);
+  if (IH_actionState.get(tabId) !== 'off') IH_actionState.set(tabId, 'off');
+}
+
+/** 命中名单的前台标签页加载完即分析一次。PDF / file: 不进这条路。 */
+async function maybeAutoAnalyze(tabId) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab?.active || tab.status !== 'complete') return;
+  const url = tab.url || '';
+  const host = IH_autoSites.hostOf(url);
+  if (!host || IL_isRestrictedUrl(url) || IL_pdfSw.isPdfUrl(url)) return;
+  if (autoRan.get(tabId) === url) return;
+  if (!(await IH_autoSites.granted(host))) return;
+  if (!autoBusyTake(tabId)) return;
+  autoRan.set(tabId, url);
+  try {
+    IH_actionState.set(tabId, 'analyzing');
+    // start()：已在跑或已画好返回 noop，闸门马上放掉，避免空占着
+    const started = await callPageApi(tabId, 'start');
+    if (started === 'noop') {
+      autoBusyRelease(tabId);
+      IH_actionState.set(tabId, 'on');
+      clearBadge(tabId);
+      return;
+    }
+    if (!started) {
+      await IL_injectWithRetry(tabId, { css: CONTENT_CSS, js: CONTENT_JS }, { logLabel: 'Info Highlight auto' });
+    }
+    clearBadge(tabId);
+  } catch (err) {
+    autoRan.delete(tabId);
+    autoBusyRelease(tabId);
+    IH_actionState.set(tabId, 'off');
+    console.error('[Info Highlight] auto inject failed', err);
+    await setBadgeError(tabId, 'inject');
+  }
+}
 
 chrome.action.onClicked.addListener((tab) => {
   void activateTab(tab);
 });
 
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  void syncAutoMenu(tabId);
+  void maybeAutoAnalyze(tabId);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // 刷新/跳转：上一页的 analyzing 与闸门不能带到下一页
+  if (changeInfo.status === 'loading' || changeInfo.url) resetAutoForTab(tabId);
+  if (changeInfo.status !== 'complete') return;
+  if (tab.active) void syncAutoMenu(tabId);
+  void maybeAutoAnalyze(tabId);
+});
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   IH_actionState.clear(tabId);
+  autoRan.delete(tabId);
+  autoBusyRelease(tabId);
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: CONTEXT_MENU_ID,
-      title: 'Info Highlight',
+      title: ANALYZE_MENU_TITLE,
       contexts: ['page', 'selection'],
+    });
+    chrome.contextMenus.create({
+      id: AUTO_MENU_ID,
+      title: 'Always analyze this site',
+      contexts: ['page', 'selection'],
+      documentUrlPatterns: ['http://*/*', 'https://*/*'],
     });
   });
 
@@ -181,8 +321,12 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId !== CONTEXT_MENU_ID || !tab?.id) return;
-  void activateTab(tab);
+  if (!tab?.id) return;
+  // 用过菜单也算用过插件；Chrome 右键工具栏图标本身不发事件，只能在这里灭蓝点
+  IL_setActionIconDotted(false);
+  if (info.menuItemId === CONTEXT_MENU_ID) void activateTab(tab);
+  // permissions.request 要手势，toggleAutoSite 里首句就发，别在这之前 await
+  else if (info.menuItemId === AUTO_MENU_ID) void toggleAutoSite(info, tab.id);
 });
 
 const ERROR_BODY_SNIPPET = 500;
@@ -841,6 +985,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (tabId && (msg.state === 'off' || msg.state === 'analyzing' || msg.state === 'on')) {
       IH_actionState.set(tabId, msg.state);
       clearBadge(tabId);
+      if (msg.state !== 'analyzing') autoBusyRelease(tabId);
     }
     return;
   }

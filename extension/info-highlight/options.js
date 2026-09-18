@@ -8,6 +8,14 @@
   if (!globalThis.IH_highlightStyle) {
     throw new Error('IH_highlightStyle missing — inject highlightStyle.js before options.js');
   }
+  if (!globalThis.IH_autoSites) {
+    throw new Error('IH_autoSites missing — inject auto-sites.js before options.js');
+  }
+  if (typeof globalThis.IL_setActionIconDotted !== 'function') {
+    throw new Error('IL_setActionIconDotted missing — inject action-dot.js before options.js');
+  }
+  // 右键工具栏图标 → 选项：Chrome 不发手势事件，只能在选项页打开时灭蓝点
+  IL_setActionIconDotted(false);
 
   const HS = globalThis.IH_highlightStyle;
 
@@ -23,6 +31,7 @@
     'analyze_pref',
     'webgpu_desc', 'model_desc',
     'local_init', 'model_clear',
+    'auto_sites', 'auto_site_input', 'auto_site_add', 'auto_site_error',
     'cache_desc', 'cache_clear',
     'ih_threshold_row', 'ih_threshold_value', 'ih_highlight_threshold_pct',
     'ih_depth_value', 'ih_max_highlight_alpha',
@@ -199,6 +208,66 @@
 
   loadBackend();
 
+  function autoSiteRow(host) {
+    const li = document.createElement('li');
+    li.className = 'row';
+    const text = document.createElement('div');
+    text.className = 'row-text';
+    const title = document.createElement('div');
+    title.className = 'row-title';
+    title.textContent = host;
+    text.append(title);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Remove';
+    btn.addEventListener('click', () => {
+      btn.disabled = true;
+      void globalThis.IH_autoSites.remove(host).then(loadAutoSites);
+    });
+    li.append(text, btn);
+    return li;
+  }
+
+  function loadAutoSites() {
+    return globalThis.IH_autoSites.list().then((hosts) => {
+      el.auto_sites.replaceChildren(...hosts.map(autoSiteRow));
+    });
+  }
+
+  function showAutoSiteError(msg) {
+    el.auto_site_error.hidden = !msg;
+    el.auto_site_error.textContent = msg || '';
+  }
+
+  async function addAutoSite() {
+    showAutoSiteError('');
+    const host = globalThis.IH_autoSites.parseHost(el.auto_site_input.value);
+    if (!host) {
+      showAutoSiteError('Enter a site like example.com');
+      return;
+    }
+    // 选项页点 Add 本身就是手势，可直接 request
+    const granted = await chrome.permissions.request({
+      origins: [globalThis.IH_autoSites.originPattern(host)],
+    });
+    if (!granted) return;
+    await globalThis.IH_autoSites.add(host);
+    el.auto_site_input.value = '';
+    await loadAutoSites();
+  }
+
+  el.auto_site_add.addEventListener('click', () => {
+    void addAutoSite();
+  });
+  el.auto_site_input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void addAutoSite();
+    }
+  });
+
+  void loadAutoSites();
+
   function formatBytes(n) {
     if (!Number.isFinite(n) || n < 0) throw new Error(`bad cache size: ${n}`);
     if (n < 1024) return `${Math.round(n)} B`;
@@ -245,6 +314,7 @@
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     if (changes.ih_webgpu_ok || changes.ih_analyze_pref || changes.ih_local_ready) loadBackend();
+    if (changes[globalThis.IH_autoSites.KEY]) void loadAutoSites();
     if (Object.keys(changes).some((k) => k.startsWith(globalThis.IH_analyzeCache.PREFIX))) {
       void refresh().catch(showCacheError);
     }
