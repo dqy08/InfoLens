@@ -8,7 +8,7 @@
 globalThis.IH_analyzeCache ||= (function () {
   const PREFIX = 'ih_ac/';
   /** 影响缓存准确性时加一。 */
-  const PLUGIN_CACHE_VERSION = 5;
+  const PLUGIN_CACHE_VERSION = 6;
 
   const store = globalThis.IL_createRingStore({
     prefix: PREFIX,

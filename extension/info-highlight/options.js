@@ -28,7 +28,7 @@
 
   const ids = [
     'brand_icon', 'brand_name',
-    'analyze_pref',
+    'analyze_pref', 'ih_cloud_model',
     'webgpu_desc', 'model_desc',
     'local_init', 'model_clear',
     'auto_sites', 'auto_site_input', 'auto_site_add', 'auto_site_error',
@@ -135,6 +135,7 @@
     const base = modelStatusText(st, webgpu);
     el.model_desc.textContent = base;
     el.analyze_pref.value = st.pref === 'cloud' || st.pref === 'local' ? st.pref : 'auto';
+    el.ih_cloud_model.value = st.cloudModel;
     el.local_init.disabled = !webgpu || !!st.ready;
     const gen = ++modelCacheGen;
     void globalThis.IH_localState.modelCacheUsage().then(({ bytes }) => {
@@ -166,6 +167,19 @@
 
   el.analyze_pref.addEventListener('change', () => {
     chrome.runtime.sendMessage({ type: 'ih-local-set-pref', pref: el.analyze_pref.value }, () => {
+      loadBackend();
+    });
+  });
+
+  for (const m of IH_localState.CLOUD_MODELS) {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.label;
+    el.ih_cloud_model.append(opt);
+  }
+
+  el.ih_cloud_model.addEventListener('change', () => {
+    chrome.runtime.sendMessage({ type: 'ih-local-set-cloud-model', model: el.ih_cloud_model.value }, () => {
       loadBackend();
     });
   });
@@ -319,7 +333,9 @@
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (changes.ih_webgpu_ok || changes.ih_analyze_pref || changes.ih_local_ready) loadBackend();
+    if (changes.ih_webgpu_ok || changes.ih_analyze_pref || changes.ih_local_ready || changes.ih_cloud_model) {
+      loadBackend();
+    }
     if (changes[globalThis.IH_autoSites.KEY]) void loadAutoSites();
     if (Object.keys(changes).some((k) => k.startsWith(globalThis.IH_analyzeCache.PREFIX))) {
       void refresh().catch(showCacheError);

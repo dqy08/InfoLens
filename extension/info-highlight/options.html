@@ -12,6 +12,7 @@
       --bg: #fff;
       --line: #e1e3e1;
       --btn-border: #747775;
+      --group: #f3f4f3;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -20,6 +21,7 @@
         --bg: #1f1f1f;
         --line: #444746;
         --btn-border: #8e918f;
+        --group: #2a2b2a;
       }
     }
     * { box-sizing: border-box; }
@@ -39,29 +41,38 @@
       gap: 12px;
       max-width: 680px;
       margin: 0 auto;
-      padding: 16px 24px;
+      padding: 12px 24px;
     }
     .top-icon { flex-shrink: 0; width: 40px; height: 40px; border-radius: 8px; }
     .top-name { font-size: 22px; font-weight: 600; }
-    main { max-width: 680px; margin: 0 auto; padding: 28px 24px 64px; }
+    main { max-width: 680px; margin: 0 auto; padding: 16px 24px 40px; }
+    section { margin: 0 0 22px; }
+    section:last-child { margin-bottom: 0; }
     h2 {
       font-size: 1.05rem;
       font-weight: 500;
       margin: 0 0 0.25rem;
     }
+    .group {
+      background: var(--group);
+      border-radius: 12px;
+      padding: 2px 14px;
+    }
+    .group > .row:last-of-type,
+    .sites .row:last-child { border-bottom: none; }
     .row {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      min-height: 48px;
-      padding: 12px 0;
+      min-height: 40px;
+      padding: 8px 0;
       border-bottom: 1px solid var(--line);
     }
     label.row { cursor: pointer; }
     .row-text { flex: 1; min-width: 0; }
     .row-title { font-size: 16px; }
-    .row-desc { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+    .row-desc { margin: 1px 0 0; color: var(--muted); font-size: 14px; line-height: 1.35; }
     input[type="checkbox"] {
       flex-shrink: 0;
       width: 18px;
@@ -108,7 +119,7 @@
     .row-slider {
       flex-direction: column;
       align-items: stretch;
-      gap: 8px;
+      gap: 6px;
     }
     .row-slider-top {
       display: flex;
@@ -183,10 +194,23 @@
       margin-left: 4px;
     }
     .row-nested[hidden] { display: none; }
-    ul.sites { margin: 0 0 0 4px; padding-left: 12px; list-style: none; border-left: 2px solid var(--line); }
+    ul.sites { margin: 0; padding: 0; list-style: none; }
     ul.sites:empty { display: none; }
-    ul.sites .row-title { word-break: break-all; }
-    main h2:not(:first-of-type) { margin-top: 28px; }
+    ul.sites .row {
+      min-height: 0;
+      padding: 3px 0;
+      gap: 8px;
+    }
+    ul.sites .row-title {
+      font-size: 13px;
+      word-break: break-all;
+    }
+    ul.sites button {
+      height: 24px;
+      padding: 0 10px;
+      font-size: 13px;
+      border-radius: 12px;
+    }
   </style>
   <link rel="stylesheet" href="options-new-dots.css" />
 </head>
@@ -198,7 +222,9 @@
     </div>
   </header>
   <main>
+    <section>
     <h2>Display</h2>
+    <div class="group">
     <label class="row" data-option-id="show_progress">
       <div class="row-text">
         <div class="row-title">Progress chart</div>
@@ -240,7 +266,11 @@
       </div>
       <input type="range" id="ih_highlight_threshold_pct" min="0" max="100" step="1" aria-label="Highlight threshold">
     </div>
+    </div>
+    </section>
+    <section>
     <h2>Analysis</h2>
+    <div class="group">
     <div class="row" data-option-id="analyze_pref">
       <div class="row-text">
         <div class="row-title">Where to analyze</div>
@@ -251,6 +281,13 @@
         <option value="local">On this device only</option>
         <option value="cloud">Cloud only</option>
       </select>
+    </div>
+    <div class="row" data-option-id="ih_cloud_model">
+      <div class="row-text">
+        <div class="row-title">Cloud model</div>
+        <p class="row-desc">Used when analysis runs in the cloud.</p>
+      </div>
+      <select id="ih_cloud_model" aria-label="Cloud model"></select>
     </div>
     <div class="row">
       <div class="row-text">
@@ -268,7 +305,11 @@
         <button type="button" id="model_clear" disabled>Clear</button>
       </div>
     </div>
+    </div>
+    </section>
+    <section>
     <h2>Auto analyze</h2>
+    <div class="group">
     <div class="row" data-option-id="ih_auto_sites">
       <div class="row-text">
         <div class="row-title">Sites</div>
@@ -281,7 +322,11 @@
     </div>
     <p id="auto_site_error" class="row-desc" hidden></p>
     <ul id="auto_sites" class="sites"></ul>
+    </div>
+    </section>
+    <section>
     <h2>Storage</h2>
+    <div class="group">
     <div class="row">
       <div class="row-text">
         <div class="row-title">Analysis cache</div>
@@ -289,6 +334,8 @@
       </div>
       <button type="button" id="cache_clear">Clear</button>
     </div>
+    </div>
+    </section>
   </main>
   <script src="cache/ring-store.js"></script>
   <script src="analyzeCache.js"></script>

@@ -97,6 +97,13 @@ test('normalizeHub 只认 modelscope，其余为 huggingface', () => {
   assert.equal(S.normalizeHub(undefined), 'huggingface');
 });
 
+test('normalizeCloudModel 只认名单内 id，其余为 Gemma', () => {
+  assert.equal(S.normalizeCloudModel('gemma-3-270m'), 'gemma-3-270m');
+  assert.equal(S.normalizeCloudModel('qwen3-0.6b'), 'qwen3-0.6b');
+  assert.equal(S.normalizeCloudModel(undefined), 'gemma-3-270m');
+  assert.equal(S.normalizeCloudModel('default'), 'gemma-3-270m');
+});
+
 test('hubRemoteHost / hubOrigins 按源区分', () => {
   assert.equal(S.hubRemoteHost('huggingface'), 'https://huggingface.co/');
   assert.equal(S.hubRemoteHost('modelscope'), 'https://www.modelscope.cn/models/');

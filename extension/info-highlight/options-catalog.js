@@ -8,7 +8,7 @@
  *    （本功能首次落地的升级迁移）。已有 seen 的用户会自动把 catalog 里多出的 id 当新的。
  * 4. build 后重新加载 dist/
  *
- * 本版：升级用户视 intensity / one-tone / auto-sites 为新；其余为旧。新安装整份视为已看。
+ * 本版：升级用户视 intensity / one-tone / auto-sites / cloud model 为新；其余为旧。新安装整份视为已看。
  */
 globalThis.IL_OPTIONS_CATALOG = Object.freeze([
   'show_progress',
@@ -16,6 +16,7 @@ globalThis.IL_OPTIONS_CATALOG = Object.freeze([
   'ih_max_highlight_alpha',
   'ih_two_tier',
   'analyze_pref',
+  'ih_cloud_model',
   'ih_auto_sites',
 ]);
 

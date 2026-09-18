@@ -40,13 +40,6 @@ function analyzeUrl() {
   return `${String(IH_CONFIG.apiBase).replace(/\/$/, '')}/api/analyze`;
 }
 
-/** IH_CONFIG.analyzeModel 非空则用之，否则 'default'。 */
-function analyzeModelForRequest() {
-  const m = IH_CONFIG.analyzeModel;
-  if (typeof m === 'string' && m.trim()) return m.trim();
-  return 'default';
-}
-
 const CONTENT_CSS = ['content.css'];
 const CONTENT_JS = [
   'drop-stale.js',
@@ -419,7 +412,7 @@ function isJsonContentType(contentTypeHeader) {
 }
 
 /** POST /api/analyze；站点成功体无 success=true，仅 success===false 视为失败。 */
-async function postAnalyze(text) {
+async function postAnalyze(text, model) {
   const url = analyzeUrl();
   let res;
   try {
@@ -427,7 +420,7 @@ async function postAnalyze(text) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: analyzeModelForRequest(),
+        model,
         text,
         privacy_mode: IH_CONFIG.privacyMode !== false,
       }),
@@ -806,7 +799,7 @@ async function initEngine() {
   return sendToEngine({ cmd: 'init', hub: st.hub });
 }
 
-async function fetchTokens(engine, text) {
+async function fetchTokens(engine, text, cloudModel) {
   if (engine === 'local') {
     localInflight += 1;
     try {
@@ -825,11 +818,11 @@ async function fetchTokens(engine, text) {
       localInflight -= 1;
     }
   }
-  const data = await postAnalyze(text);
+  const data = await postAnalyze(text, cloudModel);
   const tokens = data?.result?.bpe_strings;
   if (!Array.isArray(tokens)) throw new Error('Analyze returned no tokens');
   const raw = data?.result?.model;
-  const model = typeof raw === 'string' && raw.trim() ? raw.trim() : analyzeModelForRequest();
+  const model = typeof raw === 'string' && raw.trim() ? raw.trim() : cloudModel;
   return { tokens, model };
 }
 
@@ -840,12 +833,12 @@ async function handleAnalyze(text) {
   if (blocked) throw new Error(blocked);
   const engine = engineFrom(st);
   let inferred = false;
-  let model = engine === 'local' ? IH_localState.MODEL_ID : analyzeModelForRequest();
+  let model = engine === 'local' ? IH_localState.MODEL_ID : st.cloudModel;
   let tokens;
   try {
     tokens = await IH_analyzeCache.tokens(text, async () => {
       inferred = true;
-      const got = await fetchTokens(engine, text);
+      const got = await fetchTokens(engine, text, st.cloudModel);
       if (got.model) model = got.model;
       return got.tokens;
     });
@@ -1078,6 +1071,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       await IH_localState.set({ pref });
       if ((await resolveEngine()) !== prev) await IH_analyzeCache.dropAll();
       sendResponse({ ok: true, pref });
+    })().catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
+  if (msg?.type === 'ih-local-set-cloud-model') {
+    const cloudModel = IH_localState.normalizeCloudModel(msg.model);
+    (async () => {
+      const prev = (await IH_localState.get()).cloudModel;
+      await IH_localState.set({ cloudModel });
+      if (cloudModel !== prev) await IH_analyzeCache.dropAll();
+      sendResponse({ ok: true, cloudModel });
     })().catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
     return true;
   }
