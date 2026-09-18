@@ -33,6 +33,7 @@
     globalThis.IH_clearError();
     globalThis.IH_tokenTip.clear();
     active = false;
+    R.reportActionState('off');
   }
 
   function continuePaused() {
@@ -43,13 +44,18 @@
   async function runBatch(myGen) {
     const still = () => myGen === gen;
     busy = true;
+    R.reportActionState('analyzing');
     await R.runJob(still, {
       fail(err) {
         clearAll();
         active = true;
+        R.reportActionState('on');
         return globalThis.IH_showError(err?.message || err);
       },
-      idle() { busy = false; },
+      idle() {
+        busy = false;
+        if (active && still()) R.reportActionState('on');
+      },
     }, async (report) => {
       if (!session) {
         session = await R.beginSession(globalThis.IH_extractPage(), 'No article text');

@@ -18,6 +18,7 @@ importScripts('cache/ring-store.js');
 importScripts('analyzeCache.js');
 importScripts('local/state.js');
 importScripts('init-window-bounds.js');
+importScripts('action-state.js');
 
 const EXTENSION_ID = 'info-highlight';
 
@@ -27,6 +28,7 @@ if (!globalThis.IH_CONFIG || typeof IH_CONFIG.apiBase !== 'string' || !IH_CONFIG
 if (!globalThis.IH_localState) throw new Error('IH_localState missing');
 if (!globalThis.IH_analyzeCache) throw new Error('IH_analyzeCache missing');
 if (!globalThis.IH_initWindowBounds) throw new Error('IH_initWindowBounds missing');
+if (!globalThis.IH_actionState) throw new Error('IH_actionState missing');
 
 if (IL_reportsEnabled(IH_CONFIG)) {
   IL_prepareClientIdReporting(EXTENSION_ID, IH_CONFIG.apiBase);
@@ -73,13 +75,12 @@ async function toggleIfInjected(tabId) {
 }
 
 function clearBadge(tabId) {
-  const title = chrome.runtime.getManifest().action?.default_title || 'Info Highlight';
   void chrome.action.setBadgeText({ text: '', tabId });
-  void chrome.action.setTitle({ title, tabId });
 }
 
 async function setBadgeError(tabId, brief) {
   try {
+    IH_actionState.set(tabId, 'off');
     await chrome.action.setBadgeBackgroundColor({ color: '#c0392b', tabId });
     await chrome.action.setBadgeText({ text: '!', tabId });
     await chrome.action.setTitle({ title: `Info Highlight: ${brief}`, tabId });
@@ -93,10 +94,12 @@ async function activateTab(tab) {
   // optional file:// request 必须在手势同步阶段启动；前面不能有 await
   const fileHostPromise = IL_pdfSw.isFileUrl(tab.url) ? IL_pdfSw.requestFileHostFromGesture() : null;
   IL_setActionIconDotted(false);
+  if (IH_actionState.shouldIgnoreClick(tab.id)) return;
   try {
     const fresh = await chrome.tabs.get(tab.id);
     const url = fresh.url || tab.url || '';
     if (IL_pdfSw.isOwnViewerUrl(url)) {
+      IH_actionState.markAnalyzingIfIdle(tab.id);
       chrome.runtime.sendMessage({ type: 'ih-pdf-toggle', tabId: tab.id }, () => {
         void chrome.runtime.lastError;
       });
@@ -123,10 +126,12 @@ async function activateTab(tab) {
       clearBadge(tab.id);
       return;
     }
+    IH_actionState.markAnalyzingIfIdle(tab.id);
     if (await toggleIfInjected(tab.id)) {
       clearBadge(tab.id);
       return;
     }
+    IH_actionState.set(tab.id, 'analyzing');
     const okTab = await IL_injectWithRetry(tab.id, { css: CONTENT_CSS, js: CONTENT_JS }, { logLabel: 'Info Highlight' });
     console.info('[Info Highlight] injected into', okTab.url);
     clearBadge(tab.id);
@@ -148,6 +153,10 @@ const CONTEXT_MENU_ID = 'ih-highlight';
 
 chrome.action.onClicked.addListener((tab) => {
   void activateTab(tab);
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  IH_actionState.clear(tabId);
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -826,6 +835,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     || msg?.type === 'ih-local-progress'
     || msg?.type === 'ih-local-init-outcome'
   ) return;
+
+  if (msg?.type === 'ih-action-state') {
+    const tabId = sender.tab?.id;
+    if (tabId && (msg.state === 'off' || msg.state === 'analyzing' || msg.state === 'on')) {
+      IH_actionState.set(tabId, msg.state);
+      clearBadge(tabId);
+    }
+    return;
+  }
 
   if (msg?.type === 'ih-local-linger') {
     handleLinger(msg)

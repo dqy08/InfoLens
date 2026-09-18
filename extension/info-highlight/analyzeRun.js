@@ -33,6 +33,13 @@ globalThis.IH_analyzeRun ||= (function () {
     });
   }
 
+  /** @param {'off' | 'analyzing' | 'on'} state */
+  function reportActionState(state) {
+    chrome.runtime.sendMessage({ type: 'ih-action-state', state }, () => {
+      void chrome.runtime.lastError;
+    });
+  }
+
   /** 一轮结束后上报；未尝试任何段时不发。失败时附带截断后的 error（不含页面 URL/正文）。 */
   function reportUsage(report) {
     if (!report || report.segments < 1) return;
@@ -272,6 +279,7 @@ globalThis.IH_analyzeRun ||= (function () {
   return {
     MAX_SEGMENTS_PER_RUN,
     releaseLocalEngine,
+    reportActionState,
     beginSession,
     paintRange,
     afterPaint,
