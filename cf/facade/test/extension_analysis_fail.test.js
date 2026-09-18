@@ -10,6 +10,7 @@ import {
   handlePostExtensionAnalysisFail,
   handleListExtensionAnalysisFail,
 } from '../src/extension_analysis_fail.js';
+import { mockR2, mockCtx, r2Records } from './mock_r2.js';
 
 function mockState(init = {}) {
   const data = { ...init };
@@ -113,7 +114,8 @@ test('buildAnalysisFailRecord: 裁剪、只收 failed、忽略页面字段、err
   assert.equal(long.error.includes('[url]'), true);
 });
 
-test('handlePostExtensionAnalysisFail: 非法字段拒收；合法写入', async () => {
+test('handlePostExtensionAnalysisFail: 非法字段拒收；合法写入 R2 原文', async () => {
+  const REPORT_LOGS = mockR2();
   const STATE = mockState();
   const badExt = await handlePostExtensionAnalysisFail(
     postReq({
@@ -122,7 +124,7 @@ test('handlePostExtensionAnalysisFail: 非法字段拒收；合法写入', async
       version: '0.1.3',
       error: 'nope',
     }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json,
   );
   assert.equal(badExt.status, 400);
@@ -134,7 +136,7 @@ test('handlePostExtensionAnalysisFail: 非法字段拒收；合法写入', async
       version: '0.1.3',
       error: 'should not store successes',
     }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json,
   );
   assert.equal(okOutcome.status, 400);
@@ -146,21 +148,21 @@ test('handlePostExtensionAnalysisFail: 非法字段拒收；合法写入', async
       version: '0.1.3',
       error: 'Cancelled',
     }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json,
   );
   assert.equal(cancelled.status, 400);
 
   const noVer = await handlePostExtensionAnalysisFail(
     postReq({ extension: 'info-highlight', outcome: 'failed', error: 'x' }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json,
   );
   assert.equal(noVer.status, 400);
 
   const noErr = await handlePostExtensionAnalysisFail(
     postReq({ extension: 'info-highlight', outcome: 'failed', version: '0.1.3' }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json,
   );
   assert.equal(noErr.status, 400);
@@ -174,22 +176,24 @@ test('handlePostExtensionAnalysisFail: 非法字段拒收；合法写入', async
       segments: 4,
       duration_ms: 900,
       error: 'HTTP 500: expected application/json, got text/html',
+      client_id: 'cid-fail',
     }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json,
   );
   assert.equal(ok.status, 200);
   assert.equal(ok.body.stored, true);
-  const keys = Object.keys(STATE.data);
-  assert.equal(keys.length, 1);
-  assert.ok(keys[0].startsWith(ANALYSIS_FAIL_KEY_PREFIX));
-  const rec = JSON.parse(STATE.data[keys[0]]);
+  assert.equal(Object.keys(STATE.data).length, 0);
+  const recs = r2Records(REPORT_LOGS);
+  assert.equal(recs.length, 1);
+  const rec = recs[0].record;
   assert.equal(rec.outcome, 'failed');
   assert.equal(rec.engine, 'cloud');
   assert.equal(rec.segments, 4);
   assert.equal(rec.duration_ms, 900);
   assert.equal(rec.error, 'HTTP 500: expected application/json, got text/html');
-  assert.equal('page_url' in rec, false);
+  assert.equal(rec.client_id, 'cid-fail');
+  assert.equal(rec.route, '/api/extension-analysis-fail');
 });
 
 test('handleListExtensionAnalysisFail: 列表与单 key；无 token 拒绝', async () => {
@@ -234,8 +238,10 @@ test('handleListExtensionAnalysisFail: 列表与单 key；无 token 拒绝', asy
   assert.equal(one.body.record.outcome, 'failed');
 });
 
-test('worker 路由：POST 写入 KV 并 redact URL；admin GET 需 token', async () => {
+test('worker 路由：POST 写入 R2 原文；admin GET 只读历史 KV', async () => {
+  const REPORT_LOGS = mockR2();
   const STATE = mockState();
+  const ctx = mockCtx();
   const posted = await worker.fetch(
     new Request('https://example.test/api/extension-analysis-fail', {
       method: 'POST',
@@ -247,16 +253,20 @@ test('worker 路由：POST 写入 KV 并 redact URL；admin GET 需 token', asyn
         engine: 'local',
         segments: 2,
         error: 'Cannot reach https://api.info-lens.app',
+        client_id: 'cid-w',
       }),
     }),
-    { STATE },
+    { REPORT_LOGS, STATE },
+    ctx,
   );
+  await ctx.flush();
   assert.equal(posted.status, 200);
   const postedBody = await posted.json();
   assert.equal(postedBody.stored, true);
-  const stored = JSON.parse(Object.values(STATE.data)[0]);
-  assert.equal(stored.error, 'Cannot reach [url]');
-  assert.equal('page_url' in stored, false);
+  assert.equal(Object.keys(STATE.data).length, 0);
+  const stored = r2Records(REPORT_LOGS)[0].record;
+  assert.equal(stored.error, 'Cannot reach https://api.info-lens.app');
+  assert.equal(stored.client_id, 'cid-w');
 
   const denied = await worker.fetch(
     new Request('https://example.test/facade-extension-analysis-fail'),
@@ -264,6 +274,20 @@ test('worker 路由：POST 写入 KV 并 redact URL；admin GET 需 token', asyn
   );
   assert.equal(denied.status, 403);
 
+  const emptyList = await worker.fetch(
+    new Request('https://example.test/facade-extension-analysis-fail?limit=5', {
+      headers: { 'X-Admin-Token': 'secret' },
+    }),
+    { STATE, ADMIN_TOKEN: 'secret' },
+  );
+  assert.equal(emptyList.status, 200);
+  assert.equal((await emptyList.json()).count, 0);
+
+  const histKey = analysisFailKey('hist0001', 3_000_000);
+  STATE.data[histKey] = JSON.stringify({
+    error: 'Cannot reach [url]',
+    outcome: 'failed',
+  });
   const okList = await worker.fetch(
     new Request('https://example.test/facade-extension-analysis-fail?limit=5', {
       headers: { 'X-Admin-Token': 'secret' },
@@ -393,7 +417,8 @@ test('buildAnalysisFailRecord: 收下 detail；忽略页面字段', () => {
   assert.equal('detail' in noDetail, false);
 });
 
-test('handlePostExtensionAnalysisFail: 写入 detail；admin GET 原样返回', async () => {
+test('handlePostExtensionAnalysisFail: 写入 R2 原文 detail；admin GET 不读新事件', async () => {
+  const REPORT_LOGS = mockR2();
   const STATE = mockState();
   const ok = await handlePostExtensionAnalysisFail(
     postReq({
@@ -415,14 +440,15 @@ test('handlePostExtensionAnalysisFail: 写入 detail；admin GET 原样返回', 
         page_text: 'secret',
       },
     }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json,
   );
   assert.equal(ok.status, 200);
-  const rec = JSON.parse(Object.values(STATE.data)[0]);
+  const rec = r2Records(REPORT_LOGS)[0].record;
   assert.equal(rec.detail.tokens_skip_empty_range, 8);
   assert.equal(rec.detail.highlights_ok, true);
-  assert.equal('page_text' in rec.detail, false);
+  assert.equal(rec.detail.page_text, 'secret');
+  assert.equal(Object.keys(STATE.data).length, 0);
 
   const list = await handleListExtensionAnalysisFail(
     new Request('https://example.test/facade-extension-analysis-fail?limit=10'),
@@ -431,6 +457,5 @@ test('handlePostExtensionAnalysisFail: 写入 detail；admin GET 原样返回', 
     () => null,
   );
   assert.equal(list.status, 200);
-  assert.equal(list.body.items[0].record.detail.tokens_in, 8);
-  assert.equal(list.body.items[0].record.detail.painted, 0);
+  assert.equal(list.body.count, 0);
 });

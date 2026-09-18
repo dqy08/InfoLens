@@ -12,12 +12,10 @@
  *   - /api/v2/analyze-semantic-keywords → Hy3（新扩展）
  *   - GET /api/v2/analyze-semantic-version → 相关度 / keywords 缓存 epoch（扩展打开栏时问；不打上游）
  * - /api/client-id → 产品级匿名 client_id（Cookie il_aid，Domain=.info-lens.app）；两插件与官网共用
- * - /api/extension-events → STATE KV（流水：install / update / uninstall + extension）；读：GET /facade-extension-events
- * - /api/extension-feedback → STATE KV（技术诊断与崩溃报告）；读：GET /facade-extension-feedback
- * - /api/extension-local-init → STATE KV（阶段性：Info Highlight 本地权重初始化结果）；读：GET /facade-extension-local-init
- * - /api/extension-analysis-fail → STATE KV（阶段性调试：Info Highlight 分析失败原因，不含用量计数）；读：GET /facade-extension-analysis-fail
- * - /api/extension-local-engine → STATE KV（阶段性调试：本机引擎分析结束后仍占 offscreen）；读：GET /facade-extension-local-engine
- * - /api/extension-uninstall-survey → STATE KV（卸载问卷调查 + extension）；读：GET /facade-extension-uninstall-survey
+ * - 扩展流水 POST → REPORT_LOGS R2（一事件一对象），不写 STATE KV：
+ *   - /api/extension-usage → tee R2 后仍走下方 HF/Home 代理（HF extension_usage 语义不变）
+ *   - /api/extension-events / feedback / local-init / analysis-fail / local-engine / uninstall-survey
+ * - 上列对应 GET /facade-extension-* → 仍读历史 STATE KV；新事件在 R2（无查询 UI）
  * - keywords 双轨（扩展审核慢于 Worker，过渡期内并存）：
  *   - 旧扩展：/api/analyze-semantic-keywords → 仍 HF/Home 梯度归因（COMPUTE_PATHS，勿接到 v2）
  *   旧扩展升级完后再决定退役旧路径，或把旧入口接到 v2；当前不切
@@ -76,6 +74,7 @@ import {
   handleListUninstallSurveys,
 } from './extension_uninstall_survey.js';
 import { CLIENT_ID_PATH, handleClientId } from './client_id.js';
+import { USAGE_PATH, persistAcceptedReport } from './report_log.js';
 const HOP_BY_HOP = new Set([
   'connection',
   'keep-alive',
@@ -410,7 +409,7 @@ function buildUpstreamHeaders(req) {
   return out;
 }
 
-async function handleRequest(request, env) {
+async function handleRequest(request, env, ctx) {
   const url = new URL(request.url);
 
   if (request.method === 'OPTIONS') {
@@ -453,27 +452,43 @@ async function handleRequest(request, env) {
     return json(request, { ok: false, error: 'not_found' }, 404);
   }
 
-  // 扩展打点、反馈、本地初始化、分析失败/本机引擎残留调试、卸载问卷：边缘写 KV，不碰 HF/Home
+  let bodyBuf = null;
+
+  // usage：显式分支 tee 原 JSON 到 R2（含 client_id），再走既有 HF/Home 代理。不写 STATE KV。
+  if (path === USAGE_PATH && request.method === 'POST') {
+    bodyBuf = await request.arrayBuffer();
+    let parsed;
+    try {
+      parsed = JSON.parse(new TextDecoder().decode(bodyBuf));
+    } catch {
+      parsed = undefined;
+    }
+    if (parsed !== undefined) {
+      await persistAcceptedReport(ctx, env, { route: path, body: parsed });
+    }
+  }
+
+  // 扩展打点：校验后只写 R2；usage 已在上方 tee，此处继续落到代理。
   if (path === CLIENT_ID_PATH) {
     return handleClientId(request);
   }
   if (path === EVENTS_PATH) {
-    return handlePostExtensionEvents(request, env, json);
+    return handlePostExtensionEvents(request, env, json, ctx);
   }
   if (path === FEEDBACK_PATH) {
-    return handlePostExtensionFeedback(request, env, json);
+    return handlePostExtensionFeedback(request, env, json, ctx);
   }
   if (path === LOCAL_INIT_PATH) {
-    return handlePostExtensionLocalInit(request, env, json);
+    return handlePostExtensionLocalInit(request, env, json, ctx);
   }
   if (path === ANALYSIS_FAIL_PATH) {
-    return handlePostExtensionAnalysisFail(request, env, json);
+    return handlePostExtensionAnalysisFail(request, env, json, ctx);
   }
   if (path === LOCAL_ENGINE_PATH) {
-    return handlePostExtensionLocalEngine(request, env, json);
+    return handlePostExtensionLocalEngine(request, env, json, ctx);
   }
   if (path === UNINSTALL_SURVEY_PATH) {
-    return handlePostUninstallSurvey(request, env, json);
+    return handlePostUninstallSurvey(request, env, json, ctx);
   }
 
   if (path === '/api/v2/analyze-semantic-version') {
@@ -536,8 +551,7 @@ async function handleRequest(request, env) {
     );
   }
 
-  let bodyBuf = null;
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
+  if (bodyBuf === null && request.method !== 'GET' && request.method !== 'HEAD') {
     bodyBuf = await request.arrayBuffer();
   }
   const makeInit = () => {
@@ -599,9 +613,9 @@ async function handleRequest(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
-      return await handleRequest(request, env);
+      return await handleRequest(request, env, ctx);
     } catch (err) {
       const msg = err && err.message ? String(err.message) : String(err);
       return json(request, { ok: false, error: msg || 'worker error' }, 503);

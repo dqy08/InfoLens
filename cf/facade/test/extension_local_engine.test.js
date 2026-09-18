@@ -8,6 +8,7 @@ import {
   handlePostExtensionLocalEngine,
   handleListExtensionLocalEngine,
 } from '../src/extension_local_engine.js';
+import { mockR2, mockCtx, r2Records } from './mock_r2.js';
 
 function mockState(init = {}) {
   const data = { ...init };
@@ -83,11 +84,12 @@ test('buildLocalEngineRecord: 只收布尔 loaded 与白名单 blocked', () => {
   assert.equal(skipped.blocked, null);
 });
 
-test('handlePostExtensionLocalEngine: 非法拒收；合法写入', async () => {
+test('handlePostExtensionLocalEngine: 非法拒收；合法写入 R2', async () => {
+  const REPORT_LOGS = mockR2();
   const STATE = mockState();
   const bad = await handlePostExtensionLocalEngine(
     postReq({ extension: 'semantic-highlight', event: 'unload_linger', version: '0.1.5' }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json,
   );
   assert.equal(bad.status, 400);
@@ -101,18 +103,20 @@ test('handlePostExtensionLocalEngine: 非法拒收；合法写入', async () => 
       wait_ms: 10_000,
       blocked: 'inflight',
       js_heap_bytes: 800_000_000,
+      client_id: 'cid-eng',
     }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json,
   );
   assert.equal(ok.status, 200);
   assert.equal(ok.body.stored, true);
-  const keys = Object.keys(STATE.data);
-  assert.equal(keys.length, 1);
-  assert.ok(keys[0].startsWith(LOCAL_ENGINE_KEY_PREFIX));
-  const rec = JSON.parse(STATE.data[keys[0]]);
+  assert.equal(STATE.puts.length, 0);
+  const recs = r2Records(REPORT_LOGS);
+  assert.equal(recs.length, 1);
+  const rec = recs[0].record;
   assert.equal(rec.loaded, true);
   assert.equal(rec.blocked, 'inflight');
+  assert.equal(rec.client_id, 'cid-eng');
 });
 
 test('handleListExtensionLocalEngine: 列表与单 key', async () => {
@@ -148,8 +152,10 @@ test('handleListExtensionLocalEngine: 列表与单 key', async () => {
   assert.equal(one.body.record.event, 'unload_linger');
 });
 
-test('worker 路由：POST 写入 KV；admin GET 需 token', async () => {
+test('worker 路由：POST 写入 R2；admin GET 需 token 且只读历史 KV', async () => {
+  const REPORT_LOGS = mockR2();
   const STATE = mockState();
+  const ctx = mockCtx();
   const posted = await worker.fetch(
     new Request('https://example.test/api/extension-local-engine', {
       method: 'POST',
@@ -163,11 +169,15 @@ test('worker 路由：POST 写入 KV；admin GET 需 token', async () => {
         blocked: 'offer',
       }),
     }),
-    { STATE },
+    { REPORT_LOGS, STATE },
+    ctx,
   );
+  await ctx.flush();
   assert.equal(posted.status, 200);
   const postedBody = await posted.json();
   assert.equal(postedBody.stored, true);
+  assert.equal(STATE.puts.length, 0);
+  assert.equal(r2Records(REPORT_LOGS)[0].record.blocked, 'offer');
 
   const denied = await worker.fetch(
     new Request('https://example.test/facade-extension-local-engine'),
@@ -175,6 +185,20 @@ test('worker 路由：POST 写入 KV；admin GET 需 token', async () => {
   );
   assert.equal(denied.status, 403);
 
+  const emptyList = await worker.fetch(
+    new Request('https://example.test/facade-extension-local-engine?limit=5', {
+      headers: { 'X-Admin-Token': 'secret' },
+    }),
+    { STATE, ADMIN_TOKEN: 'secret' },
+  );
+  assert.equal(emptyList.status, 200);
+  assert.equal((await emptyList.json()).count, 0);
+
+  const histKey = localEngineKey('histeng1', 3_000_000);
+  STATE.data[histKey] = JSON.stringify({
+    event: 'unload_linger',
+    blocked: 'offer',
+  });
   const okList = await worker.fetch(
     new Request('https://example.test/facade-extension-local-engine?limit=5', {
       headers: { 'X-Admin-Token': 'secret' },

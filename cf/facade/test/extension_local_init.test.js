@@ -7,6 +7,7 @@ import {
   handlePostExtensionLocalInit,
   handleListExtensionLocalInit,
 } from '../src/extension_local_init.js';
+import { mockR2, r2Records } from './mock_r2.js';
 
 function mockState(init = {}) {
   const data = { ...init };
@@ -77,18 +78,19 @@ test('buildLocalInitRecord: 裁剪字段；ok 时不带 error', () => {
   assert.equal(fail.error, 'WebGPU is unavailable');
 });
 
-test('handlePostExtensionLocalInit: 非法字段拒收；合法写入', async () => {
+test('handlePostExtensionLocalInit: 非法字段拒收；合法写入 R2', async () => {
+  const REPORT_LOGS = mockR2();
   const STATE = mockState();
   const bad = await handlePostExtensionLocalInit(
     postReq({ extension: 'semantic-highlight', outcome: 'ok', version: '0.1.1' }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json,
   );
   assert.equal(bad.status, 400);
 
   const noVer = await handlePostExtensionLocalInit(
     postReq({ extension: 'info-highlight', outcome: 'ok' }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json,
   );
   assert.equal(noVer.status, 400);
@@ -101,19 +103,22 @@ test('handlePostExtensionLocalInit: 非法字段拒收；合法写入', async ()
       duration_ms: 900,
       hub: 'modelscope',
       error: 'local model init failed',
+      client_id: 'cid-init',
     }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json,
   );
   assert.equal(ok.status, 200);
   assert.equal(ok.body.stored, true);
-  const keys = Object.keys(STATE.data);
-  assert.equal(keys.length, 1);
-  assert.ok(keys[0].startsWith(LOCAL_INIT_KEY_PREFIX));
-  const rec = JSON.parse(STATE.data[keys[0]]);
+  assert.equal(Object.keys(STATE.data).length, 0);
+  const recs = r2Records(REPORT_LOGS);
+  assert.equal(recs.length, 1);
+  assert.match(recs[0].key, /\/api-extension-local-init\//);
+  const rec = recs[0].record;
   assert.equal(rec.outcome, 'failed');
   assert.equal(rec.hub, 'modelscope');
   assert.equal(rec.duration_ms, 900);
+  assert.equal(rec.client_id, 'cid-init');
 });
 
 test('handleListExtensionLocalInit: 列表与单 key', async () => {

@@ -4,15 +4,15 @@
  * 正式用量计数仍走 POST /api/extension-usage（只有计数，不加 message/error 字段）。
  * 本通道只收低频失败详情，方便看失败原因分布；不要当长期日志用。
  *
- * 隐私：
- * - 不存 page_url / page_text / 页面正文等专用字段。
- * - error / detail.last_align_err 里的明显 URL（含 http(s)/file/data/blob/chrome-extension 等）一律打成 [url]。
- * - detail 只收画 token 时的计数/布尔/短字符串（allowlist）；未知大字段丢弃。
+ * 校验仍用裁剪后的 record（不把 page_url/page_text 当必填；error 去 URL）。
+ * POST 落 R2 的是请求 JSON 原文（含 client_id）；不再写 STATE KV。
  *
- * POST /api/extension-analysis-fail（公开）；GET /facade-extension-analysis-fail（ADMIN_TOKEN）。
+ * POST /api/extension-analysis-fail（公开）→ REPORT_LOGS R2，不写 STATE KV。
+ * GET /facade-extension-analysis-fail（ADMIN_TOKEN）仍读历史 KV；新事件在 R2（无查询 UI）。
  */
 
 import { clipStr, utcSavedAt } from './extension_feedback.js';
+import { persistAcceptedReport } from './report_log.js';
 
 export const ANALYSIS_FAIL_PATH = '/api/extension-analysis-fail';
 export const ANALYSIS_FAIL_ADMIN_PATH = '/facade-extension-analysis-fail';
@@ -141,27 +141,15 @@ export function buildAnalysisFailRecord(body) {
   return rec;
 }
 
-function newId8() {
-  return (
-    typeof globalThis.crypto?.randomUUID === 'function'
-      ? globalThis.crypto.randomUUID()
-      : Math.random().toString(36).slice(2, 10)
-  )
-    .replace(/-/g, '')
-    .slice(0, 8);
-}
-
 /**
  * @param {Request} request
- * @param {{ STATE?: KVNamespace }} env
+ * @param {{ REPORT_LOGS?: R2Bucket }} env
  * @param {(req: Request, body: unknown, status?: number) => Response} json
+ * @param {ExecutionContext} [ctx]
  */
-export async function handlePostExtensionAnalysisFail(request, env, json) {
+export async function handlePostExtensionAnalysisFail(request, env, json, ctx) {
   if (request.method !== 'POST') {
     return json(request, { success: false, message: 'method not allowed' }, 405);
-  }
-  if (!env.STATE) {
-    return json(request, { success: false, message: 'STATE KV is not configured' }, 503);
   }
 
   let body;
@@ -181,19 +169,12 @@ export async function handlePostExtensionAnalysisFail(request, env, json) {
     return json(request, { success: false, message: 'invalid extension, outcome, version, or error' }, 400);
   }
 
-  const key = analysisFailKey(newId8());
-  try {
-    await env.STATE.put(key, JSON.stringify(record));
-  } catch (err) {
-    const msg = err && err.message ? String(err.message) : String(err);
-    console.error('[extension analysis-fail] KV put failed:', msg);
-    return json(request, { success: true, stored: false, path: key });
-  }
-
-  return json(request, { success: true, stored: true, path: key });
+  const result = await persistAcceptedReport(ctx, env, { route: ANALYSIS_FAIL_PATH, body });
+  return json(request, result);
 }
 
 /**
+ * 历史 STATE KV 流水。新事件在 REPORT_LOGS R2，本接口不查桶。
  * @param {Request} request
  * @param {{ STATE?: KVNamespace }} env
  * @param {(req: Request, body: unknown, status?: number) => Response} json

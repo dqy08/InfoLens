@@ -1,7 +1,10 @@
 /**
- * 扩展单向错误/崩溃排查日志：边缘写 STATE KV。
- * POST /api/extension-feedback（公开）；GET /facade-extension-feedback（ADMIN_TOKEN）。
+ * 扩展单向错误/崩溃排查日志。
+ * POST /api/extension-feedback（公开）→ REPORT_LOGS R2，不写 STATE KV。
+ * GET /facade-extension-feedback（ADMIN_TOKEN）仍读历史 KV；新事件在 R2（无查询 UI）。
  */
+
+import { persistAcceptedReport } from './report_log.js';
 
 export const FEEDBACK_PATH = '/api/extension-feedback';
 export const FEEDBACK_ADMIN_PATH = '/facade-extension-feedback';
@@ -75,15 +78,13 @@ export function buildFeedbackRecord(body) {
 
 /**
  * @param {Request} request
- * @param {{ STATE?: KVNamespace }} env
+ * @param {{ REPORT_LOGS?: R2Bucket }} env
  * @param {(req: Request, body: unknown, status?: number) => Response} json
+ * @param {ExecutionContext} [ctx]
  */
-export async function handlePostExtensionFeedback(request, env, json) {
+export async function handlePostExtensionFeedback(request, env, json, ctx) {
   if (request.method !== 'POST') {
     return json(request, { success: false, message: 'method not allowed' }, 405);
-  }
-  if (!env.STATE) {
-    return json(request, { success: false, message: 'STATE KV is not configured' }, 503);
   }
 
   let body;
@@ -99,27 +100,13 @@ export async function handlePostExtensionFeedback(request, env, json) {
   if (empty) {
     return json(request, { success: true, stored: false });
   }
-  const id8 = (
-    typeof globalThis.crypto?.randomUUID === 'function'
-      ? globalThis.crypto.randomUUID()
-      : Math.random().toString(36).slice(2, 10)
-  )
-    .replace(/-/g, '')
-    .slice(0, 8);
-  const key = feedbackKey(id8);
 
-  try {
-    await env.STATE.put(key, JSON.stringify(record));
-  } catch (err) {
-    const msg = err && err.message ? String(err.message) : String(err);
-    console.error('[extension feedback] KV put failed:', msg);
-    return json(request, { success: true, stored: false, path: key });
-  }
-
-  return json(request, { success: true, stored: true, path: key });
+  const result = await persistAcceptedReport(ctx, env, { route: FEEDBACK_PATH, body });
+  return json(request, result);
 }
 
 /**
+ * 历史 STATE KV 流水。新事件在 REPORT_LOGS R2，本接口不查桶。
  * @param {Request} request
  * @param {{ STATE?: KVNamespace }} env
  * @param {(req: Request, body: unknown, status?: number) => Response} json

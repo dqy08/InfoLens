@@ -9,6 +9,7 @@ import {
   handlePostExtensionFeedback,
   handleListExtensionFeedback,
 } from '../src/extension_feedback.js';
+import { mockR2, r2Records } from './mock_r2.js';
 
 function mockState(init = {}) {
   const data = { ...init };
@@ -83,18 +84,22 @@ test('feedbackKey: 更新的 ms 字典序更靠前', () => {
 });
 
 test('handlePostExtensionFeedback: 空反馈不入库', async () => {
-  const STATE = mockState();
-  const empty = await handlePostExtensionFeedback(postReq({}), { STATE }, json);
+  const REPORT_LOGS = mockR2();
+  const empty = await handlePostExtensionFeedback(postReq({}), { REPORT_LOGS }, json);
   assert.equal(empty.body.stored, false);
-  assert.equal(Object.keys(STATE.data).length, 0);
+  assert.equal(REPORT_LOGS.objects.size, 0);
 
   const ok = await handlePostExtensionFeedback(
-    postReq({ status: { tone: 'error', detail: 'boom' } }),
-    { STATE },
+    postReq({ status: { tone: 'error', detail: 'boom' }, client_id: 'cid-fb' }),
+    { REPORT_LOGS },
     json
   );
   assert.equal(ok.body.stored, true);
-  assert.equal(Object.keys(STATE.data).length, 1);
+  const recs = r2Records(REPORT_LOGS);
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].record.client_id, 'cid-fb');
+  assert.equal(recs[0].record.status.detail, 'boom');
+  assert.equal(recs[0].record.route, '/api/extension-feedback');
 });
 
 test('handleListExtensionFeedback: 支持 limit 与详情查询', async () => {
