@@ -26,5 +26,15 @@
       "binding": "STATE",
       "id": "5666f6dc489a443c8f22fdeda6507f57"
     }
+  ],
+  // 扩展流水只写 R2（usage/events/feedback/local-init/analysis-fail/local-engine/uninstall-survey）。
+  // STATE KV 只留 home allow / health 等配置，不当事件流水。
+  // 部署前必须已建桶：npx wrangler r2 bucket create infolens-report-logs
+  // Binding 名 REPORT_LOGS 须与 src/report_log.js 一致；缺 binding 时上报 no-op。
+  "r2_buckets": [
+    {
+      "binding": "REPORT_LOGS",
+      "bucket_name": "infolens-report-logs"
+    }
   ]
 }

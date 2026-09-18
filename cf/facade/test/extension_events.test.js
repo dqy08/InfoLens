@@ -7,6 +7,7 @@ import {
   handlePostExtensionEvents,
   handleListExtensionEvents,
 } from '../src/extension_events.js';
+import { mockR2, r2Records } from './mock_r2.js';
 
 function mockState(init = {}) {
   const data = { ...init };
@@ -77,52 +78,51 @@ test('buildEventRecord: update 才带 previous_version；缺 extension 默认 se
 });
 
 test('handlePostExtensionEvents: 非法 event / 缺 version / 非法 extension 拒收', async () => {
-  const STATE = mockState();
-  const badEvent = await handlePostExtensionEvents(postReq({ event: 'other', version: '0.6.5' }), { STATE }, json);
+  const REPORT_LOGS = mockR2();
+  const badEvent = await handlePostExtensionEvents(postReq({ event: 'other', version: '0.6.5' }), { REPORT_LOGS }, json);
   assert.equal(badEvent.status, 400);
-  const noVer = await handlePostExtensionEvents(postReq({ event: 'install' }), { STATE }, json);
+  const noVer = await handlePostExtensionEvents(postReq({ event: 'install' }), { REPORT_LOGS }, json);
   assert.equal(noVer.status, 400);
   const badExt = await handlePostExtensionEvents(
     postReq({ event: 'install', version: '0.1.0', extension: 'other' }),
-    { STATE },
+    { REPORT_LOGS },
     json
   );
   assert.equal(badExt.status, 400);
-  assert.equal(Object.keys(STATE.data).length, 0);
+  assert.equal(REPORT_LOGS.objects.size, 0);
 });
 
-test('handlePostExtensionEvents: 每条事件单独落盘；可带 extension', async () => {
+test('handlePostExtensionEvents: 每条事件单独落 R2；可带 extension；不写 STATE', async () => {
+  const REPORT_LOGS = mockR2();
   const STATE = mockState();
   const inst = await handlePostExtensionEvents(
     postReq({ event: 'install', version: '0.6.5' }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json
   );
   const upd = await handlePostExtensionEvents(
     postReq({ event: 'update', version: '0.6.6', previous_version: '0.6.5', extension: 'semantic-highlight' }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json
   );
   const visit = await handlePostExtensionEvents(
     postReq({ event: 'uninstall', version: '0.1.0', extension: 'info-highlight' }),
-    { STATE },
+    { REPORT_LOGS, STATE },
     json
   );
   assert.equal(inst.body.stored, true);
   assert.equal(upd.body.stored, true);
   assert.equal(visit.body.stored, true);
-  const keys = Object.keys(STATE.data);
-  assert.equal(keys.length, 3);
-  assert.equal(keys.filter((k) => k.includes(':install:')).length, 1);
-  assert.equal(keys.filter((k) => k.includes(':update:')).length, 1);
-  assert.equal(keys.filter((k) => k.includes(':uninstall:')).length, 1);
-  const records = Object.values(STATE.data).map((raw) => JSON.parse(raw));
-  assert.equal(records.filter((r) => r.event === 'install').length, 1);
-  const installRec = records.find((r) => r.event === 'install');
-  assert.equal(installRec.extension, 'semantic-highlight');
-  const updateRec = records.find((r) => r.event === 'update');
+  const recs = r2Records(REPORT_LOGS);
+  assert.equal(recs.length, 3);
+  assert.equal(Object.keys(STATE.data).length, 0);
+  assert.equal(recs.filter((r) => r.record.event === 'install').length, 1);
+  const installRec = recs.find((r) => r.record.event === 'install').record;
+  assert.equal(installRec.extension, undefined);
+  assert.equal(installRec.route, '/api/extension-events');
+  const updateRec = recs.find((r) => r.record.event === 'update').record;
   assert.equal(updateRec.previous_version, '0.6.5');
-  const uninstallRec = records.find((r) => r.event === 'uninstall');
+  const uninstallRec = recs.find((r) => r.record.event === 'uninstall').record;
   assert.equal(uninstallRec.extension, 'info-highlight');
 });
 

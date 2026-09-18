@@ -1,12 +1,14 @@
 /**
  * 扩展卸载问卷调查（流失分析）。
- * POST /api/extension-uninstall-survey（公开）；GET /facade-extension-uninstall-survey（ADMIN_TOKEN）。
+ * POST /api/extension-uninstall-survey（公开）→ REPORT_LOGS R2，不写 STATE KV。
+ * GET /facade-extension-uninstall-survey（ADMIN_TOKEN）仍读历史 KV；新事件在 R2（无查询 UI）。
  * body.extension：与 extension_events 同约定；缺省 semantic-highlight。
  */
 
 import { clipStr, utcSavedAt } from './extension_feedback.js';
 import { normalizeExtension } from './extension_events.js';
 import { normalizeClientId } from './client_id.js';
+import { persistAcceptedReport } from './report_log.js';
 
 export const UNINSTALL_SURVEY_PATH = '/api/extension-uninstall-survey';
 export const UNINSTALL_SURVEY_ADMIN_PATH = '/facade-extension-uninstall-survey';
@@ -59,15 +61,13 @@ export function buildUninstallSurveyRecord(body) {
 
 /**
  * @param {Request} request
- * @param {{ STATE?: KVNamespace }} env
+ * @param {{ REPORT_LOGS?: R2Bucket }} env
  * @param {(req: Request, body: unknown, status?: number) => Response} json
+ * @param {ExecutionContext} [ctx]
  */
-export async function handlePostUninstallSurvey(request, env, json) {
+export async function handlePostUninstallSurvey(request, env, json, ctx) {
   if (request.method !== 'POST') {
     return json(request, { success: false, message: 'method not allowed' }, 405);
-  }
-  if (!env.STATE) {
-    return json(request, { success: false, message: 'STATE KV is not configured' }, 503);
   }
 
   let body;
@@ -85,27 +85,12 @@ export async function handlePostUninstallSurvey(request, env, json) {
     return json(request, { success: true, stored: false });
   }
 
-  const id8 = (
-    typeof globalThis.crypto?.randomUUID === 'function'
-      ? globalThis.crypto.randomUUID()
-      : Math.random().toString(36).slice(2, 10)
-  )
-    .replace(/-/g, '')
-    .slice(0, 8);
-  const key = uninstallSurveyKey(id8);
-
-  try {
-    await env.STATE.put(key, JSON.stringify(record));
-  } catch (err) {
-    const msg = err && err.message ? String(err.message) : String(err);
-    console.error('[uninstall survey] KV put failed:', msg);
-    return json(request, { success: true, stored: false, path: key });
-  }
-
-  return json(request, { success: true, stored: true, path: key });
+  const result = await persistAcceptedReport(ctx, env, { route: UNINSTALL_SURVEY_PATH, body });
+  return json(request, result);
 }
 
 /**
+ * 历史 STATE KV 流水。新事件在 REPORT_LOGS R2，本接口不查桶。
  * @param {Request} request
  * @param {{ STATE?: KVNamespace }} env
  * @param {(req: Request, body: unknown, status?: number) => Response} json

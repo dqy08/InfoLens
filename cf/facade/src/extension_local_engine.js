@@ -1,9 +1,11 @@
 /**
  * 阶段性调试：Info Highlight 本机引擎在分析结束后仍占着 offscreen（可整段删除）。
- * POST /api/extension-local-engine（公开）；GET /facade-extension-local-engine（ADMIN_TOKEN）。
+ * POST /api/extension-local-engine（公开）→ REPORT_LOGS R2，不写 STATE KV。
+ * GET /facade-extension-local-engine（ADMIN_TOKEN）仍读历史 KV；新事件在 R2（无查询 UI）。
  */
 
 import { clipStr, utcSavedAt } from './extension_feedback.js';
+import { persistAcceptedReport } from './report_log.js';
 
 export const LOCAL_ENGINE_PATH = '/api/extension-local-engine';
 export const LOCAL_ENGINE_ADMIN_PATH = '/facade-extension-local-engine';
@@ -43,27 +45,15 @@ export function buildLocalEngineRecord(body) {
   };
 }
 
-function newId8() {
-  return (
-    typeof globalThis.crypto?.randomUUID === 'function'
-      ? globalThis.crypto.randomUUID()
-      : Math.random().toString(36).slice(2, 10)
-  )
-    .replace(/-/g, '')
-    .slice(0, 8);
-}
-
 /**
  * @param {Request} request
- * @param {{ STATE?: KVNamespace }} env
+ * @param {{ REPORT_LOGS?: R2Bucket }} env
  * @param {(req: Request, body: unknown, status?: number) => Response} json
+ * @param {ExecutionContext} [ctx]
  */
-export async function handlePostExtensionLocalEngine(request, env, json) {
+export async function handlePostExtensionLocalEngine(request, env, json, ctx) {
   if (request.method !== 'POST') {
     return json(request, { success: false, message: 'method not allowed' }, 405);
-  }
-  if (!env.STATE) {
-    return json(request, { success: false, message: 'STATE KV is not configured' }, 503);
   }
 
   let body;
@@ -78,19 +68,12 @@ export async function handlePostExtensionLocalEngine(request, env, json) {
     return json(request, { success: false, message: 'invalid extension, event, or version' }, 400);
   }
 
-  const key = localEngineKey(newId8());
-  try {
-    await env.STATE.put(key, JSON.stringify(record));
-  } catch (err) {
-    const msg = err && err.message ? String(err.message) : String(err);
-    console.error('[extension local-engine] KV put failed:', msg);
-    return json(request, { success: true, stored: false, path: key });
-  }
-
-  return json(request, { success: true, stored: true, path: key });
+  const result = await persistAcceptedReport(ctx, env, { route: LOCAL_ENGINE_PATH, body });
+  return json(request, result);
 }
 
 /**
+ * 历史 STATE KV 流水。新事件在 REPORT_LOGS R2，本接口不查桶。
  * @param {Request} request
  * @param {{ STATE?: KVNamespace }} env
  * @param {(req: Request, body: unknown, status?: number) => Response} json

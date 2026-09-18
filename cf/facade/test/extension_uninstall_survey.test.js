@@ -7,6 +7,7 @@ import {
   handlePostUninstallSurvey,
   handleListUninstallSurveys,
 } from '../src/extension_uninstall_survey.js';
+import { mockR2, r2Records } from './mock_r2.js';
 
 function mockState(init = {}) {
   const data = { ...init };
@@ -70,22 +71,25 @@ test('uninstallSurveyKey: 倒序排序前缀正确', () => {
 });
 
 test('handlePostUninstallSurvey: 空内容不入库', async () => {
-  const STATE = mockState();
+  const REPORT_LOGS = mockR2();
   const empty = await handlePostUninstallSurvey(
     postReq({ reasons: [], comment: '  ' }),
-    { STATE },
+    { REPORT_LOGS },
     json
   );
   assert.equal(empty.body.stored, false);
-  assert.equal(Object.keys(STATE.data).length, 0);
+  assert.equal(REPORT_LOGS.objects.size, 0);
 
   const filled = await handlePostUninstallSurvey(
-    postReq({ reasons: ['slow_or_fail'], comment: 'failed on arxiv' }),
-    { STATE },
+    postReq({ reasons: ['slow_or_fail'], comment: 'failed on arxiv', client_id: 'cid-sv' }),
+    { REPORT_LOGS },
     json
   );
   assert.equal(filled.body.stored, true);
-  assert.equal(Object.keys(STATE.data).length, 1);
+  const recs = r2Records(REPORT_LOGS);
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].record.client_id, 'cid-sv');
+  assert.deepEqual(recs[0].record.reasons, ['slow_or_fail']);
 });
 
 test('handleListUninstallSurveys: 读取列表与详情', async () => {
