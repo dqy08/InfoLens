@@ -127,7 +127,10 @@ async function activateTab(tab, opts = {}) {
       return;
     }
 
-    const okTab = await IL_injectWithRetry(tab.id, { css: CONTENT_CSS, js: CONTENT_JS }, { logLabel: 'InfoLens' });
+    const okTab = await IL_injectWithRetry(tab.id, { css: CONTENT_CSS, js: CONTENT_JS }, {
+      logLabel: 'InfoLens',
+      waitComplete: false,
+    });
     console.info('[InfoLens] injected into', okTab.url);
     if (query) await openIfInjected(tab.id, query);
     clearBadge(tab.id);

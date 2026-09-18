@@ -268,11 +268,12 @@ globalThis.IH_analyzeRun ||= (function () {
         await fail(err);
       }
     } finally {
-      // 取消/失败/成功都带墙钟；取消也要收尾：上报、清 busy、卸本地引擎
+      // 取消/失败/成功都带墙钟；取消也要收尾：上报、清 busy
       report.duration_ms = Math.max(0, Date.now() - t0);
       reportUsage(report);
       idle();
-      releaseLocalEngine();
+      // 仅本代仍有效时卸引擎；已换代（toggle/recheck）由取消方或新一轮负责，避免卸掉新跑
+      if (still()) releaseLocalEngine();
     }
   }
 

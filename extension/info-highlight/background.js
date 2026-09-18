@@ -142,7 +142,10 @@ async function activateTab(tab) {
       return;
     }
     IH_actionState.set(tab.id, 'analyzing');
-    const okTab = await IL_injectWithRetry(tab.id, { css: CONTENT_CSS, js: CONTENT_JS }, { logLabel: 'Info Highlight' });
+    const okTab = await IL_injectWithRetry(tab.id, { css: CONTENT_CSS, js: CONTENT_JS }, {
+      logLabel: 'Info Highlight',
+      waitComplete: false,
+    });
     console.info('[Info Highlight] injected into', okTab.url);
     clearBadge(tab.id);
   } catch (err) {
@@ -171,6 +174,8 @@ function autoMenuTitle(host, on) {
 const AUTO_BUSY_TIMEOUT_MS = 120000;
 /** tabId -> 已自动跑过的 url；跳过的不记，切回来还会再试 */
 const autoRan = new Map();
+/** tabId -> 导航代数；reset 时 +1，过期的自动分析不再改闸门 */
+const autoGenByTab = new Map();
 /** 同时只放一个自动分析，避免切标签时并发 */
 let autoBusy = null;
 
@@ -233,24 +238,28 @@ async function toggleAutoSite(info, tabId) {
 function resetAutoForTab(tabId) {
   autoRan.delete(tabId);
   autoBusyRelease(tabId);
+  autoGenByTab.set(tabId, (autoGenByTab.get(tabId) || 0) + 1);
   if (IH_actionState.get(tabId) !== 'off') IH_actionState.set(tabId, 'off');
 }
 
-/** 命中名单的前台标签页加载完即分析一次。PDF / file: 不进这条路。 */
+/** 命中名单的前台标签即可分析；不必等 complete（转圈时正文往往已在）。PDF / file: 不进。 */
 async function maybeAutoAnalyze(tabId) {
   const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (!tab?.active || tab.status !== 'complete') return;
+  if (!tab?.active) return;
   const url = tab.url || '';
   const host = IH_autoSites.hostOf(url);
   if (!host || IL_isRestrictedUrl(url) || IL_pdfSw.isPdfUrl(url)) return;
   if (autoRan.get(tabId) === url) return;
   if (!(await IH_autoSites.granted(host))) return;
+  const gen = autoGenByTab.get(tabId) || 0;
+  const stillCurrent = () => (autoGenByTab.get(tabId) || 0) === gen;
   if (!autoBusyTake(tabId)) return;
   autoRan.set(tabId, url);
   try {
     IH_actionState.set(tabId, 'analyzing');
     // start()：已在跑或已画好返回 noop，闸门马上放掉，避免空占着
     const started = await callPageApi(tabId, 'start');
+    if (!stillCurrent()) return;
     if (started === 'noop') {
       autoBusyRelease(tabId);
       IH_actionState.set(tabId, 'on');
@@ -258,13 +267,20 @@ async function maybeAutoAnalyze(tabId) {
       return;
     }
     if (!started) {
-      await IL_injectWithRetry(tabId, { css: CONTENT_CSS, js: CONTENT_JS }, { logLabel: 'Info Highlight auto' });
+      await IL_injectWithRetry(tabId, { css: CONTENT_CSS, js: CONTENT_JS }, {
+        logLabel: 'Info Highlight auto',
+        waitComplete: false,
+        isStale: () => !stillCurrent(),
+      });
     }
+    if (!stillCurrent()) return;
     clearBadge(tabId);
   } catch (err) {
+    if (!stillCurrent()) return;
     autoRan.delete(tabId);
     autoBusyRelease(tabId);
     IH_actionState.set(tabId, 'off');
+    if (String(err?.message || err).includes('navigation superseded')) return;
     console.error('[Info Highlight] auto inject failed', err);
     await setBadgeError(tabId, 'inject');
   }
@@ -282,14 +298,47 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   // 刷新/跳转：上一页的 analyzing 与闸门不能带到下一页
   if (changeInfo.status === 'loading' || changeInfo.url) resetAutoForTab(tabId);
-  if (changeInfo.status !== 'complete') return;
+  // loading 即可试跑（注入不等 complete）；complete / SPA 改 url 再兜一次
+  const tryAuto =
+    changeInfo.status === 'loading' ||
+    changeInfo.status === 'complete' ||
+    !!changeInfo.url;
+  if (!tryAuto) return;
   if (tab.active) void syncAutoMenu(tabId);
+  if (changeInfo.status === 'complete') {
+    // 先尽量启动；已在跑/已画完则在 complete 核对正文，变了就重跑
+    void (async () => {
+      await maybeAutoAnalyze(tabId);
+      await maybeRecheckContent(tabId);
+    })();
+    return;
+  }
   void maybeAutoAnalyze(tabId);
 });
+
+/** complete 时：页内已有分析则对比正文，变了清掉重跑（重复段走缓存）。 */
+async function maybeRecheckContent(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      func: () => {
+        const api = window.__IH_DEMO__;
+        if (!api || typeof api.recheck !== 'function') return null;
+        return api.recheck();
+      },
+    });
+    if (results?.[0]?.result === 'rerun') {
+      console.info('[Info Highlight] complete recheck: article text changed, re-analyzing');
+    }
+  } catch {
+    /* 未注入或无权 */
+  }
+}
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   IH_actionState.clear(tabId);
   autoRan.delete(tabId);
+  autoGenByTab.delete(tabId);
   autoBusyRelease(tabId);
 });
 

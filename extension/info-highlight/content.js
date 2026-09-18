@@ -53,8 +53,17 @@
         return globalThis.IH_showError(err?.message || err);
       },
       idle() {
+        // 已被更新一代取消时不要清 busy：recheck 可能已开跑下一轮
+        if (!still()) return;
         busy = false;
-        if (active && still()) R.reportActionState('on');
+        if (active) {
+          R.reportActionState('on');
+          // complete 时可能还在 busy/pending；本轮画完再核一次正文
+          Promise.resolve().then(() => {
+            if (myGen !== gen) return;
+            recheck();
+          });
+        }
       },
     }, async (report) => {
       if (!session) {
@@ -92,6 +101,31 @@
     return true;
   }
 
-  window.__IH_DEMO__ = { toggle, start };
+  /**
+   * 在 tabs.complete 时（SW）以及本轮分析收尾时调用：
+   * 正文相对本轮 session 变了则清掉重跑（缓存命中重复段）。
+   * @returns {false | 'same' | 'pending' | 'rerun'}
+   */
+  function recheck() {
+    if (!busy && !active) return false;
+    // 首轮还没抽出 session：让它用此刻 DOM 做完，避免无意义的连环重跑
+    if (!session) return 'pending';
+    let mapped;
+    try {
+      mapped = globalThis.IH_extractPage();
+    } catch {
+      return false;
+    }
+    const text = typeof mapped?.text === 'string' ? mapped.text : '';
+    if (!text || text === session.mapped.text) return 'same';
+    gen += 1;
+    busy = false;
+    clearAll();
+    R.releaseLocalEngine();
+    void runBatch(gen += 1);
+    return 'rerun';
+  }
+
+  window.__IH_DEMO__ = { toggle, start, recheck };
   toggle();
 })();
