@@ -27,12 +27,6 @@ globalThis.IH_analyzeRun ||= (function () {
     });
   }
 
-  function releaseLocalEngine() {
-    chrome.runtime.sendMessage({ type: 'ih-local-unload' }, () => {
-      void chrome.runtime.lastError;
-    });
-  }
-
   /** @param {'off' | 'analyzing' | 'on'} state */
   function reportActionState(state) {
     chrome.runtime.sendMessage({ type: 'ih-action-state', state }, () => {
@@ -169,7 +163,7 @@ globalThis.IH_analyzeRun ||= (function () {
     }
   }
 
-  /** 取下一段前让一帧：标签在后台时浏览器不触发 rAF，分析就停在段边界，切回前台自动接着跑 */
+  /** 取下一段前让一帧：后台标签不触发 rAF，就停在段边界不再发请求。引擎闲置 10s 自己卸。 */
   function nextFrame() {
     return new Promise((resolve) => requestAnimationFrame(() => resolve()));
   }
@@ -278,14 +272,11 @@ globalThis.IH_analyzeRun ||= (function () {
       report.duration_ms = Math.max(0, Date.now() - t0);
       reportUsage(report);
       idle();
-      // 仅本代仍有效时卸引擎；已换代（toggle/recheck）由取消方或新一轮负责，避免卸掉新跑
-      if (still()) releaseLocalEngine();
     }
   }
 
   return {
     MAX_SEGMENTS_PER_RUN,
-    releaseLocalEngine,
     reportActionState,
     beginSession,
     paintRange,

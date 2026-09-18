@@ -26,7 +26,6 @@ globalThis.chrome = {
   },
 };
 
-// 段与段之间让一帧（后台标签不触发，分析就停在段边界）
 globalThis.requestAnimationFrame = (cb) => setTimeout(() => cb(0), 0);
 
 globalThis.IH_setProgressSearching = async () => {};

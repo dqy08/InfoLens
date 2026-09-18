@@ -21,6 +21,8 @@
   let gen = 0;
   let busy = false;
   let active = false;
+  /** 用户/自动要过分析、且还没点掉。加载中静默失败后靠 load 再试一轮。 */
+  let wanted = false;
   /** @type {{ mapped: { text: string, pieces: unknown[] }, segs: { start: number, end: number, text: string }[], next: number, painted: number } | null} */
   let session = null;
 
@@ -39,8 +41,7 @@
     void runBatch(gen += 1);
   }
 
-  /** @param {boolean} [auto] 自动触发的一轮：页面还没加载完就失败多半是正文没出来，静默等下一轮 */
-  async function runBatch(myGen, auto) {
+  async function runBatch(myGen) {
     const still = () => myGen === gen;
     const early = document.readyState !== 'complete';
     busy = true;
@@ -48,7 +49,8 @@
     await R.runJob(still, {
       fail(err) {
         clearAll();
-        if (auto && document.readyState !== 'complete') return;
+        // 加载中失败多半是正文还没出来：手动点图标与自动分析同一条路，静默等 load 再试
+        if (document.readyState !== 'complete') return;
         active = true;
         R.reportActionState('on');
         return globalThis.IH_showError(err?.message || err);
@@ -59,8 +61,7 @@
         busy = false;
         if (!active) return;
         R.reportActionState('on');
-        // 开跑时页面还没加载完：收尾再核一次正文（complete 那次 recheck 可能来得更早）。
-        // 加载完之后开的轮不核，免得正文一直变就一直重跑。
+        // complete 时正文定稿：只给加载中开跑的轮收尾再核一次。之后地址/DOM 变了不自动跟。
         if (!early) return;
         Promise.resolve().then(() => {
           if (myGen !== gen) return;
@@ -87,12 +88,13 @@
 
   function toggle() {
     if (busy || active) {
+      wanted = false;
       gen += 1;
       busy = false;
       clearAll();
-      R.releaseLocalEngine();
       return;
     }
+    wanted = true;
     void runBatch(gen += 1);
   }
 
@@ -100,13 +102,14 @@
   function start() {
     if (busy) return 'busy';
     if (active) return 'painted';
-    void runBatch(gen += 1, true);
+    wanted = true;
+    void runBatch(gen += 1);
     return true;
   }
 
   /**
-   * 在 tabs.complete 时（SW）以及尝试轮收尾时调用：
-   * 正文相对本轮 session 变了则清掉重跑（缓存命中重复段）。重跑一律是正式轮，不会再自己触发 recheck。
+   * complete 定稿用：正文相对本轮 session 变了则清掉重跑（缓存命中重复段）。
+   * 加载完之后不再调——地址变了或 DOM 变了靠用户点工具栏清掉再分析。
    * @returns {false | 'same' | 'pending' | 'rerun'}
    */
   function recheck() {
@@ -122,10 +125,14 @@
     const text = typeof mapped?.text === 'string' ? mapped.text : '';
     if (!text || text === session.mapped.text) return 'same';
     clearAll();
-    R.releaseLocalEngine();
-    void runBatch(gen += 1, true);
+    void runBatch(gen += 1);
     return 'rerun';
   }
+
+  window.addEventListener('load', () => {
+    if (!wanted || busy || active) return;
+    void runBatch(gen += 1);
+  });
 
   window.__IH_DEMO__ = { toggle, start, recheck };
 })();

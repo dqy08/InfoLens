@@ -170,7 +170,7 @@ function progressToInit(info) {
   chrome.runtime.sendMessage({ type: 'ih-local-progress', info }).catch(() => {});
 }
 
-/** 分析结束 10s 后若本页还在，喊 SW 写 KV 并强关。analyze/init 会撤表。 */
+/** 上一段 analyze 结束后 10s 内没有下一段/init，喊 SW 关藏页（释放 WebGPU）。新 analyze/init 撤表。 */
 const LINGER_MS = 10_000;
 let lingerTimer = 0;
 let lingerArmedAt = 0;
@@ -216,15 +216,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
     if (cmd === 'analyze') {
       disarmLinger();
-      const result = await analyzeText(msg.text);
-      return { ok: true, result };
+      try {
+        const result = await analyzeText(msg.text);
+        return { ok: true, result };
+      } finally {
+        // 标签暂停不再发消息时，靠这段闲置计时卸引擎；下一段到来会先 disarm
+        armLinger();
+      }
     }
     if (cmd === 'status') {
       return { ok: true, loaded: !!(model && tokenizer) };
-    }
-    if (cmd === 'linger-watch') {
-      armLinger();
-      return { ok: true };
     }
     throw new Error(`unknown engine cmd: ${cmd}`);
   })

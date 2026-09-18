@@ -282,19 +282,20 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  const navigated = changeInfo.status === 'loading' || !!changeInfo.url;
-  // 刷新/跳转：上一页的 analyzing 与闸门不能带到下一页
-  if (navigated) resetAutoForTab(tabId);
-  if (!navigated && changeInfo.status !== 'complete') return;
-  if (tab.active) void syncAutoMenu(tabId);
+  // 整页开始加载才 reset。地址变了（DOM 往往也变）与 complete 之后正文变了同一回事：不自动跟。
+  if (changeInfo.status === 'loading') resetAutoForTab(tabId);
+  if (tab.active && (changeInfo.url || changeInfo.status === 'loading' || changeInfo.status === 'complete')) {
+    void syncAutoMenu(tabId);
+  }
   if (changeInfo.status === 'complete') {
-    // 先尽量启动；已在跑/已画完则在 complete 核对正文，变了就重跑
+    // 定稿：已在跑/已画完则在 complete 核对正文；之后不再核
     void (async () => {
       await maybeAutoAnalyze(tabId);
       await maybeRecheckContent(tabId);
     })();
     return;
   }
+  if (changeInfo.status !== 'loading') return;
   // 加载中先试一次：正文往往已在，没出来也不打扰，等 complete 再来
   const gen = autoGenByTab.get(tabId) || 0;
   setTimeout(() => {
@@ -449,9 +450,6 @@ async function ensureOffscreen() {
 }
 
 let localInflight = 0;
-let unloadQueued = false;
-/** 礼貌卸载没关上时的原因，留给 10s 后的残留上报。 */
-let lingerBlocked = 'none';
 
 async function sendToEngine(payload) {
   await ensureOffscreen();
@@ -481,25 +479,7 @@ async function destroyOffscreen() {
 async function closeOffscreenIfIdle() {
   if (creating) await creating;
   if (idleBlockReason() !== 'none') return;
-  unloadQueued = false;
   await destroyOffscreen();
-}
-
-/** 分析已结束仍占着页：藏页自己 10s 后喊一声。新的 analyze/init 会撤掉这块表。 */
-function armLingerIfOpen() {
-  void (async () => {
-    if (!(await hasOffscreen())) return;
-    lingerBlocked = idleBlockReason();
-    chrome.runtime.sendMessage({ type: 'ih-local-engine', cmd: 'linger-watch' }, () => {
-      void chrome.runtime.lastError;
-    });
-  })();
-}
-
-async function queueUnload() {
-  unloadQueued = true;
-  await closeOffscreenIfIdle();
-  armLingerIfOpen();
 }
 
 async function dropLocalModel() {
@@ -778,10 +758,6 @@ async function fetchTokens(engine, text) {
       return tokens;
     } finally {
       localInflight -= 1;
-      if (unloadQueued) {
-        await closeOffscreenIfIdle();
-        armLingerIfOpen();
-      }
     }
   }
   const data = await postAnalyze(text);
@@ -852,20 +828,18 @@ async function postLocalEngineLinger(payload) {
 }
 
 /**
- * 藏页在 unload 后还活过 10s。正在推理/初始化则当新任务，不动。
- * 其余情况写 KV 再强关，不再看 offerLock。
+ * 上一段结束后闲置 10s：写 KV 并关藏页。正在推理/初始化则当新任务，不动。
  */
 async function handleLinger(msg) {
   if (localInflight > 0 || initBusy) return;
   if (!(await hasOffscreen())) return;
+  const blocked = idleBlockReason();
   void postLocalEngineLinger({
     loaded: msg?.loaded,
     js_heap_bytes: msg?.js_heap_bytes,
     wait_ms: msg?.wait_ms,
-    blocked: lingerBlocked,
+    blocked,
   });
-  unloadQueued = false;
-  lingerBlocked = 'none';
   await destroyOffscreen();
 }
 
@@ -1080,12 +1054,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg?.type === 'ih-local-refuse') {
     refuseLocal()
-      .then(() => sendResponse({ ok: true }))
-      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
-    return true;
-  }
-  if (msg?.type === 'ih-local-unload') {
-    queueUnload()
       .then(() => sendResponse({ ok: true }))
       .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
     return true;

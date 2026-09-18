@@ -135,7 +135,6 @@
     generation += 1;
     busy = false;
     clear();
-    R.releaseLocalEngine();
     R.reportActionState('off');
   }
 
