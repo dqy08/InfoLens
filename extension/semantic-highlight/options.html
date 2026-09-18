@@ -76,6 +76,7 @@
     button:hover:not(:disabled) { filter: brightness(1.08); }
     button:disabled { opacity: 0.45; cursor: default; }
   </style>
+  <link rel="stylesheet" href="options-new-dots.css" />
 </head>
 <body>
   <header class="top">
@@ -86,7 +87,7 @@
   </header>
   <main>
     <h2>Storage</h2>
-    <div class="row">
+    <div class="row" data-option-id="analysis_cache">
       <div class="row-text">
         <div class="row-title">Analysis cache</div>
         <p id="cache_desc" class="row-desc"></p>
@@ -96,6 +97,10 @@
   </main>
   <script src="cache/ring-store.js"></script>
   <script src="semantic/analyzeCache.js"></script>
+  <script src="sw/action-dot.js"></script>
+  <script src="options-attention.js"></script>
+  <script src="options-catalog.js"></script>
+  <script src="options-new-dots.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

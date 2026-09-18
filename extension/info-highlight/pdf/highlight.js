@@ -45,12 +45,19 @@
   function job(myGeneration, work) {
     const still = () => myGeneration === generation;
     busy = true;
+    R.reportActionState('analyzing');
     return R.runJob(still, {
       fail(err) {
         clear();
+        R.reportActionState('on');
         return globalThis.IH_showError(err?.message || err);
       },
-      idle() { busy = false; },
+      idle() {
+        busy = false;
+        if (!still()) return;
+        if (!enabled) R.reportActionState('off');
+        else if (session) R.reportActionState('on');
+      },
     }, work);
   }
 
@@ -80,6 +87,7 @@
       if (!still()) return;
       clear();
       await globalThis.IH_showError(error?.message || error);
+      R.reportActionState('on');
       return;
     }
     if (!session || mapped.text !== session.mapped.text) {
@@ -128,6 +136,7 @@
     busy = false;
     clear();
     R.releaseLocalEngine();
+    R.reportActionState('off');
   }
 
   chrome.runtime.onMessage.addListener((message) => {

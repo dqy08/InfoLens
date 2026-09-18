@@ -5,7 +5,9 @@
  */
 
 importScripts('sw/restricted-url.js');
-importScripts('sw/install-dot.js');
+importScripts('sw/action-dot.js');
+importScripts('options-attention.js');
+importScripts('options-catalog.js');
 importScripts('sw/lifecycle-events.js');
 importScripts('sw/client-id.js');
 importScripts('sw/inject.js');
@@ -125,7 +127,10 @@ async function activateTab(tab, opts = {}) {
       return;
     }
 
-    const okTab = await IL_injectWithRetry(tab.id, { css: CONTENT_CSS, js: CONTENT_JS }, { logLabel: 'InfoLens' });
+    const okTab = await IL_injectWithRetry(tab.id, { css: CONTENT_CSS, js: CONTENT_JS }, {
+      logLabel: 'InfoLens',
+      waitComplete: false,
+    });
     console.info('[InfoLens] injected into', okTab.url);
     if (query) await openIfInjected(tab.id, query);
     clearBadge(tab.id);
@@ -160,7 +165,8 @@ chrome.runtime.onInstalled.addListener((details) => {
     });
   });
 
-  IL_maybeShowInstallDot(details);
+  void IL_optionsAttention.onInstalled(details, IL_OPTIONS_CATALOG);
+  IL_setActionIconDotted(true);
   if (IL_reportsEnabled(IL_CONFIG)) {
     IL_reportInstallOrUpdate(details, EXTENSION_ID, IL_CONFIG?.apiBase);
   }

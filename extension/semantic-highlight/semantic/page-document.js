@@ -274,8 +274,15 @@
       return applyMapped(root, collectTextMap(root));
     }
 
+    /** 加载中也能开浮条、输入；抽正文要等 complete，否则搜的是半截 DOM */
+    function whenLoaded() {
+      if (document.readyState === 'complete') return null;
+      return new Promise((resolve) => window.addEventListener('load', resolve, { once: true }));
+    }
+
     /** 分片让出主线程；isStale 为真则丢弃，不改已有 extract。 */
     async function refreshAsync(isStale) {
+      await whenLoaded();
       const root = pickArticleRoot();
       const mapped = await collectTextMapAsync(root, isStale);
       if (isStale?.()) {

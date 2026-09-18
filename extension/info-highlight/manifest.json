@@ -11,7 +11,7 @@
     "128": "icons/icon128.png"
   },
   "permissions": ["activeTab", "scripting", "storage", "offscreen", "contextMenus"],
-  "optional_host_permissions": ["file:///*", "https://huggingface.co/*", "https://*.huggingface.co/*", "https://*.hf.co/*", "https://*.xethub.hf.co/*", "https://*.modelscope.cn/*"],
+  "optional_host_permissions": ["*://*/*", "file:///*", "https://huggingface.co/*", "https://*.huggingface.co/*", "https://*.hf.co/*", "https://*.xethub.hf.co/*", "https://*.modelscope.cn/*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
   },

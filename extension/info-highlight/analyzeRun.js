@@ -33,6 +33,13 @@ globalThis.IH_analyzeRun ||= (function () {
     });
   }
 
+  /** @param {'off' | 'analyzing' | 'on'} state */
+  function reportActionState(state) {
+    chrome.runtime.sendMessage({ type: 'ih-action-state', state }, () => {
+      void chrome.runtime.lastError;
+    });
+  }
+
   /** 一轮结束后上报；未尝试任何段时不发。失败时附带截断后的 error（不含页面 URL/正文）。 */
   function reportUsage(report) {
     if (!report || report.segments < 1) return;
@@ -162,6 +169,11 @@ globalThis.IH_analyzeRun ||= (function () {
     }
   }
 
+  /** 取下一段前让一帧：标签在后台时浏览器不触发 rAF，分析就停在段边界，切回前台自动接着跑 */
+  function nextFrame() {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
   function applyTokens(session, tokens, i, opts, report) {
     const stats = globalThis.IH_paintTokens(tokens, session.mapped, {
       append: true,
@@ -185,6 +197,7 @@ globalThis.IH_analyzeRun ||= (function () {
   async function paintRange(session, from, to, still, opts, report) {
     let lastAlignErr;
     for (let i = from; i < to; i++) {
+      await nextFrame();
       if (!still()) return lastAlignErr;
       let got;
       try {
@@ -261,17 +274,19 @@ globalThis.IH_analyzeRun ||= (function () {
         await fail(err);
       }
     } finally {
-      // 取消/失败/成功都带墙钟；取消也要收尾：上报、清 busy、卸本地引擎
+      // 取消/失败/成功都带墙钟；取消也要收尾：上报、清 busy
       report.duration_ms = Math.max(0, Date.now() - t0);
       reportUsage(report);
       idle();
-      releaseLocalEngine();
+      // 仅本代仍有效时卸引擎；已换代（toggle/recheck）由取消方或新一轮负责，避免卸掉新跑
+      if (still()) releaseLocalEngine();
     }
   }
 
   return {
     MAX_SEGMENTS_PER_RUN,
     releaseLocalEngine,
+    reportActionState,
     beginSession,
     paintRange,
     afterPaint,

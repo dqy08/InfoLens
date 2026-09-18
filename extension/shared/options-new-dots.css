@@ -1,0 +1,16 @@
+/* 未看过的选项：标题旁蓝点（与工具栏 -dot 同色 #0A84FF） */
+.option-is-new .row-title {
+  position: relative;
+  display: inline-block;
+  padding-right: 0.65em;
+}
+.option-is-new .row-title::after {
+  content: "";
+  position: absolute;
+  top: 0.15em;
+  right: 0;
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: #0A84FF;
+}

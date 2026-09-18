@@ -57,26 +57,39 @@ globalThis.IL_injectOnce = async function IL_injectOnce(tabId, files) {
 /**
  * @param {number} tabId
  * @param {{ css: string[], js: string[] }} files
- * @param {{ logLabel: string }} opts
+ * @param {{
+ *   logLabel?: string,
+ *   waitComplete?: boolean,
+ *   isStale?: () => boolean,
+ * }} opts
+ * waitComplete 默认 true；点图标 / 自动分析传 false，转圈未结束也能注入。
+ * isStale 为真则中止（导航已换代），避免把脚本打进下一页或清掉下一轮状态。
  */
 globalThis.IL_injectWithRetry = async function IL_injectWithRetry(tabId, files, opts) {
   const logLabel = opts?.logLabel || 'extension';
+  const waitComplete = opts?.waitComplete !== false;
+  const isStale = typeof opts?.isStale === 'function' ? opts.isStale : () => false;
   let lastErr;
-  for (let attempt = 1; attempt <= 4; attempt++) {
+  const attempts = waitComplete ? 4 : 8;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (isStale()) throw new Error('inject aborted: navigation superseded');
     try {
-      const tab = await IL_waitTabComplete(tabId);
+      const tab = waitComplete ? await IL_waitTabComplete(tabId) : await chrome.tabs.get(tabId);
+      if (isStale()) throw new Error('inject aborted: navigation superseded');
       if (IL_isRestrictedUrl(tab.url)) {
         throw new Error(`restricted page: ${tab.url || '(no url)'}`);
       }
       if (tab.discarded) {
         await chrome.tabs.reload(tabId);
-        await IL_waitTabComplete(tabId);
+        if (waitComplete) await IL_waitTabComplete(tabId);
       }
       await IL_injectOnce(tabId, files);
+      if (isStale()) throw new Error('inject aborted: navigation superseded');
       return tab;
     } catch (err) {
       lastErr = err;
-      if (!IL_isTransientFrameError(err) || attempt === 4) throw err;
+      if (isStale() || String(err?.message || err).includes('navigation superseded')) throw err;
+      if (!IL_isTransientFrameError(err) || attempt === attempts) throw err;
       console.warn(`[${logLabel}] inject attempt ${attempt} failed, retry…`, err?.message || err);
       await IL_sleep(100 * attempt);
     }
