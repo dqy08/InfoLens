@@ -169,6 +169,11 @@ globalThis.IH_analyzeRun ||= (function () {
     }
   }
 
+  /** 取下一段前让一帧：标签在后台时浏览器不触发 rAF，分析就停在段边界，切回前台自动接着跑 */
+  function nextFrame() {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
   function applyTokens(session, tokens, i, opts, report) {
     const stats = globalThis.IH_paintTokens(tokens, session.mapped, {
       append: true,
@@ -192,6 +197,7 @@ globalThis.IH_analyzeRun ||= (function () {
   async function paintRange(session, from, to, still, opts, report) {
     let lastAlignErr;
     for (let i = from; i < to; i++) {
+      await nextFrame();
       if (!still()) return lastAlignErr;
       let got;
       try {

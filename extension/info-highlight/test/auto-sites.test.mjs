@@ -64,9 +64,37 @@ test('parseHost 接受 hostname 或 URL', () => {
   assert.equal(A.parseHost('chrome://extensions'), null);
 });
 
-test('子域各算各的', () => {
+test('parseHost 只放行 * 与 *.example.com 两种通配', () => {
+  assert.equal(A.parseHost('*'), '*');
+  assert.equal(A.parseHost('*.example.com'), '*.example.com');
+  assert.equal(A.parseHost('https://*.example.com/a'), '*.example.com');
+  assert.equal(A.parseHost('a*b.com'), null);
+  assert.equal(A.parseHost('*.'), null);
+  // IPv6 字面量拼不出合法 match pattern
+  assert.equal(A.parseHost('[::1]'), null);
+});
+
+test('matches 与 match pattern 的 host 规则一致', () => {
+  assert.equal(A.matches('example.com', 'example.com'), true);
+  // 精确项不含子域
+  assert.equal(A.matches('example.com', 'news.example.com'), false);
+  assert.equal(A.matches('*.example.com', 'example.com'), true);
+  assert.equal(A.matches('*.example.com', 'news.example.com'), true);
+  assert.equal(A.matches('*.example.com', 'notexample.com'), false);
+  assert.equal(A.matches('*', 'anything.test'), true);
+});
+
+test('has 认通配，hasExact 只认精确项', async () => {
+  mockChrome({ sites: ['*.example.com'] });
+  assert.equal(await A.has('news.example.com'), true);
+  assert.equal(await A.hasExact('news.example.com'), false);
+  assert.equal(await A.hasExact('*.example.com'), true);
+});
+
+test('originPattern 覆盖 http 与 https', () => {
   assert.equal(A.originPattern('news.example.com'), '*://news.example.com/*');
-  assert.notEqual(A.originPattern('news.example.com'), A.originPattern('example.com'));
+  assert.equal(A.originPattern('*.example.com'), '*://*.example.com/*');
+  assert.equal(A.originPattern('*'), '*://*/*');
 });
 
 test('list 忽略非字符串与非数组', async () => {

@@ -1,5 +1,5 @@
 /**
- * 自动分析的站点名单：hostname 精确匹配（子域各算各的）。
+ * 自动分析的站点名单：条目是 hostname、`*.example.com` 或 `*`，匹配规则与 Chrome match pattern 的 host 一致。
  * 名单在 chrome.storage.local，host 权限在 Chrome 手上——用户可在扩展详情页单独撤销，
  * 故要跑之前以 granted() 为准，名单只当用户意图看。
  */
@@ -18,11 +18,26 @@ globalThis.IH_autoSites ||= (function () {
     return u.hostname || null;
   }
 
-  /** 选项页手填：hostname 或完整 URL，抽出 hostname；非法则 null */
+  /** `*` 与 `*.example.com` 之外不许再有通配；IPv6 字面量拼不出合法 match pattern */
+  function isListable(host) {
+    if (host === '*') return true;
+    const rest = host.startsWith('*.') ? host.slice(2) : host;
+    return !!rest && !rest.includes('*') && !rest.includes('[');
+  }
+
+  /** 选项页手填：hostname、完整 URL，或 `*.example.com` / `*`；非法则 null */
   function parseHost(input) {
     const s = String(input || '').trim();
     if (!s) return null;
-    return hostOf(s.includes('://') ? s : `https://${s}`);
+    const host = s === '*' ? s : hostOf(s.includes('://') ? s : `https://${s}`);
+    return host && isListable(host) ? host : null;
+  }
+
+  /** 页面 hostname 是否被某条名单项覆盖 */
+  function matches(entry, host) {
+    if (entry === '*') return true;
+    if (entry.startsWith('*.')) return host === entry.slice(2) || host.endsWith(entry.slice(1));
+    return entry === host;
   }
 
   // 一次授权覆盖 http 与 https。manifest 的 optional_host_permissions 也须用通配 scheme 的单条，
@@ -39,6 +54,11 @@ globalThis.IH_autoSites ||= (function () {
   }
 
   async function has(host) {
+    return !!host && (await list()).some((entry) => matches(entry, host));
+  }
+
+  /** 右键菜单只管精确项：它加什么就查什么、删什么；通配项只在选项页增删 */
+  async function hasExact(host) {
     return !!host && (await list()).includes(host);
   }
 
@@ -60,5 +80,5 @@ globalThis.IH_autoSites ||= (function () {
     return chrome.permissions.contains({ origins: [originPattern(host)] });
   }
 
-  return { KEY, hostOf, parseHost, originPattern, list, has, add, remove, granted };
+  return { KEY, hostOf, parseHost, matches, originPattern, list, has, hasExact, add, remove, granted };
 })();

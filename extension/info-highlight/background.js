@@ -60,10 +60,9 @@ const CONTENT_JS = [
 ];
 
 /**
- * 已注入则调页内 API。
+ * 已注入则调页内 API；未注入返回 false（注入后要再调一次，content.js 不自启）。
  * @param {'toggle' | 'start'} method
- * @returns {Promise<false | true | 'noop'>}
- *   false = 未注入；true = 已调用；'noop' = 已注入但 start 未开跑（已在分析/已画好）
+ * @returns {Promise<false | true | 'busy' | 'painted'>} start 的 'busy' / 'painted' = 页内已有一轮在跑 / 已画好
  */
 async function callPageApi(tabId, method) {
   try {
@@ -73,7 +72,7 @@ async function callPageApi(tabId, method) {
       func: (m) => {
         const api = window.__IH_DEMO__;
         if (!api) return false;
-        if (m === 'start') return api.start() ? true : 'noop';
+        if (m === 'start') return api.start();
         api[m]();
         return true;
       },
@@ -137,6 +136,7 @@ async function activateTab(tab) {
       return;
     }
     IH_actionState.markAnalyzingIfIdle(tab.id);
+    manualTabs.add(tab.id);
     if (await callPageApi(tab.id, 'toggle')) {
       clearBadge(tab.id);
       return;
@@ -146,6 +146,7 @@ async function activateTab(tab) {
       logLabel: 'Info Highlight',
       waitComplete: false,
     });
+    await callPageApi(tab.id, 'toggle');
     console.info('[Info Highlight] injected into', okTab.url);
     clearBadge(tab.id);
   } catch (err) {
@@ -170,31 +171,12 @@ function autoMenuTitle(host, on) {
   return on ? `Stop always analyzing ${host}` : `Always analyze ${host}`;
 }
 
-/** 分析卡住时别把自动闸门永久占着 */
-const AUTO_BUSY_TIMEOUT_MS = 120000;
-/** tabId -> 已自动跑过的 url；跳过的不记，切回来还会再试 */
-const autoRan = new Map();
-/** tabId -> 导航代数；reset 时 +1，过期的自动分析不再改闸门 */
+/** 开始加载后等一会再做尝试轮：太早正文还没出来，白跑一趟 */
+const AUTO_LOADING_DELAY_MS = 1500;
+/** 人工点过图标的标签：自动分析别再插手，直到下次导航 */
+const manualTabs = new Set();
+/** tabId -> 导航代数；reset 时 +1，过期的自动分析不再改状态 */
 const autoGenByTab = new Map();
-/** 同时只放一个自动分析，避免切标签时并发 */
-let autoBusy = null;
-
-function autoBusyTake(tabId) {
-  if (autoBusy) return false;
-  autoBusy = {
-    tabId,
-    timer: setTimeout(() => {
-      autoBusy = null;
-    }, AUTO_BUSY_TIMEOUT_MS),
-  };
-  return true;
-}
-
-function autoBusyRelease(tabId) {
-  if (autoBusy?.tabId !== tabId) return;
-  clearTimeout(autoBusy.timer);
-  autoBusy = null;
-}
 
 /**
  * 无 tabs 权限时只看得见已授权站点的 url；看不见即未授权，正好是要显示「添加」的情形。
@@ -210,7 +192,7 @@ async function syncAutoMenu(tabId) {
     });
     return;
   }
-  const on = await IH_autoSites.has(host);
+  const on = await IH_autoSites.hasExact(host);
   chrome.contextMenus.update(AUTO_MENU_ID, { title: autoMenuTitle(host, on) }, () => {
     void chrome.runtime.lastError;
   });
@@ -222,11 +204,12 @@ async function toggleAutoSite(info, tabId) {
   if (!host) throw new Error(`auto-site menu on unsupported url: ${info.pageUrl || '(none)'}`);
   // 手势同步阶段发起；已授权时不弹窗直接 true，故开关两向都先发它
   const requested = chrome.permissions.request({ origins: [IH_autoSites.originPattern(host)] });
-  const wasOn = await IH_autoSites.has(host);
+  const wasOn = await IH_autoSites.hasExact(host);
   const granted = await requested;
+  // 用户刚在菜单里表了态，之前点图标的操作不再压制自动分析
+  manualTabs.delete(tabId);
   if (wasOn) {
     await IH_autoSites.remove(host);
-    autoRan.delete(tabId);
   } else if (granted) {
     await IH_autoSites.add(host);
     await maybeAutoAnalyze(tabId);
@@ -234,55 +217,58 @@ async function toggleAutoSite(info, tabId) {
   await syncAutoMenu(tabId);
 }
 
-/** 导航开始：丢掉本页自动分析进度，否则 analyzing / 闸门会挡住下一页 */
+/** 导航开始：丢掉本页自动分析进度，否则 analyzing 会挡住下一页 */
 function resetAutoForTab(tabId) {
-  autoRan.delete(tabId);
-  autoBusyRelease(tabId);
+  manualTabs.delete(tabId);
   autoGenByTab.set(tabId, (autoGenByTab.get(tabId) || 0) + 1);
   if (IH_actionState.get(tabId) !== 'off') IH_actionState.set(tabId, 'off');
 }
 
-/** 命中名单的前台标签即可分析；不必等 complete（转圈时正文往往已在）。PDF / file: 不进。 */
+/**
+ * 命中名单的前台标签即可分析。PDF / file: 不进。
+ * 重复触发是幂等的：页内已在跑返回 'busy'、已画好返回 'painted'，都不动它。
+ * 加载中失败由页内按 readyState 决定静默与否；这里的注入失败同理，看 tab.status。
+ * @param {number} tabId
+ */
 async function maybeAutoAnalyze(tabId) {
   const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (!tab?.active) return;
+  if (!tab?.active || manualTabs.has(tabId)) return;
   const url = tab.url || '';
   const host = IH_autoSites.hostOf(url);
   if (!host || IL_isRestrictedUrl(url) || IL_pdfSw.isPdfUrl(url)) return;
-  if (autoRan.get(tabId) === url) return;
   if (!(await IH_autoSites.granted(host))) return;
   const gen = autoGenByTab.get(tabId) || 0;
   const stillCurrent = () => (autoGenByTab.get(tabId) || 0) === gen;
-  if (!autoBusyTake(tabId)) return;
-  autoRan.set(tabId, url);
   try {
-    IH_actionState.set(tabId, 'analyzing');
-    // start()：已在跑或已画好返回 noop，闸门马上放掉，避免空占着
     const started = await callPageApi(tabId, 'start');
     if (!stillCurrent()) return;
-    if (started === 'noop') {
-      autoBusyRelease(tabId);
+    if (started === 'busy') return;
+    if (started === 'painted') {
       IH_actionState.set(tabId, 'on');
       clearBadge(tabId);
       return;
     }
     if (!started) {
+      // 注入要等一会，先把图标切成分析中；已注入的那条路由页内自己上报
+      IH_actionState.set(tabId, 'analyzing');
       await IL_injectWithRetry(tabId, { css: CONTENT_CSS, js: CONTENT_JS }, {
         logLabel: 'Info Highlight auto',
         waitComplete: false,
         isStale: () => !stillCurrent(),
       });
+      if (!stillCurrent()) return;
+      await callPageApi(tabId, 'start');
     }
     if (!stillCurrent()) return;
     clearBadge(tabId);
   } catch (err) {
     if (!stillCurrent()) return;
-    autoRan.delete(tabId);
-    autoBusyRelease(tabId);
     IH_actionState.set(tabId, 'off');
     if (String(err?.message || err).includes('navigation superseded')) return;
     console.error('[Info Highlight] auto inject failed', err);
-    await setBadgeError(tabId, 'inject');
+    // 加载中注入失败多半是 frame 还没就绪，下一轮还会来；加载完了还失败才值得提示
+    const fresh = await chrome.tabs.get(tabId).catch(() => null);
+    if (fresh?.status === 'complete') await setBadgeError(tabId, 'inject');
   }
 }
 
@@ -296,14 +282,10 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const navigated = changeInfo.status === 'loading' || !!changeInfo.url;
   // 刷新/跳转：上一页的 analyzing 与闸门不能带到下一页
-  if (changeInfo.status === 'loading' || changeInfo.url) resetAutoForTab(tabId);
-  // loading 即可试跑（注入不等 complete）；complete / SPA 改 url 再兜一次
-  const tryAuto =
-    changeInfo.status === 'loading' ||
-    changeInfo.status === 'complete' ||
-    !!changeInfo.url;
-  if (!tryAuto) return;
+  if (navigated) resetAutoForTab(tabId);
+  if (!navigated && changeInfo.status !== 'complete') return;
   if (tab.active) void syncAutoMenu(tabId);
   if (changeInfo.status === 'complete') {
     // 先尽量启动；已在跑/已画完则在 complete 核对正文，变了就重跑
@@ -313,7 +295,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     })();
     return;
   }
-  void maybeAutoAnalyze(tabId);
+  // 加载中先试一次：正文往往已在，没出来也不打扰，等 complete 再来
+  const gen = autoGenByTab.get(tabId) || 0;
+  setTimeout(() => {
+    if ((autoGenByTab.get(tabId) || 0) !== gen) return;
+    void maybeAutoAnalyze(tabId);
+  }, AUTO_LOADING_DELAY_MS);
 });
 
 /** complete 时：页内已有分析则对比正文，变了清掉重跑（重复段走缓存）。 */
@@ -337,9 +324,8 @@ async function maybeRecheckContent(tabId) {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   IH_actionState.clear(tabId);
-  autoRan.delete(tabId);
+  manualTabs.delete(tabId);
   autoGenByTab.delete(tabId);
-  autoBusyRelease(tabId);
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -553,20 +539,10 @@ let offerLock = null;
 let initBusy = false;
 let initCancellable = false;
 
-function isOptionsPageUrl(url) {
-  if (typeof url !== 'string') return false;
-  const base = chrome.runtime.getURL('options.html');
-  return url === base || url.startsWith(`${base}?`);
-}
-
 /** Prepare 开着时通知选项页：暂停「新选项」看见计时 */
 function notifyOptionsInitOverlay(active) {
-  const payload = { type: 'ih-local-init-overlay', active: !!active };
-  void chrome.tabs.query({}).then((tabs) => {
-    for (const tab of tabs) {
-      if (tab.id == null || !isOptionsPageUrl(tab.url)) continue;
-      void chrome.tabs.sendMessage(tab.id, payload).catch(() => {});
-    }
+  chrome.runtime.sendMessage({ type: 'ih-local-init-overlay', active: !!active }, () => {
+    void chrome.runtime.lastError;
   });
 }
 
@@ -1034,7 +1010,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (tabId && (msg.state === 'off' || msg.state === 'analyzing' || msg.state === 'on')) {
       IH_actionState.set(tabId, msg.state);
       clearBadge(tabId);
-      if (msg.state !== 'analyzing') autoBusyRelease(tabId);
     }
     return;
   }

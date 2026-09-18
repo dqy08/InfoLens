@@ -133,14 +133,14 @@ test('安装视全部为已看；升级无新项也不影响工具栏（由 back
   assert.deepEqual(store.calls.at(-1), { path: dotted });
 });
 
-test('打开选项页 / markSeen 不碰工具栏', async () => {
+test('列未看项 / markSeen 不碰工具栏', async () => {
   const icons = { 16: 'icons/icon16.png', 32: 'icons/icon32.png' };
   const env = loadAttention(
     { action: { default_icon: icons }, update_url: 'https://example' },
     { il_options_seen_ids: ['a'] },
   );
   const catalog = ['a', 'b'];
-  const unseen = await env.sandbox.IL_optionsAttention.onOptionsOpen(catalog);
+  const unseen = await env.sandbox.IL_optionsAttention.unseen(catalog);
   assert.equal(unseen.join(','), 'b');
   assert.equal(env.calls.length, 0);
 

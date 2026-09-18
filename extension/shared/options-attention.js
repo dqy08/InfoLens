@@ -70,15 +70,10 @@
     return unseenOf(catalog, await ensureSeeded(catalog));
   }
 
-  async function onOptionsOpen(catalog) {
-    return unseen(catalog);
-  }
-
   globalThis.IL_optionsAttention = {
     SEEN_KEY,
     unseen,
     markSeen,
     onInstalled,
-    onOptionsOpen,
   };
 })();

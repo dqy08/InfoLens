@@ -114,7 +114,7 @@
     },
   };
 
-  void attention.onOptionsOpen(catalog).then((unseen) => {
+  void attention.unseen(catalog).then((unseen) => {
     paint(unseen);
     observe(unseen);
   });

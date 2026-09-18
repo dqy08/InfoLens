@@ -222,7 +222,11 @@
     btn.textContent = 'Remove';
     btn.addEventListener('click', () => {
       btn.disabled = true;
-      void globalThis.IH_autoSites.remove(host).then(loadAutoSites);
+      // 名单变了由 storage.onChanged 重绘
+      globalThis.IH_autoSites.remove(host).catch((err) => {
+        btn.disabled = false;
+        showAutoSiteError(String(err?.message || err));
+      });
     });
     li.append(text, btn);
     return li;
@@ -243,7 +247,7 @@
     showAutoSiteError('');
     const host = globalThis.IH_autoSites.parseHost(el.auto_site_input.value);
     if (!host) {
-      showAutoSiteError('Enter a site like example.com');
+      showAutoSiteError('Enter a site like example.com, *.example.com, or * for every site');
       return;
     }
     // 选项页点 Add 本身就是手势，可直接 request
@@ -251,18 +255,20 @@
       origins: [globalThis.IH_autoSites.originPattern(host)],
     });
     if (!granted) return;
+    // 名单变了由 storage.onChanged 重绘
     await globalThis.IH_autoSites.add(host);
     el.auto_site_input.value = '';
-    await loadAutoSites();
   }
 
-  el.auto_site_add.addEventListener('click', () => {
-    void addAutoSite();
-  });
+  function submitAutoSite() {
+    addAutoSite().catch((err) => showAutoSiteError(String(err?.message || err)));
+  }
+
+  el.auto_site_add.addEventListener('click', submitAutoSite);
   el.auto_site_input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      void addAutoSite();
+      submitAutoSite();
     }
   });
 
