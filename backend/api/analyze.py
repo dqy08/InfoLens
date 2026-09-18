@@ -6,8 +6,13 @@ import queue
 import threading
 from typing import Optional
 from backend.platform.schemas import create_empty_analysis_result
-from backend.models.model_manager import project_registry, DEFAULT_BASE_MODEL, inference_lock
-from model_paths import resolve_hf_path
+from backend.models.model_manager import (
+    project_registry,
+    DEFAULT_BASE_MODEL,
+    ensure_project_loaded,
+    inference_lock,
+)
+from model_paths import MODEL_PATHS, resolve_hf_path, validate_base_model_id
 from backend.platform.oom import exit_if_oom
 from backend.api.sse_utils import (
     SSEProgressReporter,
@@ -89,20 +94,30 @@ def _validate_and_prepare_request(analyze_request):
     context = get_app_context(prefer_module_context=True)
     default_model = context.base_model_id if context.base_model_id else DEFAULT_BASE_MODEL
     
-    # 处理 default、None 或空字符串，使用默认模型
+    # 空 / default → 启动时 --base_model；显式 id 须为 MODEL_PATHS 中的 base
     if not model or model == 'default' or model == '':
         model = default_model
     else:
-        # 只允许使用默认模型，其他模型请求将被拒绝
-        if model != default_model:
-            return None, None, f"Only default model '{default_model}' is allowed", 400
+        try:
+            model = validate_base_model_id(model)
+        except ValueError:
+            known = ", ".join(MODEL_PATHS.keys())
+            return (
+                None,
+                None,
+                f"Unknown base model '{analyze_request.get('model')}'. Known: {known}",
+                400,
+            )
     
     return model, text, None, None
 
 
 def _load_project_with_error_handling(model):
     """
-    获取已加载的模型；若未加载则根据配置进行懒加载或返回错误。
+    获取已加载的模型；若未加载则按需加载。
+
+    启动是否预载默认槽位由 --no_auto_load 统一控制；此处对任意已校验的
+    base id 在首次请求时加载（权重缓存按 HF 路径去重，可并存多个）。
     
     Returns:
         (project_obj, error_msg, status_code) 元组
@@ -120,23 +135,20 @@ def _load_project_with_error_handling(model):
     p = project_registry.get(model)
     if p is None:
         from backend.platform.app_context import get_app_context
-        from backend.models.model_manager import ensure_base_slot_ready
 
         context = get_app_context(prefer_module_context=True)
         if context.model_loading:
             error_msg = f"Model '{model}' is still loading; try again later"
             print(f"⚠️ {error_msg}")
             return None, error_msg, 503
-        # 懒加载模式 (--no_auto_load)：首次请求仅初始化主槽位（权重 + QwenLM 项目）
-        if getattr(context.args, 'no_auto_load', False):
-            try:
-                ensure_base_slot_ready()
-                p = project_registry.get(model)
-            except Exception as e:  # noqa: BLE001
-                import traceback
-                print(f"⚠️ 模型懒加载失败: {e}")
-                traceback.print_exc()
-                return None, f"Model load failed: {str(e)}", 500
+        try:
+            ensure_project_loaded(model)
+            p = project_registry.get(model)
+        except Exception as e:  # noqa: BLE001
+            import traceback
+            print(f"⚠️ 模型懒加载失败: {e}")
+            traceback.print_exc()
+            return None, f"Model load failed: {str(e)}", 500
         if p is None:
             error_msg = f"Model '{model}' is not loaded; contact the administrator"
             print(f"⚠️ {error_msg}")

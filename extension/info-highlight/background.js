@@ -40,6 +40,13 @@ function analyzeUrl() {
   return `${String(IH_CONFIG.apiBase).replace(/\/$/, '')}/api/analyze`;
 }
 
+/** IH_CONFIG.analyzeModel 非空则用之，否则 'default'。 */
+function analyzeModelForRequest() {
+  const m = IH_CONFIG.analyzeModel;
+  if (typeof m === 'string' && m.trim()) return m.trim();
+  return 'default';
+}
+
 const CONTENT_CSS = ['content.css'];
 const CONTENT_JS = [
   'drop-stale.js',
@@ -354,7 +361,7 @@ async function postAnalyze(text) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'default',
+        model: analyzeModelForRequest(),
         text,
         privacy_mode: IH_CONFIG.privacyMode !== false,
       }),

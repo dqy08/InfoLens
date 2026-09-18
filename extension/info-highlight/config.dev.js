@@ -9,4 +9,9 @@ var IH_CONFIG = {
   privacyMode: false,
   /** 不上报 install/update/用量，避免污染线上统计 */
   reportUsage: false,
+  /**
+   * 远程 /api/analyze 的 model（须为后端 MODEL_PATHS 中的 base id）。
+   * 缺省或空字符串则传 'default'（服务端 --base_model）。
+   */
+  analyzeModel: 'qwen3-0.6b',
 };
