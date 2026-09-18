@@ -10,6 +10,8 @@ python3 extension/scripts/build_extension.py semantic-highlight
 
 改了 `shared/` 且两个都要测，两条都跑。
 
+选项「新增」蓝点：改对应插件的 `options-catalog.js`（步骤写在文件头注释里）。
+
 | 插件 | Chrome Web Store ID | 商店页 |
 |------|---------------------|--------|
 | [Info Highlight](./info-highlight/README.md) | `gemajnklkebeikmfphiddpjfimahacdk` | [打开](https://chromewebstore.google.com/detail/gemajnklkebeikmfphiddpjfimahacdk) |

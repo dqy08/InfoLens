@@ -138,6 +138,10 @@
     });
   }
 
+  function syncNewDotsPaused(overlay) {
+    globalThis.IL_optionsNewDots?.setPaused(!!overlay);
+  }
+
   function loadBackend() {
     chrome.runtime.sendMessage({ type: 'ih-local-status' }, (res) => {
       if (chrome.runtime.lastError || !res?.ok) {
@@ -147,6 +151,7 @@
         return;
       }
       applyBackend(res);
+      syncNewDotsPaused(res.initOverlay);
     });
   }
 
@@ -157,6 +162,7 @@
   });
 
   function startPrepare() {
+    syncNewDotsPaused(true);
     el.local_init.disabled = true;
     const pref = el.analyze_pref.value === 'cloud' ? 'auto' : el.analyze_pref.value;
     chrome.runtime.sendMessage({ type: 'ih-local-set-pref', pref }, () => {
@@ -216,6 +222,10 @@
   }
 
   chrome.runtime.onMessage.addListener((msg) => {
+    if (msg?.type === 'ih-local-init-overlay') {
+      syncNewDotsPaused(msg.active);
+      return;
+    }
     if (msg?.type === 'ih-local-init-outcome') {
       loadBackend();
       return;

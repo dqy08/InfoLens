@@ -174,6 +174,7 @@
     .row-nested[hidden] { display: none; }
     main h2:not(:first-of-type) { margin-top: 28px; }
   </style>
+  <link rel="stylesheet" href="options-new-dots.css" />
 </head>
 <body>
   <header class="top">
@@ -184,21 +185,21 @@
   </header>
   <main>
     <h2>Display</h2>
-    <label class="row">
+    <label class="row" data-option-id="show_progress">
       <div class="row-text">
         <div class="row-title">Progress chart</div>
         <p class="row-desc">Show how information density changes across the page, and where you are</p>
       </div>
       <input type="checkbox" id="show_progress">
     </label>
-    <label class="row">
+    <label class="row" data-option-id="show_token_tip">
       <div class="row-text">
         <div class="row-title">Hover for details</div>
         <p class="row-desc">When the pointer rests on text, show its information density and more likely words. Hidden when you analyze the same page again.</p>
       </div>
       <input type="checkbox" id="show_token_tip" checked>
     </label>
-    <div class="row row-slider">
+    <div class="row row-slider" data-option-id="ih_max_highlight_alpha">
       <div class="row-slider-top">
         <div class="row-text">
           <div class="row-title">Highlight intensity</div>
@@ -208,7 +209,7 @@
       </div>
       <input type="range" class="ih-intensity" id="ih_max_highlight_alpha" min="5" max="100" step="1" aria-label="Highlight intensity">
     </div>
-    <label class="row">
+    <label class="row" data-option-id="ih_two_tier">
       <div class="row-text">
         <div class="row-title">One-tone highlight</div>
         <p class="row-desc">A single highlight level instead of a gradient. (Warning — it depends on a threshold that does not generalize across model changes.)</p>
@@ -226,7 +227,7 @@
       <input type="range" id="ih_highlight_threshold_pct" min="0" max="100" step="1" aria-label="Highlight threshold">
     </div>
     <h2>Analysis</h2>
-    <div class="row">
+    <div class="row" data-option-id="analyze_pref">
       <div class="row-text">
         <div class="row-title">Where to analyze</div>
         <p class="row-desc">Auto prefers this device. On-device only does not upload the page, and will not fall back to the cloud.</p>
@@ -266,6 +267,10 @@
   <script src="analyzeCache.js"></script>
   <script src="local/state.js"></script>
   <script src="highlightStyle.js"></script>
+  <script src="sw/action-dot.js"></script>
+  <script src="options-attention.js"></script>
+  <script src="options-catalog.js"></script>
+  <script src="options-new-dots.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

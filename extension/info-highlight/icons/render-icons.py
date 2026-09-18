@@ -6,7 +6,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 RGB = (255, 71, 64)
-DOT_RGB = (52, 199, 89)
+DOT_RGB = (10, 132, 255)  # #0A84FF，与选项页蓝点一致
 # Same 16-step ramp as content.css --ih-token-* (weaken max 0.5); boost to 0.95 so 16px stays readable.
 TOKEN_MAX = 0.5
 ICON_MAX = 0.95

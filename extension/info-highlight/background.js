@@ -5,7 +5,9 @@
  */
 
 importScripts('sw/restricted-url.js');
-importScripts('sw/install-dot.js');
+importScripts('sw/action-dot.js');
+importScripts('options-attention.js');
+importScripts('options-catalog.js');
 importScripts('sw/lifecycle-events.js');
 importScripts('sw/client-id.js');
 importScripts('sw/inject.js');
@@ -157,7 +159,8 @@ chrome.runtime.onInstalled.addListener((details) => {
     });
   });
 
-  IL_maybeShowInstallDot(details);
+  void IL_optionsAttention.onInstalled(details, IL_OPTIONS_CATALOG);
+  IL_setActionIconDotted(true);
   if (IL_reportsEnabled(IH_CONFIG)) {
     IL_reportInstallOrUpdate(details, EXTENSION_ID, IH_CONFIG.apiBase);
   }
@@ -342,9 +345,52 @@ async function probeAndStore() {
 let initWaiters = [];
 let initGeneration = 0;
 let initWindowId = null;
+/** Prepare 打开时的宿主窗；焦点回到该窗时再把 Prepare 拉到前面 */
+let initHostWindowId = null;
 let offerLock = null;
 let initBusy = false;
 let initCancellable = false;
+
+function isOptionsPageUrl(url) {
+  if (typeof url !== 'string') return false;
+  const base = chrome.runtime.getURL('options.html');
+  return url === base || url.startsWith(`${base}?`);
+}
+
+/** Prepare 开着时通知选项页：暂停「新选项」看见计时 */
+function notifyOptionsInitOverlay(active) {
+  const payload = { type: 'ih-local-init-overlay', active: !!active };
+  void chrome.tabs.query({}).then((tabs) => {
+    for (const tab of tabs) {
+      if (tab.id == null || !isOptionsPageUrl(tab.url)) continue;
+      void chrome.tabs.sendMessage(tab.id, payload).catch(() => {});
+    }
+  });
+}
+
+function clearInitWindowId() {
+  if (initWindowId == null) return;
+  initWindowId = null;
+  initHostWindowId = null;
+  notifyOptionsInitOverlay(false);
+}
+
+function assignInitWindowId(id, hostId) {
+  initWindowId = id;
+  initHostWindowId = hostId ?? null;
+  notifyOptionsInitOverlay(true);
+}
+
+/** 焦点回到打开 Prepare 时的宿主窗 → 再把 Prepare 拉到前面 */
+function focusInitIfHostFocused(windowId) {
+  if (initWindowId == null || initHostWindowId == null) return;
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  if (windowId === initWindowId) return;
+  if (windowId !== initHostWindowId) return;
+  void chrome.windows.update(initWindowId, { focused: true }).catch(() => {});
+}
+
+chrome.windows.onFocusChanged.addListener(focusInitIfHostFocused);
 
 function resolveInitWaiters(engine) {
   const waiters = initWaiters;
@@ -372,7 +418,7 @@ async function refuseLocal() {
 
 async function abandonInitWindow() {
   const id = initWindowId;
-  initWindowId = null;
+  clearInitWindowId();
   if (id == null) return;
   try {
     await chrome.windows.remove(id);
@@ -381,10 +427,10 @@ async function abandonInitWindow() {
   }
 }
 
-async function createInitPopupWindow(create) {
+async function createInitPopupWindow(create, hostId) {
   const win = await chrome.windows.create(create);
   if (win?.id == null) throw new Error('Init window create returned no id');
-  initWindowId = win.id;
+  assignInitWindowId(win.id, hostId);
   if (create.left == null || create.top == null) return initWindowId;
   try {
     await chrome.windows.update(win.id, { left: create.left, top: create.top, focused: true });
@@ -403,9 +449,10 @@ async function openInitWindow() {
   if (initWindowId != null) {
     try {
       await chrome.windows.update(initWindowId, { focused: true });
+      notifyOptionsInitOverlay(true);
       return initWindowId;
     } catch {
-      initWindowId = null;
+      clearInitWindowId();
     }
   }
   const width = 540;
@@ -418,8 +465,11 @@ async function openInitWindow() {
     height,
     focused: true,
   };
+  /** @type {number | null} */
+  let hostId = null;
   try {
     const host = await chrome.windows.getLastFocused();
+    hostId = host?.id ?? null;
     const pos = IH_initWindowBounds.clampPopupToHost(host, width, height);
     if (pos) {
       create.left = pos.left;
@@ -429,7 +479,7 @@ async function openInitWindow() {
     /* 没有宿主窗口时让浏览器自己放 */
   }
   try {
-    return await createInitPopupWindow(create);
+    return await createInitPopupWindow(create, hostId);
   } catch (err) {
     const canRetryWithoutPos =
       IH_initWindowBounds.isBoundsError(err) && create.left != null && create.top != null;
@@ -438,7 +488,7 @@ async function openInitWindow() {
     delete create.left;
     delete create.top;
     try {
-      return await createInitPopupWindow(create);
+      return await createInitPopupWindow(create, hostId);
     } catch (err2) {
       await abandonInitWindow();
       throw err2;
@@ -453,7 +503,7 @@ async function openInitAndWait() {
     function onRemoved(id) {
       if (id !== windowId) return;
       chrome.windows.onRemoved.removeListener(onRemoved);
-      initWindowId = null;
+      clearInitWindowId();
       void (async () => {
         const st = await IH_localState.get();
         // 下载中关掉（Hide）继续后台；已就绪则只关窗。其余等同拒绝，避免下一段分析再弹。
@@ -786,7 +836,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg?.type === 'ih-local-status') {
     handleStatus()
-      .then((data) => sendResponse({ ok: true, ...data }))
+      .then((data) => sendResponse({ ok: true, ...data, initOverlay: initWindowId != null }))
       .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
     return true;
   }

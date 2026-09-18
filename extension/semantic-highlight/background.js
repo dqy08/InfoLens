@@ -5,7 +5,9 @@
  */
 
 importScripts('sw/restricted-url.js');
-importScripts('sw/install-dot.js');
+importScripts('sw/action-dot.js');
+importScripts('options-attention.js');
+importScripts('options-catalog.js');
 importScripts('sw/lifecycle-events.js');
 importScripts('sw/client-id.js');
 importScripts('sw/inject.js');
@@ -160,7 +162,8 @@ chrome.runtime.onInstalled.addListener((details) => {
     });
   });
 
-  IL_maybeShowInstallDot(details);
+  void IL_optionsAttention.onInstalled(details, IL_OPTIONS_CATALOG);
+  IL_setActionIconDotted(true);
   if (IL_reportsEnabled(IL_CONFIG)) {
     IL_reportInstallOrUpdate(details, EXTENSION_ID, IL_CONFIG?.apiBase);
   }
