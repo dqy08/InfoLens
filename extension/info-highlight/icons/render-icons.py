@@ -4,7 +4,7 @@
 Modes:
   off  — default red (idle)
   on   — idle tiles + green check badge (analysis done)
-  busy — same geometry, neutral gray (analyzing)
+  busy — 8 tiles; filled 0–7 are gray→red in reading order (analyzing)
 """
 
 from pathlib import Path
@@ -44,20 +44,25 @@ def icon_alpha(level: int) -> float:
     return token_alpha(level) * (ICON_MAX / TOKEN_MAX)
 
 
-def paint_unit(mode: str = "off") -> Image.Image:
+TILES = sum(len(words) for words in ROWS)
+
+
+def paint_unit(mode: str = "off", filled: int = 0) -> Image.Image:
     side = PAD * 2 + len(ROWS) * ROW_H + (len(ROWS) - 1) * ROW_GAP
     img = Image.new("RGBA", (side, side), (0, 0, 0, 0))
     px = img.load()
-    rgb = BUSY_RGB if mode == "busy" else RGB
     y = PAD
+    i = 0
     for words in ROWS:
         x = PAD
         for width, level in words:
+            rgb = RGB if mode != "busy" or i < filled else BUSY_RGB
             a = round(icon_alpha(level) * 255)
             for dy in range(ROW_H):
                 for dx in range(width):
                     px[x + dx, y + dy] = (*rgb, a)
             x += width + WORD_GAP
+            i += 1
         y += ROW_H + ROW_GAP
     return img
 
@@ -113,10 +118,15 @@ def main() -> None:
     for size in SIZES:
         unit.resize((size, size), Image.Resampling.NEAREST).save(out / f"icon{size}.png")
         print(f"wrote icon{size}.png")
-    busy = paint_unit("busy")
+    for filled in range(TILES):
+        busy = paint_unit("busy", filled)
+        suffix = "" if filled == 0 else f"-{filled}"
+        for size in ACTION_SIZES:
+            busy.resize((size, size), Image.Resampling.NEAREST).save(
+                out / f"icon{size}-busy{suffix}.png"
+            )
+            print(f"wrote icon{size}-busy{suffix}.png")
     for size in ACTION_SIZES:
-        busy.resize((size, size), Image.Resampling.NEAREST).save(out / f"icon{size}-busy.png")
-        print(f"wrote icon{size}-busy.png")
         base = unit.resize((size, size), Image.Resampling.NEAREST)
         paint_check(base).save(out / f"icon{size}-on.png")
         print(f"wrote icon{size}-on.png")

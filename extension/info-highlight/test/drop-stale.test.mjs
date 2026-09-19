@@ -90,7 +90,7 @@ test('扩展重载后的旧世界：有痕迹则 stale，拒绝再注入', () =>
   assert.doesNotMatch(peek[0], /ih-progress-host/);
   assert.doesNotMatch(peek[0], /ih-token-0/);
   assert.match(peek[0], /demo\.isLive/);
-  assert.match(bg, /pageCsPeek\(tab\.id, 'toggle'\)/);
+  assert.match(bg, /pageCsPeek\(tab\.id, force \? 'force' : 'toggle'\)/);
   assert.match(bg, /peek\.state === 'live' && peek\.result/);
   assert.match(bg, /pageCsPeek\(tabId, 'start'\)/);
   assert.match(bg, /IL_pdfSw\.isPdfUrl\(url\)[\s\S]*pageCsPeek\(tab\.id\)/);

@@ -64,7 +64,7 @@ const CONTENT_JS = [
  * 本世界 API 活着则可选调用 toggle/start；否则看 DOM 是否还有本扩展上次注入的痕迹。
  * live / stale / empty。重载后旧隔离世界互不可见，只能靠标记。
  * SYNC: content.js 的 data-ih-cs；pdf/entry.js 的 #il-pdf-entry[data-il-extension-id]
- * @param {'toggle' | 'start' | ''} [method]
+ * @param {'toggle' | 'start' | 'force' | ''} [method]
  * @returns {Promise<{ state: 'live' | 'stale' | 'empty', result?: unknown }>}
  */
 async function pageCsPeek(tabId, method) {
@@ -92,6 +92,10 @@ async function pageCsPeek(tabId, method) {
           if (m === 'start' && typeof demo?.start === 'function') {
             return { state: 'live', result: demo.start() };
           }
+          if (m === 'force' && typeof demo?.force === 'function') {
+            demo.force();
+            return { state: 'live', result: true };
+          }
           if (m === 'toggle' && typeof demo?.toggle === 'function') {
             demo.toggle();
             return { state: 'live', result: true };
@@ -115,18 +119,25 @@ async function pageCsPeek(tabId, method) {
 /** SYNC: semantic-highlight/semantic/find.js → OTHER_IL_MSG / alert */
 const STALE_PAGE_MSG =
   'Another Info Highlight is already on this page. Please refresh the page and try again.';
+/** SYNC: analyzeRun.js → FORCE_BUSY_MSG */
+const FORCE_BUSY_MSG =
+  'Info Highlight is still analyzing this page. Try again when it finishes.';
 
-async function refuseStalePage(tabId) {
-  await setBadgeError(tabId, 'refresh this page');
+async function pageAlert(tabId, msg) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId, frameIds: [0] },
       func: (msg) => { alert(msg); },
-      args: [STALE_PAGE_MSG],
+      args: [msg],
     });
   } catch {
-    /* 页上 alert 不了就只留工具栏感叹号 */
+    /* 页上 alert 不了 */
   }
+}
+
+async function refuseStalePage(tabId) {
+  await setBadgeError(tabId, 'refresh this page');
+  await pageAlert(tabId, STALE_PAGE_MSG);
 }
 
 function clearBadge(tabId) {
@@ -144,19 +155,23 @@ async function setBadgeError(tabId, brief) {
   }
 }
 
-async function activateTab(tab) {
+async function activateTab(tab, force) {
   if (!tab?.id) return;
   // optional file:// request 必须在手势同步阶段启动；前面不能有 await
   const fileHostPromise = IL_pdfSw.isFileUrl(tab.url) ? IL_pdfSw.requestFileHostFromGesture() : null;
   IL_setActionIconDotted(false);
-  if (IH_actionState.shouldIgnoreClick(tab.id)) return;
+  if (!force && IH_actionState.shouldIgnoreClick(tab.id)) return;
+  if (force && IH_actionState.get(tab.id) === 'analyzing') {
+    await pageAlert(tab.id, FORCE_BUSY_MSG);
+    return;
+  }
   try {
     const fresh = await chrome.tabs.get(tab.id);
     const url = fresh.url || tab.url || '';
     if (IL_pdfSw.isOwnViewerUrl(url)) {
       IH_actionState.markAnalyzingIfIdle(tab.id);
       const ok = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ type: 'ih-pdf-toggle', tabId: tab.id }, (res) => {
+        chrome.runtime.sendMessage({ type: force ? 'ih-pdf-force' : 'ih-pdf-toggle', tabId: tab.id }, (res) => {
           resolve(!chrome.runtime.lastError && res?.ok === true);
         });
       });
@@ -189,12 +204,12 @@ async function activateTab(tab) {
     }
     // 无 .pdf 后缀时先由页内按 Content-Type / 魔数确认，再退回网页管线
     {
-      const peek = await pageCsPeek(tab.id, 'toggle');
+      const peek = await pageCsPeek(tab.id, force ? 'force' : 'toggle');
       if (peek.state === 'stale') {
         await refuseStalePage(tab.id);
         return;
       }
-      // result 表示页内 demo.toggle 已执行。仅 PDF 入口 live 时没有 result，要落到下面切按钮。
+      // result 表示页内 demo.toggle / force 已执行。仅 PDF 入口 live 时没有 result，要落到下面切按钮。
       if (peek.state === 'live' && peek.result) {
         manualTabs.add(tab.id);
         clearBadge(tab.id);
@@ -212,7 +227,7 @@ async function activateTab(tab) {
       logLabel: 'Info Highlight',
       waitComplete: false,
     });
-    const after = await pageCsPeek(tab.id, 'toggle');
+    const after = await pageCsPeek(tab.id, force ? 'force' : 'toggle');
     if (after.state !== 'live') {
       await setBadgeError(tab.id, 'inject');
       return;
@@ -234,8 +249,10 @@ async function activateTab(tab) {
 }
 
 const CONTEXT_MENU_ID = 'ih-highlight';
+const FORCE_MENU_ID = 'ih-force-analyze';
 const AUTO_MENU_ID = 'ih-auto-site';
 const ANALYZE_MENU_TITLE = 'Analyze this page';
+const FORCE_ANALYZE_MENU_TITLE = 'Force analyze this page';
 
 function autoMenuTitle(host, on) {
   return on ? `Stop always analyzing ${host}` : `Always analyze ${host}`;
@@ -371,15 +388,20 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
+      id: AUTO_MENU_ID,
+      title: 'Always analyze this site',
+      contexts: ['page', 'selection'],
+      documentUrlPatterns: ['http://*/*', 'https://*/*'],
+    });
+    chrome.contextMenus.create({
       id: CONTEXT_MENU_ID,
       title: ANALYZE_MENU_TITLE,
       contexts: ['page', 'selection'],
     });
     chrome.contextMenus.create({
-      id: AUTO_MENU_ID,
-      title: 'Always analyze this site',
+      id: FORCE_MENU_ID,
+      title: FORCE_ANALYZE_MENU_TITLE,
       contexts: ['page', 'selection'],
-      documentUrlPatterns: ['http://*/*', 'https://*/*'],
     });
   });
 
@@ -400,6 +422,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   // 用过菜单也算用过插件；Chrome 右键工具栏图标本身不发事件，只能在这里灭蓝点
   IL_setActionIconDotted(false);
   if (info.menuItemId === CONTEXT_MENU_ID) void activateTab(tab);
+  else if (info.menuItemId === FORCE_MENU_ID) void activateTab(tab, true);
   // permissions.request 要手势，toggleAutoSite 里首句就发，别在这之前 await
   else if (info.menuItemId === AUTO_MENU_ID) void toggleAutoSite(info, tab.id);
 });
@@ -826,7 +849,7 @@ async function fetchTokens(engine, text, cloudModel) {
   return { tokens, model };
 }
 
-async function handleAnalyze(text) {
+async function handleAnalyze(text, skipCache) {
   await maybeOfferInit();
   const st = await IH_localState.get();
   const blocked = localOnlyBlockReason(st);
@@ -841,7 +864,7 @@ async function handleAnalyze(text) {
       const got = await fetchTokens(engine, text, st.cloudModel);
       if (got.model) model = got.model;
       return got.tokens;
-    });
+    }, { skip: skipCache });
   } catch (err) {
     if (st.pref === IH_localState.PREF_LOCAL) {
       throw new Error(`On-device analysis failed: ${String(err?.message || err)}`);
@@ -1045,7 +1068,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'ih-action-state') {
     const tabId = sender.tab?.id;
     if (tabId && (msg.state === 'off' || msg.state === 'analyzing' || msg.state === 'on')) {
-      IH_actionState.set(tabId, msg.state);
+      IH_actionState.set(tabId, msg.state, msg.filled);
       clearBadge(tabId);
     }
     return;
@@ -1151,7 +1174,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: false, error: 'Missing text' });
     return;
   }
-  handleAnalyze(text)
+  handleAnalyze(text, !!msg.skipCache)
     .then(({ data, inferred, engine }) => sendResponse({ ok: true, data, inferred, engine }))
     .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
   return true;

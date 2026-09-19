@@ -10,6 +10,7 @@
   let generation = 0;
   let busy = false;
   let enabled = true;
+  let skipCache = false;
   /** @type {{ mapped: { text: string, pieces: unknown[], root: Element }, segs: { start: number, end: number, text: string }[], next: number, painted: number } | null} */
   let session = null;
 
@@ -69,7 +70,7 @@
       }
       const end = Math.min(session.next + R.MAX_SEGMENTS_PER_RUN, session.segs.length);
       const lastAlignErr = await R.paintRange(
-        session, session.next, end, still, { overlay: true }, report,
+        session, session.next, end, still, { overlay: true, skipCache }, report,
       );
       if (!still()) return;
       session.next = end;
@@ -115,6 +116,7 @@
 
   function restart() {
     if (!enabled) return;
+    skipCache = false;
     session = null;
     void runBatch(generation += 1);
   }
@@ -139,10 +141,21 @@
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type !== 'ih-pdf-toggle') return;
+    if (message?.type !== 'ih-pdf-toggle' && message?.type !== 'ih-pdf-force') return;
     chrome.tabs.getCurrent((tab) => {
       if (tab?.id !== message.tabId) return;
-      toggle();
+      if (message.type === 'ih-pdf-force') {
+        if (busy) {
+          alert(R.FORCE_BUSY_MSG);
+        } else {
+          enabled = true;
+          skipCache = true;
+          clear();
+          void runBatch(generation += 1);
+        }
+      } else {
+        toggle();
+      }
       sendResponse({ ok: true });
     });
     return true;

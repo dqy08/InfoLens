@@ -132,6 +132,21 @@ test('paintRange：累加 skip_level / painted，align_fail_n 计入跳过段', 
   assert.equal(report2.last_align_err, 'token offset align failed');
 });
 
+test('paintRange：opts.skipCache 写进 ih-analyze', async () => {
+  const session = {
+    mapped: { text: 'Hello', pieces: [{}] },
+    segs: [{ start: 0, end: 5, text: 'Hello' }],
+    painted: 0,
+  };
+  globalThis.__ihPaintStats = () => ({
+    painted: 1, tokens_in: 1, tokens_skip_level: 0, tokens_skip_empty_range: 0,
+  });
+  await R.paintRange(session, 0, 1, () => true, { skipCache: true }, newReport());
+  const analyze = messages.filter((m) => m.type === 'ih-analyze');
+  assert.equal(analyze.length, 1);
+  assert.equal(analyze[0].skipCache, true);
+});
+
 test('afterPaint：painted===0 挂 detail 且 error 仍以 emptyMsg 开头', async () => {
   const session = {
     next: 1,

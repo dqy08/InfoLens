@@ -56,12 +56,15 @@ globalThis.IH_analyzeCache ||= (function () {
   /**
    * @param {string} text
    * @param {(text: string) => Promise<unknown[]>} send
+   * @param {{ skip?: boolean }} [opts]
    */
-  async function tokens(text, send) {
+  async function tokens(text, send, opts) {
     await invalidateIfStale();
     const sk = dataKey(await key(text));
-    const cached = (await store.get(sk))[sk];
-    if (Array.isArray(cached)) return cached;
+    if (!opts?.skip) {
+      const cached = (await store.get(sk))[sk];
+      if (Array.isArray(cached)) return cached;
+    }
     const incoming = await send(text);
     const slim = slimTokens(incoming);
     await store.put({ [sk]: slim, [store.META_KEY]: { v: PLUGIN_CACHE_VERSION } });

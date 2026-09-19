@@ -27,6 +27,7 @@
   let gen = 0;
   let busy = false;
   let active = false;
+  let skipCache = false;
   /** @type {{ mapped: { text: string, pieces: unknown[] }, segs: { start: number, end: number, text: string }[], next: number, painted: number } | null} */
   let session = null;
 
@@ -87,7 +88,7 @@
         session = await R.beginSession(globalThis.IH_extractPage(), 'No article text');
         globalThis.IH_tokenTip.bind(session.mapped);
       }
-      const opts = { onTokens: (tokens) => globalThis.IH_tokenTip.add(tokens) };
+      const opts = { onTokens: (tokens) => globalThis.IH_tokenTip.add(tokens), skipCache };
       const paintTo = async (to) => {
         const err = await R.paintRange(session, session.next, to, still, opts, report);
         if (still()) session.next = to;
@@ -134,12 +135,23 @@
   }
 
   function toggle() {
+    skipCache = false;
     if (busy || active) {
       gen += 1;
       busy = false;
       clearAll();
       return;
     }
+    void runBatch(gen += 1, false);
+  }
+
+  function force() {
+    if (busy) {
+      alert(R.FORCE_BUSY_MSG);
+      return;
+    }
+    skipCache = true;
+    if (active) clearAll();
     void runBatch(gen += 1, false);
   }
 
@@ -155,11 +167,12 @@
   function start() {
     if (busy) return 'busy';
     if (active) return 'painted';
+    skipCache = false;
     void runBatch(gen += 1, true);
     return true;
   }
 
   // SYNC: background.js → pageCsPeek 的 data-ih-cs
   document.documentElement.setAttribute('data-ih-cs', '');
-  window.__IH_DEMO__ = { toggle, start, isLive };
+  window.__IH_DEMO__ = { toggle, start, force, isLive };
 })();
