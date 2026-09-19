@@ -10,8 +10,7 @@
   let generation = 0;
   let busy = false;
   let enabled = true;
-  let skipCache = false;
-  /** @type {{ mapped: { text: string, pieces: unknown[], root: Element }, segs: { start: number, end: number, text: string }[], next: number, painted: number } | null} */
+  /** @type {{ mapped: { text: string, pieces: unknown[], root: Element }, segs: { start: number, end: number, text: string }[], next: number, painted: number, skipCache?: boolean } | null} */
   let session = null;
 
   function extractPdfPage() {
@@ -30,7 +29,7 @@
 
   function continuePaused() {
     if (busy || !session || !enabled) return;
-    void runBatch(generation += 1);
+    void runBatch(generation += 1, session.skipCache);
   }
 
   async function finish(lastAlignErr, report) {
@@ -62,15 +61,17 @@
     }, work);
   }
 
-  async function runBatch(myGeneration) {
+  async function runBatch(myGeneration, skipCache) {
     const still = () => myGeneration === generation;
+    const skip = !!skipCache;
     await job(myGeneration, async (report) => {
       if (!session) {
         session = await R.beginSession(extractPdfPage(), 'PDF has no text to analyze');
+        session.skipCache = skip;
       }
       const end = Math.min(session.next + R.MAX_SEGMENTS_PER_RUN, session.segs.length);
       const lastAlignErr = await R.paintRange(
-        session, session.next, end, still, { overlay: true, skipCache }, report,
+        session, session.next, end, still, { overlay: true, skipCache: skip }, report,
       );
       if (!still()) return;
       session.next = end;
@@ -93,7 +94,7 @@
     }
     if (!session || mapped.text !== session.mapped.text) {
       session = null;
-      await runBatch(myGeneration);
+      await runBatch(myGeneration, false);
       return;
     }
     session.mapped = mapped;
@@ -102,7 +103,7 @@
     globalThis.IH_clearHighlights();
     await globalThis.IH_bindProgress(mapped, session.segs);
     if (done === 0) {
-      await runBatch(myGeneration);
+      await runBatch(myGeneration, session.skipCache);
       return;
     }
     await job(myGeneration, async (report) => {
@@ -116,16 +117,15 @@
 
   function restart() {
     if (!enabled) return;
-    skipCache = false;
     session = null;
-    void runBatch(generation += 1);
+    void runBatch(generation += 1, false);
   }
 
   function onRerendered() {
     if (!enabled) return;
     const myGeneration = generation += 1;
     if (session) void remount(myGeneration);
-    else void runBatch(myGeneration);
+    else void runBatch(myGeneration, false);
   }
 
   function toggle() {
@@ -149,9 +149,8 @@
           alert(R.FORCE_BUSY_MSG);
         } else {
           enabled = true;
-          skipCache = true;
           clear();
-          void runBatch(generation += 1);
+          void runBatch(generation += 1, true);
         }
       } else {
         toggle();

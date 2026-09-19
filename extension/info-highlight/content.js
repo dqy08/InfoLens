@@ -27,8 +27,7 @@
   let gen = 0;
   let busy = false;
   let active = false;
-  let skipCache = false;
-  /** @type {{ mapped: { text: string, pieces: unknown[] }, segs: { start: number, end: number, text: string }[], next: number, painted: number } | null} */
+  /** @type {{ mapped: { text: string, pieces: unknown[] }, segs: { start: number, end: number, text: string }[], next: number, painted: number, skipCache?: boolean } | null} */
   let session = null;
 
   function clearAll() {
@@ -48,7 +47,7 @@
 
   function continuePaused() {
     if (busy || !session) return;
-    void runBatch(gen += 1, false);
+    void runBatch(gen += 1, false, session.skipCache);
   }
 
   function pageText() {
@@ -59,8 +58,9 @@
     }
   }
 
-  async function runBatch(myGen, settle) {
+  async function runBatch(myGen, settle, skipCache) {
     const still = () => myGen === gen;
+    const skip = !!skipCache;
     busy = true;
     R.reportActionState('analyzing');
     await whenComplete();
@@ -86,9 +86,10 @@
     const job = async (report) => {
       if (!session) {
         session = await R.beginSession(globalThis.IH_extractPage(), 'No article text');
+        session.skipCache = skip;
         globalThis.IH_tokenTip.bind(session.mapped);
       }
-      const opts = { onTokens: (tokens) => globalThis.IH_tokenTip.add(tokens), skipCache };
+      const opts = { onTokens: (tokens) => globalThis.IH_tokenTip.add(tokens), skipCache: skip };
       const paintTo = async (to) => {
         const err = await R.paintRange(session, session.next, to, still, opts, report);
         if (still()) session.next = to;
@@ -101,6 +102,7 @@
         if (!still()) return;
         if (pageText() !== session.mapped.text) {
           session = await R.beginSession(globalThis.IH_extractPage(), 'No article text');
+          session.skipCache = skip;
           globalThis.IH_tokenTip.bind(session.mapped);
           lastAlignErr = await paintTo(Math.min(R.MAX_SEGMENTS_PER_RUN, session.segs.length));
         } else if (session.next < cap) {
@@ -135,14 +137,13 @@
   }
 
   function toggle() {
-    skipCache = false;
     if (busy || active) {
       gen += 1;
       busy = false;
       clearAll();
       return;
     }
-    void runBatch(gen += 1, false);
+    void runBatch(gen += 1, false, false);
   }
 
   function force() {
@@ -150,9 +151,8 @@
       alert(R.FORCE_BUSY_MSG);
       return;
     }
-    skipCache = true;
     if (active) clearAll();
-    void runBatch(gen += 1, false);
+    void runBatch(gen += 1, false, true);
   }
 
   function isLive() {
@@ -167,8 +167,7 @@
   function start() {
     if (busy) return 'busy';
     if (active) return 'painted';
-    skipCache = false;
-    void runBatch(gen += 1, true);
+    void runBatch(gen += 1, true, false);
     return true;
   }
 

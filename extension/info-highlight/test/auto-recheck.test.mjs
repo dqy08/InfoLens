@@ -22,3 +22,11 @@ test('content.js：段末作废重来；1 秒只补瞬间结束', () => {
   assert.ok(wait, '应留下未满 1 秒则等待');
   assert.match(wait[0], /pageText\(\)/);
 });
+
+test('content.js：skipCache 是 runBatch 参数，不是页内状态位', () => {
+  const src = readFileSync(join(dir, '../content.js'), 'utf8');
+  assert.doesNotMatch(src, /let skipCache/);
+  assert.match(src, /async function runBatch\(myGen, settle, skipCache\)/);
+  assert.match(src, /void runBatch\(gen \+= 1, false, true\)/);
+  assert.match(src, /void runBatch\(gen \+= 1, false, session\.skipCache\)/);
+});

@@ -61,9 +61,9 @@ const CONTENT_JS = [
 ];
 
 /**
- * 本世界 API 活着则可选调用 toggle/start；否则看 DOM 是否还有本扩展上次注入的痕迹。
+ * 本世界 API 活着则可选调用 toggle/start；否则看 DOM 是否还有网页管线上次注入的痕迹。
  * live / stale / empty。重载后旧隔离世界互不可见，只能靠标记。
- * SYNC: content.js 的 data-ih-cs；pdf/entry.js 的 #il-pdf-entry[data-il-extension-id]
+ * SYNC: content.js 的 data-ih-cs。PDF 入口节点由 entry.js 同 id 回收，不当 stale。
  * @param {'toggle' | 'start' | 'force' | ''} [method]
  * @returns {Promise<{ state: 'live' | 'stale' | 'empty', result?: unknown }>}
  */
@@ -102,9 +102,7 @@ async function pageCsPeek(tabId, method) {
           }
           return { state: 'live' };
         }
-        const pdfMine = document.getElementById('il-pdf-entry')?.dataset?.ilExtensionId
-          === chrome.runtime.id;
-        const marked = document.documentElement.hasAttribute('data-ih-cs') || pdfMine;
+        const marked = document.documentElement.hasAttribute('data-ih-cs');
         return { state: marked ? 'stale' : 'empty' };
       },
     });
@@ -116,9 +114,8 @@ async function pageCsPeek(tabId, method) {
   }
 }
 
-/** SYNC: semantic-highlight/semantic/find.js → OTHER_IL_MSG / alert */
 const STALE_PAGE_MSG =
-  'Another Info Highlight is already on this page. Please refresh the page and try again.';
+  'A previous version of Info Highlight is still on this page. Please refresh the page and try again.';
 /** SYNC: analyzeRun.js → FORCE_BUSY_MSG */
 const FORCE_BUSY_MSG =
   'Info Highlight is still analyzing this page. Try again when it finishes.';
@@ -176,7 +173,7 @@ async function activateTab(tab, force) {
         });
       });
       if (!ok) {
-        await refuseStalePage(tab.id);
+        await setBadgeError(tab.id, 'inject');
         return;
       }
       clearBadge(tab.id);
