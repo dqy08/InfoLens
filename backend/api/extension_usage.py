@@ -36,19 +36,6 @@ def _optional_duration_ms(v):
     return min(n, _MAX_DURATION_MS)
 
 
-def _duration_bucket(ms: int) -> str:
-    """半开区间；后缀与 visit_stats / client API_ORDER 一致。"""
-    if ms < 500:
-        return "dur_lt_500"
-    if ms < 1000:
-        return "dur_500_1s"
-    if ms < 2000:
-        return "dur_1_2s"
-    if ms < 5000:
-        return "dur_2_5s"
-    return "dur_ge_5s"
-
-
 def extension_usage_report(usage_body=None):
     d = usage_body if isinstance(usage_body, dict) else {}
     extension = str(d.get("extension") or "").strip()
@@ -74,8 +61,6 @@ def extension_usage_report(usage_body=None):
         bump_api("info_highlight_run__failed")
     if cached > 0:
         bump_api("info_highlight_run__cached")
-    if outcome == "ok" and duration_ms is not None:
-        bump_api(f"info_highlight_run__{engine}__{_duration_bucket(duration_ms)}")
 
     details = (
         f"ext={extension} eng={engine} outcome={outcome} "
