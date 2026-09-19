@@ -7,9 +7,11 @@ globalThis.IH_analyzeRun ||= (function () {
   /** SYNC: local/scoring.js → alignUtf16Offsets fail() */
   const ALIGN_FAIL = 'token offset align failed';
 
-  function sendAnalyze(text) {
+  function sendAnalyze(text, skipCache) {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({ type: 'ih-analyze', text }, (res) => {
+      const msg = { type: 'ih-analyze', text };
+      if (skipCache) msg.skipCache = true;
+      chrome.runtime.sendMessage(msg, (res) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
           return;
@@ -18,6 +20,8 @@ globalThis.IH_analyzeRun ||= (function () {
           reject(new Error(res?.error || 'Analyze failed'));
           return;
         }
+        const model = typeof res.data?.result?.model === 'string' ? res.data.result.model.trim() : '';
+        if (model) globalThis.IH_tokenTip?.setModel?.(model);
         resolve({
           data: res.data,
           inferred: !!res.inferred,
@@ -27,11 +31,28 @@ globalThis.IH_analyzeRun ||= (function () {
     });
   }
 
-  /** @param {'off' | 'analyzing' | 'on'} state */
-  function reportActionState(state) {
-    chrome.runtime.sendMessage({ type: 'ih-action-state', state }, () => {
+  /** SYNC: action-state.js TILES / icons/render-icons.py TILES */
+  const ACTION_TILES = 8;
+
+  /** @param {'off' | 'analyzing' | 'on'} state @param {number} [filled] */
+  function reportActionState(state, filled) {
+    const msg = { type: 'ih-action-state', state };
+    if (state === 'analyzing') {
+      const v = Math.floor(Number(filled));
+      msg.filled = Number.isFinite(v) && v > 0 ? (v >= ACTION_TILES ? ACTION_TILES : v) : 0;
+    }
+    chrome.runtime.sendMessage(msg, () => {
       void chrome.runtime.lastError;
     });
+  }
+
+  function reportActionFilled(done, total) {
+    const n = Number(total);
+    if (!(n > 0)) {
+      reportActionState('analyzing', 0);
+      return;
+    }
+    reportActionState('analyzing', Math.min(ACTION_TILES, Math.floor((Number(done) * ACTION_TILES) / n)));
   }
 
   /** 一轮结束后上报；未尝试任何段时不发。失败时附带截断后的 error（不含页面 URL/正文）。 */
@@ -140,10 +161,10 @@ globalThis.IH_analyzeRun ||= (function () {
    *   | { kind: 'error', err: Error, inferred: boolean, engine: string | null }
    * >}
    */
-  async function analyzeSegment(text, segs, i) {
+  async function analyzeSegment(text, segs, i, skipCache) {
     if (!/\S/.test(segs[i].text)) return { kind: 'empty' };
     const win = globalThis.IH_segmentWindow(text, segs, i);
-    const { data, inferred, engine } = await sendAnalyze(win.requestText);
+    const { data, inferred, engine } = await sendAnalyze(win.requestText, skipCache);
     const raw = data?.result?.bpe_strings;
     if (!Array.isArray(raw)) {
       return { kind: 'error', err: new Error('Analyze returned no tokens'), inferred, engine };
@@ -184,18 +205,20 @@ globalThis.IH_analyzeRun ||= (function () {
    * @param {number} from
    * @param {number} to
    * @param {() => boolean} still
-   * @param {{ overlay?: boolean, onTokens?: (tokens: unknown[], i: number) => void }} [opts]
+   * @param {{ overlay?: boolean, onTokens?: (tokens: unknown[], i: number) => void, skipCache?: boolean }} [opts]
    * @param {{ segments: number, segments_ok: number, cached: number, engine: string | null, error?: string | null, duration_ms?: number, align_fail_n?: number, tokens_in?: number, tokens_skip_level?: number, tokens_skip_empty_range?: number, painted?: number, detail?: object | null }} report
    * @returns {Promise<Error | undefined>}
    */
   async function paintRange(session, from, to, still, opts, report) {
+    const batch = to - from;
+    reportActionFilled(0, batch);
     let lastAlignErr;
     for (let i = from; i < to; i++) {
       await nextFrame();
       if (!still()) return lastAlignErr;
       let got;
       try {
-        got = await analyzeSegment(session.mapped.text, session.segs, i);
+        got = await analyzeSegment(session.mapped.text, session.segs, i, opts?.skipCache);
       } catch (err) {
         if (!still()) return lastAlignErr;
         // SW/通道失败：计入尝试，但不记 cached（inferred 未知）
@@ -205,6 +228,7 @@ globalThis.IH_analyzeRun ||= (function () {
       if (!still()) return lastAlignErr;
       if (got.kind === 'empty') {
         applyTokens(session, [], i, opts, report);
+        reportActionFilled(i + 1 - from, batch);
         continue;
       }
       noteAttempt(report, got.inferred, got.engine);
@@ -216,10 +240,12 @@ globalThis.IH_analyzeRun ||= (function () {
           report.align_fail_n = (report.align_fail_n || 0) + 1;
           report.last_align_err = clipAlignErr(got.err);
         }
+        reportActionFilled(i + 1 - from, batch);
         continue;
       }
       if (report) report.segments_ok += 1;
       applyTokens(session, got.tokens, i, opts, report);
+      reportActionFilled(i + 1 - from, batch);
     }
     return lastAlignErr;
   }
@@ -277,6 +303,7 @@ globalThis.IH_analyzeRun ||= (function () {
 
   return {
     MAX_SEGMENTS_PER_RUN,
+    FORCE_BUSY_MSG: 'Info Highlight is still analyzing this page. Try again when it finishes.',
     reportActionState,
     beginSession,
     paintRange,

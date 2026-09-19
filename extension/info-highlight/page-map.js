@@ -291,12 +291,13 @@
 
   /**
    * classic = token bits（站点默认 tokenRenderStyle）。
+   * SYNC: client/src/shared/core/Util.ts → calculateSurprisal（p≤0 用 EPSILON 托底）
    * @param {{ p?: number | null, real_topk?: [number, number] | null }} tok
    * @returns {number | null}
    */
   function tokenBits(tok) {
     const p = Number.isFinite(tok?.p) ? tok.p : tok?.real_topk?.[1];
-    if (!Number.isFinite(p) || p <= 0) return null;
+    if (!Number.isFinite(p)) return null;
     return -Math.log2(Math.max(p, Number.EPSILON));
   }
 

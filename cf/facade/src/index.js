@@ -22,6 +22,7 @@
  * - 请求发现 home 不可达（fetch 抛错 / 502·52x·530）→ 写 last_fail_at，本请求改打 HF
  *   冷却期内不再尝试 home；不含源站业务 503/504
  * - /facade-home-probe：始终探 HOME_ORIGIN/api/health；冷却期内若恢复则清 last_fail_at（不通则只观测、不续写）
+ * - POST /api/analyze：model 仅 default / gemma-3-270m / qwen3-0.6b，其余 400 不转发
  */
 import {
   RELEVANCE_PATH,
@@ -75,6 +76,7 @@ import {
 } from './extension_uninstall_survey.js';
 import { CLIENT_ID_PATH, handleClientId } from './client_id.js';
 import { USAGE_PATH, persistAcceptedReport } from './report_log.js';
+import { ANALYZE_PATH, analyzeModelGateMessage } from './analyze_model.js';
 const HOP_BY_HOP = new Set([
   'connection',
   'keep-alive',
@@ -98,7 +100,7 @@ const COOLDOWN_SEC = 60;
 
 /** 两模式均走 home 的算力路径（不含已边缘短路的 relevance / keywords v2） */
 const COMPUTE_PATHS = new Set([
-  '/api/analyze',
+  ANALYZE_PATH,
   '/api/tokenize',
   '/api/prediction-attribute',
   '/api/analyze-semantic',
@@ -489,6 +491,14 @@ async function handleRequest(request, env, ctx) {
   }
   if (path === UNINSTALL_SURVEY_PATH) {
     return handlePostUninstallSurvey(request, env, json, ctx);
+  }
+
+  if (path === ANALYZE_PATH && request.method === 'POST') {
+    bodyBuf = await request.arrayBuffer();
+    const denied = analyzeModelGateMessage(bodyBuf);
+    if (denied) {
+      return json(request, { success: false, message: denied }, 400);
+    }
   }
 
   if (path === '/api/v2/analyze-semantic-version') {

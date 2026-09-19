@@ -117,17 +117,28 @@ test('skip_level：低 surprisal 或 bits 为空', () => {
     [
       { offset: [0, 5], p: COLD },
       { offset: [0, 5] },
-      { offset: [0, 5], p: 0 },
     ],
     mapped,
     { append: true },
   );
   assert.deepEqual(stats, {
     painted: 0,
-    tokens_in: 3,
-    tokens_skip_level: 3,
+    tokens_in: 2,
+    tokens_skip_level: 2,
     tokens_skip_empty_range: 0,
   });
+});
+
+test('p=0：与站点 calculateSurprisal 同，EPSILON 托底，高 surprisal 要画', () => {
+  assert.equal(globalThis.IH_tokenBits({ p: 0 }), -Math.log2(Number.EPSILON));
+  const mapped = mappedFor('Hello');
+  const stats = globalThis.IH_paintTokens(
+    [{ offset: [0, 5], p: 0 }],
+    mapped,
+    { append: true },
+  );
+  assert.equal(stats.tokens_skip_level, 0);
+  assert.equal(stats.painted, 1);
 });
 
 test('painted：高 surprisal 且 range 非空白', () => {

@@ -10,11 +10,20 @@
  * 探测结果挂 window.__IL_PDF_ENTRY_RESULT__（Promise<boolean>），供 SW 判断是否真的露出入口。
  */
 (() => {
+  function isLive() {
+    try {
+      return !!chrome.runtime?.id;
+    } catch {
+      return false;
+    }
+  }
+
   const existing = document.getElementById('il-pdf-entry');
   if (existing) {
-    // 同一次加载：点图标只切换显隐。扩展重载后 runtime id 对不上 → 拆掉重建。
+    // 同一次加载：点图标只切换显隐。别的扩展留下的节点：拆掉重建。
     if (existing.dataset.ilExtensionId === chrome.runtime.id) {
       existing.hidden = !existing.hidden;
+      window.__IH_PDF_ENTRY__ = { isLive };
       window.__IL_PDF_ENTRY_RESULT__ = Promise.resolve(true);
       return;
     }
@@ -219,9 +228,8 @@
 
   async function offer() {
     if (!(await shouldOffer())) return false;
-    // 探测期间若再次注入，可能已有节点
-    if (document.getElementById('il-pdf-entry')) return true;
-    mountButton();
+    if (!document.getElementById('il-pdf-entry')) mountButton();
+    window.__IH_PDF_ENTRY__ = { isLive };
     return true;
   }
 

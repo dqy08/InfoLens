@@ -81,10 +81,35 @@ test('drop-stale：无 isLive / 已作废则清掉全局', () => {
   delete globalThis.window;
 });
 
-test('callPageApi 在调 start 前先问 isLive', () => {
-  const src = readFileSync(join(dir, '../background.js'), 'utf8');
-  const fn = src.match(/async function callPageApi\(tabId, method\) \{[\s\S]*?\n\}/);
-  assert.ok(fn, 'callPageApi missing');
-  assert.match(fn[0], /api\.isLive/);
-  assert.match(fn[0], /return false/);
+test('扩展重载后的旧世界：有痕迹则 stale，拒绝再注入', () => {
+  const bg = readFileSync(join(dir, '../background.js'), 'utf8');
+  const peek = bg.match(/async function pageCsPeek\(tabId, method\) \{[\s\S]*?\n\}/);
+  assert.ok(peek, 'pageCsPeek missing');
+  assert.match(peek[0], /data-ih-cs/);
+  assert.doesNotMatch(peek[0], /il-pdf-entry/);
+  assert.doesNotMatch(peek[0], /ih-progress-host/);
+  assert.doesNotMatch(peek[0], /ih-token-0/);
+  assert.match(peek[0], /demo\.isLive/);
+  assert.match(peek[0], /pdf\?\.isLive/);
+  assert.match(bg, /pageCsPeek\(tab\.id, force \? 'force' : 'toggle'\)/);
+  assert.match(bg, /peek\.state === 'live' && peek\.result/);
+  assert.match(bg, /pageCsPeek\(tabId, 'start'\)/);
+  assert.match(bg, /IL_pdfSw\.isPdfUrl\(url\)[\s\S]*pageCsPeek\(tab\.id\)/);
+  assert.match(bg, /async function refuseStalePage\(tabId\)/);
+  assert.match(bg, /alert\(msg\)/);
+  assert.match(bg, /A previous version of Info Highlight is still on this page/);
+  assert.match(bg, /await refuseStalePage\(tabId\)/);
+  assert.match(bg, /res\?\.ok === true/);
+  assert.match(bg, /if \(!ok\) \{\s*await setBadgeError\(tab\.id, 'inject'\)/);
+  const pdfHl = readFileSync(join(dir, '../pdf/highlight.js'), 'utf8');
+  assert.match(pdfHl, /if \(tab\?\.id !== message\.tabId\) return;/);
+  assert.match(pdfHl, /sendResponse\(\{ ok: true \}\)/);
+  assert.doesNotMatch(pdfHl, /let skipCache/);
+  assert.match(pdfHl, /async function runBatch\(myGeneration, skipCache\)/);
+  const content = readFileSync(join(dir, '../content.js'), 'utf8');
+  assert.match(content, /setAttribute\('data-ih-cs'/);
+  const entry = readFileSync(join(dir, '../../shared/pdf/entry.js'), 'utf8');
+  assert.match(entry, /window\.__IH_PDF_ENTRY__/);
+  assert.doesNotMatch(bg, /async function callPageApi/);
+  assert.doesNotMatch(bg, /pageCsProbe/);
 });

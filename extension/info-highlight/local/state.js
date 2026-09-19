@@ -1,5 +1,5 @@
 /**
- * 本机分析状态：WebGPU 探测、用户偏好、模型是否就绪、权重下载源。
+ * 分析偏好与本机模型状态：WebGPU、本机/云端偏好、云端模型、权重是否就绪、下载源。
  * 写入 chrome.storage.local。权重在 Cache API（transformers-cache），不进 chrome.storage。
  */
 globalThis.IH_localState ||= (function () {
@@ -8,11 +8,18 @@ globalThis.IH_localState ||= (function () {
   const PREF_LOCAL = 'local';
   const HUB_HUGGINGFACE = 'huggingface';
   const HUB_MODELSCOPE = 'modelscope';
+  const CLOUD_GEMMA = 'gemma-3-270m';
+  const CLOUD_MODELS = Object.freeze([
+    { id: CLOUD_GEMMA, label: 'Gemma 3 270M' },
+    { id: 'qwen3-0.6b', label: 'Qwen3 0.6B' },
+  ]);
+  const CLOUD_MODEL_IDS = new Set(CLOUD_MODELS.map((m) => m.id));
   const KEYS = {
     webgpu: 'ih_webgpu_ok',
     pref: 'ih_analyze_pref',
     ready: 'ih_local_ready',
     hub: 'ih_model_hub',
+    cloudModel: 'ih_cloud_model',
   };
   const MODEL_ID = 'onnx-community/gemma-3-270m-ONNX';
   const MODEL_DTYPE = 'q4';
@@ -37,7 +44,13 @@ globalThis.IH_localState ||= (function () {
   function get() {
     return new Promise((resolve, reject) => {
       chrome.storage.local.get(
-        { [KEYS.webgpu]: null, [KEYS.pref]: PREF_AUTO, [KEYS.ready]: false, [KEYS.hub]: HUB_HUGGINGFACE },
+        {
+          [KEYS.webgpu]: null,
+          [KEYS.pref]: PREF_AUTO,
+          [KEYS.ready]: false,
+          [KEYS.hub]: HUB_HUGGINGFACE,
+          [KEYS.cloudModel]: CLOUD_GEMMA,
+        },
         (res) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
@@ -48,6 +61,7 @@ globalThis.IH_localState ||= (function () {
             pref: normalizePref(res[KEYS.pref]),
             ready: !!res[KEYS.ready],
             hub: normalizeHub(res[KEYS.hub]),
+            cloudModel: normalizeCloudModel(res[KEYS.cloudModel]),
           });
         },
       );
@@ -65,6 +79,12 @@ globalThis.IH_localState ||= (function () {
     }
     if ('hub' in patch) out[KEYS.hub] = normalizeHub(patch.hub);
     if ('ready' in patch) out[KEYS.ready] = !!patch.ready;
+    if ('cloudModel' in patch) {
+      if (!CLOUD_MODEL_IDS.has(patch.cloudModel)) {
+        throw new Error(`bad cloud model: ${patch.cloudModel}`);
+      }
+      out[KEYS.cloudModel] = patch.cloudModel;
+    }
     return new Promise((resolve, reject) => {
       chrome.storage.local.set(out, () => {
         if (chrome.runtime.lastError) {
@@ -84,6 +104,10 @@ globalThis.IH_localState ||= (function () {
   function normalizeHub(h) {
     if (h === HUB_MODELSCOPE) return HUB_MODELSCOPE;
     return HUB_HUGGINGFACE;
+  }
+
+  function normalizeCloudModel(id) {
+    return CLOUD_MODEL_IDS.has(id) ? id : CLOUD_GEMMA;
   }
 
   function hubOrigins(h) {
@@ -150,6 +174,7 @@ globalThis.IH_localState ||= (function () {
     PREF_LOCAL,
     HUB_HUGGINGFACE,
     HUB_MODELSCOPE,
+    CLOUD_MODELS,
     KEYS,
     MODEL_ID,
     MODEL_DTYPE,
@@ -158,6 +183,7 @@ globalThis.IH_localState ||= (function () {
     set,
     normalizePref,
     normalizeHub,
+    normalizeCloudModel,
     hubOrigins,
     hubRemoteHost,
     probeWebGPU,

@@ -22,6 +22,9 @@ warnings.filterwarnings(
 )
 
 import connexion
+from connexion.datastructures import MediaTypeDict
+from connexion.exceptions import BadRequestProblem
+from connexion.validators import JSONRequestBodyValidator, VALIDATOR_MAP
 from backend.platform.logging_config import configure_logging
 from backend.api.static import register_static_routes
 from backend.platform.visit_stats import register_visit_stats
@@ -73,6 +76,22 @@ from backend.core.completion_generator import register_inference_shutdown_handle
 
 register_inference_shutdown_handlers()
 
+
+class _JSONRequestBodyValidator(JSONRequestBodyValidator):
+    """非法编码的 JSON 体是 400，不要让 Connexion 的 utf-8 decode 变成 500。"""
+
+    async def _parse(self, stream, scope):
+        try:
+            return await super()._parse(stream, scope)
+        except UnicodeDecodeError as exc:
+            raise BadRequestProblem(
+                detail=f"Request body is not valid {self._encoding}: {exc}"
+            ) from exc
+
+
+_json_body_validators = MediaTypeDict(dict(VALIDATOR_MAP["body"]))
+_json_body_validators["*/*json"] = _JSONRequestBodyValidator
+
 # 创建 Connexion 应用
 app = connexion.App(__name__)
 
@@ -82,7 +101,7 @@ register_visit_stats(app)
 
 # 注册路由
 register_static_routes(app)
-app.add_api('server.yaml')
+app.add_api("server.yaml", validator_map={"body": _json_body_validators})
 
 
 def _log_500_handler(request, exc):

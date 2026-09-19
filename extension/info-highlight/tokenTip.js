@@ -1,7 +1,7 @@
 /**
  * Token 悬停面板：网页 token 只绑 ::highlight、没有 DOM 可挂事件，
  * 故由 caretPositionFromPoint 反查指针下的字，再按码点偏移二分到 token。
- * 内容取站点 tooltip 的精简版：token 文字 + 信息量一行 + Top-K 条形图。
+ * 内容取站点 tooltip 的精简版：token 文字 + 信息量一行 + Top-K 条形图；底部另附本轮 result.model。
  * SYNC: client/src/shared/vis/ToolTip.ts → 行文案、d3.format('.3g') 数值格式与右下偏移
  * SYNC: client/src/shared/cross/topkChartUtils.ts → 行结构、省略行、条形与百分比
  */
@@ -56,6 +56,12 @@ globalThis.IH_tokenTip ||= (function () {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .label { color: #9aa0a6; }
+.model {
+  margin-top: 0.5em;
+  color: #7e868c;
+  font-size: 0.75em;
+  font-weight: 400;
+}
 
 /* 命中 token 在正文里的蓝框；::highlight() 只能改字色底色，画不了边框，故用覆盖层
  * SYNC: client/src/css/pages/_app-pages.scss → .token:hover 的 outline / box-shadow */
@@ -108,6 +114,7 @@ globalThis.IH_tokenTip ||= (function () {
   }
   .token { color: #933; }
   .label { color: #666; }
+  .model { color: #9aa0a6; }
   .topk-row.is-selected { color: #933; }
   .box {
     outline-color: #1e6fff;
@@ -138,6 +145,8 @@ globalThis.IH_tokenTip ||= (function () {
   let pointer = null;
   /** 正在展示的 token；指针仍在同一 token 上时不重绘 */
   let shown = null;
+  /** 本轮分析返回的 result.model；全局一份，不进 token */
+  let modelName = '';
   /** options.js 的 show_token_tip；默认开 */
   let enabled = true;
   chrome.storage?.local?.get({ show_token_tip: true }, (res) => {
@@ -291,6 +300,12 @@ globalThis.IH_tokenTip ||= (function () {
     const bits = globalThis.IH_tokenBits(tok);
     if (bits != null) appendRow(el, 'information:', `${sig3(bits)} bits`);
     appendTopk(el, tok);
+    if (modelName) {
+      const foot = document.createElement('div');
+      foot.className = 'model';
+      foot.textContent = modelName;
+      el.appendChild(foot);
+    }
   }
 
   /** 默认贴命中字的右下；越界则翻到左 / 上 */
@@ -390,8 +405,14 @@ globalThis.IH_tokenTip ||= (function () {
     if (!raf) raf = requestAnimationFrame(update);
   }
 
+  /** @param {string} name 本轮 `result.model` */
+  function setModel(name) {
+    modelName = typeof name === 'string' ? name.trim() : '';
+  }
+
   /** @param {{ text: string, pieces: Array<{ node: Text, start: number, end: number }> }} next */
   function bind(next) {
+    modelName = '';
     mapped = next;
     idx = globalThis.IL_createTextIndex(next.text);
     pieceOf = new Map(next.pieces.map((p) => [p.node, p]));
@@ -422,7 +443,8 @@ globalThis.IH_tokenTip ||= (function () {
     idx = null;
     pieceOf = new Map();
     tokens = [];
+    modelName = '';
   }
 
-  return { bind, add, clear };
+  return { bind, add, clear, setModel };
 })();

@@ -1,5 +1,5 @@
 /**
- * 自动分析：1 秒内已跑完才对正文，变了再跑；不靠空串分支。
+ * 自动分析：第一段结束正文变了就重来；整轮 1 秒内结束才再等再对。不靠空串。
  * 运行：node --test extension/info-highlight/test/auto-recheck.test.mjs
  */
 import test from 'node:test';
@@ -10,9 +10,23 @@ import { fileURLToPath } from 'node:url';
 
 const dir = dirname(fileURLToPath(import.meta.url));
 
-test('content.js：1 秒内跑完才对正文，变了再跑', () => {
+test('content.js：段末作废重来；1 秒只补瞬间结束', () => {
   const src = readFileSync(join(dir, '../content.js'), 'utf8');
-  assert.match(src, /1000 - \(Date\.now\(\) - t0\)/);
-  assert.match(src, /pageText\(\) !== \(session\?\.mapped\?\.text \|\| ''\)/);
-  assert.doesNotMatch(src, /settle && !pageText\(\)\.trim\(\)/);
+  const fn = src.slice(src.indexOf('async function runBatch'), src.indexOf('function toggle'));
+  assert.match(fn, /if \(settle && session\.next === 0 && cap > 0\)/);
+  assert.match(fn, /await paintTo\(1\)/);
+  assert.match(fn, /pageText\(\) !== session\.mapped\.text/);
+  assert.match(fn, /1000 - \(Date\.now\(\) - t0\)/);
+  assert.doesNotMatch(fn, /settle && !pageText\(\)\.trim\(\)/);
+  const wait = fn.match(/if \(left > 0\) \{[\s\S]*?\n    \}/);
+  assert.ok(wait, '应留下未满 1 秒则等待');
+  assert.match(wait[0], /pageText\(\)/);
+});
+
+test('content.js：skipCache 是 runBatch 参数，不是页内状态位', () => {
+  const src = readFileSync(join(dir, '../content.js'), 'utf8');
+  assert.doesNotMatch(src, /let skipCache/);
+  assert.match(src, /async function runBatch\(myGen, settle, skipCache\)/);
+  assert.match(src, /void runBatch\(gen \+= 1, false, true\)/);
+  assert.match(src, /void runBatch\(gen \+= 1, false, session\.skipCache\)/);
 });

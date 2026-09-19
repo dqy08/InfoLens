@@ -133,12 +133,18 @@ def detect_platform(verbose: bool = True) -> str:
     return platform
 
 
+# HF Spaces CPU upgrade 标称 32GB，cgroup 常见可见约 29.x–30.x GB；
+# 用 28 避免 29.80 这类略低于 30 的值被误判成 cloud_cpu_16g。
+_CLOUD_CPU_32G_MIN_GB = 28.0
+_CLOUD_CPU_16G_MIN_GB = 15.0
+
+
 def _detect_cpu_variant() -> str:
     """
     检测具体的 CPU 环境变体（内部函数）
     根据内存大小识别不同的 CPU 环境：
-    - >= 30GB: cloud_cpu_32g（32G 内存环境）
-    - >= 15GB: cloud_cpu_16g（16G 内存环境）
+    - >= 28GB: cloud_cpu_32g（HF Spaces CPU upgrade 等 ~32G 档）
+    - >= 15GB: cloud_cpu_16g（HF Spaces CPU basic 等 ~16G 档）
     - 其他: default_cpu_machine（默认配置）
     
     优先检测容器内存限制（cgroup），如果不可用则回退到系统内存检测。
@@ -183,12 +189,17 @@ def _detect_cpu_variant() -> str:
         # 转换为 GB
         total_memory_gb = total_memory / (1024 ** 3)
         
-        # 判断标准：
-        # - >= 30GB: cloud_cpu_32g（HF Spaces CPU upgrade 通常会有 30.x GB 可见）
-        # - >= 15GB: cloud_cpu_16g（HF Spaces CPU basic 通常会有 15.x GB 可见）
-        if total_memory_gb >= 30.0:
+        if total_memory_gb >= _CLOUD_CPU_32G_MIN_GB:
+            print(
+                f"🔍 CPU 档位: cloud_cpu_32g "
+                f"(内存 {total_memory_gb:.2f} GB >= {_CLOUD_CPU_32G_MIN_GB:g} GB)"
+            )
             return "cloud_cpu_32g"
-        elif total_memory_gb >= 15.0:
+        if total_memory_gb >= _CLOUD_CPU_16G_MIN_GB:
+            print(
+                f"🔍 CPU 档位: cloud_cpu_16g "
+                f"(内存 {total_memory_gb:.2f} GB >= {_CLOUD_CPU_16G_MIN_GB:g} GB)"
+            )
             return "cloud_cpu_16g"
             
     except Exception as e:

@@ -122,6 +122,30 @@ test('空数组也写；再读不打网', async () => {
   assert.equal(calls, 1);
 });
 
+test('skip：已有缓存也打网并覆盖；失败则原条留下', async () => {
+  mockLocal();
+  await cache.tokens('t0', async () => [tok(0, 1, 0.1)]);
+  await assert.rejects(() =>
+    cache.tokens('t0', async () => {
+      throw new Error('network');
+    }, { skip: true })
+  );
+  let calls = 0;
+  const got = await cache.tokens('t0', async () => {
+    calls += 1;
+    return [tok(0, 1, 0.9)];
+  }, { skip: true });
+  assert.equal(calls, 1);
+  assert.deepEqual(got, [live(0, 1, 0.9)]);
+  let hit = 0;
+  const cached = await cache.tokens('t0', async () => {
+    hit += 1;
+    return [tok(0, 1)];
+  });
+  assert.equal(hit, 0);
+  assert.equal(cached[0].p, 0.9);
+});
+
 test('失败不写', async () => {
   await assert.rejects(() =>
     cache.tokens('tx', async () => {
@@ -201,7 +225,7 @@ test('满员时覆盖环上最旧条', async () => {
     data[k] = [tok(0, 1)];
   }
   data['ih_ac/order'] = { keys, i: 0 };
-  data['ih_ac/meta'] = { v: 5 };
+  data['ih_ac/meta'] = { v: 7 };
   await cache.tokens('new', async () => [tok(0, 2, 0.9)]);
   assert.equal(data[keys[0]], undefined);
   assert.equal(data[keys[1]][0].offset[1], 1);

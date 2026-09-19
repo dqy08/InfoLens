@@ -99,10 +99,12 @@ def log_cached_demo(path: str):
 
 def log_analyze_request(
     text: str, stream_mode: bool = False, client_ip: str = None, privacy_mode: bool = False,
+    model: str = None,
 ):
     """
     记录收到分析请求。
     privacy_mode=True 时不落 text 内容与明文 IP，仅记字符数和 IP 摘要。
+    model 按请求体原样记录；空则记 default。
     
     Returns:
         int: 请求ID
@@ -117,15 +119,19 @@ def log_analyze_request(
     char_count = len(text) if text else 0
     byte_count = len(text.encode('utf-8')) if text else 0
     mode_str = "(stream)" if stream_mode else ""
+    model_s = (model or "").strip() or "default"
 
     if privacy_mode:
         visitor = f"visitor=#{_visitor_seq_no(client_ip)}"
-        details = f"req_id={request_id}, chars={char_count}, bytes={byte_count}"
+        details = f"req_id={request_id}, model={model_s!r}, chars={char_count}, bytes={byte_count}"
         log_request(f"📥 收到请求{mode_str}（隐私模式）", details, client_ip=visitor)
     else:
         preview_length = 100
         text_preview = _log_str_preview(text if text else "", preview_length)
-        details = f"req_id={request_id}, text='{text_preview}', chars={char_count}, bytes={byte_count}"
+        details = (
+            f"req_id={request_id}, model={model_s!r}, text='{text_preview}', "
+            f"chars={char_count}, bytes={byte_count}"
+        )
         log_request(f"📥 收到请求{mode_str}", details, client_ip)
 
     _hit_api("analyze")
