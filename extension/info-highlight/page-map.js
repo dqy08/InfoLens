@@ -1,6 +1,6 @@
 /**
  * 正文提取 + 码点偏移 → Range；网页 token 只绑 CSS Custom Highlight（勿 getClientRects）。
- * PDF 的 canvas 已含字形，底色会盖在字上，token 改画 overlay 红线（paintTokens 的 overlay）。
+ * PDF：canvas 已含字形；色块会盖在字上，resolvePaintStyle 回退成 overlay 红线（粗细随字盒高）。
  * 进度图量段 Y 例外，想法来自 extension/semantic-highlight/semantic/find.js（横轴=文档 Y / 视口带 / 点击跳转）。
  *
  * 段：切分力度 = 语义 800 字节 × 倍数。每次送 1 段前文 + 本段（1:1），只画本段。
@@ -244,13 +244,17 @@
   /** @type {{ twoTier: boolean, thresholdPct: number, maxAlphaDepth: number }} */
   let highlightPrefs = HS.normalizePrefs(HS.STORAGE_DEFAULTS);
 
-  function applyTokenColors() {
-    HS.applyCssVars(
-      document.documentElement,
-      HS.depthToMaxAlpha(highlightPrefs.maxAlphaDepth),
-      highlightPrefs.twoTier,
-    );
+  function tokenMaxAlpha() {
+    return HS.depthToMaxAlpha(highlightPrefs.maxAlphaDepth, highlightPrefs.paintStyle, 'pdf');
   }
+
+  function applyTokenColors() {
+    HS.applyCssVars(document.documentElement, highlightPrefs);
+  }
+
+  HS.watchColorScheme(() => {
+    applyTokenColors();
+  });
 
   function clearTokenOverlays() {
     for (const el of tokenOverlayEls) el.remove();
@@ -266,30 +270,42 @@
     }
   }
 
-  /** 线相对 root 定位；粗细与上移由 pdf/viewer.css 按 --il-pdf-scale 给 */
+  function tokenOverlayMount(root) {
+    if (typeof root.querySelector !== 'function') return root;
+    let host = root.querySelector('#ih-token-overlay');
+    if (host) return host;
+    host = document.createElement('div');
+    host.id = 'ih-token-overlay';
+    root.appendChild(host);
+    return host;
+  }
+
+  /** 线相对 pages root；粗细随字盒高，见 HS.underlineOverlayBox */
   function tokenOverlayContext(root) {
     if (!root) throw new Error('token overlay root missing');
+    const mount = tokenOverlayMount(root);
     return {
-      root,
+      root: mount,
       rect: root.getBoundingClientRect(),
-      scale: globalThis.IL_pdfTextLayer.scaleOf(root),
     };
   }
 
-  function appendTokenUnderline(rect, level, ctx) {
-    const pos = globalThis.IL_pdfTextLayer.underlinePos(rect, ctx.rect, ctx.scale);
+  function appendTokenUnderline(rect, level, ctx, parent) {
+    const box = HS.underlineOverlayBox(rect, ctx.rect);
     const el = document.createElement('div');
     el.className = 'il-token-underline';
-    el.style.left = `${pos.x}px`;
-    el.style.top = `${pos.y}px`;
-    el.style.width = `${rect.width}px`;
+    el.style.left = `${box.x}px`;
+    el.style.top = `${box.y}px`;
+    el.style.width = `${box.width}px`;
+    el.style.height = `${box.height}px`;
+    el.style.transform = 'none';
     const a = HS.alphaForLevel(
       level,
-      HS.depthToMaxAlpha(highlightPrefs.maxAlphaDepth),
+      tokenMaxAlpha(),
       highlightPrefs.twoTier,
     );
     el.style.backgroundColor = `rgba(${HS.SURPRISAL_RED_RGB}, ${a})`;
-    ctx.root.appendChild(el);
+    (parent || ctx.root).appendChild(el);
     tokenOverlayEls.push(el);
   }
 
@@ -402,9 +418,13 @@
     for (const tok of tokens) paintBuf.tokens.push(tok);
 
     const overlay = opts?.overlay ? tokenOverlayContext(mapped.root) : null;
-    const idx = globalThis.IL_createTextIndex(mapped.text);
+    if (overlay && HS.resolvePaintStyle(highlightPrefs.paintStyle, 'pdf') !== HS.PAINT_UNDERLINE) {
+      throw new Error('PDF paint fallback is underline only');
+    }
+    const idx = opts?.index || globalThis.IL_createTextIndex(mapped.text);
     const incoming = Array.isArray(tokens) ? tokens : [];
-    const list = wordMerge ? globalThis.IH_mergeWordTokens(incoming, mapped.text) : incoming;
+    const list = opts?.skipMerge ? incoming : tokensForPaint(incoming, mapped.text);
+    const overlayParent = overlay ? document.createDocumentFragment() : null;
     const stats = {
       painted: 0,
       tokens_in: list.length,
@@ -435,14 +455,20 @@
         }
         for (const r of range.getClientRects()) {
           if (r.width < 1 || r.height < 1) continue;
-          appendTokenUnderline(r, level, overlay);
+          appendTokenUnderline(r, level, overlay, overlayParent);
           n += 1;
         }
       }
       if (n === 0) stats.tokens_skip_empty_range += 1;
       else stats.painted += n;
     }
+    if (overlayParent) overlay.root.appendChild(overlayParent);
     return stats;
+  }
+
+  function tokensForPaint(tokens, text) {
+    const incoming = Array.isArray(tokens) ? tokens : [];
+    return wordMerge ? globalThis.IH_mergeWordTokens(incoming, text) : incoming;
   }
 
   function applyHighlightPrefs(raw) {
@@ -450,7 +476,8 @@
     const levelChanged =
       next.twoTier !== highlightPrefs.twoTier
       || next.thresholdPct !== highlightPrefs.thresholdPct;
-    const alphaChanged = next.maxAlphaDepth !== highlightPrefs.maxAlphaDepth;
+    const alphaChanged = next.maxAlphaDepth !== highlightPrefs.maxAlphaDepth
+      || next.paintStyle !== highlightPrefs.paintStyle;
     highlightPrefs = next;
     applyTokenColors();
     if (levelChanged || (alphaChanged && paintBuf.overlay)) {
@@ -493,6 +520,7 @@
       !(HS.KEY_TWO_TIER in changes)
       && !(HS.KEY_THRESHOLD_PCT in changes)
       && !(HS.KEY_MAX_ALPHA_DEPTH in changes)
+      && !(HS.KEY_PAINT_STYLE in changes)
     ) {
       return;
     }
@@ -1040,6 +1068,7 @@
   globalThis.IH_segmentWindow = segmentWindow;
   globalThis.IH_tokensInSegment = tokensInSegment;
   globalThis.IH_paintTokens = paintTokens;
+  globalThis.IH_tokensForPaint = tokensForPaint;
   globalThis.IH_tokenBits = tokenBits;
   globalThis.IH_rangesFromUtf16 = rangesFromUtf16;
   globalThis.IH_clearHighlights = clearHighlights;

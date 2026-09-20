@@ -41,6 +41,7 @@
     'cache_desc', 'cache_clear',
     'ih_threshold_row', 'ih_threshold_value', 'ih_highlight_threshold_pct',
     'ih_depth_value', 'ih_max_highlight_alpha',
+    'ih_paint_style',
   ];
   const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
   if (ids.some((id) => !el[id])) {
@@ -67,7 +68,7 @@
 
   /** 滑条 accent 合成到页面底色上，观感接近正文里的高亮红 */
   function intensityAccent(depth) {
-    const a = HS.depthToMaxAlpha(depth);
+    const a = HS.depthToMaxAlpha(depth, el.ih_paint_style.value);
     const bg = getComputedStyle(document.body).backgroundColor;
     const m = bg.match(/\d+/g);
     if (!m || m.length < 3) return `rgba(${HS.SURPRISAL_RED_RGB}, ${a})`;
@@ -85,6 +86,10 @@
     input.style.setProperty('--ih-intensity-accent', intensityAccent(depth));
     input.style.setProperty('--ih-intensity-pct', `${pct}%`);
   }
+
+  HS.watchColorScheme(() => {
+    syncDepthLabel(HS.clampMaxAlphaDepth(el.ih_max_highlight_alpha.value));
+  });
 
   function loadToggles() {
     return Promise.all(Object.entries(TOGGLES).map(([key, fallback]) => new Promise((resolve) => {
@@ -108,6 +113,7 @@
         const prefs = HS.normalizePrefs(res);
         el.ih_highlight_threshold_pct.value = String(prefs.thresholdPct);
         syncThresholdLabel(prefs.thresholdPct);
+        el.ih_paint_style.value = prefs.paintStyle;
         el.ih_max_highlight_alpha.value = String(prefs.maxAlphaDepth);
         syncDepthLabel(prefs.maxAlphaDepth);
         syncTwoTierUi(prefs.twoTier);
@@ -128,6 +134,13 @@
     el.ih_max_highlight_alpha.value = String(depth);
     syncDepthLabel(depth);
     chrome.storage.local.set({ [HS.KEY_MAX_ALPHA_DEPTH]: depth });
+  });
+
+  el.ih_paint_style.addEventListener('change', () => {
+    const style = HS.normalizePaintStyle(el.ih_paint_style.value);
+    el.ih_paint_style.value = style;
+    chrome.storage.local.set({ [HS.KEY_PAINT_STYLE]: style });
+    syncDepthLabel(HS.clampMaxAlphaDepth(el.ih_max_highlight_alpha.value));
   });
 
   function modelStatusText(st, webgpu) {

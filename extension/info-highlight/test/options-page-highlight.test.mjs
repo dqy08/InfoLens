@@ -13,12 +13,17 @@ const dir = dirname(fileURLToPath(import.meta.url));
 test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () => {
   const html = readFileSync(join(dir, '../options.html'), 'utf8');
   assert.match(html, /id="ih_highlight_options_page"/);
-  assert.match(html, /id="ih_word_merge"/);
+  assert.match(html, /id="ih_paint_style"/);
+  assert.match(html, /PDFs cannot use color blocks/);
   assert.doesNotMatch(html, /<h2>Experimental<\/h2>/);
   assert.match(html, /Progress chart[\s\S]*class="experimental">Experimental/);
+  assert.match(html, /One-tone highlight[\s\S]*class="experimental">Experimental/);
   assert.match(html, /Merge subwords[\s\S]*class="experimental">Experimental/);
   assert.match(html, /Not recommended/);
   assert.match(html, /Highlight this page[\s\S]*class="experimental">Experimental/);
+  const display = html.slice(html.indexOf('<h2>Display</h2>'), html.indexOf('<h2>Analysis</h2>'));
+  assert.ok(display.indexOf('Highlight intensity') < display.indexOf('Progress chart'));
+  assert.ok(display.indexOf('Highlight intensity') < display.indexOf('One-tone highlight'));
   assert.match(html, /src="wordMerge\.js"/);
   assert.match(html, /src="content\.js"/);
   assert.match(html, /src="options-page-flags\.js"/);
@@ -27,6 +32,11 @@ test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () =>
   const catalog = readFileSync(join(dir, '../options-catalog.js'), 'utf8');
   assert.match(catalog, /'ih_highlight_options_page'/);
   assert.match(catalog, /'ih_word_merge'/);
+  assert.match(catalog, /'ih_paint_style'/);
+  assert.doesNotMatch(
+    catalog.slice(catalog.indexOf('globalThis.IL_OPTIONS_SEED_SEEN')),
+    /ih_paint_style/,
+  );
   assert.doesNotMatch(
     catalog.slice(catalog.indexOf('globalThis.IL_OPTIONS_SEED_SEEN')),
     /ih_highlight_options_page/,

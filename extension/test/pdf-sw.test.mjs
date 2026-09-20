@@ -98,3 +98,28 @@ test('viewer.js 派发的每个事件，每个插件都有人听', () => {
     }
   }
 });
+
+test('IL_createPdfZoomIdle：连调只跑最后一次', async () => {
+  const sandbox = {
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (cb) => setTimeout(() => cb(0), 0),
+    Node: { TEXT_NODE: 3 },
+    window: {},
+    document: { getElementById: () => null },
+    getComputedStyle: () => ({ getPropertyValue: () => '' }),
+  };
+  sandbox.globalThis = sandbox;
+  vm.runInContext(read('shared/pdf/text-layer.js'), vm.createContext(sandbox));
+  const idle = sandbox.IL_createPdfZoomIdle();
+  const hits = [];
+  idle.schedule(() => {
+    hits.push(1);
+  });
+  idle.schedule(() => {
+    hits.push(2);
+  });
+  await new Promise((r) => setTimeout(r, idle.IDLE_MS + 80));
+  assert.deepEqual(hits, [2]);
+  idle.cancel();
+});

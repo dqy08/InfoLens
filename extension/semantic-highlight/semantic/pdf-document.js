@@ -34,14 +34,27 @@
     let textSnapshot = '';
     /** @type {typeof hooks} */
     let activeHooks = hooks;
+    if (typeof globalThis.IL_createPdfZoomIdle !== 'function') {
+      throw new Error('IL_createPdfZoomIdle missing — load text-layer.js first');
+    }
+    const zoomIdle = globalThis.IL_createPdfZoomIdle();
 
-    /** 缩放全页重渲后：同文换节点，立刻重绑并让 find 重测 overlay */
+    /** 缩放全页重渲后：停稳再换节点、重测 overlay（与信息量高亮同一套 idle） */
     function onPdfRerendered() {
       if (!extractRoot) return;
-      const data = layer.peek(getData);
-      if (!data) return;
-      if (data.pageText === textSnapshot) rebind(data);
-      activeHooks.onContentMaybeChanged?.();
+      stopLayoutWatch();
+      zoomIdle.schedule(() => {
+        try {
+          if (!extractRoot) return;
+          const data = layer.peek(getData);
+          if (data) {
+            if (data.pageText === textSnapshot) rebind(data);
+            activeHooks.onContentMaybeChanged?.();
+          }
+        } finally {
+          if (extractRoot) startLayoutWatch();
+        }
+      });
     }
     window.addEventListener('il-pdf-rerendered', onPdfRerendered);
 
@@ -135,6 +148,7 @@
     }
 
     function release() {
+      zoomIdle.cancel();
       window.removeEventListener('il-pdf-rerendered', onPdfRerendered);
       releasePaintMount();
       extractRoot = null;

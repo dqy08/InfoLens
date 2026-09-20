@@ -73,6 +73,7 @@ globalThis.CSS = {
 globalThis.document = {
   createRange: () => new FakeRange(),
   createElement: () => ({ style: {}, className: '' }),
+  createDocumentFragment: () => ({ appendChild() {} }),
   documentElement: { style: { setProperty() {} } },
 };
 globalThis.IL_progressAxis = {

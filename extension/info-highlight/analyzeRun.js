@@ -195,7 +195,20 @@ globalThis.IH_analyzeRun ||= (function () {
     return new Promise((resolve) => requestAnimationFrame(() => resolve()));
   }
 
+  /** 当前任务结束并完成一次绘制后再继续。单次 rAF 会在绘制前执行，挡不住高亮。 */
+  function waitForPaint() {
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => setTimeout(resolve, 0));
+    });
+  }
+
+  function commitSegTokens(session, i, tokens) {
+    if (!session.tokensBySeg) session.tokensBySeg = [];
+    session.tokensBySeg[i] = tokens;
+  }
+
   function applyTokens(session, tokens, i, opts, report) {
+    commitSegTokens(session, i, tokens);
     const stats = globalThis.IH_paintTokens(tokens, session.mapped, {
       append: true,
       overlay: !!opts?.overlay,
@@ -204,6 +217,53 @@ globalThis.IH_analyzeRun ||= (function () {
     addPaintStats(report, stats);
     opts?.onTokens?.(tokens, i);
     globalThis.IH_appendProgress(tokens, session.segs[i]);
+  }
+
+  /**
+   * 已提交段按新 mapped 重画。不请求分析。
+   * 先等页面画出，再按时间片贴线。取消则停。
+   * @param {() => boolean} [still]
+   */
+  async function repaintCommitted(session, mapped, overlay, still) {
+    const done = session.next;
+    if (!(done > 0)) throw new Error('repaintCommitted requires committed segments');
+    const bags = session.tokensBySeg;
+    if (!Array.isArray(bags)) throw new Error('session tokensBySeg missing');
+    for (let i = 0; i < done; i++) {
+      if (!Array.isArray(bags[i])) throw new Error(`session tokens missing for segment ${i}`);
+    }
+    session.mapped = mapped;
+    session.painted = 0;
+    await waitForPaint();
+    if (still && !still()) return;
+    const idx = globalThis.IL_createTextIndex?.(mapped.text);
+    let append = false;
+    let t0 = performance.now();
+    const budgetMs = 8;
+    const batch = 8;
+    for (let i = 0; i < done; i++) {
+      const list = globalThis.IH_tokensForPaint
+        ? globalThis.IH_tokensForPaint(bags[i], mapped.text)
+        : bags[i];
+      globalThis.IH_appendProgress(bags[i], session.segs[i]);
+      for (let j = 0; j < list.length; ) {
+        if (performance.now() - t0 >= budgetMs) {
+          await waitForPaint();
+          if (still && !still()) return;
+          t0 = performance.now();
+        }
+        const end = Math.min(j + batch, list.length);
+        const stats = globalThis.IH_paintTokens(list.slice(j, end), mapped, {
+          append,
+          overlay: !!overlay,
+          skipMerge: true,
+          index: idx,
+        });
+        append = true;
+        session.painted += Number(stats?.painted) || 0;
+        j = end;
+      }
+    }
   }
 
   /**
@@ -242,6 +302,7 @@ globalThis.IH_analyzeRun ||= (function () {
       if (got.kind === 'align_fail') {
         console.warn('[Info Highlight] skip segment', i, got.err);
         lastAlignErr = got.err;
+        commitSegTokens(session, i, []);
         if (report) {
           report.align_fail_n = (report.align_fail_n || 0) + 1;
           report.last_align_err = clipAlignErr(got.err);
@@ -261,7 +322,7 @@ globalThis.IH_analyzeRun ||= (function () {
     if (!segs.length) throw new Error(emptyMsg);
     globalThis.IH_clearHighlights();
     await globalThis.IH_bindProgress(mapped, segs);
-    return { mapped, segs, next: 0, painted: 0 };
+    return { mapped, segs, next: 0, painted: 0, tokensBySeg: [] };
   }
 
   async function afterPaint(session, lastAlignErr, emptyMsg, onMore, report) {
@@ -313,6 +374,7 @@ globalThis.IH_analyzeRun ||= (function () {
     reportActionState,
     beginSession,
     paintRange,
+    repaintCommitted,
     afterPaint,
     runJob,
   };

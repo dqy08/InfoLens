@@ -232,34 +232,18 @@
   </header>
   <main>
     <section>
-    <h2>Content</h2>
+    <h2>Highlight</h2>
     <div class="group">
-    <label class="row" data-option-id="ih_article_only">
+    <div class="row" data-option-id="ih_paint_style">
       <div class="row-text">
-        <div class="row-title">Main article only</div>
-        <p class="row-desc">Highlight the main text of the page. Turn off to include other visible text.</p>
+        <div class="row-title">Highlight style</div>
+        <p class="row-desc">Color blocks or underlines. If a document cannot use the selected style, it falls back (PDFs cannot use color blocks, because they would cover the letters).</p>
       </div>
-      <input type="checkbox" id="ih_article_only" checked>
-    </label>
+      <select id="ih_paint_style" aria-label="Highlight style">
+        <option value="block">Color blocks</option>
+        <option value="underline">Underline</option>
+      </select>
     </div>
-    </section>
-    <section>
-    <h2>Display</h2>
-    <div class="group">
-    <label class="row" data-option-id="show_progress">
-      <div class="row-text">
-        <div class="row-title">Progress chart <span class="experimental">Experimental</span></div>
-        <p class="row-desc">Show how information density changes across the page, and where you are</p>
-      </div>
-      <input type="checkbox" id="show_progress">
-    </label>
-    <label class="row" data-option-id="show_token_tip">
-      <div class="row-text">
-        <div class="row-title">Hover for details</div>
-        <p class="row-desc">When the pointer rests on text, show its information density and more likely words. Hidden when you analyze the same page again.</p>
-      </div>
-      <input type="checkbox" id="show_token_tip" checked>
-    </label>
     <div class="row row-slider" data-option-id="ih_max_highlight_alpha">
       <div class="row-slider-top">
         <div class="row-text">
@@ -272,8 +256,8 @@
     </div>
     <label class="row" data-option-id="ih_two_tier">
       <div class="row-text">
-        <div class="row-title">One-tone highlight</div>
-        <p class="row-desc">A single highlight level instead of a gradient. (Warning — it depends on a threshold that does not generalize across model changes.)</p>
+        <div class="row-title">One-tone highlight <span class="experimental">Experimental</span></div>
+        <p class="row-desc">A single highlight level instead of a gradient. Depends on a threshold that does not generalize across model changes. (Not recommended.)</p>
       </div>
       <input type="checkbox" id="ih_two_tier">
     </label>
@@ -287,6 +271,25 @@
       </div>
       <input type="range" id="ih_highlight_threshold_pct" min="0" max="100" step="1" aria-label="Highlight threshold">
     </div>
+    </div>
+    </section>
+    <section>
+    <h2>Display</h2>
+    <div class="group">
+    <label class="row" data-option-id="show_token_tip">
+      <div class="row-text">
+        <div class="row-title">Hover for details</div>
+        <p class="row-desc">When the pointer rests on text, show its information density and more likely words. Hidden when you analyze the same page again.</p>
+      </div>
+      <input type="checkbox" id="show_token_tip" checked>
+    </label>
+    <label class="row" data-option-id="show_progress">
+      <div class="row-text">
+        <div class="row-title">Progress chart <span class="experimental">Experimental</span></div>
+        <p class="row-desc">Show how information density changes across the page, and where you are</p>
+      </div>
+      <input type="checkbox" id="show_progress">
+    </label>
     <label class="row" data-option-id="ih_word_merge">
       <div class="row-text">
         <div class="row-title">Merge subwords <span class="experimental">Experimental</span></div>
@@ -300,6 +303,18 @@
         <p class="row-desc">Run Info Highlight on this settings page. Analysis always uses the cloud model above. Other display options still apply, except main-article-only and hover details.</p>
       </div>
       <input type="checkbox" id="ih_highlight_options_page" checked>
+    </label>
+    </div>
+    </section>
+    <section>
+    <h2>Content</h2>
+    <div class="group">
+    <label class="row" data-option-id="ih_article_only">
+      <div class="row-text">
+        <div class="row-title">Main article only</div>
+        <p class="row-desc">Highlight the main text of the page. Turn off to include other visible text.</p>
+      </div>
+      <input type="checkbox" id="ih_article_only" checked>
     </label>
     </div>
     </section>

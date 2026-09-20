@@ -185,6 +185,13 @@ main {
   --il-pdf-scale: 1;
 }
 
+#ih-token-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
 /* content.css 里线粗为屏像素常量；PDF 下随 --il-pdf-scale 放大/缩小 */
 #il-pv-pages .il-chunk-underline,
 #il-pv-pages .il-chunk-underline-pending {

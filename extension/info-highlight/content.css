@@ -6,6 +6,9 @@
  * level 0 无色
  */
 :root {
+  --ih-paint-deco: none;
+  --ih-underline-thickness: 12.5%;
+  --ih-underline-offset: 18.75%;
   --ih-token-0: rgba(255, 71, 64, 0);
   --ih-token-1: rgba(255, 71, 64, 0.03125);
   --ih-token-2: rgba(255, 71, 64, 0.0625);
@@ -24,25 +27,47 @@
   --ih-token-15: rgba(255, 71, 64, 0.46875);
 }
 
-::highlight(ih-token-0) { background-color: var(--ih-token-0); }
-::highlight(ih-token-1) { background-color: var(--ih-token-1); }
-::highlight(ih-token-2) { background-color: var(--ih-token-2); }
-::highlight(ih-token-3) { background-color: var(--ih-token-3); }
-::highlight(ih-token-4) { background-color: var(--ih-token-4); }
-::highlight(ih-token-5) { background-color: var(--ih-token-5); }
-::highlight(ih-token-6) { background-color: var(--ih-token-6); }
-::highlight(ih-token-7) { background-color: var(--ih-token-7); }
-::highlight(ih-token-8) { background-color: var(--ih-token-8); }
-::highlight(ih-token-9) { background-color: var(--ih-token-9); }
-::highlight(ih-token-10) { background-color: var(--ih-token-10); }
-::highlight(ih-token-11) { background-color: var(--ih-token-11); }
-::highlight(ih-token-12) { background-color: var(--ih-token-12); }
-::highlight(ih-token-13) { background-color: var(--ih-token-13); }
-::highlight(ih-token-14) { background-color: var(--ih-token-14); }
-::highlight(ih-token-15) { background-color: var(--ih-token-15); }
+::highlight(ih-token-0),
+::highlight(ih-token-1),
+::highlight(ih-token-2),
+::highlight(ih-token-3),
+::highlight(ih-token-4),
+::highlight(ih-token-5),
+::highlight(ih-token-6),
+::highlight(ih-token-7),
+::highlight(ih-token-8),
+::highlight(ih-token-9),
+::highlight(ih-token-10),
+::highlight(ih-token-11),
+::highlight(ih-token-12),
+::highlight(ih-token-13),
+::highlight(ih-token-14),
+::highlight(ih-token-15) {
+  text-decoration-line: var(--ih-paint-deco);
+  text-decoration-style: solid;
+  text-decoration-thickness: var(--ih-underline-thickness, 12.5%);
+  text-underline-offset: var(--ih-underline-offset, 18.75%);
+  text-decoration-skip-ink: none;
+}
+::highlight(ih-token-0) { background-color: var(--ih-token-bg-0, var(--ih-token-0)); text-decoration-color: var(--ih-token-0); }
+::highlight(ih-token-1) { background-color: var(--ih-token-bg-1, var(--ih-token-1)); text-decoration-color: var(--ih-token-1); }
+::highlight(ih-token-2) { background-color: var(--ih-token-bg-2, var(--ih-token-2)); text-decoration-color: var(--ih-token-2); }
+::highlight(ih-token-3) { background-color: var(--ih-token-bg-3, var(--ih-token-3)); text-decoration-color: var(--ih-token-3); }
+::highlight(ih-token-4) { background-color: var(--ih-token-bg-4, var(--ih-token-4)); text-decoration-color: var(--ih-token-4); }
+::highlight(ih-token-5) { background-color: var(--ih-token-bg-5, var(--ih-token-5)); text-decoration-color: var(--ih-token-5); }
+::highlight(ih-token-6) { background-color: var(--ih-token-bg-6, var(--ih-token-6)); text-decoration-color: var(--ih-token-6); }
+::highlight(ih-token-7) { background-color: var(--ih-token-bg-7, var(--ih-token-7)); text-decoration-color: var(--ih-token-7); }
+::highlight(ih-token-8) { background-color: var(--ih-token-bg-8, var(--ih-token-8)); text-decoration-color: var(--ih-token-8); }
+::highlight(ih-token-9) { background-color: var(--ih-token-bg-9, var(--ih-token-9)); text-decoration-color: var(--ih-token-9); }
+::highlight(ih-token-10) { background-color: var(--ih-token-bg-10, var(--ih-token-10)); text-decoration-color: var(--ih-token-10); }
+::highlight(ih-token-11) { background-color: var(--ih-token-bg-11, var(--ih-token-11)); text-decoration-color: var(--ih-token-11); }
+::highlight(ih-token-12) { background-color: var(--ih-token-bg-12, var(--ih-token-12)); text-decoration-color: var(--ih-token-12); }
+::highlight(ih-token-13) { background-color: var(--ih-token-bg-13, var(--ih-token-13)); text-decoration-color: var(--ih-token-13); }
+::highlight(ih-token-14) { background-color: var(--ih-token-bg-14, var(--ih-token-14)); text-decoration-color: var(--ih-token-14); }
+::highlight(ih-token-15) { background-color: var(--ih-token-bg-15, var(--ih-token-15)); text-decoration-color: var(--ih-token-15); }
 
 /* PDF token：canvas 已含字形，::highlight 底色会盖在字上，改画 overlay 红线。
- * 线粗/上移随 --il-pdf-scale，由 pdf/viewer.css 给；alpha 由 page-map.js 按档位写。
+ * 粗细/位置由 page-map 按字盒高 × highlightStyle UNDERLINE_*（与网页 % 同一比例）。
  * SYNC: extension/semantic-highlight/content.css → .il-token-underline */
 .il-token-underline {
   position: absolute;

@@ -1,16 +1,21 @@
 /**
  * PDF 信息量标记：viewer 提供阅读序全文和 textLayer 节点。
- * 分批分析见 analyzeRun.js。缩放重建 textLayer 后：正文不变则换新节点，已分析段从缓存画回，暂停点保留。
+ * token 走 overlay 红线（色块会盖住 canvas 字形；highlightStyle.resolvePaintStyle 把 pdf 上回退成下划线）。
+ * 分批分析见 analyzeRun.js。缩放后 textLayer 重建：IL_createPdfZoomIdle 停稳再贴已提交 token。
  */
 (() => {
   if (!globalThis.IH_analyzeRun) {
     throw new Error('IH_analyzeRun missing — inject analyzeRun.js before highlight.js');
   }
   const R = globalThis.IH_analyzeRun;
+  if (typeof globalThis.IL_createPdfZoomIdle !== 'function') {
+    throw new Error('IL_createPdfZoomIdle missing — load text-layer.js first');
+  }
+  const zoomIdle = globalThis.IL_createPdfZoomIdle();
   let generation = 0;
   let busy = false;
   let enabled = true;
-  /** @type {{ mapped: { text: string, pieces: unknown[], root: Element }, segs: { start: number, end: number, text: string }[], next: number, painted: number, skipCache?: boolean } | null} */
+  /** @type {{ mapped: { text: string, pieces: unknown[], root: Element }, segs: { start: number, end: number, text: string }[], next: number, painted: number, tokensBySeg?: unknown[][], skipCache?: boolean } | null} */
   let session = null;
 
   function extractPdfPage() {
@@ -21,6 +26,7 @@
   }
 
   function clear() {
+    zoomIdle.cancel();
     session = null;
     globalThis.IH_clearHighlights();
     globalThis.IH_clearProgress();
@@ -79,7 +85,7 @@
     });
   }
 
-  /** 同文换节点：把已提交的段画回新 textLayer，暂停点不动。 */
+  /** 同文换节点：idle 已等过绘制。按时间片贴线。不分析、不改图标。暂停点不动。 */
   async function remount(myGeneration) {
     const still = () => myGeneration === generation;
     let mapped;
@@ -97,35 +103,46 @@
       await runBatch(myGeneration, false);
       return;
     }
-    session.mapped = mapped;
-    session.painted = 0;
     const done = session.next;
-    globalThis.IH_clearHighlights();
     await globalThis.IH_bindProgress(mapped, session.segs);
+    if (!still()) return;
     if (done === 0) {
+      session.mapped = mapped;
       await runBatch(myGeneration, session.skipCache);
       return;
     }
-    await job(myGeneration, async (report) => {
-      const lastAlignErr = await R.paintRange(
-        session, 0, done, still, { overlay: true }, report,
-      );
+    R.reportActionState('on');
+    try {
+      globalThis.IH_clearError();
+      await R.repaintCommitted(session, mapped, true, still);
       if (!still()) return;
-      await finish(lastAlignErr, report);
-    });
+      await finish(undefined, { segments: 0 });
+    } catch (error) {
+      if (!still()) return;
+      clear();
+      await globalThis.IH_showError(error?.message || error);
+      R.reportActionState('on');
+      return;
+    }
+    if (!still()) return;
+    R.reportActionState('on');
   }
 
   function restart() {
     if (!enabled) return;
+    zoomIdle.cancel();
     session = null;
     void runBatch(generation += 1, false);
   }
 
   function onRerendered() {
     if (!enabled) return;
-    const myGeneration = generation += 1;
-    if (session) void remount(myGeneration);
-    else void runBatch(myGeneration, false);
+    const g = generation += 1;
+    zoomIdle.schedule(() => {
+      if (!enabled || g !== generation) return;
+      if (session) return remount(g);
+      return runBatch(g, false);
+    });
   }
 
   function toggle() {
