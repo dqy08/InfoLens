@@ -252,10 +252,6 @@
     HS.applyCssVars(document.documentElement, highlightPrefs);
   }
 
-  HS.watchColorScheme(() => {
-    applyTokenColors();
-  });
-
   function clearTokenOverlays() {
     for (const el of tokenOverlayEls) el.remove();
     tokenOverlayEls = [];
@@ -304,7 +300,7 @@
       tokenMaxAlpha(),
       highlightPrefs.twoTier,
     );
-    el.style.backgroundColor = `rgba(${HS.SURPRISAL_RED_RGB}, ${a})`;
+    el.style.backgroundColor = `rgba(${HS.rgbForColor(highlightPrefs.highlightColor)}, ${a})`;
     (parent || ctx.root).appendChild(el);
     tokenOverlayEls.push(el);
   }
@@ -478,9 +474,10 @@
       || next.thresholdPct !== highlightPrefs.thresholdPct;
     const alphaChanged = next.maxAlphaDepth !== highlightPrefs.maxAlphaDepth
       || next.paintStyle !== highlightPrefs.paintStyle;
+    const colorChanged = next.highlightColor !== highlightPrefs.highlightColor;
     highlightPrefs = next;
     applyTokenColors();
-    if (levelChanged || (alphaChanged && paintBuf.overlay)) {
+    if (levelChanged || ((alphaChanged || colorChanged) && paintBuf.overlay)) {
       repaintFromBuffer();
     }
   }
@@ -521,6 +518,7 @@
       && !(HS.KEY_THRESHOLD_PCT in changes)
       && !(HS.KEY_MAX_ALPHA_DEPTH in changes)
       && !(HS.KEY_PAINT_STYLE in changes)
+      && !(HS.KEY_HIGHLIGHT_COLOR in changes)
     ) {
       return;
     }

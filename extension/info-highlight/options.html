@@ -144,7 +144,7 @@
     input[type="range"] {
       width: 100%;
       margin: 0;
-      accent-color: #ff4740;
+      accent-color: rgb(var(--ih-highlight-rgb, 255, 71, 64));
       cursor: pointer;
     }
     /* 强度滑条自绘：避免 accent-color 的悬停变色，以及浅色 accent 把右侧轨道衬白 */
@@ -202,6 +202,65 @@
       margin-left: 4px;
     }
     .row-nested[hidden] { display: none; }
+    input[type="range"].ih-hue {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 16px;
+      background: transparent;
+    }
+    input[type="range"].ih-hue:focus { outline: none; }
+    input[type="range"].ih-hue::-webkit-slider-runnable-track {
+      height: 8px;
+      border-radius: 4px;
+      background: var(--ih-hue-track);
+    }
+    input[type="range"].ih-hue::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      margin-top: -4px;
+      border: none;
+      border-radius: 50%;
+      background: rgb(var(--ih-highlight-rgb, 255, 71, 64));
+      box-shadow: 0 0 0 1px var(--btn-border);
+    }
+    input[type="range"].ih-hue::-moz-range-track {
+      height: 8px;
+      border: none;
+      border-radius: 4px;
+      background: var(--ih-hue-track);
+    }
+    input[type="range"].ih-hue::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border: none;
+      border-radius: 50%;
+      background: rgb(var(--ih-highlight-rgb, 255, 71, 64));
+      box-shadow: 0 0 0 1px var(--btn-border);
+    }
+    .ih-color-swatches {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+      width: 100%;
+    }
+    button.ih-color-swatch {
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      border: 2px solid var(--bg);
+      border-radius: 50%;
+      box-shadow: 0 0 0 1px var(--btn-border);
+      background: rgb(var(--ih-swatch-rgb));
+    }
+    button.ih-color-swatch-ink {
+      background: linear-gradient(to right, #000 50%, #fff 50%);
+    }
+    button.ih-color-swatch[aria-checked="true"] {
+      box-shadow: 0 0 0 2px var(--fg);
+    }
     ul.sites { margin: 0; padding: 0; list-style: none; }
     ul.sites:empty { display: none; }
     ul.sites .row {
@@ -244,15 +303,22 @@
         <option value="underline">Underline</option>
       </select>
     </div>
+    <div class="row row-slider" data-option-id="ih_highlight_color">
+      <div class="row-text">
+        <div class="row-title">Highlight color</div>
+      </div>
+      <div class="ih-color-swatches" id="ih_highlight_swatches" role="radiogroup" aria-label="Highlight color presets"></div>
+      <input type="range" class="ih-hue" id="ih_highlight_color" min="0" max="359" step="1" aria-label="Highlight color">
+    </div>
     <div class="row row-slider" data-option-id="ih_max_highlight_alpha">
       <div class="row-slider-top">
         <div class="row-text">
           <div class="row-title">Highlight intensity</div>
-          <p class="row-desc">How strong the red highlight looks.</p>
+          <p class="row-desc">How strong the highlight looks.</p>
         </div>
         <span class="row-slider-value" id="ih_depth_value"></span>
       </div>
-      <input type="range" class="ih-intensity" id="ih_max_highlight_alpha" min="5" max="100" step="1" aria-label="Highlight intensity">
+      <input type="range" class="ih-intensity" id="ih_max_highlight_alpha" min="5" max="150" step="1" aria-label="Highlight intensity">
     </div>
     <label class="row" data-option-id="ih_two_tier">
       <div class="row-text">

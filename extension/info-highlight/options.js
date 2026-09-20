@@ -41,7 +41,7 @@
     'cache_desc', 'cache_clear',
     'ih_threshold_row', 'ih_threshold_value', 'ih_highlight_threshold_pct',
     'ih_depth_value', 'ih_max_highlight_alpha',
-    'ih_paint_style',
+    'ih_paint_style', 'ih_highlight_color', 'ih_highlight_swatches',
   ];
   const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
   if (ids.some((id) => !el[id])) {
@@ -66,15 +66,46 @@
     el.ih_threshold_value.textContent = HS.formatThresholdLabel(pct);
   }
 
-  /** 滑条 accent 合成到页面底色上，观感接近正文里的高亮红 */
+  let highlightColor = HS.HUE_RED;
+  let lastHue = HS.HUE_RED;
+
+  function hueNear(a, b) {
+    const d = Math.abs(a - b) % 360;
+    return Math.min(d, 360 - d) <= 8;
+  }
+
+  function parseRgb(rgb) {
+    return rgb.split(',').map((s) => Number(s.trim()));
+  }
+
+  /** 滑条 accent 合成到页面底色上，观感接近正文里的高亮 */
   function intensityAccent(depth) {
     const a = HS.depthToMaxAlpha(depth, el.ih_paint_style.value);
+    const [r, g, b] = parseRgb(HS.rgbForColor(highlightColor));
     const bg = getComputedStyle(document.body).backgroundColor;
     const m = bg.match(/\d+/g);
-    if (!m || m.length < 3) return `rgba(${HS.SURPRISAL_RED_RGB}, ${a})`;
+    if (!m || m.length < 3) return `rgba(${r}, ${g}, ${b}, ${a})`;
     const [br, bgG, bb] = m.map(Number);
-    const [r, g, b] = HS.SURPRISAL_RED_RGB.split(',').map((s) => Number(s.trim()));
     return `rgb(${Math.round(br * (1 - a) + r * a)}, ${Math.round(bgG * (1 - a) + g * a)}, ${Math.round(bb * (1 - a) + b * a)})`;
+  }
+
+  function syncHighlightColor(v) {
+    highlightColor = HS.normalizeHighlightColor(v);
+    const ink = HS.isInk(highlightColor);
+    if (!ink) lastHue = highlightColor;
+    el.ih_highlight_color.value = String(lastHue);
+    el.ih_highlight_color.hidden = ink;
+    const rgb = HS.rgbForColor(highlightColor);
+    document.documentElement.style.setProperty('--ih-highlight-rgb', rgb);
+    el.ih_highlight_color.style.setProperty('--ih-hue-track', HS.hueTrackCss());
+    for (const btn of el.ih_highlight_swatches.querySelectorAll('.ih-color-swatch')) {
+      const id = btn.dataset.color;
+      const on = id === HS.COLOR_INK
+        ? ink
+        : !ink && hueNear(HS.hueForColorId(id), lastHue);
+      btn.setAttribute('aria-checked', on ? 'true' : 'false');
+    }
+    syncDepthLabel(HS.clampMaxAlphaDepth(el.ih_max_highlight_alpha.value));
   }
 
   function syncDepthLabel(depth) {
@@ -88,7 +119,7 @@
   }
 
   HS.watchColorScheme(() => {
-    syncDepthLabel(HS.clampMaxAlphaDepth(el.ih_max_highlight_alpha.value));
+    syncHighlightColor(highlightColor);
   });
 
   function loadToggles() {
@@ -115,7 +146,7 @@
         syncThresholdLabel(prefs.thresholdPct);
         el.ih_paint_style.value = prefs.paintStyle;
         el.ih_max_highlight_alpha.value = String(prefs.maxAlphaDepth);
-        syncDepthLabel(prefs.maxAlphaDepth);
+        syncHighlightColor(prefs.highlightColor);
         syncTwoTierUi(prefs.twoTier);
         resolve();
       });
@@ -142,6 +173,31 @@
     chrome.storage.local.set({ [HS.KEY_PAINT_STYLE]: style });
     syncDepthLabel(HS.clampMaxAlphaDepth(el.ih_max_highlight_alpha.value));
   });
+
+  el.ih_highlight_color.addEventListener('input', () => {
+    syncHighlightColor(el.ih_highlight_color.value);
+    chrome.storage.local.set({ [HS.KEY_HIGHLIGHT_COLOR]: highlightColor });
+  });
+
+  function appendColorSwatch(id, label, rgb) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ih-color-swatch';
+    btn.dataset.color = id;
+    btn.setAttribute('role', 'radio');
+    btn.setAttribute('aria-label', label);
+    if (id === HS.COLOR_INK) btn.classList.add('ih-color-swatch-ink');
+    else btn.style.setProperty('--ih-swatch-rgb', rgb);
+    btn.addEventListener('click', () => {
+      syncHighlightColor(id === HS.COLOR_INK ? HS.COLOR_INK : HS.hueForColorId(id));
+      chrome.storage.local.set({ [HS.KEY_HIGHLIGHT_COLOR]: highlightColor });
+    });
+    el.ih_highlight_swatches.append(btn);
+  }
+  for (const id of HS.COLOR_IDS) {
+    appendColorSwatch(id, `${id[0].toUpperCase()}${id.slice(1)}`, HS.rgbForHue(HS.hueForColorId(id)));
+  }
+  appendColorSwatch(HS.COLOR_INK, 'Black / white');
 
   function modelStatusText(st, webgpu) {
     if (st.ready) return 'Ready (Gemma 3 270M)';
