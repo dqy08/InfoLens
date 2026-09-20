@@ -19,6 +19,7 @@ globalThis.IL_OPTIONS_CATALOG = Object.freeze([
   'analyze_pref',
   'ih_cloud_model',
   'ih_auto_sites',
+  'ih_highlight_options_page',
 ]);
 
 /** 升级且尚无 seen 键时写入；勿把本版新项写进来 */

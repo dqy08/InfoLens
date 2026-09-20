@@ -87,7 +87,9 @@
 
   function extractPage() {
     requireFns();
-    const root = globalThis.IL_findArticleRoot(document, { articleOnly });
+    const root = globalThis.IL_findArticleRoot(document, {
+      articleOnly: globalThis.IH_OPTIONS_PAGE ? false : articleOnly,
+    });
     const mapped = globalThis.IL_collectTextMap(root);
     if (!mapped.text || !mapped.pieces.length) {
       throw new Error('No article text');

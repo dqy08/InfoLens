@@ -171,14 +171,21 @@
     idle();
   }
 
-  function toggle() {
+  function setEnabled(on) {
+    if (on) {
+      if (busy || active) return;
+      void runBatch(gen += 1, false, false);
+      return;
+    }
     if (busy || active) {
       gen += 1;
       busy = false;
       clearAll();
-      return;
     }
-    void runBatch(gen += 1, false, false);
+  }
+
+  function toggle() {
+    setEnabled(!(busy || active));
   }
 
   function force() {
@@ -208,5 +215,5 @@
 
   // SYNC: background.js → pageCsPeek 的 data-ih-cs
   document.documentElement.setAttribute('data-ih-cs', '');
-  window.__IH_DEMO__ = { toggle, start, force, isLive };
+  window.__IH_DEMO__ = { toggle, start, force, isLive, setEnabled };
 })();

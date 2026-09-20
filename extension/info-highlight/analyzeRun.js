@@ -37,6 +37,7 @@ globalThis.IH_analyzeRun ||= (function () {
 
   /** @param {'off' | 'analyzing' | 'on'} state @param {number} [filled] */
   function reportActionState(state, filled) {
+    if (globalThis.IH_OPTIONS_PAGE) return;
     const msg = { type: 'ih-action-state', state };
     if (state === 'analyzing') {
       const v = Math.floor(Number(filled));

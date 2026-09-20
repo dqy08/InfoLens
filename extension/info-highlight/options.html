@@ -213,6 +213,7 @@
     }
   </style>
   <link rel="stylesheet" href="options-new-dots.css" />
+  <link rel="stylesheet" href="content.css" />
 </head>
 <body>
   <header class="top">
@@ -337,6 +338,18 @@
     </div>
     </section>
     <section>
+    <h2>Experimental</h2>
+    <div class="group">
+    <label class="row" data-option-id="ih_highlight_options_page">
+      <div class="row-text">
+        <div class="row-title">Highlight this page</div>
+        <p class="row-desc">Run Info Highlight on this settings page. Analysis always uses the cloud model above. Other display options still apply, except main-article-only and hover details.</p>
+      </div>
+      <input type="checkbox" id="ih_highlight_options_page" checked>
+    </label>
+    </div>
+    </section>
+    <section>
     <h2>Storage</h2>
     <div class="group">
     <div class="row">
@@ -359,5 +372,21 @@
   <script src="options-catalog.js"></script>
   <script src="options-new-dots.js"></script>
   <script src="options.js"></script>
+  <!-- SYNC: background.js CONTENT_JS，无 drop-stale / tokenTip / 第二份 highlightStyle -->
+  <script src="vendor/Readability.js"></script>
+  <script src="extractRootPatches.js"></script>
+  <script src="articleRoot.js"></script>
+  <script src="textMapConfig.js"></script>
+  <script src="collectTextMap.js"></script>
+  <script src="splitTextToChunks.js"></script>
+  <script src="textIndex.js"></script>
+  <script src="scrollGeometry.js"></script>
+  <script src="progressAxis.js"></script>
+  <script src="overlay.js"></script>
+  <script src="options-page-flags.js"></script>
+  <script src="page-map.js"></script>
+  <script src="analyzeRun.js"></script>
+  <script src="content.js"></script>
+  <script src="options-highlight.js"></script>
 </body>
 </html>

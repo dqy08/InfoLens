@@ -100,6 +100,7 @@ test('Info Highlight 本版：升级后 intensity / one-tone / auto-sites / clou
   assert.ok(!seed.includes('ih_auto_sites'));
   assert.ok(!seed.includes('ih_cloud_model'));
   assert.ok(!seed.includes('ih_article_only'));
+  assert.ok(!seed.includes('ih_highlight_options_page'));
 
   const env = loadAttention(
     { action: { default_icon: icons }, update_url: 'https://example' },
@@ -112,7 +113,7 @@ test('Info Highlight 本版：升级后 intensity / one-tone / auto-sites / clou
   const unseen = await env.sandbox.IL_optionsAttention.unseen(catalog);
   assert.equal(
     unseen.slice().sort().join(','),
-    'ih_article_only,ih_auto_sites,ih_cloud_model,ih_max_highlight_alpha,ih_two_tier',
+    'ih_article_only,ih_auto_sites,ih_cloud_model,ih_highlight_options_page,ih_max_highlight_alpha,ih_two_tier',
   );
 });
 

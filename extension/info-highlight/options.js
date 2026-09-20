@@ -19,12 +19,16 @@
 
   const HS = globalThis.IH_highlightStyle;
 
+  let resolvePageReady;
+  globalThis.IH_optionsPageReady = new Promise((r) => { resolvePageReady = r; });
+
   /** 复选框 id 即 chrome.storage.local 的键；值为默认值 */
   const TOGGLES = {
     ih_article_only: true,
     show_progress: false,
     show_token_tip: true,
     [HS.KEY_TWO_TIER]: HS.STORAGE_DEFAULTS[HS.KEY_TWO_TIER],
+    ih_highlight_options_page: true,
   };
 
   const ids = [
@@ -81,27 +85,35 @@
     input.style.setProperty('--ih-intensity-pct', `${pct}%`);
   }
 
-  for (const [key, fallback] of Object.entries(TOGGLES)) {
-    const box = document.getElementById(key);
-    if (!box) throw new Error(`options page missing checkbox: ${key}`);
-    chrome.storage.local.get({ [key]: fallback }, (res) => {
-      box.checked = !!res[key];
-      if (key === HS.KEY_TWO_TIER) syncTwoTierUi(box.checked);
-    });
-    box.addEventListener('change', () => {
-      chrome.storage.local.set({ [key]: box.checked });
-      if (key === HS.KEY_TWO_TIER) syncTwoTierUi(box.checked);
-    });
+  function loadToggles() {
+    return Promise.all(Object.entries(TOGGLES).map(([key, fallback]) => new Promise((resolve) => {
+      const box = document.getElementById(key);
+      if (!box) throw new Error(`options page missing checkbox: ${key}`);
+      chrome.storage.local.get({ [key]: fallback }, (res) => {
+        box.checked = !!res[key];
+        if (key === HS.KEY_TWO_TIER) syncTwoTierUi(box.checked);
+        resolve();
+      });
+      box.addEventListener('change', () => {
+        chrome.storage.local.set({ [key]: box.checked });
+        if (key === HS.KEY_TWO_TIER) syncTwoTierUi(box.checked);
+      });
+    })));
   }
 
-  chrome.storage.local.get(HS.STORAGE_DEFAULTS, (res) => {
-    const prefs = HS.normalizePrefs(res);
-    el.ih_highlight_threshold_pct.value = String(prefs.thresholdPct);
-    syncThresholdLabel(prefs.thresholdPct);
-    el.ih_max_highlight_alpha.value = String(prefs.maxAlphaDepth);
-    syncDepthLabel(prefs.maxAlphaDepth);
-    syncTwoTierUi(prefs.twoTier);
-  });
+  function loadSliders() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(HS.STORAGE_DEFAULTS, (res) => {
+        const prefs = HS.normalizePrefs(res);
+        el.ih_highlight_threshold_pct.value = String(prefs.thresholdPct);
+        syncThresholdLabel(prefs.thresholdPct);
+        el.ih_max_highlight_alpha.value = String(prefs.maxAlphaDepth);
+        syncDepthLabel(prefs.maxAlphaDepth);
+        syncTwoTierUi(prefs.twoTier);
+        resolve();
+      });
+    });
+  }
 
   el.ih_highlight_threshold_pct.addEventListener('input', () => {
     const pct = HS.clampThresholdPct(el.ih_highlight_threshold_pct.value);
@@ -139,7 +151,7 @@
     el.ih_cloud_model.value = st.cloudModel;
     el.local_init.disabled = !webgpu || !!st.ready;
     const gen = ++modelCacheGen;
-    void globalThis.IH_localState.modelCacheUsage().then(({ bytes }) => {
+    return globalThis.IH_localState.modelCacheUsage().then(({ bytes }) => {
       if (gen !== modelCacheGen) return;
       el.model_desc.textContent = bytes > 0 ? `${base} · ${formatBytes(bytes)}` : base;
       el.model_clear.disabled = bytes === 0;
@@ -154,15 +166,18 @@
   }
 
   function loadBackend() {
-    chrome.runtime.sendMessage({ type: 'ih-local-status' }, (res) => {
-      if (chrome.runtime.lastError || !res?.ok) {
-        el.webgpu_desc.textContent = res?.error || chrome.runtime.lastError?.message || 'Failed to read status';
-        el.local_init.disabled = true;
-        el.model_clear.disabled = true;
-        return;
-      }
-      applyBackend(res);
-      syncNewDotsPaused(res.initOverlay);
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'ih-local-status' }, (res) => {
+        if (chrome.runtime.lastError || !res?.ok) {
+          el.webgpu_desc.textContent = res?.error || chrome.runtime.lastError?.message || 'Failed to read status';
+          el.local_init.disabled = true;
+          el.model_clear.disabled = true;
+          resolve();
+          return;
+        }
+        syncNewDotsPaused(res.initOverlay);
+        void Promise.resolve(applyBackend(res)).finally(resolve);
+      });
     });
   }
 
@@ -220,8 +235,6 @@
       loadBackend();
     });
   });
-
-  loadBackend();
 
   function autoSiteRow(host) {
     const li = document.createElement('li');
@@ -286,8 +299,6 @@
       submitAutoSite();
     }
   });
-
-  void loadAutoSites();
 
   function formatBytes(n) {
     if (!Number.isFinite(n) || n < 0) throw new Error(`bad cache size: ${n}`);
@@ -354,5 +365,11 @@
     }
   });
 
-  void refresh().catch(showCacheError);
+  void Promise.all([
+    loadToggles(),
+    loadSliders(),
+    loadBackend(),
+    loadAutoSites(),
+    refresh().catch(showCacheError),
+  ]).finally(() => resolvePageReady());
 })();
