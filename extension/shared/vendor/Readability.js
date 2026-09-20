@@ -1414,9 +1414,17 @@ Readability.prototype = {
 
       // InfoLens: capture rid for live-DOM map-back (set before mutations below).
       // Synthetic DIV is clone-only; map to `page` (normally body) instead.
-      this._ilArticleRootRid = neededToCreateTopCandidate
-        ? page.getAttribute("data-il-rid")
-        : topCandidate.getAttribute("data-il-rid");
+      // _replaceBrs 等会在 clone 里造出无 rid 的节点，沿祖先找到打标过的活节点。
+      var ridNode = neededToCreateTopCandidate ? page : topCandidate;
+      var mappedRid = null;
+      while (ridNode && ridNode.nodeType === 1) {
+        mappedRid = ridNode.getAttribute("data-il-rid");
+        if (mappedRid != null && mappedRid !== "") {
+          break;
+        }
+        ridNode = ridNode.parentElement || ridNode.parentNode;
+      }
+      this._ilArticleRootRid = mappedRid;
 
       // Now that we have the top candidate, look through its siblings for content
       // that might also be related. Things like preambles, content split by ads

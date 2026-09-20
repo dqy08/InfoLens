@@ -999,6 +999,8 @@ async function postLocalInitReport({ outcome, duration_ms, error }) {
     hub,
   };
   if (outcome !== 'ok' && error) body.error = String(error).slice(0, 500);
+  const client_id = await IL_getClientId(IH_CONFIG.apiBase).catch(() => null);
+  if (client_id) body.client_id = client_id;
   IL_postKeepalive('/api/extension-local-init', body, IH_CONFIG.apiBase);
 }
 

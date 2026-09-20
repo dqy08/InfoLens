@@ -82,9 +82,12 @@
     }
   }
 
+  const KEY_ARTICLE_ONLY = 'ih_article_only';
+  let articleOnly = true;
+
   function extractPage() {
     requireFns();
-    const root = globalThis.IL_findArticleRoot(document);
+    const root = globalThis.IL_findArticleRoot(document, { articleOnly });
     const mapped = globalThis.IL_collectTextMap(root);
     if (!mapped.text || !mapped.pieces.length) {
       throw new Error('No article text');
@@ -283,7 +286,53 @@
     tokenOverlayEls.push(el);
   }
 
+  function rangeLive(range) {
+    const a = range.startContainer;
+    const b = range.endContainer;
+    return !!(a && b && a.isConnected && b.isConnected && !range.collapsed);
+  }
+
+  /** 画完之后 DOM 再变：只丢掉映不回的 range，不重抽、不重画。只动本插件登记。 */
+  function pruneDetachedHighlights() {
+    if (!CSS.highlights) return;
+    const visit = (h) => {
+      if (!h || typeof h.delete !== 'function') return;
+      for (const range of [...h]) {
+        if (!rangeLive(range)) h.delete(range);
+      }
+    };
+    for (let i = 0; i < TOKEN_LEVELS; i++) visit(CSS.highlights.get(HL_PREFIX + i));
+    visit(CSS.highlights.get(HL_UNDERLINE));
+  }
+
+  let liveWatch = null;
+  let liveWatchTimer = 0;
+
+  function stopHighlightLiveWatch() {
+    liveWatch?.disconnect();
+    liveWatch = null;
+    if (liveWatchTimer) {
+      clearTimeout(liveWatchTimer);
+      liveWatchTimer = 0;
+    }
+  }
+
+  function watchHighlightLive() {
+    stopHighlightLiveWatch();
+    const root = document.documentElement;
+    if (!root || typeof MutationObserver !== 'function') return;
+    liveWatch = new MutationObserver(() => {
+      if (liveWatchTimer) return;
+      liveWatchTimer = window.setTimeout(() => {
+        liveWatchTimer = 0;
+        pruneDetachedHighlights();
+      }, 120);
+    });
+    liveWatch.observe(root, { childList: true, subtree: true });
+  }
+
   function clearHighlights() {
+    stopHighlightLiveWatch();
     clearTokenPaints();
     clearUnderline();
     paintBuf = { tokens: [], mapped: null, overlay: false };
@@ -401,19 +450,25 @@
     }
   }
 
+  const prefsDefaults = { ...HS.STORAGE_DEFAULTS, [KEY_ARTICLE_ONLY]: true };
+
   const prefsReady = new Promise((resolve) => {
     const get = chrome.storage?.local?.get;
     if (typeof get !== 'function') {
       resolve();
       return;
     }
-    get.call(chrome.storage.local, HS.STORAGE_DEFAULTS, (res) => {
+    get.call(chrome.storage.local, prefsDefaults, (res) => {
       applyHighlightPrefs(res);
+      articleOnly = res?.[KEY_ARTICLE_ONLY] !== false;
       resolve();
     });
   });
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area && area !== 'local') return;
+    if (KEY_ARTICLE_ONLY in changes) {
+      articleOnly = changes[KEY_ARTICLE_ONLY].newValue !== false;
+    }
     if (
       !(HS.KEY_TWO_TIER in changes)
       && !(HS.KEY_THRESHOLD_PCT in changes)
@@ -958,6 +1013,9 @@
   }
 
   globalThis.IH_extractPage = extractPage;
+  globalThis.IH_prefsReady = prefsReady;
+  globalThis.IH_watchHighlightLive = watchHighlightLive;
+  globalThis.IH_pruneDetachedHighlights = pruneDetachedHighlights;
   globalThis.IH_splitSegments = splitSegments;
   globalThis.IH_segmentWindow = segmentWindow;
   globalThis.IH_tokensInSegment = tokensInSegment;

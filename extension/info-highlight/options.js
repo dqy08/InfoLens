@@ -21,6 +21,7 @@
 
   /** 复选框 id 即 chrome.storage.local 的键；值为默认值 */
   const TOGGLES = {
+    ih_article_only: true,
     show_progress: false,
     show_token_tip: true,
     [HS.KEY_TWO_TIER]: HS.STORAGE_DEFAULTS[HS.KEY_TWO_TIER],

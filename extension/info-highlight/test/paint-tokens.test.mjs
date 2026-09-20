@@ -47,8 +47,14 @@ class FakeHighlight {
   add(r) {
     this.ranges.push(r);
   }
+  delete(r) {
+    this.ranges = this.ranges.filter((x) => x !== r);
+  }
   clear() {
     this.ranges = [];
+  }
+  *[Symbol.iterator]() {
+    yield* this.ranges;
   }
 }
 
@@ -59,6 +65,7 @@ globalThis.CSS = {
     has: (k) => hlMap.has(k),
     get: (k) => hlMap.get(k),
     set: (k, v) => hlMap.set(k, v),
+    values: () => hlMap.values(),
   },
 };
 globalThis.document = {
@@ -209,4 +216,24 @@ test('overlay：无 client rects 记 skip_empty_range', () => {
   } finally {
     FakeRange.clientRects = [{ width: 8, height: 10 }];
   }
+});
+
+test('pruneDetachedHighlights：断开的 range 丢掉，还在的留下；不碰别人的登记', () => {
+  hlMap.clear();
+  const live = mappedFor('Hello');
+  globalThis.IH_paintTokens([{ offset: [0, 5], p: HOT }], live, { append: false });
+  const painted = [...hlMap.values()].flatMap((h) => [...h]);
+  assert.equal(painted.length, 1);
+  painted[0].startContainer.isConnected = false;
+  painted[0].endContainer.isConnected = false;
+  const foreign = new FakeHighlight();
+  const other = new FakeRange();
+  other.startContainer = { isConnected: false, data: 'x' };
+  other.endContainer = other.startContainer;
+  other.collapsed = false;
+  foreign.add(other);
+  hlMap.set('other-hl', foreign);
+  globalThis.IH_pruneDetachedHighlights();
+  assert.equal([...hlMap.values()].flatMap((h) => [...h]).length, 1);
+  assert.equal(foreign.ranges.length, 1);
 });

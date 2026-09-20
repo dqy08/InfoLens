@@ -13,13 +13,17 @@ const dir = dirname(fileURLToPath(import.meta.url));
 test('content.js：段末作废重来；1 秒只补瞬间结束', () => {
   const src = readFileSync(join(dir, '../content.js'), 'utf8');
   const fn = src.slice(src.indexOf('async function runBatch'), src.indexOf('function toggle'));
-  assert.match(fn, /if \(settle && session\.next === 0 && cap > 0\)/);
-  assert.match(fn, /await paintTo\(1\)/);
-  assert.match(fn, /pageText\(\) !== session\.mapped\.text/);
-  assert.match(fn, /1000 - \(Date\.now\(\) - t0\)/);
+  assert.match(src, /let extractStable/);
+  assert.match(src, /markExtractStable/);
+  assert.match(src, /不表示正文已在 DOM/);
+  assert.match(fn, /await globalThis\.IH_prefsReady/);
+  assert.match(fn, /SETTLE_MS/);
+  assert.match(src, /paintAfterFirstSegmentCheck/);
+  assert.match(src, /await paintTo\(1\)/);
+  assert.match(src, /pageText\(\) !== session\.mapped\.text/);
   assert.doesNotMatch(fn, /settle && !pageText\(\)\.trim\(\)/);
   const wait = fn.match(/if \(left > 0\) \{[\s\S]*?\n    \}/);
-  assert.ok(wait, '应留下未满 1 秒则等待');
+  assert.ok(wait, '应留下未满 SETTLE_MS 则等待');
   assert.match(wait[0], /pageText\(\)/);
 });
 
