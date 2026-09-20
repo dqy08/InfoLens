@@ -88,12 +88,13 @@ def check_references(root: Path, files: list[Path]) -> None:
 
 
 DOM_CONTRACTS = {"pdf/viewer.js": "pdf/viewer.html"}
-ELEMENT_ID = re.compile(r"""getElementById\(\s*['"]([^'"]+)['"]\s*\)""")
+ELEMENT_ID = re.compile(r"""getElementById\(\s*['"]([^'"]+)['"]\s*\)(?!\s*\?)""")
 DECLARED_ID = re.compile(r"""\bid=['"]([^'"]+)['"]""")
 
 
 def check_dom_contracts(root: Path) -> None:
-    """共享脚本按 id 取元素，而页面骨架由各插件自己维护；缺 id 只会在运行时炸，这里提前拦。"""
+    """共享脚本按 id 取元素，而页面骨架由各插件自己维护；缺 id 只会在运行时炸，这里提前拦。
+    getElementById(...)?. 是运行时可选节点（如插件自己挂的 overlay），不要求写在 html 里。"""
     errors: list[str] = []
     for script_rel, page_rel in DOM_CONTRACTS.items():
         script, page = root / script_rel, root / page_rel
