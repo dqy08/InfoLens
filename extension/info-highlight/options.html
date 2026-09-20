@@ -46,6 +46,14 @@
     .top-icon { flex-shrink: 0; width: 40px; height: 40px; border-radius: 8px; }
     .top-name { font-size: 22px; font-weight: 600; }
     main { max-width: 680px; margin: 0 auto; padding: 16px 24px 40px; }
+    .page-demo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 22px;
+      cursor: pointer;
+      font-size: 16px;
+    }
     section { margin: 0 0 22px; }
     section:last-child { margin-bottom: 0; }
     h2 {
@@ -290,6 +298,10 @@
     </div>
   </header>
   <main>
+    <label class="page-demo">
+      <input type="checkbox" id="ih_highlight_options_page">
+      Highlight this page to preview the highlight in real time.
+    </label>
     <section>
     <h2>Highlight</h2>
     <div class="group">
@@ -362,13 +374,6 @@
         <p class="row-desc">Paint each word as one block by adding its subword scores. Hover still shows individual tokens. (Not recommended.)</p>
       </div>
       <input type="checkbox" id="ih_word_merge">
-    </label>
-    <label class="row" data-option-id="ih_highlight_options_page">
-      <div class="row-text">
-        <div class="row-title">Highlight this page <span class="experimental">Experimental</span></div>
-        <p class="row-desc">Run Info Highlight on this settings page. Analysis always uses the cloud model above. Other display options still apply, except main-article-only and hover details.</p>
-      </div>
-      <input type="checkbox" id="ih_highlight_options_page" checked>
     </label>
     </div>
     </section>

@@ -29,7 +29,7 @@
     show_token_tip: true,
     [HS.KEY_TWO_TIER]: HS.STORAGE_DEFAULTS[HS.KEY_TWO_TIER],
     ih_word_merge: false,
-    ih_highlight_options_page: true,
+    ih_highlight_options_page: false,
   };
 
   const ids = [

@@ -12,7 +12,11 @@ const dir = dirname(fileURLToPath(import.meta.url));
 
 test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () => {
   const html = readFileSync(join(dir, '../options.html'), 'utf8');
-  assert.match(html, /id="ih_highlight_options_page"/);
+  assert.match(html, /<main>[\s\S]*?id="ih_highlight_options_page"/);
+  assert.match(html, /id="ih_highlight_options_page">\s*Highlight this page to preview the highlight in real time\./);
+  assert.doesNotMatch(html, /id="ih_highlight_options_page" checked/);
+  assert.ok(html.indexOf('id="ih_highlight_options_page"') < html.indexOf('<h2>Highlight</h2>'));
+  assert.ok(html.indexOf('class="page-demo"') < html.indexOf('<h2>Highlight</h2>'));
   assert.match(html, /id="ih_paint_style"/);
   assert.match(html, /id="ih_highlight_color"/);
   assert.match(html, /class="ih-hue"/);
@@ -24,7 +28,6 @@ test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () =>
   assert.match(html, /One-tone highlight[\s\S]*class="experimental">Experimental/);
   assert.match(html, /Merge subwords[\s\S]*class="experimental">Experimental/);
   assert.match(html, /Not recommended/);
-  assert.match(html, /Highlight this page[\s\S]*class="experimental">Experimental/);
   const highlight = html.slice(html.indexOf('<h2>Highlight</h2>'), html.indexOf('<h2>Display</h2>'));
   assert.ok(highlight.indexOf('Highlight style') < highlight.indexOf('Highlight color'));
   assert.ok(highlight.indexOf('Highlight color') < highlight.indexOf('Highlight intensity'));
@@ -37,7 +40,7 @@ test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () =>
   assert.match(html, /href="content\.css"/);
   assert.doesNotMatch(html, /tokenTip\.js/);
   const catalog = readFileSync(join(dir, '../options-catalog.js'), 'utf8');
-  assert.match(catalog, /'ih_highlight_options_page'/);
+  assert.doesNotMatch(catalog, /ih_highlight_options_page/);
   assert.match(catalog, /'ih_word_merge'/);
   assert.match(catalog, /'ih_paint_style'/);
   assert.match(catalog, /'ih_highlight_color'/);
@@ -58,7 +61,7 @@ test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () =>
     /ih_word_merge/,
   );
   const opts = readFileSync(join(dir, '../options.js'), 'utf8');
-  assert.match(opts, /ih_highlight_options_page: true/);
+  assert.match(opts, /ih_highlight_options_page: false/);
   assert.match(opts, /ih_word_merge: false/);
   assert.match(opts, /IH_optionsPageReady/);
   assert.match(opts, /COLOR_INK/);
