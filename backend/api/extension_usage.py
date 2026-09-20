@@ -21,6 +21,13 @@ def _nonneg_int(v, default=0) -> int:
     return min(n, _MAX_SEGMENTS)
 
 
+def _optional_model(v):
+    if not isinstance(v, str):
+        return None
+    s = v.strip()[:64]
+    return s or None
+
+
 def _optional_duration_ms(v):
     """非法/缺失视为缺省（None），不 400。"""
     if v is None or v == "":
@@ -52,6 +59,7 @@ def extension_usage_report(usage_body=None):
     version = str(d.get("version") or "").strip()[:32]
     duration_ms = _optional_duration_ms(d.get("duration_ms"))
     client_id = optional_client_id(d.get("client_id"))
+    model = _optional_model(d.get("model"))
 
     bump_api("info_highlight_run")
     bump_api(f"info_highlight_run__{engine}")
@@ -68,6 +76,8 @@ def extension_usage_report(usage_body=None):
     )
     if version:
         details += f" v={version}"
+    if model:
+        details += f" m={model}"
     if duration_ms is not None:
         details += f" dur={duration_ms}"
     if client_id:

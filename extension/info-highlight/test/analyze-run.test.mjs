@@ -120,6 +120,8 @@ test('paintRange：累加 skip_level / painted，align_fail_n 计入跳过段', 
   assert.equal(report.painted, 0);
   assert.equal(session.painted, 0);
   assert.equal(report.align_fail_n, 0);
+  assert.equal(report.engine, 'cloud');
+  assert.equal(report.model, 'qwen3-0.6b');
   assert.deepEqual(globalThis.IH_tokenTip.models, ['qwen3-0.6b', 'qwen3-0.6b']);
 
   globalThis.__ihAlignFail = true;
@@ -244,8 +246,10 @@ test('background.js：/api/extension-usage keepalive 不含 error/detail', () =>
   const fn = src.match(/async function postUsageReport\(body\) \{[\s\S]*?\n\}/);
   assert.ok(fn, 'postUsageReport missing');
   assert.match(fn[0], /IL_postKeepalive\('\/api\/extension-usage', payload/);
+  assert.match(fn[0], /if \(model\) payload\.model = model/);
   assert.doesNotMatch(fn[0], /payload\.error/);
   assert.doesNotMatch(fn[0], /payload\.detail/);
   assert.match(fn[0], /detail: body\?\.detail/);
+  assert.doesNotMatch(src, /function usageModelId/);
   assert.match(src, /IL_postKeepalive\('\/api\/extension-analysis-fail'/);
 });

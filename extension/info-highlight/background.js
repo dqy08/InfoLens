@@ -959,6 +959,7 @@ async function postUsageReport(body) {
   const cached = Math.max(0, Math.min(segments, Number(body?.cached) || 0));
   const duration_ms = clampDurationMs(body?.duration_ms);
   const client_id = await IL_getClientId(IH_CONFIG.apiBase).catch(() => null);
+  const model = typeof body?.model === 'string' ? body.model.trim().slice(0, 64) : '';
   // 正式用量 POST 只计数字段；error/detail 不得进入 keepalive body
   const payload = {
     extension: EXTENSION_ID,
@@ -970,6 +971,7 @@ async function postUsageReport(body) {
     cached,
     duration_ms,
   };
+  if (model) payload.model = model;
   if (client_id) payload.client_id = client_id;
   IL_postKeepalive('/api/extension-usage', payload, IH_CONFIG.apiBase);
   if (outcome === 'failed') {

@@ -103,6 +103,7 @@ class ExtensionUsageTest(unittest.TestCase):
         details = log.call_args.args[1]
         self.assertIn('dur=1234', details)
         self.assertIn('v=0.1.3', details)
+        self.assertNotIn('m=', details)
 
     @patch('backend.api.extension_usage.log_request')
     @patch('backend.api.extension_usage.bump_api')
@@ -279,7 +280,22 @@ class ExtensionUsageTest(unittest.TestCase):
         self.assertIn('dur=10', details)
         self.assertNotIn('should never appear', details)
         self.assertNotIn('also no', details)
+        self.assertNotIn('m=', details)
         self._assert_no_duration_bumps(_bump)
+
+    @patch('backend.api.extension_usage.log_request')
+    @patch('backend.api.extension_usage.bump_api')
+    def test_model_qwen_in_log(self, _bump, log):
+        out = extension_usage_report({
+            'extension': 'info-highlight',
+            'engine': 'cloud',
+            'outcome': 'ok',
+            'segments': 1,
+            'model': 'qwen3-0.6b',
+        })
+        self.assertEqual(out, {'success': True})
+        details = log.call_args.args[1]
+        self.assertIn('m=qwen3-0.6b', details)
 
 
 if __name__ == '__main__':

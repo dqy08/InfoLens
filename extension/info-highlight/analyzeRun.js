@@ -26,6 +26,7 @@ globalThis.IH_analyzeRun ||= (function () {
           data: res.data,
           inferred: !!res.inferred,
           engine: res.engine === 'local' || res.engine === 'cloud' ? res.engine : null,
+          model: model || null,
         });
       });
     });
@@ -67,6 +68,7 @@ globalThis.IH_analyzeRun ||= (function () {
       cached: report.cached,
       duration_ms: Math.max(0, Math.round(Number(report.duration_ms) || 0)),
     };
+    if (report.model) msg.model = String(report.model);
     if (report.outcome === 'failed' && report.error) {
       msg.error = String(report.error).slice(0, 500);
     }
@@ -85,6 +87,7 @@ globalThis.IH_analyzeRun ||= (function () {
       segments_ok: 0,
       cached: 0,
       engine: null,
+      model: null,
       outcome: null,
       error: null,
       duration_ms: 0,
@@ -146,28 +149,29 @@ globalThis.IH_analyzeRun ||= (function () {
   }
 
   /** @param {boolean | null} inferred 仅 `false` 计为 cache hit；`null` 表示未知（失败路径） */
-  function noteAttempt(report, inferred, engine) {
+  function noteAttempt(report, inferred, engine, model) {
     if (!report) return;
     report.segments += 1;
     if (inferred === false) report.cached += 1;
     if (engine) report.engine = engine;
+    if (model) report.model = model;
   }
 
   /**
    * @returns {Promise<
    *   | { kind: 'empty' }
-   *   | { kind: 'ok', tokens: unknown[], inferred: boolean, engine: string | null }
-   *   | { kind: 'align_fail', err: Error, inferred: boolean, engine: string | null }
-   *   | { kind: 'error', err: Error, inferred: boolean, engine: string | null }
+   *   | { kind: 'ok', tokens: unknown[], inferred: boolean, engine: string | null, model: string | null }
+   *   | { kind: 'align_fail', err: Error, inferred: boolean, engine: string | null, model: string | null }
+   *   | { kind: 'error', err: Error, inferred: boolean, engine: string | null, model: string | null }
    * >}
    */
   async function analyzeSegment(text, segs, i, skipCache) {
     if (!/\S/.test(segs[i].text)) return { kind: 'empty' };
     const win = globalThis.IH_segmentWindow(text, segs, i);
-    const { data, inferred, engine } = await sendAnalyze(win.requestText, skipCache);
+    const { data, inferred, engine, model } = await sendAnalyze(win.requestText, skipCache);
     const raw = data?.result?.bpe_strings;
     if (!Array.isArray(raw)) {
-      return { kind: 'error', err: new Error('Analyze returned no tokens'), inferred, engine };
+      return { kind: 'error', err: new Error('Analyze returned no tokens'), inferred, engine, model };
     }
     try {
       return {
@@ -175,10 +179,11 @@ globalThis.IH_analyzeRun ||= (function () {
         tokens: globalThis.IH_tokensInSegment(raw, win),
         inferred,
         engine,
+        model,
       };
     } catch (err) {
       if (String(err?.message || err).includes(ALIGN_FAIL)) {
-        return { kind: 'align_fail', err, inferred, engine };
+        return { kind: 'align_fail', err, inferred, engine, model };
       }
       throw err;
     }
@@ -231,7 +236,7 @@ globalThis.IH_analyzeRun ||= (function () {
         reportActionFilled(i + 1 - from, batch);
         continue;
       }
-      noteAttempt(report, got.inferred, got.engine);
+      noteAttempt(report, got.inferred, got.engine, got.model);
       if (got.kind === 'error') throw got.err;
       if (got.kind === 'align_fail') {
         console.warn('[Info Highlight] skip segment', i, got.err);
