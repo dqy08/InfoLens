@@ -12,6 +12,9 @@
   if (!globalThis.IH_highlightStyle) {
     throw new Error('IH_highlightStyle missing — inject highlightStyle.js first');
   }
+  if (typeof globalThis.IH_mergeWordTokens !== 'function') {
+    throw new Error('IH_mergeWordTokens missing — inject wordMerge.js first');
+  }
   const HS = globalThis.IH_highlightStyle;
   /** SYNC: client/src/shared/core/constants.ts → SEMANTIC_CHUNK_BYTES */
   const UNIT_BYTES = 800;
@@ -83,7 +86,9 @@
   }
 
   const KEY_ARTICLE_ONLY = 'ih_article_only';
+  const KEY_WORD_MERGE = 'ih_word_merge';
   let articleOnly = true;
+  let wordMerge = false;
 
   function extractPage() {
     requireFns();
@@ -398,7 +403,8 @@
 
     const overlay = opts?.overlay ? tokenOverlayContext(mapped.root) : null;
     const idx = globalThis.IL_createTextIndex(mapped.text);
-    const list = Array.isArray(tokens) ? tokens : [];
+    const incoming = Array.isArray(tokens) ? tokens : [];
+    const list = wordMerge ? globalThis.IH_mergeWordTokens(incoming, mapped.text) : incoming;
     const stats = {
       painted: 0,
       tokens_in: list.length,
@@ -452,7 +458,11 @@
     }
   }
 
-  const prefsDefaults = { ...HS.STORAGE_DEFAULTS, [KEY_ARTICLE_ONLY]: true };
+  const prefsDefaults = {
+    ...HS.STORAGE_DEFAULTS,
+    [KEY_ARTICLE_ONLY]: true,
+    [KEY_WORD_MERGE]: false,
+  };
 
   const prefsReady = new Promise((resolve) => {
     const get = chrome.storage?.local?.get;
@@ -463,6 +473,7 @@
     get.call(chrome.storage.local, prefsDefaults, (res) => {
       applyHighlightPrefs(res);
       articleOnly = res?.[KEY_ARTICLE_ONLY] !== false;
+      wordMerge = res?.[KEY_WORD_MERGE] === true;
       resolve();
     });
   });
@@ -470,6 +481,13 @@
     if (area && area !== 'local') return;
     if (KEY_ARTICLE_ONLY in changes) {
       articleOnly = changes[KEY_ARTICLE_ONLY].newValue !== false;
+    }
+    if (KEY_WORD_MERGE in changes) {
+      const next = changes[KEY_WORD_MERGE].newValue === true;
+      if (next !== wordMerge) {
+        wordMerge = next;
+        if (paintBuf.mapped && paintBuf.tokens.length) repaintFromBuffer();
+      }
     }
     if (
       !(HS.KEY_TWO_TIER in changes)

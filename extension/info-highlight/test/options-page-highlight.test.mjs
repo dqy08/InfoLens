@@ -10,22 +10,34 @@ import { fileURLToPath } from 'node:url';
 
 const dir = dirname(fileURLToPath(import.meta.url));
 
-test('选项页挂网页管线，无 tokenTip，实验项默认开', () => {
+test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () => {
   const html = readFileSync(join(dir, '../options.html'), 'utf8');
   assert.match(html, /id="ih_highlight_options_page"/);
-  assert.match(html, /<h2>Experimental<\/h2>/);
+  assert.match(html, /id="ih_word_merge"/);
+  assert.doesNotMatch(html, /<h2>Experimental<\/h2>/);
+  assert.match(html, /Progress chart[\s\S]*class="experimental">Experimental/);
+  assert.match(html, /Merge subwords[\s\S]*class="experimental">Experimental/);
+  assert.match(html, /Not recommended/);
+  assert.match(html, /Highlight this page[\s\S]*class="experimental">Experimental/);
+  assert.match(html, /src="wordMerge\.js"/);
   assert.match(html, /src="content\.js"/);
   assert.match(html, /src="options-page-flags\.js"/);
   assert.match(html, /href="content\.css"/);
   assert.doesNotMatch(html, /tokenTip\.js/);
   const catalog = readFileSync(join(dir, '../options-catalog.js'), 'utf8');
   assert.match(catalog, /'ih_highlight_options_page'/);
+  assert.match(catalog, /'ih_word_merge'/);
   assert.doesNotMatch(
     catalog.slice(catalog.indexOf('globalThis.IL_OPTIONS_SEED_SEEN')),
     /ih_highlight_options_page/,
   );
+  assert.doesNotMatch(
+    catalog.slice(catalog.indexOf('globalThis.IL_OPTIONS_SEED_SEEN')),
+    /ih_word_merge/,
+  );
   const opts = readFileSync(join(dir, '../options.js'), 'utf8');
   assert.match(opts, /ih_highlight_options_page: true/);
+  assert.match(opts, /ih_word_merge: false/);
   assert.match(opts, /IH_optionsPageReady/);
 });
 
@@ -36,6 +48,7 @@ test('选项页抽字忽略只标主文；分析强制云端', () => {
   assert.match(flags, /IH_OPTIONS_PAGE = true/);
   assert.match(flags, /IH_tokenTip/);
   const bg = readFileSync(join(dir, '../background.js'), 'utf8');
+  assert.match(bg, /'wordMerge\.js'/);
   assert.match(bg, /function isOwnOptionsPage\(sender\)/);
   assert.match(bg, /handleAnalyze\(text, !!msg\.skipCache, isOwnOptionsPage\(sender\)\)/);
   assert.match(bg, /const engine = forceCloud \? 'cloud' : engineFrom\(st\)/);

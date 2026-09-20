@@ -55,6 +55,7 @@ const CONTENT_JS = [
   'progressAxis.js',
   'overlay.js',
   'highlightStyle.js',
+  'wordMerge.js',
   'page-map.js',
   'tokenTip.js',
   'analyzeRun.js',
