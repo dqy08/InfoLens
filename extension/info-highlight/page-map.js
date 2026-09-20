@@ -1,6 +1,6 @@
 /**
  * 正文提取 + 码点偏移 → Range；网页 token 只绑 CSS Custom Highlight（勿 getClientRects）。
- * PDF 的 canvas 已含字形，底色会盖在字上，token 改画 overlay 红线（paintTokens 的 overlay）。
+ * PDF：canvas 已含字形；色块会盖在字上，resolvePaintStyle 回退成 overlay 红线（粗细随字盒高）。
  * 进度图量段 Y 例外，想法来自 extension/semantic-highlight/semantic/find.js（横轴=文档 Y / 视口带 / 点击跳转）。
  *
  * 段：切分力度 = 语义 800 字节 × 倍数。每次送 1 段前文 + 本段（1:1），只画本段。
@@ -11,6 +11,9 @@
 (() => {
   if (!globalThis.IH_highlightStyle) {
     throw new Error('IH_highlightStyle missing — inject highlightStyle.js first');
+  }
+  if (typeof globalThis.IH_mergeWordTokens !== 'function') {
+    throw new Error('IH_mergeWordTokens missing — inject wordMerge.js first');
   }
   const HS = globalThis.IH_highlightStyle;
   /** SYNC: client/src/shared/core/constants.ts → SEMANTIC_CHUNK_BYTES */
@@ -82,9 +85,16 @@
     }
   }
 
+  const KEY_ARTICLE_ONLY = 'ih_article_only';
+  const KEY_WORD_MERGE = 'ih_word_merge';
+  let articleOnly = true;
+  let wordMerge = false;
+
   function extractPage() {
     requireFns();
-    const root = globalThis.IL_findArticleRoot(document);
+    const root = globalThis.IL_findArticleRoot(document, {
+      articleOnly: globalThis.IH_OPTIONS_PAGE ? false : articleOnly,
+    });
     const mapped = globalThis.IL_collectTextMap(root);
     if (!mapped.text || !mapped.pieces.length) {
       throw new Error('No article text');
@@ -234,12 +244,12 @@
   /** @type {{ twoTier: boolean, thresholdPct: number, maxAlphaDepth: number }} */
   let highlightPrefs = HS.normalizePrefs(HS.STORAGE_DEFAULTS);
 
+  function tokenMaxAlpha() {
+    return HS.depthToMaxAlpha(highlightPrefs.maxAlphaDepth, highlightPrefs.paintStyle, 'pdf');
+  }
+
   function applyTokenColors() {
-    HS.applyCssVars(
-      document.documentElement,
-      HS.depthToMaxAlpha(highlightPrefs.maxAlphaDepth),
-      highlightPrefs.twoTier,
-    );
+    HS.applyCssVars(document.documentElement, highlightPrefs);
   }
 
   function clearTokenOverlays() {
@@ -256,34 +266,92 @@
     }
   }
 
-  /** 线相对 root 定位；粗细与上移由 pdf/viewer.css 按 --il-pdf-scale 给 */
+  function tokenOverlayMount(root) {
+    if (typeof root.querySelector !== 'function') return root;
+    let host = root.querySelector('#ih-token-overlay');
+    if (host) return host;
+    host = document.createElement('div');
+    host.id = 'ih-token-overlay';
+    root.appendChild(host);
+    return host;
+  }
+
+  /** 线相对 pages root；粗细随字盒高，见 HS.underlineOverlayBox */
   function tokenOverlayContext(root) {
     if (!root) throw new Error('token overlay root missing');
+    const mount = tokenOverlayMount(root);
     return {
-      root,
+      root: mount,
       rect: root.getBoundingClientRect(),
-      scale: globalThis.IL_pdfTextLayer.scaleOf(root),
     };
   }
 
-  function appendTokenUnderline(rect, level, ctx) {
-    const pos = globalThis.IL_pdfTextLayer.underlinePos(rect, ctx.rect, ctx.scale);
+  function appendTokenUnderline(rect, level, ctx, parent) {
+    const box = HS.underlineOverlayBox(rect, ctx.rect);
     const el = document.createElement('div');
     el.className = 'il-token-underline';
-    el.style.left = `${pos.x}px`;
-    el.style.top = `${pos.y}px`;
-    el.style.width = `${rect.width}px`;
+    el.style.left = `${box.x}px`;
+    el.style.top = `${box.y}px`;
+    el.style.width = `${box.width}px`;
+    el.style.height = `${box.height}px`;
+    el.style.transform = 'none';
     const a = HS.alphaForLevel(
       level,
-      HS.depthToMaxAlpha(highlightPrefs.maxAlphaDepth),
+      tokenMaxAlpha(),
       highlightPrefs.twoTier,
     );
-    el.style.backgroundColor = `rgba(${HS.SURPRISAL_RED_RGB}, ${a})`;
-    ctx.root.appendChild(el);
+    el.style.backgroundColor = `rgba(${HS.rgbForColor(highlightPrefs.highlightColor)}, ${a})`;
+    (parent || ctx.root).appendChild(el);
     tokenOverlayEls.push(el);
   }
 
+  function rangeLive(range) {
+    const a = range.startContainer;
+    const b = range.endContainer;
+    return !!(a && b && a.isConnected && b.isConnected && !range.collapsed);
+  }
+
+  /** 画完之后 DOM 再变：只丢掉映不回的 range，不重抽、不重画。只动本插件登记。 */
+  function pruneDetachedHighlights() {
+    if (!CSS.highlights) return;
+    const visit = (h) => {
+      if (!h || typeof h.delete !== 'function') return;
+      for (const range of [...h]) {
+        if (!rangeLive(range)) h.delete(range);
+      }
+    };
+    for (let i = 0; i < TOKEN_LEVELS; i++) visit(CSS.highlights.get(HL_PREFIX + i));
+    visit(CSS.highlights.get(HL_UNDERLINE));
+  }
+
+  let liveWatch = null;
+  let liveWatchTimer = 0;
+
+  function stopHighlightLiveWatch() {
+    liveWatch?.disconnect();
+    liveWatch = null;
+    if (liveWatchTimer) {
+      clearTimeout(liveWatchTimer);
+      liveWatchTimer = 0;
+    }
+  }
+
+  function watchHighlightLive() {
+    stopHighlightLiveWatch();
+    const root = document.documentElement;
+    if (!root || typeof MutationObserver !== 'function') return;
+    liveWatch = new MutationObserver(() => {
+      if (liveWatchTimer) return;
+      liveWatchTimer = window.setTimeout(() => {
+        liveWatchTimer = 0;
+        pruneDetachedHighlights();
+      }, 120);
+    });
+    liveWatch.observe(root, { childList: true, subtree: true });
+  }
+
   function clearHighlights() {
+    stopHighlightLiveWatch();
     clearTokenPaints();
     clearUnderline();
     paintBuf = { tokens: [], mapped: null, overlay: false };
@@ -346,8 +414,13 @@
     for (const tok of tokens) paintBuf.tokens.push(tok);
 
     const overlay = opts?.overlay ? tokenOverlayContext(mapped.root) : null;
-    const idx = globalThis.IL_createTextIndex(mapped.text);
-    const list = Array.isArray(tokens) ? tokens : [];
+    if (overlay && HS.resolvePaintStyle(highlightPrefs.paintStyle, 'pdf') !== HS.PAINT_UNDERLINE) {
+      throw new Error('PDF paint fallback is underline only');
+    }
+    const idx = opts?.index || globalThis.IL_createTextIndex(mapped.text);
+    const incoming = Array.isArray(tokens) ? tokens : [];
+    const list = opts?.skipMerge ? incoming : tokensForPaint(incoming, mapped.text);
+    const overlayParent = overlay ? document.createDocumentFragment() : null;
     const stats = {
       painted: 0,
       tokens_in: list.length,
@@ -378,14 +451,20 @@
         }
         for (const r of range.getClientRects()) {
           if (r.width < 1 || r.height < 1) continue;
-          appendTokenUnderline(r, level, overlay);
+          appendTokenUnderline(r, level, overlay, overlayParent);
           n += 1;
         }
       }
       if (n === 0) stats.tokens_skip_empty_range += 1;
       else stats.painted += n;
     }
+    if (overlayParent) overlay.root.appendChild(overlayParent);
     return stats;
+  }
+
+  function tokensForPaint(tokens, text) {
+    const incoming = Array.isArray(tokens) ? tokens : [];
+    return wordMerge ? globalThis.IH_mergeWordTokens(incoming, text) : incoming;
   }
 
   function applyHighlightPrefs(raw) {
@@ -393,13 +472,21 @@
     const levelChanged =
       next.twoTier !== highlightPrefs.twoTier
       || next.thresholdPct !== highlightPrefs.thresholdPct;
-    const alphaChanged = next.maxAlphaDepth !== highlightPrefs.maxAlphaDepth;
+    const alphaChanged = next.maxAlphaDepth !== highlightPrefs.maxAlphaDepth
+      || next.paintStyle !== highlightPrefs.paintStyle;
+    const colorChanged = next.highlightColor !== highlightPrefs.highlightColor;
     highlightPrefs = next;
     applyTokenColors();
-    if (levelChanged || (alphaChanged && paintBuf.overlay)) {
+    if (levelChanged || ((alphaChanged || colorChanged) && paintBuf.overlay)) {
       repaintFromBuffer();
     }
   }
+
+  const prefsDefaults = {
+    ...HS.STORAGE_DEFAULTS,
+    [KEY_ARTICLE_ONLY]: true,
+    [KEY_WORD_MERGE]: false,
+  };
 
   const prefsReady = new Promise((resolve) => {
     const get = chrome.storage?.local?.get;
@@ -407,17 +494,31 @@
       resolve();
       return;
     }
-    get.call(chrome.storage.local, HS.STORAGE_DEFAULTS, (res) => {
+    get.call(chrome.storage.local, prefsDefaults, (res) => {
       applyHighlightPrefs(res);
+      articleOnly = res?.[KEY_ARTICLE_ONLY] !== false;
+      wordMerge = res?.[KEY_WORD_MERGE] === true;
       resolve();
     });
   });
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area && area !== 'local') return;
+    if (KEY_ARTICLE_ONLY in changes) {
+      articleOnly = changes[KEY_ARTICLE_ONLY].newValue !== false;
+    }
+    if (KEY_WORD_MERGE in changes) {
+      const next = changes[KEY_WORD_MERGE].newValue === true;
+      if (next !== wordMerge) {
+        wordMerge = next;
+        if (paintBuf.mapped && paintBuf.tokens.length) repaintFromBuffer();
+      }
+    }
     if (
       !(HS.KEY_TWO_TIER in changes)
       && !(HS.KEY_THRESHOLD_PCT in changes)
       && !(HS.KEY_MAX_ALPHA_DEPTH in changes)
+      && !(HS.KEY_PAINT_STYLE in changes)
+      && !(HS.KEY_HIGHLIGHT_COLOR in changes)
     ) {
       return;
     }
@@ -958,10 +1059,14 @@
   }
 
   globalThis.IH_extractPage = extractPage;
+  globalThis.IH_prefsReady = prefsReady;
+  globalThis.IH_watchHighlightLive = watchHighlightLive;
+  globalThis.IH_pruneDetachedHighlights = pruneDetachedHighlights;
   globalThis.IH_splitSegments = splitSegments;
   globalThis.IH_segmentWindow = segmentWindow;
   globalThis.IH_tokensInSegment = tokensInSegment;
   globalThis.IH_paintTokens = paintTokens;
+  globalThis.IH_tokensForPaint = tokensForPaint;
   globalThis.IH_tokenBits = tokenBits;
   globalThis.IH_rangesFromUtf16 = rangesFromUtf16;
   globalThis.IH_clearHighlights = clearHighlights;

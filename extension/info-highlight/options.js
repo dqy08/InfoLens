@@ -19,11 +19,17 @@
 
   const HS = globalThis.IH_highlightStyle;
 
+  let resolvePageReady;
+  globalThis.IH_optionsPageReady = new Promise((r) => { resolvePageReady = r; });
+
   /** 复选框 id 即 chrome.storage.local 的键；值为默认值 */
   const TOGGLES = {
+    ih_article_only: true,
     show_progress: false,
     show_token_tip: true,
     [HS.KEY_TWO_TIER]: HS.STORAGE_DEFAULTS[HS.KEY_TWO_TIER],
+    ih_word_merge: false,
+    ih_highlight_options_page: true,
   };
 
   const ids = [
@@ -35,6 +41,7 @@
     'cache_desc', 'cache_clear',
     'ih_threshold_row', 'ih_threshold_value', 'ih_highlight_threshold_pct',
     'ih_depth_value', 'ih_max_highlight_alpha',
+    'ih_paint_style', 'ih_highlight_color', 'ih_highlight_swatches',
   ];
   const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
   if (ids.some((id) => !el[id])) {
@@ -59,15 +66,46 @@
     el.ih_threshold_value.textContent = HS.formatThresholdLabel(pct);
   }
 
-  /** 滑条 accent 合成到页面底色上，观感接近正文里的高亮红 */
+  let highlightColor = HS.HUE_RED;
+  let lastHue = HS.HUE_RED;
+
+  function hueNear(a, b) {
+    const d = Math.abs(a - b) % 360;
+    return Math.min(d, 360 - d) <= 8;
+  }
+
+  function parseRgb(rgb) {
+    return rgb.split(',').map((s) => Number(s.trim()));
+  }
+
+  /** 滑条 accent 合成到页面底色上，观感接近正文里的高亮 */
   function intensityAccent(depth) {
-    const a = HS.depthToMaxAlpha(depth);
+    const a = HS.depthToMaxAlpha(depth, el.ih_paint_style.value);
+    const [r, g, b] = parseRgb(HS.rgbForColor(highlightColor));
     const bg = getComputedStyle(document.body).backgroundColor;
     const m = bg.match(/\d+/g);
-    if (!m || m.length < 3) return `rgba(${HS.SURPRISAL_RED_RGB}, ${a})`;
+    if (!m || m.length < 3) return `rgba(${r}, ${g}, ${b}, ${a})`;
     const [br, bgG, bb] = m.map(Number);
-    const [r, g, b] = HS.SURPRISAL_RED_RGB.split(',').map((s) => Number(s.trim()));
     return `rgb(${Math.round(br * (1 - a) + r * a)}, ${Math.round(bgG * (1 - a) + g * a)}, ${Math.round(bb * (1 - a) + b * a)})`;
+  }
+
+  function syncHighlightColor(v) {
+    highlightColor = HS.normalizeHighlightColor(v);
+    const ink = HS.isInk(highlightColor);
+    if (!ink) lastHue = highlightColor;
+    el.ih_highlight_color.value = String(lastHue);
+    el.ih_highlight_color.hidden = ink;
+    const rgb = HS.rgbForColor(highlightColor);
+    document.documentElement.style.setProperty('--ih-highlight-rgb', rgb);
+    el.ih_highlight_color.style.setProperty('--ih-hue-track', HS.hueTrackCss());
+    for (const btn of el.ih_highlight_swatches.querySelectorAll('.ih-color-swatch')) {
+      const id = btn.dataset.color;
+      const on = id === HS.COLOR_INK
+        ? ink
+        : !ink && hueNear(HS.hueForColorId(id), lastHue);
+      btn.setAttribute('aria-checked', on ? 'true' : 'false');
+    }
+    syncDepthLabel(HS.clampMaxAlphaDepth(el.ih_max_highlight_alpha.value));
   }
 
   function syncDepthLabel(depth) {
@@ -80,27 +118,40 @@
     input.style.setProperty('--ih-intensity-pct', `${pct}%`);
   }
 
-  for (const [key, fallback] of Object.entries(TOGGLES)) {
-    const box = document.getElementById(key);
-    if (!box) throw new Error(`options page missing checkbox: ${key}`);
-    chrome.storage.local.get({ [key]: fallback }, (res) => {
-      box.checked = !!res[key];
-      if (key === HS.KEY_TWO_TIER) syncTwoTierUi(box.checked);
-    });
-    box.addEventListener('change', () => {
-      chrome.storage.local.set({ [key]: box.checked });
-      if (key === HS.KEY_TWO_TIER) syncTwoTierUi(box.checked);
-    });
+  HS.watchColorScheme(() => {
+    syncHighlightColor(highlightColor);
+  });
+
+  function loadToggles() {
+    return Promise.all(Object.entries(TOGGLES).map(([key, fallback]) => new Promise((resolve) => {
+      const box = document.getElementById(key);
+      if (!box) throw new Error(`options page missing checkbox: ${key}`);
+      chrome.storage.local.get({ [key]: fallback }, (res) => {
+        box.checked = !!res[key];
+        if (key === HS.KEY_TWO_TIER) syncTwoTierUi(box.checked);
+        resolve();
+      });
+      box.addEventListener('change', () => {
+        chrome.storage.local.set({ [key]: box.checked });
+        if (key === HS.KEY_TWO_TIER) syncTwoTierUi(box.checked);
+      });
+    })));
   }
 
-  chrome.storage.local.get(HS.STORAGE_DEFAULTS, (res) => {
-    const prefs = HS.normalizePrefs(res);
-    el.ih_highlight_threshold_pct.value = String(prefs.thresholdPct);
-    syncThresholdLabel(prefs.thresholdPct);
-    el.ih_max_highlight_alpha.value = String(prefs.maxAlphaDepth);
-    syncDepthLabel(prefs.maxAlphaDepth);
-    syncTwoTierUi(prefs.twoTier);
-  });
+  function loadSliders() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(HS.STORAGE_DEFAULTS, (res) => {
+        const prefs = HS.normalizePrefs(res);
+        el.ih_highlight_threshold_pct.value = String(prefs.thresholdPct);
+        syncThresholdLabel(prefs.thresholdPct);
+        el.ih_paint_style.value = prefs.paintStyle;
+        el.ih_max_highlight_alpha.value = String(prefs.maxAlphaDepth);
+        syncHighlightColor(prefs.highlightColor);
+        syncTwoTierUi(prefs.twoTier);
+        resolve();
+      });
+    });
+  }
 
   el.ih_highlight_threshold_pct.addEventListener('input', () => {
     const pct = HS.clampThresholdPct(el.ih_highlight_threshold_pct.value);
@@ -115,6 +166,38 @@
     syncDepthLabel(depth);
     chrome.storage.local.set({ [HS.KEY_MAX_ALPHA_DEPTH]: depth });
   });
+
+  el.ih_paint_style.addEventListener('change', () => {
+    const style = HS.normalizePaintStyle(el.ih_paint_style.value);
+    el.ih_paint_style.value = style;
+    chrome.storage.local.set({ [HS.KEY_PAINT_STYLE]: style });
+    syncDepthLabel(HS.clampMaxAlphaDepth(el.ih_max_highlight_alpha.value));
+  });
+
+  el.ih_highlight_color.addEventListener('input', () => {
+    syncHighlightColor(el.ih_highlight_color.value);
+    chrome.storage.local.set({ [HS.KEY_HIGHLIGHT_COLOR]: highlightColor });
+  });
+
+  function appendColorSwatch(id, label, rgb) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ih-color-swatch';
+    btn.dataset.color = id;
+    btn.setAttribute('role', 'radio');
+    btn.setAttribute('aria-label', label);
+    if (id === HS.COLOR_INK) btn.classList.add('ih-color-swatch-ink');
+    else btn.style.setProperty('--ih-swatch-rgb', rgb);
+    btn.addEventListener('click', () => {
+      syncHighlightColor(id === HS.COLOR_INK ? HS.COLOR_INK : HS.hueForColorId(id));
+      chrome.storage.local.set({ [HS.KEY_HIGHLIGHT_COLOR]: highlightColor });
+    });
+    el.ih_highlight_swatches.append(btn);
+  }
+  for (const id of HS.COLOR_IDS) {
+    appendColorSwatch(id, `${id[0].toUpperCase()}${id.slice(1)}`, HS.rgbForHue(HS.hueForColorId(id)));
+  }
+  appendColorSwatch(HS.COLOR_INK, 'Black / white');
 
   function modelStatusText(st, webgpu) {
     if (st.ready) return 'Ready (Gemma 3 270M)';
@@ -138,7 +221,7 @@
     el.ih_cloud_model.value = st.cloudModel;
     el.local_init.disabled = !webgpu || !!st.ready;
     const gen = ++modelCacheGen;
-    void globalThis.IH_localState.modelCacheUsage().then(({ bytes }) => {
+    return globalThis.IH_localState.modelCacheUsage().then(({ bytes }) => {
       if (gen !== modelCacheGen) return;
       el.model_desc.textContent = bytes > 0 ? `${base} · ${formatBytes(bytes)}` : base;
       el.model_clear.disabled = bytes === 0;
@@ -153,15 +236,18 @@
   }
 
   function loadBackend() {
-    chrome.runtime.sendMessage({ type: 'ih-local-status' }, (res) => {
-      if (chrome.runtime.lastError || !res?.ok) {
-        el.webgpu_desc.textContent = res?.error || chrome.runtime.lastError?.message || 'Failed to read status';
-        el.local_init.disabled = true;
-        el.model_clear.disabled = true;
-        return;
-      }
-      applyBackend(res);
-      syncNewDotsPaused(res.initOverlay);
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'ih-local-status' }, (res) => {
+        if (chrome.runtime.lastError || !res?.ok) {
+          el.webgpu_desc.textContent = res?.error || chrome.runtime.lastError?.message || 'Failed to read status';
+          el.local_init.disabled = true;
+          el.model_clear.disabled = true;
+          resolve();
+          return;
+        }
+        syncNewDotsPaused(res.initOverlay);
+        void Promise.resolve(applyBackend(res)).finally(resolve);
+      });
     });
   }
 
@@ -219,8 +305,6 @@
       loadBackend();
     });
   });
-
-  loadBackend();
 
   function autoSiteRow(host) {
     const li = document.createElement('li');
@@ -285,8 +369,6 @@
       submitAutoSite();
     }
   });
-
-  void loadAutoSites();
 
   function formatBytes(n) {
     if (!Number.isFinite(n) || n < 0) throw new Error(`bad cache size: ${n}`);
@@ -353,5 +435,11 @@
     }
   });
 
-  void refresh().catch(showCacheError);
+  void Promise.all([
+    loadToggles(),
+    loadSliders(),
+    loadBackend(),
+    loadAutoSites(),
+    refresh().catch(showCacheError),
+  ]).finally(() => resolvePageReady());
 })();

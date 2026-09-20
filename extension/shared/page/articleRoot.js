@@ -1,6 +1,6 @@
 /**
- * 定根：text/plain 整页即正文；其余走 Readability（预打标 → clone → data-il-rid 映回），
- * 再经 extractRootPatches 手动修补。Readability 失败抛错，不回退启发式。
+ * 定根：text/plain 整页即正文；其余默认 Readability（预打标 → clone → data-il-rid 映回），
+ * articleOnly === false 时根为 body。再经 extractRootPatches 手动修补。Readability 失败抛错，不回退启发式。
  */
 (() => {
   const ATTR = 'data-il-rid';
@@ -45,15 +45,20 @@
 
   /**
    * @param {Document} doc
+   * @param {{ articleOnly?: boolean }} [opts] articleOnly 默认 true；false 则根为 body（可见字尽量都收）
    * @returns {Element}
    */
-  function findArticleRoot(doc) {
+  function findArticleRoot(doc, opts) {
     if (!doc?.body) {
       throw new Error('document.body missing');
     }
 
     const plain = findPlainTextRoot(doc);
     if (plain) return applyPatches(plain, doc);
+
+    if (opts && opts.articleOnly === false) {
+      return applyPatches(doc.body, doc);
+    }
 
     if (typeof Readability !== 'function') {
       throw new Error('Readability missing — inject vendor/Readability.js first');

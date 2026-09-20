@@ -120,6 +120,8 @@ test('paintRange：累加 skip_level / painted，align_fail_n 计入跳过段', 
   assert.equal(report.painted, 0);
   assert.equal(session.painted, 0);
   assert.equal(report.align_fail_n, 0);
+  assert.equal(report.engine, 'cloud');
+  assert.equal(report.model, 'qwen3-0.6b');
   assert.deepEqual(globalThis.IH_tokenTip.models, ['qwen3-0.6b', 'qwen3-0.6b']);
 
   globalThis.__ihAlignFail = true;
@@ -200,6 +202,105 @@ test('afterPaint：lastAlignErr 优先抛出，detail 仍带 last_align_err', as
   assert.equal(report.detail.painted, 0);
 });
 
+test('paintRange：按段写入 tokensBySeg；align_fail 记空数组', async () => {
+  const toks = [{ offset: [0, 5], p: 0.01 }];
+  globalThis.__ihAnalyzeTokens = toks;
+  globalThis.__ihPaintStats = () => ({
+    painted: 1, tokens_in: 1, tokens_skip_level: 0, tokens_skip_empty_range: 0,
+  });
+  const session = {
+    mapped: { text: 'Hello world', pieces: [{}, {}] },
+    segs: [
+      { start: 0, end: 5, text: 'Hello' },
+      { start: 6, end: 11, text: 'world' },
+    ],
+    painted: 0,
+  };
+  await R.paintRange(session, 0, 2, () => true, {}, newReport());
+  assert.deepEqual(session.tokensBySeg, [toks, toks]);
+
+  globalThis.__ihAlignFail = true;
+  const skipped = { mapped: { text: 'Hello', pieces: [{}] }, segs: [{ start: 0, end: 5, text: 'Hello' }], painted: 0 };
+  await R.paintRange(skipped, 0, 1, () => true, {}, newReport());
+  assert.deepEqual(skipped.tokensBySeg, [[]]);
+});
+
+test('repaintCommitted：只画 [0, next)，不发 ih-analyze', async () => {
+  const paints = [];
+  const progress = [];
+  const prevAppend = globalThis.IH_appendProgress;
+  globalThis.__ihPaintStats = (tokens) => {
+    paints.push(tokens);
+    return { painted: tokens.length, tokens_in: tokens.length, tokens_skip_level: 0, tokens_skip_empty_range: 0 };
+  };
+  globalThis.IH_appendProgress = (tokens, seg) => {
+    progress.push({ tokens, start: seg.start });
+  };
+  const extra = [{ offset: [99, 100], p: 0.5 }];
+  const session = {
+    mapped: { text: 'old', pieces: [] },
+    segs: [
+      { start: 0, end: 1, text: 'a' },
+      { start: 1, end: 2, text: 'b' },
+      { start: 2, end: 3, text: 'c' },
+    ],
+    next: 2,
+    painted: 9,
+    tokensBySeg: [
+      [{ offset: [0, 1], p: 0.1 }],
+      [{ offset: [1, 2], p: 0.2 }],
+      extra,
+    ],
+  };
+  const mapped = { text: 'old', pieces: [{}], root: {} };
+  const before = messages.filter((m) => m.type === 'ih-analyze').length;
+  try {
+    await R.repaintCommitted(session, mapped, true);
+  } finally {
+    globalThis.IH_appendProgress = prevAppend;
+  }
+  assert.equal(messages.filter((m) => m.type === 'ih-analyze').length, before);
+  assert.equal(paints.length, 2);
+  assert.equal(session.mapped, mapped);
+  assert.equal(session.painted, 2);
+  assert.deepEqual(progress.map((p) => p.start), [0, 1]);
+  assert.equal(session.tokensBySeg[2], extra);
+});
+
+test('repaintCommitted：缺已提交段 token 则抛错', async () => {
+  const session = {
+    mapped: { text: 'x', pieces: [] },
+    segs: [{ start: 0, end: 1, text: 'x' }],
+    next: 1,
+    painted: 1,
+    tokensBySeg: [],
+  };
+  await assert.rejects(
+    () => R.repaintCommitted(session, session.mapped, true),
+    /tokens missing for segment 0/,
+  );
+});
+
+test('repaintCommitted：still 为假则停，不画', async () => {
+  const paints = [];
+  globalThis.__ihPaintStats = (tokens) => {
+    paints.push(tokens);
+    return { painted: 1, tokens_in: 1, tokens_skip_level: 0, tokens_skip_empty_range: 0 };
+  };
+  const session = {
+    mapped: { text: 'ab', pieces: [] },
+    segs: [
+      { start: 0, end: 1, text: 'a' },
+      { start: 1, end: 2, text: 'b' },
+    ],
+    next: 2,
+    painted: 0,
+    tokensBySeg: [[{ offset: [0, 1], p: 0.1 }], [{ offset: [1, 2], p: 0.2 }]],
+  };
+  await R.repaintCommitted(session, { text: 'ab', pieces: [{}] }, true, () => false);
+  assert.equal(paints.length, 0);
+});
+
 test('runJob：failed 时 ih-usage-report 带 detail；ok 时不带', async () => {
   await R.runJob(
     () => true,
@@ -244,8 +345,10 @@ test('background.js：/api/extension-usage keepalive 不含 error/detail', () =>
   const fn = src.match(/async function postUsageReport\(body\) \{[\s\S]*?\n\}/);
   assert.ok(fn, 'postUsageReport missing');
   assert.match(fn[0], /IL_postKeepalive\('\/api\/extension-usage', payload/);
+  assert.match(fn[0], /if \(model\) payload\.model = model/);
   assert.doesNotMatch(fn[0], /payload\.error/);
   assert.doesNotMatch(fn[0], /payload\.detail/);
   assert.match(fn[0], /detail: body\?\.detail/);
+  assert.doesNotMatch(src, /function usageModelId/);
   assert.match(src, /IL_postKeepalive\('\/api\/extension-analysis-fail'/);
 });

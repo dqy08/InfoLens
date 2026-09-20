@@ -78,3 +78,44 @@ globalThis.IL_pdfTextLayer = (() => {
 
   return { UNDERLINE_WIDTH, read, peek, pagesRoot, pieces, scaleOf, underlinePos };
 })();
+
+/**
+ * 缩放会连发 il-pdf-rerendered。停稳后再等一帧绘制，再跑 overlay。
+ * 每个查看器页自己 create 一份，互不影响。
+ */
+globalThis.IL_createPdfZoomIdle = function IL_createPdfZoomIdle() {
+  const IDLE_MS = 200;
+  let timer = 0;
+  let seq = 0;
+
+  function waitForPaint() {
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => setTimeout(resolve, 0));
+    });
+  }
+
+  function cancel() {
+    seq += 1;
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = 0;
+  }
+
+  /**
+   * @param {() => void | Promise<void>} run
+   */
+  function schedule(run) {
+    cancel();
+    const mine = seq;
+    timer = setTimeout(() => {
+      timer = 0;
+      void (async () => {
+        await waitForPaint();
+        if (mine !== seq) return;
+        await run();
+      })();
+    }, IDLE_MS);
+  }
+
+  return { IDLE_MS, schedule, cancel };
+};

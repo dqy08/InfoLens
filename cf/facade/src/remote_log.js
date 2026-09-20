@@ -1,8 +1,9 @@
-import { feedbackKey, utcSavedAt } from './extension_feedback.js';
+import { persistAcceptedReport } from './report_log.js';
 
 const ERROR_DETAIL_MAX = 500;
 export const CUSTOM_DOMAIN = 'api.info-lens.app';
-export const AUTO_ERROR_TTL_SEC = 7 * 24 * 3600; // 7 天（与 Workers Observability 日志保留周期对齐）
+/** 自动快照与用户上报同一套对象存储，目录 reports/…/facade-auto/。 */
+export const FACADE_AUTO_PATH = '/facade-auto';
 /** 格式 unparseable 时，首次之外再打几次（带 formatReminder）。 */
 export const UNPARSEABLE_RETRIES = 3;
 
@@ -114,7 +115,7 @@ export function publicRemoteError(err) {
 }
 
 /**
- * 远程推理失败：结构化写入 Workers Logs，并在请求来自自定义域名时向 STATE KV 写入错误快照。
+ * 远程推理失败：结构化写入 Workers Logs；生产域名再写入对象存储（不写 STATE KV）。
  */
 export async function logRemoteFailure(event, err, pub, env, request, extra) {
   const raw = err && err.message != null ? String(err.message) : String(err);
@@ -128,32 +129,17 @@ export async function logRemoteFailure(event, err, pub, env, request, extra) {
     ...extraFields,
   });
 
-  if (env && env.STATE && isCustomDomain(request)) {
-    try {
-      const id8 = (
-        typeof globalThis.crypto?.randomUUID === 'function'
-          ? globalThis.crypto.randomUUID()
-          : Math.random().toString(36).slice(2, 10)
-      )
-        .replace(/-/g, '')
-        .slice(0, 8);
-      const key = feedbackKey(id8);
-      const record = {
-        saved_at: utcSavedAt(),
-        source: 'facade_auto',
-        event,
-        kind: pub.kind,
-        message: pub.message,
-        error_detail: pub.error_detail,
-        domain: CUSTOM_DOMAIN,
-        ...extraFields,
-      };
-      await env.STATE.put(key, JSON.stringify(record), {
-        expirationTtl: AUTO_ERROR_TTL_SEC,
-      });
-    } catch (e) {
-      const msg = e && e.message ? String(e.message) : String(e);
-      console.error('[facade_auto] failed to record error in KV:', msg);
-    }
-  }
+  if (!env || !isCustomDomain(request)) return;
+  await persistAcceptedReport(undefined, env, {
+    route: FACADE_AUTO_PATH,
+    body: {
+      source: 'facade_auto',
+      event,
+      kind: pub.kind,
+      message: pub.message,
+      error_detail: pub.error_detail,
+      domain: CUSTOM_DOMAIN,
+      ...extraFields,
+    },
+  });
 }

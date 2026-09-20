@@ -72,6 +72,14 @@
     label.row { cursor: pointer; }
     .row-text { flex: 1; min-width: 0; }
     .row-title { font-size: 16px; }
+    .experimental {
+      display: inline-block;
+      margin-left: 0.4em;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted);
+      vertical-align: 0.1em;
+    }
     .row-desc { margin: 1px 0 0; color: var(--muted); font-size: 14px; line-height: 1.35; }
     input[type="checkbox"] {
       flex-shrink: 0;
@@ -136,7 +144,7 @@
     input[type="range"] {
       width: 100%;
       margin: 0;
-      accent-color: #ff4740;
+      accent-color: rgb(var(--ih-highlight-rgb, 255, 71, 64));
       cursor: pointer;
     }
     /* 强度滑条自绘：避免 accent-color 的悬停变色，以及浅色 accent 把右侧轨道衬白 */
@@ -194,6 +202,65 @@
       margin-left: 4px;
     }
     .row-nested[hidden] { display: none; }
+    input[type="range"].ih-hue {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 16px;
+      background: transparent;
+    }
+    input[type="range"].ih-hue:focus { outline: none; }
+    input[type="range"].ih-hue::-webkit-slider-runnable-track {
+      height: 8px;
+      border-radius: 4px;
+      background: var(--ih-hue-track);
+    }
+    input[type="range"].ih-hue::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      margin-top: -4px;
+      border: none;
+      border-radius: 50%;
+      background: rgb(var(--ih-highlight-rgb, 255, 71, 64));
+      box-shadow: 0 0 0 1px var(--btn-border);
+    }
+    input[type="range"].ih-hue::-moz-range-track {
+      height: 8px;
+      border: none;
+      border-radius: 4px;
+      background: var(--ih-hue-track);
+    }
+    input[type="range"].ih-hue::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border: none;
+      border-radius: 50%;
+      background: rgb(var(--ih-highlight-rgb, 255, 71, 64));
+      box-shadow: 0 0 0 1px var(--btn-border);
+    }
+    .ih-color-swatches {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+      width: 100%;
+    }
+    button.ih-color-swatch {
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      border: 2px solid var(--bg);
+      border-radius: 50%;
+      box-shadow: 0 0 0 1px var(--btn-border);
+      background: rgb(var(--ih-swatch-rgb));
+    }
+    button.ih-color-swatch-ink {
+      background: linear-gradient(to right, #000 50%, #fff 50%);
+    }
+    button.ih-color-swatch[aria-checked="true"] {
+      box-shadow: 0 0 0 2px var(--fg);
+    }
     ul.sites { margin: 0; padding: 0; list-style: none; }
     ul.sites:empty { display: none; }
     ul.sites .row {
@@ -213,6 +280,7 @@
     }
   </style>
   <link rel="stylesheet" href="options-new-dots.css" />
+  <link rel="stylesheet" href="content.css" />
 </head>
 <body>
   <header class="top">
@@ -223,36 +291,39 @@
   </header>
   <main>
     <section>
-    <h2>Display</h2>
+    <h2>Highlight</h2>
     <div class="group">
-    <label class="row" data-option-id="show_progress">
+    <div class="row" data-option-id="ih_paint_style">
       <div class="row-text">
-        <div class="row-title">Progress chart</div>
-        <p class="row-desc">Show how information density changes across the page, and where you are</p>
+        <div class="row-title">Highlight style</div>
+        <p class="row-desc">Color blocks or underlines. If a document cannot use the selected style, it falls back (PDFs cannot use color blocks, because they would cover the letters).</p>
       </div>
-      <input type="checkbox" id="show_progress">
-    </label>
-    <label class="row" data-option-id="show_token_tip">
+      <select id="ih_paint_style" aria-label="Highlight style">
+        <option value="block">Color blocks</option>
+        <option value="underline">Underline</option>
+      </select>
+    </div>
+    <div class="row row-slider" data-option-id="ih_highlight_color">
       <div class="row-text">
-        <div class="row-title">Hover for details</div>
-        <p class="row-desc">When the pointer rests on text, show its information density and more likely words. Hidden when you analyze the same page again.</p>
+        <div class="row-title">Highlight color</div>
       </div>
-      <input type="checkbox" id="show_token_tip" checked>
-    </label>
+      <div class="ih-color-swatches" id="ih_highlight_swatches" role="radiogroup" aria-label="Highlight color presets"></div>
+      <input type="range" class="ih-hue" id="ih_highlight_color" min="0" max="359" step="1" aria-label="Highlight color">
+    </div>
     <div class="row row-slider" data-option-id="ih_max_highlight_alpha">
       <div class="row-slider-top">
         <div class="row-text">
           <div class="row-title">Highlight intensity</div>
-          <p class="row-desc">How strong the red highlight looks.</p>
+          <p class="row-desc">How strong the highlight looks.</p>
         </div>
         <span class="row-slider-value" id="ih_depth_value"></span>
       </div>
-      <input type="range" class="ih-intensity" id="ih_max_highlight_alpha" min="5" max="100" step="1" aria-label="Highlight intensity">
+      <input type="range" class="ih-intensity" id="ih_max_highlight_alpha" min="5" max="150" step="1" aria-label="Highlight intensity">
     </div>
     <label class="row" data-option-id="ih_two_tier">
       <div class="row-text">
-        <div class="row-title">One-tone highlight</div>
-        <p class="row-desc">A single highlight level instead of a gradient. (Warning — it depends on a threshold that does not generalize across model changes.)</p>
+        <div class="row-title">One-tone highlight <span class="experimental">Experimental</span></div>
+        <p class="row-desc">A single highlight level instead of a gradient. Depends on a threshold that does not generalize across model changes. (Not recommended.)</p>
       </div>
       <input type="checkbox" id="ih_two_tier">
     </label>
@@ -266,6 +337,51 @@
       </div>
       <input type="range" id="ih_highlight_threshold_pct" min="0" max="100" step="1" aria-label="Highlight threshold">
     </div>
+    </div>
+    </section>
+    <section>
+    <h2>Display</h2>
+    <div class="group">
+    <label class="row" data-option-id="show_token_tip">
+      <div class="row-text">
+        <div class="row-title">Hover for details</div>
+        <p class="row-desc">When the pointer rests on text, show its information density and more likely words. Hidden when you analyze the same page again.</p>
+      </div>
+      <input type="checkbox" id="show_token_tip" checked>
+    </label>
+    <label class="row" data-option-id="show_progress">
+      <div class="row-text">
+        <div class="row-title">Progress chart <span class="experimental">Experimental</span></div>
+        <p class="row-desc">Show how information density changes across the page, and where you are</p>
+      </div>
+      <input type="checkbox" id="show_progress">
+    </label>
+    <label class="row" data-option-id="ih_word_merge">
+      <div class="row-text">
+        <div class="row-title">Merge subwords <span class="experimental">Experimental</span></div>
+        <p class="row-desc">Paint each word as one block by adding its subword scores. Hover still shows individual tokens. (Not recommended.)</p>
+      </div>
+      <input type="checkbox" id="ih_word_merge">
+    </label>
+    <label class="row" data-option-id="ih_highlight_options_page">
+      <div class="row-text">
+        <div class="row-title">Highlight this page <span class="experimental">Experimental</span></div>
+        <p class="row-desc">Run Info Highlight on this settings page. Analysis always uses the cloud model above. Other display options still apply, except main-article-only and hover details.</p>
+      </div>
+      <input type="checkbox" id="ih_highlight_options_page" checked>
+    </label>
+    </div>
+    </section>
+    <section>
+    <h2>Content</h2>
+    <div class="group">
+    <label class="row" data-option-id="ih_article_only">
+      <div class="row-text">
+        <div class="row-title">Main article only</div>
+        <p class="row-desc">Highlight the main text of the page. Turn off to include other visible text.</p>
+      </div>
+      <input type="checkbox" id="ih_article_only" checked>
+    </label>
     </div>
     </section>
     <section>
@@ -347,5 +463,22 @@
   <script src="options-catalog.js"></script>
   <script src="options-new-dots.js"></script>
   <script src="options.js"></script>
+  <!-- SYNC: background.js CONTENT_JS，无 drop-stale / tokenTip / 第二份 highlightStyle -->
+  <script src="vendor/Readability.js"></script>
+  <script src="extractRootPatches.js"></script>
+  <script src="articleRoot.js"></script>
+  <script src="textMapConfig.js"></script>
+  <script src="collectTextMap.js"></script>
+  <script src="splitTextToChunks.js"></script>
+  <script src="textIndex.js"></script>
+  <script src="scrollGeometry.js"></script>
+  <script src="progressAxis.js"></script>
+  <script src="overlay.js"></script>
+  <script src="options-page-flags.js"></script>
+  <script src="wordMerge.js"></script>
+  <script src="page-map.js"></script>
+  <script src="analyzeRun.js"></script>
+  <script src="content.js"></script>
+  <script src="options-highlight.js"></script>
 </body>
 </html>

@@ -369,6 +369,8 @@
       }
       if (gen !== renderGen) return;
 
+      document.getElementById('ih-token-overlay')?.remove();
+      document.getElementById('il-overlay-host')?.remove();
       pagesHost.replaceChildren(fragment);
       pageWraps = nextWraps;
       currentScale = nextScale;

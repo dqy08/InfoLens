@@ -4,8 +4,9 @@ import {
   publicRemoteError,
   isCustomDomain,
   logRemoteFailure,
-  AUTO_ERROR_TTL_SEC,
+  FACADE_AUTO_PATH,
 } from '../src/remote_log.js';
+import { mockR2, r2Records } from './mock_r2.js';
 
 test('publicRemoteError: 流式中断 502 → 归 inference', () => {
   const r = publicRemoteError(
@@ -60,50 +61,34 @@ test('isCustomDomain: 仅识别 api.info-lens.app', () => {
   assert.equal(isCustomDomain(null), false);
 });
 
-test('logRemoteFailure: 自定义域名写入 STATE KV 并携带 7 天 TTL', async () => {
-  let putKey = null;
-  let putVal = null;
-  let putOpts = null;
-  const mockState = {
-    async put(k, v, opts) {
-      putKey = k;
-      putVal = v;
-      putOpts = opts;
-    },
-  };
-
+test('logRemoteFailure: 自定义域名写入对象存储', async () => {
+  const bucket = mockR2();
   const req = new Request('https://api.info-lens.app/api/v2/analyze-semantic-relevance');
   const err = new Error('unparseable multi-chunk output: expected [1] count, got "["');
   const pub = publicRemoteError(err);
 
-  await logRemoteFailure('remote_relevance_v2_failed', err, pub, { STATE: mockState }, req);
+  await logRemoteFailure('remote_relevance_v2_failed', err, pub, { REPORT_LOGS: bucket }, req);
 
-  assert.ok(putKey && putKey.startsWith('feedback:'));
-  assert.equal(putOpts?.expirationTtl, AUTO_ERROR_TTL_SEC);
-  assert.equal(putOpts?.expirationTtl, 604800);
-
-  const parsed = JSON.parse(putVal);
+  const recs = r2Records(bucket);
+  assert.equal(recs.length, 1);
+  assert.match(recs[0].key, new RegExp(`/facade-auto/`));
+  const parsed = recs[0].record;
   assert.equal(parsed.source, 'facade_auto');
   assert.equal(parsed.event, 'remote_relevance_v2_failed');
   assert.equal(parsed.kind, 'internal');
   assert.equal(parsed.message, 'Unparsable model output');
   assert.ok(parsed.error_detail.includes('unparseable multi-chunk output'));
   assert.equal(parsed.domain, 'api.info-lens.app');
-  assert.match(parsed.saved_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  assert.equal(parsed.route, FACADE_AUTO_PATH);
+  assert.match(parsed.received_at, /^\d{4}-\d{2}-\d{2}T/);
 });
 
-test('logRemoteFailure: 非自定义域名不写入 STATE KV', async () => {
-  let putCalled = false;
-  const mockState = {
-    async put() {
-      putCalled = true;
-    },
-  };
-
+test('logRemoteFailure: 非自定义域名不写入对象存储', async () => {
+  const bucket = mockR2();
   const req = new Request('https://infolens-api.xiaoyundqy.workers.dev/api/v2/analyze-semantic-relevance');
   const err = new Error('unparseable');
   const pub = publicRemoteError(err);
 
-  await logRemoteFailure('remote_relevance_v2_failed', err, pub, { STATE: mockState }, req);
-  assert.equal(putCalled, false);
+  await logRemoteFailure('remote_relevance_v2_failed', err, pub, { REPORT_LOGS: bucket }, req);
+  assert.equal(r2Records(bucket).length, 0);
 });

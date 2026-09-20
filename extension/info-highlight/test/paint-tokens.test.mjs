@@ -11,6 +11,8 @@ import { runInThisContext } from 'node:vm';
 
 const dir = dirname(fileURLToPath(import.meta.url));
 
+const storageListeners = [];
+
 class FakeRange {
   constructor() {
     this.startContainer = null;
@@ -47,8 +49,14 @@ class FakeHighlight {
   add(r) {
     this.ranges.push(r);
   }
+  delete(r) {
+    this.ranges = this.ranges.filter((x) => x !== r);
+  }
   clear() {
     this.ranges = [];
+  }
+  *[Symbol.iterator]() {
+    yield* this.ranges;
   }
 }
 
@@ -59,11 +67,13 @@ globalThis.CSS = {
     has: (k) => hlMap.has(k),
     get: (k) => hlMap.get(k),
     set: (k, v) => hlMap.set(k, v),
+    values: () => hlMap.values(),
   },
 };
 globalThis.document = {
   createRange: () => new FakeRange(),
   createElement: () => ({ style: {}, className: '' }),
+  createDocumentFragment: () => ({ appendChild() {} }),
   documentElement: { style: { setProperty() {} } },
 };
 globalThis.IL_progressAxis = {
@@ -79,7 +89,7 @@ globalThis.IL_pdfTextLayer = {
 globalThis.chrome = {
   storage: {
     local: { get(_defaults, cb) { cb?.({ show_progress: false }); } },
-    onChanged: { addListener() {} },
+    onChanged: { addListener(fn) { storageListeners.push(fn); } },
   },
 };
 
@@ -88,6 +98,9 @@ runInThisContext(readFileSync(join(dir, '../../shared/page/textIndex.js'), 'utf8
 });
 runInThisContext(readFileSync(join(dir, '../highlightStyle.js'), 'utf8'), {
   filename: 'highlightStyle.js',
+});
+runInThisContext(readFileSync(join(dir, '../wordMerge.js'), 'utf8'), {
+  filename: 'wordMerge.js',
 });
 runInThisContext(readFileSync(join(dir, '../page-map.js'), 'utf8'), {
   filename: 'page-map.js',
@@ -139,6 +152,45 @@ test('p=0：与站点 calculateSurprisal 同，EPSILON 托底，高 surprisal �
   );
   assert.equal(stats.tokens_skip_level, 0);
   assert.equal(stats.painted, 1);
+});
+
+test('词切分合并：默认关；打开后一词一块且 bit 相加', () => {
+  const text = ' unbelievable';
+  const mapped = mappedFor(text);
+  const hot = [
+    { offset: [0, 3], p: HOT },
+    { offset: [3, 9], p: HOT },
+    { offset: [9, 13], p: HOT },
+  ];
+  const summed = [
+    { offset: [0, 3], p: 0.5 },
+    { offset: [3, 9], p: 0.5 },
+    { offset: [9, 13], p: 0.25 },
+  ];
+  assert.ok(storageListeners.length, 'page-map storage listener');
+  const setMerge = (on) => {
+    for (const fn of storageListeners) {
+      fn({ ih_word_merge: { newValue: on } }, 'local');
+    }
+  };
+
+  setMerge(false);
+  hlMap.clear();
+  const off = globalThis.IH_paintTokens(hot, mapped, { append: false });
+  assert.equal(off.tokens_in, 3);
+  assert.equal(off.painted, 3);
+
+  setMerge(true);
+  hlMap.clear();
+  const on = globalThis.IH_paintTokens(summed, mapped, { append: false });
+  assert.equal(on.tokens_in, 1);
+  assert.equal(on.tokens_skip_level, 0);
+  assert.equal(on.painted, 1);
+  const ranges = [...hlMap.values()].flatMap((h) => [...h]);
+  assert.equal(ranges.length, 1);
+  assert.equal(ranges[0].toString(), text);
+
+  setMerge(false);
 });
 
 test('painted：高 surprisal 且 range 非空白', () => {
@@ -209,4 +261,24 @@ test('overlay：无 client rects 记 skip_empty_range', () => {
   } finally {
     FakeRange.clientRects = [{ width: 8, height: 10 }];
   }
+});
+
+test('pruneDetachedHighlights：断开的 range 丢掉，还在的留下；不碰别人的登记', () => {
+  hlMap.clear();
+  const live = mappedFor('Hello');
+  globalThis.IH_paintTokens([{ offset: [0, 5], p: HOT }], live, { append: false });
+  const painted = [...hlMap.values()].flatMap((h) => [...h]);
+  assert.equal(painted.length, 1);
+  painted[0].startContainer.isConnected = false;
+  painted[0].endContainer.isConnected = false;
+  const foreign = new FakeHighlight();
+  const other = new FakeRange();
+  other.startContainer = { isConnected: false, data: 'x' };
+  other.endContainer = other.startContainer;
+  other.collapsed = false;
+  foreign.add(other);
+  hlMap.set('other-hl', foreign);
+  globalThis.IH_pruneDetachedHighlights();
+  assert.equal([...hlMap.values()].flatMap((h) => [...h]).length, 1);
+  assert.equal(foreign.ranges.length, 1);
 });

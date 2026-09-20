@@ -41,6 +41,7 @@ function analyzeUrl() {
 }
 
 const CONTENT_CSS = ['content.css'];
+/** SYNC: options.html 网页管线脚本（无 drop-stale / tokenTip；另加 options-page-flags.js） */
 const CONTENT_JS = [
   'drop-stale.js',
   'vendor/Readability.js',
@@ -54,6 +55,7 @@ const CONTENT_JS = [
   'progressAxis.js',
   'overlay.js',
   'highlightStyle.js',
+  'wordMerge.js',
   'page-map.js',
   'tokenTip.js',
   'analyzeRun.js',
@@ -846,12 +848,19 @@ async function fetchTokens(engine, text, cloudModel) {
   return { tokens, model };
 }
 
-async function handleAnalyze(text, skipCache) {
-  await maybeOfferInit();
+function isOwnOptionsPage(sender) {
+  const url = String(sender?.url || '').split('?')[0];
+  return url === chrome.runtime.getURL('options.html');
+}
+
+async function handleAnalyze(text, skipCache, forceCloud) {
+  if (!forceCloud) await maybeOfferInit();
   const st = await IH_localState.get();
-  const blocked = localOnlyBlockReason(st);
-  if (blocked) throw new Error(blocked);
-  const engine = engineFrom(st);
+  if (!forceCloud) {
+    const blocked = localOnlyBlockReason(st);
+    if (blocked) throw new Error(blocked);
+  }
+  const engine = forceCloud ? 'cloud' : engineFrom(st);
   let inferred = false;
   let model = engine === 'local' ? IH_localState.MODEL_ID : st.cloudModel;
   let tokens;
@@ -863,7 +872,7 @@ async function handleAnalyze(text, skipCache) {
       return got.tokens;
     }, { skip: skipCache });
   } catch (err) {
-    if (st.pref === IH_localState.PREF_LOCAL) {
+    if (!forceCloud && st.pref === IH_localState.PREF_LOCAL) {
       throw new Error(`On-device analysis failed: ${String(err?.message || err)}`);
     }
     throw err;
@@ -959,6 +968,7 @@ async function postUsageReport(body) {
   const cached = Math.max(0, Math.min(segments, Number(body?.cached) || 0));
   const duration_ms = clampDurationMs(body?.duration_ms);
   const client_id = await IL_getClientId(IH_CONFIG.apiBase).catch(() => null);
+  const model = typeof body?.model === 'string' ? body.model.trim().slice(0, 64) : '';
   // 正式用量 POST 只计数字段；error/detail 不得进入 keepalive body
   const payload = {
     extension: EXTENSION_ID,
@@ -970,6 +980,7 @@ async function postUsageReport(body) {
     cached,
     duration_ms,
   };
+  if (model) payload.model = model;
   if (client_id) payload.client_id = client_id;
   IL_postKeepalive('/api/extension-usage', payload, IH_CONFIG.apiBase);
   if (outcome === 'failed') {
@@ -999,6 +1010,8 @@ async function postLocalInitReport({ outcome, duration_ms, error }) {
     hub,
   };
   if (outcome !== 'ok' && error) body.error = String(error).slice(0, 500);
+  const client_id = await IL_getClientId(IH_CONFIG.apiBase).catch(() => null);
+  if (client_id) body.client_id = client_id;
   IL_postKeepalive('/api/extension-local-init', body, IH_CONFIG.apiBase);
 }
 
@@ -1171,7 +1184,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: false, error: 'Missing text' });
     return;
   }
-  handleAnalyze(text, !!msg.skipCache)
+  handleAnalyze(text, !!msg.skipCache, isOwnOptionsPage(sender))
     .then(({ data, inferred, engine }) => sendResponse({ ok: true, data, inferred, engine }))
     .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
   return true;

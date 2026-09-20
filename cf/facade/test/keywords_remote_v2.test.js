@@ -8,6 +8,7 @@ import {
   streamKeywordsV2,
   handleRemoteKeywordsV2,
 } from '../src/keywords_remote_v2.js';
+import { mockR2, r2Records } from './mock_r2.js';
 
 /** 构造 OpenRouter stream 响应体：把若干 delta.content 帧拼成 SSE 文本 */
 function sseResp(deltaChunks) {
@@ -155,9 +156,9 @@ test('handleRemoteKeywordsV2: 首次 unparseable 时以 formatReminder 重试一
   }
 });
 
-test('handleRemoteKeywordsV2: 已发出 row 后 unparseable → 不重试、客户端成功，仍写 KV', async () => {
+test('handleRemoteKeywordsV2: 已发出 row 后 unparseable → 不重试、客户端成功，仍写对象存储', async () => {
   let callCount = 0;
-  let putVal = null;
+  const bucket = mockR2();
   const originalFetch = globalThis.fetch;
   try {
     globalThis.fetch = async () => {
@@ -172,7 +173,7 @@ test('handleRemoteKeywordsV2: 已发出 row 后 unparseable → 不重试、客�
       req,
       {
         OPENROUTER_API_KEY: 'test',
-        STATE: { async put(_k, v) { putVal = v; } },
+        REPORT_LOGS: bucket,
       },
       (_r, b, s) => new Response(JSON.stringify(b), { status: s || 200 })
     );
@@ -182,7 +183,9 @@ test('handleRemoteKeywordsV2: 已发出 row 后 unparseable → 不重试、客�
     assert.ok(text.includes('"type":"row","offset":[2,4],"raw":"测试","score":1'));
     assert.ok(text.includes('"type":"result","success":true'));
     assert.ok(!text.includes('"type":"error"'));
-    const parsed = JSON.parse(putVal);
+    const recs = r2Records(bucket);
+    assert.equal(recs.length, 1);
+    const parsed = recs[0].record;
     assert.equal(parsed.source, 'facade_auto');
     assert.equal(parsed.event, 'remote_keywords_v2_failed');
     assert.equal(parsed.attempt, 1);
