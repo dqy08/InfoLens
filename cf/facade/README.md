@@ -18,8 +18,9 @@ Bucket 名：**`infolens-report-logs`**
 - `POST /api/extension-analysis-fail`
 - `POST /api/extension-local-engine`
 - `POST /api/extension-uninstall-survey`
+- 生产域名远程推理失败自动快照（`/facade-auto`）
 
-STATE KV 只留 home 白名单 / 健康探活等配置快照。Admin GET（`/facade-extension-*`）仍读 **历史 KV**；新事件在 R2，本次不做查询 UI。
+STATE KV 只留 home 白名单 / 健康探活等配置快照。Admin GET（`/facade-extension-*`）仍读 **历史 KV**；新事件在对象存储，本次不做查询 UI。
 
 ### 部署前建桶
 

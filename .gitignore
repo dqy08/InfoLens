@@ -1,6 +1,7 @@
 .cursor/
 .agents/
 .scratch/
+extension/extension-usage-analytics/
 skills-lock.json
 .cache_huggingface
 # --- 核心语言与依赖 ---

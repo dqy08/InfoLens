@@ -12,10 +12,11 @@
  *   - /api/v2/analyze-semantic-keywords → Hy3（新扩展）
  *   - GET /api/v2/analyze-semantic-version → 相关度 / keywords 缓存 epoch（扩展打开栏时问；不打上游）
  * - /api/client-id → 产品级匿名 client_id（Cookie il_aid，Domain=.info-lens.app）；两插件与官网共用
- * - 扩展流水 POST → REPORT_LOGS R2（一事件一对象），不写 STATE KV：
- *   - /api/extension-usage → tee R2 后仍走下方 HF/Home 代理（HF extension_usage 语义不变）
+ * - 扩展流水 POST → REPORT_LOGS（一事件一对象），不写 STATE KV：
+ *   - /api/extension-usage → tee 后仍走下方 HF/Home 代理（HF extension_usage 语义不变）
  *   - /api/extension-events / feedback / local-init / analysis-fail / local-engine / uninstall-survey
- * - 上列对应 GET /facade-extension-* → 仍读历史 STATE KV；新事件在 R2（无查询 UI）
+ *   - 生产域名远程推理失败自动快照 → /facade-auto（同一桶）
+ * - 上列对应 GET /facade-extension-* → 仍读历史 STATE KV；新事件在对象存储（无查询 UI）
  * - keywords 双轨（扩展审核慢于 Worker，过渡期内并存）：
  *   - 旧扩展：/api/analyze-semantic-keywords → 仍 HF/Home 梯度归因（COMPUTE_PATHS，勿接到 v2）
  *   旧扩展升级完后再决定退役旧路径，或把旧入口接到 v2；当前不切
