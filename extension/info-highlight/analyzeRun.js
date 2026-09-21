@@ -2,8 +2,8 @@
  * 网页 / PDF 共用：向 SW 要 token、按段画、对齐失败跳过；一轮结束上报用量。
  */
 globalThis.IH_analyzeRun ||= (function () {
-  /** SYNC: extension/semantic-highlight/semantic/find.js → MAX_CHUNKS_PER_SEARCH */
-  const MAX_SEGMENTS_PER_RUN = 32;
+  /** 一轮 UI 批处理最多连续处理的段数。与 semantic MAX_CHUNKS_PER_SEARCH 解耦，可单独调整。 */
+  const MAX_SEGMENTS_PER_RUN = 8;
   /** SYNC: local/scoring.js → alignUtf16Offsets fail() */
   const ALIGN_FAIL = 'token offset align failed';
 
