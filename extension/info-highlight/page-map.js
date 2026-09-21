@@ -1,6 +1,6 @@
 /**
  * 正文提取 + 码点偏移 → Range；网页 token 只绑 CSS Custom Highlight（勿 getClientRects）。
- * PDF：canvas 已含字形；色块会盖在字上，resolvePaintStyle 回退成 overlay 红线（粗细随字盒高）。
+ * PDF：canvas 已含字形；色块会盖在字上、字色也改不了 canvas，resolvePaintStyle 回退成 overlay 红线（粗细随字盒高）。
  * 进度图量段 Y 例外，想法来自 extension/semantic-highlight/semantic/find.js（横轴=文档 Y / 视口带 / 点击跳转）。
  *
  * 段：切分力度 = 语义 800 字节 × 倍数。每次送 1 段前文 + 本段（1:1），只画本段。
@@ -190,6 +190,63 @@
     }
   }
 
+  function originCssColor(node) {
+    const el = node.nodeType === 1 ? node : node.parentElement;
+    if (!el) throw new Error('origin color: no element');
+    const c = getComputedStyle(el).color;
+    if (!c) throw new Error('origin color empty');
+    return c;
+  }
+
+  function tokenHighlightNames() {
+    const keys = CSS.highlights.keys?.();
+    if (!keys) {
+      return Array.from({ length: TOKEN_LEVELS }, (_, i) => HL_PREFIX + i);
+    }
+    return [...keys].filter((name) => name.startsWith(HL_PREFIX));
+  }
+
+  function textFgSheet() {
+    let el = document.getElementById('ih-text-fg-css');
+    if (el) return el.sheet;
+    el = document.createElement('style');
+    el.id = 'ih-text-fg-css';
+    document.documentElement.appendChild(el);
+    return el.sheet;
+  }
+
+  /** 字色规则写死了当时的原文色和终点墨；主题或字色变了必须丢掉再画。 */
+  function forgetTextFg() {
+    document.getElementById('ih-text-fg-css')?.remove();
+    if (!CSS.highlights?.delete) return;
+    const base = new RegExp(`^${HL_PREFIX}\\d+$`);
+    for (const name of tokenHighlightNames()) {
+      if (base.test(name)) continue;
+      CSS.highlights.delete(name);
+    }
+  }
+
+  function highlightForTextRange(range, level) {
+    const origin = originCssColor(range.startContainer);
+    const rgb = HS.rgbForTextColor(highlightPrefs.textColor);
+    const ident = (s) => String(s).replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const name = `${HL_PREFIX}${level}-${ident(origin)}-${ident(rgb)}`;
+    if (!CSS.highlights.has(name)) {
+      const h = new Highlight();
+      h.priority = level;
+      CSS.highlights.set(name, h);
+      const sheet = textFgSheet();
+      sheet.insertRule(
+        // 覆盖率：线性光 lerp。Oklab 会把前半段混成浑浊深色。
+        `::highlight(${name}){background-color:transparent;color:color-mix(in srgb-linear,rgb(${rgb}) var(--ih-token-pct-${level}),${origin})}`,
+        sheet.cssRules.length,
+      );
+    }
+    const h = CSS.highlights.get(name);
+    if (!h) throw new Error(`highlight missing: ${name}`);
+    return h;
+  }
+
   function ensureHighlightRegistry() {
     requireHighlightApi();
     for (let i = 0; i < TOKEN_LEVELS; i++) {
@@ -261,9 +318,10 @@
   function clearTokenPaints() {
     clearTokenOverlays();
     if (!CSS.highlights) return;
-    for (let i = 0; i < TOKEN_LEVELS; i++) {
-      CSS.highlights.get(HL_PREFIX + i)?.clear();
+    for (const name of tokenHighlightNames()) {
+      CSS.highlights.get(name)?.clear();
     }
+    forgetTextFg();
   }
 
   function tokenOverlayMount(root) {
@@ -320,7 +378,7 @@
         if (!rangeLive(range)) h.delete(range);
       }
     };
-    for (let i = 0; i < TOKEN_LEVELS; i++) visit(CSS.highlights.get(HL_PREFIX + i));
+    for (const name of tokenHighlightNames()) visit(CSS.highlights.get(name));
     visit(CSS.highlights.get(HL_UNDERLINE));
   }
 
@@ -439,13 +497,14 @@
       }
       const u0 = idx.cpToUtf16(off[0]);
       const u1 = idx.cpToUtf16(off[1]);
-      const h = overlay ? null : CSS.highlights.get(HL_PREFIX + level);
-      if (!overlay && !h) throw new Error(`highlight missing: ${HL_PREFIX}${level}`);
+      const textPaint = !overlay && highlightPrefs.paintStyle === HS.PAINT_TEXT;
+      const h = overlay || textPaint ? null : CSS.highlights.get(HL_PREFIX + level);
+      if (!overlay && !textPaint && !h) throw new Error(`highlight missing: ${HL_PREFIX}${level}`);
       let n = 0;
       for (const range of rangesFromUtf16(mapped.pieces, mapped.text, u0, u1)) {
         if (!/\S/.test(range.toString())) continue;
         if (!overlay) {
-          h.add(range);
+          (textPaint ? highlightForTextRange(range, level) : h).add(range);
           n += 1;
           continue;
         }
@@ -472,12 +531,19 @@
     const levelChanged =
       next.twoTier !== highlightPrefs.twoTier
       || next.thresholdPct !== highlightPrefs.thresholdPct;
+    const paintStyleChanged = next.paintStyle !== highlightPrefs.paintStyle;
     const alphaChanged = next.maxAlphaDepth !== highlightPrefs.maxAlphaDepth
-      || next.paintStyle !== highlightPrefs.paintStyle;
-    const colorChanged = next.highlightColor !== highlightPrefs.highlightColor;
+      || paintStyleChanged;
+    const colorChanged = next.highlightColor !== highlightPrefs.highlightColor
+      || next.textColor !== highlightPrefs.textColor;
     highlightPrefs = next;
     applyTokenColors();
-    if (levelChanged || ((alphaChanged || colorChanged) && paintBuf.overlay)) {
+    if (
+      levelChanged
+      || paintStyleChanged
+      || ((alphaChanged || colorChanged) && paintBuf.overlay)
+      || (colorChanged && next.paintStyle === HS.PAINT_TEXT)
+    ) {
       repaintFromBuffer();
     }
   }
@@ -519,12 +585,20 @@
       && !(HS.KEY_MAX_ALPHA_DEPTH in changes)
       && !(HS.KEY_PAINT_STYLE in changes)
       && !(HS.KEY_HIGHLIGHT_COLOR in changes)
+      && !(HS.KEY_TEXT_COLOR in changes)
     ) {
       return;
     }
     chrome.storage.local.get(HS.STORAGE_DEFAULTS, (res) => {
       applyHighlightPrefs(res);
     });
+  });
+
+  HS.watchColorScheme(() => {
+    applyTokenColors();
+    if (highlightPrefs.paintStyle !== HS.PAINT_TEXT) return;
+    if (!paintBuf.mapped || !paintBuf.tokens.length) return;
+    requestAnimationFrame(() => repaintFromBuffer());
   });
 
   function shortError(msg) {

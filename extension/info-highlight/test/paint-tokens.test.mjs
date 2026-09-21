@@ -61,20 +61,48 @@ class FakeHighlight {
 }
 
 const hlMap = new Map();
+const styleEls = new Map();
 globalThis.Highlight = FakeHighlight;
 globalThis.CSS = {
   highlights: {
     has: (k) => hlMap.has(k),
     get: (k) => hlMap.get(k),
     set: (k, v) => hlMap.set(k, v),
+    keys: () => hlMap.keys(),
     values: () => hlMap.values(),
+    delete: (k) => hlMap.delete(k),
   },
 };
+globalThis.getComputedStyle = (el) => ({ color: el?.color || 'rgb(12, 34, 56)' });
+const stored = { show_progress: false };
 globalThis.document = {
   createRange: () => new FakeRange(),
-  createElement: () => ({ style: {}, className: '' }),
+  createElement() {
+    const el = {
+      style: {},
+      className: '',
+      id: '',
+      sheet: {
+        cssRules: [],
+        insertRule(css) {
+          this.cssRules.push(css);
+          return this.cssRules.length - 1;
+        },
+      },
+      remove() {
+        if (this.id) styleEls.delete(this.id);
+      },
+    };
+    return el;
+  },
   createDocumentFragment: () => ({ appendChild() {} }),
-  documentElement: { style: { setProperty() {} } },
+  getElementById: (id) => styleEls.get(id) ?? null,
+  documentElement: {
+    style: { setProperty() {}, removeProperty() {} },
+    appendChild(el) {
+      if (el.id) styleEls.set(el.id, el);
+    },
+  },
 };
 globalThis.IL_progressAxis = {
   measureChunkContentY() {},
@@ -88,7 +116,7 @@ globalThis.IL_pdfTextLayer = {
 };
 globalThis.chrome = {
   storage: {
-    local: { get(_defaults, cb) { cb?.({ show_progress: false }); } },
+    local: { get(_defaults, cb) { cb?.({ ...stored }); } },
     onChanged: { addListener(fn) { storageListeners.push(fn); } },
   },
 };
@@ -106,8 +134,8 @@ runInThisContext(readFileSync(join(dir, '../page-map.js'), 'utf8'), {
   filename: 'page-map.js',
 });
 
-function mappedFor(text, { connected = true } = {}) {
-  const node = { data: text, isConnected: connected };
+function mappedFor(text, { connected = true, color = 'rgb(12, 34, 56)' } = {}) {
+  const node = { data: text, isConnected: connected, parentElement: { color } };
   return {
     text,
     pieces: [{ node, start: 0, end: text.length }],
@@ -281,4 +309,41 @@ test('pruneDetachedHighlights：断开的 range 丢掉，还在的留下；不�
   globalThis.IH_pruneDetachedHighlights();
   assert.equal([...hlMap.values()].flatMap((h) => [...h]).length, 1);
   assert.equal(foreign.ranges.length, 1);
+});
+
+test('字色：按原文色分 Highlight，rgb(12,34,56) 与 rgb(1,234,56) 不撞名', () => {
+  const HS = globalThis.IH_highlightStyle;
+  stored.ih_paint_style = HS.PAINT_TEXT;
+  stored.ih_text_color = 'blue';
+  try {
+    for (const fn of storageListeners) {
+      fn({ ih_paint_style: { newValue: HS.PAINT_TEXT } }, 'local');
+    }
+    hlMap.clear();
+    styleEls.clear();
+    const a = mappedFor('Hello', { color: 'rgb(12, 34, 56)' });
+    const first = globalThis.IH_paintTokens([{ offset: [0, 5], p: HOT }], a, { append: false });
+    assert.equal(first.painted, 1);
+    const b = mappedFor('Hello', { color: 'rgb(1, 234, 56)' });
+    const second = globalThis.IH_paintTokens([{ offset: [0, 5], p: HOT }], b, { append: true });
+    assert.equal(second.painted, 1);
+    const names = [...hlMap.keys()].filter((k) => k.startsWith('ih-token-') && k.includes('-rgb-'));
+    assert.equal(names.filter((n) => n.includes('rgb-12-34-56')).length, 1);
+    assert.equal(names.filter((n) => n.includes('rgb-1-234-56')).length, 1);
+    const ink = HS.rgbForTextColor('blue').replace(/[^0-9]+/g, '-').replace(/^-|-$/g, '');
+    assert.ok(names.every((n) => n.endsWith(`-${ink}`)));
+    const sheet = styleEls.get('ih-text-fg-css');
+    assert.ok(sheet);
+    const css = sheet.sheet.cssRules.join('\n');
+    assert.match(css, /color-mix\(in srgb-linear/);
+    assert.match(css, /rgb\(12, 34, 56\)/);
+    assert.match(css, /rgb\(1, 234, 56\)/);
+    assert.equal([...hlMap.get('ih-token-5') ?? []].length, 0);
+  } finally {
+    delete stored.ih_paint_style;
+    delete stored.ih_text_color;
+    for (const fn of storageListeners) {
+      fn({ ih_paint_style: { newValue: 'block' } }, 'local');
+    }
+  }
 });

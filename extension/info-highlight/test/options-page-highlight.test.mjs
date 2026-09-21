@@ -13,16 +13,25 @@ const dir = dirname(fileURLToPath(import.meta.url));
 test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () => {
   const html = readFileSync(join(dir, '../options.html'), 'utf8');
   assert.match(html, /<main>[\s\S]*?id="ih_highlight_options_page"/);
-  assert.match(html, /id="ih_highlight_options_page">\s*Highlight this page to preview the highlight in real time\./);
+  assert.match(html, /id="ih_highlight_options_page">\s*Highlight this page to preview/);
   assert.doesNotMatch(html, /id="ih_highlight_options_page" checked/);
   assert.ok(html.indexOf('id="ih_highlight_options_page"') < html.indexOf('<h2>Highlight</h2>'));
   assert.ok(html.indexOf('class="page-demo"') < html.indexOf('<h2>Highlight</h2>'));
+  assert.match(html, /\.page-demo \{[\s\S]*?justify-content: flex-end;/);
   assert.match(html, /id="ih_paint_style"/);
   assert.match(html, /id="ih_highlight_color"/);
+  assert.match(html, /id="ih_text_swatches"/);
+  assert.match(html, /\.row\[hidden\] \{ display: none; \}/);
   assert.match(html, /class="ih-hue"/);
   assert.match(html, /ih-color-swatch-ink/);
-  assert.match(html, /How strong the highlight looks/);
-  assert.match(html, /PDFs cannot use color blocks/);
+  assert.match(html, /PDFs fall back to underline/);
+  assert.doesNotMatch(html, /Ink for the text-color style/);
+  assert.doesNotMatch(html, /How strong the highlight looks/);
+  assert.doesNotMatch(html, /<select id="ih_paint_style"/);
+  assert.match(html, /\.ih-paint-cards \{[\s\S]*?grid-template-columns: 1fr;/);
+  assert.doesNotMatch(html, /grid-template-columns: 1fr 1fr 1fr/);
+  assert.match(html, /\.ih-paint-demo \{[\s\S]*?font-size: 16px;/);
+  assert.match(html, /button\.ih-paint-card \{[\s\S]*?border-color: transparent;/);
   assert.doesNotMatch(html, /<h2>Experimental<\/h2>/);
   assert.match(html, /Progress chart[\s\S]*class="experimental">Experimental/);
   assert.match(html, /One-tone highlight[\s\S]*class="experimental">Experimental/);
@@ -30,7 +39,8 @@ test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () =>
   assert.match(html, /Not recommended/);
   const highlight = html.slice(html.indexOf('<h2>Highlight</h2>'), html.indexOf('<h2>Display</h2>'));
   assert.ok(highlight.indexOf('Highlight style') < highlight.indexOf('Highlight color'));
-  assert.ok(highlight.indexOf('Highlight color') < highlight.indexOf('Highlight intensity'));
+  assert.ok(highlight.indexOf('id="ih_highlight_color"') < highlight.indexOf('id="ih_text_swatches"'));
+  assert.ok(highlight.indexOf('id="ih_text_swatches"') < highlight.indexOf('Highlight intensity'));
   assert.ok(highlight.indexOf('Highlight intensity') < highlight.indexOf('One-tone highlight'));
   const display = html.slice(html.indexOf('<h2>Display</h2>'), html.indexOf('<h2>Analysis</h2>'));
   assert.ok(display.indexOf('Progress chart') < display.indexOf('Merge subwords'));
@@ -44,6 +54,7 @@ test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () =>
   assert.match(catalog, /'ih_word_merge'/);
   assert.match(catalog, /'ih_paint_style'/);
   assert.match(catalog, /'ih_highlight_color'/);
+  assert.doesNotMatch(catalog, /ih_text_color/);
   assert.doesNotMatch(
     catalog.slice(catalog.indexOf('globalThis.IL_OPTIONS_SEED_SEEN')),
     /ih_paint_style/,
@@ -66,13 +77,36 @@ test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () =>
   assert.match(opts, /IH_optionsPageReady/);
   assert.match(opts, /COLOR_INK/);
   assert.match(opts, /Black \/ white/);
+  assert.match(opts, /KEY_TEXT_COLOR/);
+  assert.match(opts, /TEXT_COLOR_IDS/);
   assert.match(opts, /ih_highlight_color\.hidden/);
+  assert.match(opts, /function syncPaintColorUi/);
+  assert.match(opts, /ih-paint-card/);
+  assert.match(opts, /PAINT_STYLES/);
+  assert.match(opts, /\[' Highlight', 19\]/);
+  assert.match(opts, /\[' yourself', 4\.29\]/);
+  assert.match(opts, /function syncPaintDemo/);
+  assert.match(opts, /tokenLevelFromBits/);
+  assert.match(opts, /setAttribute\('aria-hidden', 'true'\)/);
+  const collect = readFileSync(join(dir, '../../shared/page/collectTextMap.js'), 'utf8');
+  assert.match(collect, /\[aria-hidden="true"\]/);
+  assert.doesNotMatch(opts, /The more surprising a word is the stronger it looks/);
+  assert.doesNotMatch(opts, /ih-paint-card-label/);
+  assert.doesNotMatch(html, /ih-paint-card-label/);
+  assert.match(html, /rgba\(var\(--ih-mark-rgb/);
+  assert.match(html, /var\(--ih-block-max/);
+  assert.match(html, /var\(--ih-line-max/);
+  assert.match(html, /var\(--ih-ink-max/);
+  assert.match(opts, /--ih-block-max/);
+  assert.doesNotMatch(html, /data-option-id="ih_text_color"/);
+  assert.doesNotMatch(html, /data-option-id="ih_highlight_color"[^>]*hidden/);
   assert.ok(opts.indexOf('for (const id of HS.COLOR_IDS)') < opts.indexOf("appendColorSwatch(HS.COLOR_INK"));
 });
 
 test('选项页抽字忽略只标主文；分析强制云端', () => {
   const pageMap = readFileSync(join(dir, '../page-map.js'), 'utf8');
   assert.match(pageMap, /IH_OPTIONS_PAGE \? false : articleOnly/);
+  assert.match(pageMap, /color-mix\(in srgb-linear/);
   const flags = readFileSync(join(dir, '../options-page-flags.js'), 'utf8');
   assert.match(flags, /IH_OPTIONS_PAGE = true/);
   assert.match(flags, /IH_tokenTip/);
