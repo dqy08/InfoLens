@@ -1,6 +1,7 @@
 /**
  * 浏览器词切分（Intl.Segmenter）→ 恰好铺满一词的连续整 token 合成一块，供着色。
  * offset 与 Analyze 一致：Unicode 码点下标。对不齐则不合并。信息量（bit）相加。
+ * 合并失败只放弃这一刀：无 Segmenter / 词段冲突 / 其它异常都打 error，原 token 照常着色。
  */
 globalThis.IH_mergeWordTokens ||= (function () {
   function utf16ToCp(text, utf16Index) {
@@ -60,9 +61,6 @@ globalThis.IH_mergeWordTokens ||= (function () {
    * 词级区间：isWordLike 段；紧贴词前的一个 ASCII 空格并入段（BPE 常把空格粘在下一 token 上）。
    */
   function wordLikeSpansByCodePoint(text) {
-    if (typeof Intl === 'undefined' || typeof Intl.Segmenter !== 'function') {
-      throw new Error('Intl.Segmenter missing');
-    }
     const s = text || '';
     const chars = Array.from(s);
     const spans = [];
@@ -85,17 +83,19 @@ globalThis.IH_mergeWordTokens ||= (function () {
     for (const [ms, me] of wordLikeSpansByCodePoint(text)) {
       const idxs = tokenIndicesCoveringSpan(tokens, ms, me);
       if (!idxs || idxs.length < 2) continue;
+      const clash = idxs.find((ti) => spanTag[ti] !== null);
+      if (clash != null) {
+        const t = tokens[clash];
+        console.error(
+          '[Info Highlight] wordMerge: skip word span',
+          [ms, me],
+          `token index ${clash} already in span ${spanTag[clash]} (offset=[${t.offset[0]},${t.offset[1]}))`,
+        );
+        continue;
+      }
       const sid = nextSid;
       nextSid += 1;
-      for (const ti of idxs) {
-        if (spanTag[ti] !== null) {
-          const t = tokens[ti];
-          throw new Error(
-            `wordMerge: token index ${ti} falls in two word spans (offset=[${t.offset[0]},${t.offset[1]}), prior span id=${spanTag[ti]})`,
-          );
-        }
-        spanTag[ti] = sid;
-      }
+      for (const ti of idxs) spanTag[ti] = sid;
     }
     const groups = [];
     let i = 0;
@@ -147,7 +147,16 @@ globalThis.IH_mergeWordTokens ||= (function () {
    */
   function mergeWordTokens(tokens, text) {
     const list = Array.isArray(tokens) ? tokens : [];
-    return mergeIndexGroups(text, list).map((group) => mergeGroup(group, list, text));
+    try {
+      if (typeof Intl === 'undefined' || typeof Intl.Segmenter !== 'function') {
+        console.error('[Info Highlight] wordMerge: Intl.Segmenter missing');
+        return list;
+      }
+      return mergeIndexGroups(text, list).map((group) => mergeGroup(group, list, text));
+    } catch (err) {
+      console.error('[Info Highlight] wordMerge:', err);
+      return list;
+    }
   }
 
   return mergeWordTokens;
