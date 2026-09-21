@@ -234,6 +234,26 @@ test('painted：高 surprisal 且 range 非空白', () => {
   assert.equal(stats.painted, 1);
 });
 
+test('节点文本变短：不抛错，可画的仍画', () => {
+  const node = { data: 'Hi', isConnected: true, parentElement: { color: 'rgb(0,0,0)' } };
+  const mapped = {
+    text: 'Hello',
+    pieces: [{ node, start: 0, end: 5 }],
+    root: { getBoundingClientRect: () => ({ width: 10, height: 10 }), appendChild() {} },
+  };
+  const stats = globalThis.IH_paintTokens(
+    [
+      { offset: [0, 5], p: HOT },
+      { offset: [0, 2], p: HOT },
+    ],
+    mapped,
+    { append: true },
+  );
+  assert.equal(stats.tokens_in, 2);
+  assert.equal(stats.painted, 1);
+  assert.equal(stats.tokens_skip_empty_range, 1);
+});
+
 test('skip_empty_range：有 level 但 range 全空白 / 节点断开', () => {
   const ws = mappedFor('Hi   there');
   const spaceOnly = globalThis.IH_paintTokens(

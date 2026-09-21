@@ -374,16 +374,13 @@
   let modelCacheGen = 0;
   function applyBackend(st) {
     const webgpu = st.webgpuOk === true;
-    el.webgpu_desc.textContent = webgpu
-      ? 'Available'
-      : st.webgpuOk === false
-        ? (st.pref === 'local'
-          ? 'Unavailable. On-device only is selected, so cloud will not be used'
-          : 'Unavailable; cloud will be used')
-        : 'Not checked yet';
+    el.webgpu_desc.textContent = IH_userErrors.webgpuStatusLine(st.pref, st.webgpuOk);
     const base = modelStatusText(st, webgpu);
     el.model_desc.textContent = base;
     el.analyze_pref.value = st.pref === 'cloud' || st.pref === 'local' ? st.pref : 'auto';
+    const localOpt = el.analyze_pref.querySelector('option[value="local"]');
+    if (!localOpt) throw new Error('analyze_pref missing local option');
+    localOpt.disabled = !webgpu;
     el.ih_cloud_model.value = st.cloudModel;
     el.local_init.disabled = !webgpu || !!st.ready;
     const gen = ++modelCacheGen;

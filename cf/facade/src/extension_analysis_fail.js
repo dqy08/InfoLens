@@ -1,8 +1,5 @@
 /**
- * 阶段性调试：Info Highlight 分析失败原因流水（可整段删除）。
- *
- * 正式用量计数仍走 POST /api/extension-usage（只有计数，不加 message/error 字段）。
- * 本通道只收低频失败详情，方便看失败原因分布；不要当长期日志用。
+ * 旧扩展分析失败详情。新版本失败原因写在 POST /api/extension-usage 的 error/detail。
  *
  * 校验仍用裁剪后的 record（不把 page_url/page_text 当必填；error 去 URL）。
  * POST 落 R2 的是请求 JSON 原文（含 client_id）；不再写 STATE KV。

@@ -129,8 +129,14 @@ test('选项页抽字忽略只标主文；分析强制云端', () => {
   assert.match(bg, /'wordMerge\.js'/);
   assert.match(bg, /function isOwnOptionsPage\(sender\)/);
   assert.match(bg, /handleAnalyze\(text, !!msg\.skipCache, isOwnOptionsPage\(sender\)\)/);
-  assert.match(bg, /const engine = forceCloud \? 'cloud' : engineFrom\(st\)/);
+  assert.match(bg, /fetchTokensWithAutoFallback/);
+  assert.match(bg, /st\.ready && st\.webgpuOk !== false \? 'local' : 'cloud'/);
   assert.match(bg, /if \(!forceCloud\) await maybeOfferInit\(\)/);
+  assert.match(bg, /if \(pref === IH_localState\.PREF_LOCAL\) \{[\s\S]*?probeAndStore\(\)/);
+  const html = readFileSync(join(dir, '../options.html'), 'utf8');
+  const optJs = readFileSync(join(dir, '../options.js'), 'utf8');
+  assert.match(html, /<option value="local" disabled>/);
+  assert.match(optJs, /localOpt\.disabled = !webgpu/);
   const content = readFileSync(join(dir, '../content.js'), 'utf8');
   assert.match(content, /function setEnabled\(on\)/);
   assert.match(content, /void runBatch\(gen \+= 1, false, false\)/);

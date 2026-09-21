@@ -53,6 +53,9 @@
     busy = true;
     R.reportActionState('analyzing');
     return R.runJob(still, {
+      onFailed({ report, err }) {
+        globalThis.IH_feedbackContext?.stash({ session, report, err, surface: 'pdf' });
+      },
       fail(err) {
         clear();
         R.reportActionState('on');

@@ -107,6 +107,9 @@
     const t0 = Date.now();
     let heldErr = null;
 
+    const onFailed = ({ report, err }) => {
+      globalThis.IH_feedbackContext?.stash({ session, report, err, surface: 'web' });
+    };
     const fail = (err) => {
       clearAll();
       active = true;
@@ -121,8 +124,8 @@
     };
     // settle：idle 延到对拍窗结束，图标一直显示分析中
     const hooks = settle
-      ? { fail: (err) => { heldErr = err; }, idle() {} }
-      : { fail, idle };
+      ? { fail: (err) => { heldErr = err; }, idle() {}, onFailed }
+      : { fail, idle, onFailed };
     const job = async (report) => {
       if (!settle) extractStable = true;
       if (!session) await openSession(skip);

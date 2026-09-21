@@ -149,7 +149,7 @@ test('paintRange：opts.skipCache 写进 ih-analyze', async () => {
   assert.equal(analyze[0].skipCache, true);
 });
 
-test('afterPaint：painted===0 挂 detail 且 error 仍以 emptyMsg 开头', async () => {
+test('afterPaint：painted===0 挂 detail；对用户只抛 emptyMsg', async () => {
   const session = {
     next: 1,
     segs: [{}],
@@ -163,14 +163,10 @@ test('afterPaint：painted===0 挂 detail 且 error 仍以 emptyMsg 开头', asy
   report.tokens_skip_level = 12;
   await assert.rejects(
     () => R.afterPaint(session, null, 'No tokens mapped onto the page', () => {}, report),
-    (err) => {
-      assert.match(err.message, /^No tokens mapped onto the page /);
-      assert.match(err.message, /in=12/);
-      assert.match(err.message, /skip_lvl=12/);
-      assert.match(err.message, /painted=0/);
-      return true;
-    },
+    /No tokens mapped onto the page/,
   );
+  assert.equal(report.error, 'No tokens mapped onto the page');
+  assert.doesNotMatch(String(report.error), /skip_lvl=/);
   assert.equal(report.detail.tokens_in, 12);
   assert.equal(report.detail.tokens_skip_level, 12);
   assert.equal(report.detail.tokens_skip_empty_range, 0);
@@ -183,7 +179,7 @@ test('afterPaint：painted===0 挂 detail 且 error 仍以 emptyMsg 开头', asy
   assert.equal('page_text' in report.detail, false);
 });
 
-test('afterPaint：lastAlignErr 优先抛出，detail 仍带 last_align_err', async () => {
+test('afterPaint：painted===0 时 detail 带 last_align_err，对用户仍用 emptyMsg', async () => {
   const session = {
     next: 1,
     segs: [{}],
@@ -195,8 +191,9 @@ test('afterPaint：lastAlignErr 优先抛出，detail 仍带 last_align_err', as
   const alignErr = new Error('token offset align failed');
   await assert.rejects(
     () => R.afterPaint(session, alignErr, 'No tokens mapped onto the page', () => {}, report),
-    /token offset align failed/,
+    /No tokens mapped onto the page/,
   );
+  assert.equal(report.error, 'No tokens mapped onto the page');
   assert.equal(report.detail.align_fail_n, 2);
   assert.equal(report.detail.last_align_err, 'token offset align failed');
   assert.equal(report.detail.painted, 0);
@@ -322,7 +319,7 @@ test('runJob：failed 时 ih-usage-report 带 detail；ok 时不带', async () =
   assert.equal(failMsg.outcome, 'failed');
   assert.equal(failMsg.detail.tokens_in, 3);
   assert.equal(failMsg.detail.painted, 0);
-  assert.match(failMsg.error, /^No tokens mapped onto the page /);
+  assert.equal(failMsg.error, 'No tokens mapped onto the page');
   assert.equal(failMsg.segments, 1);
 
   messages.length = 0;
@@ -340,15 +337,34 @@ test('runJob：failed 时 ih-usage-report 带 detail；ok 时不带', async () =
   assert.equal('error' in okMsg, false);
 });
 
-test('background.js：/api/extension-usage keepalive 不含 error/detail', () => {
+test('runJob：onFailed 在 fail 之前收到 report', async () => {
+  let seen = null;
+  await R.runJob(
+    () => true,
+    {
+      onFailed: ({ report }) => {
+        seen = report.outcome;
+      },
+      fail: async () => {},
+      idle: () => {},
+    },
+    async (report) => {
+      report.segments = 1;
+      throw new Error('boom');
+    },
+  );
+  assert.equal(seen, 'failed');
+});
+
+test('background.js：失败时 error/detail 写进同一条 /api/extension-usage', () => {
   const src = readFileSync(join(dir, '../background.js'), 'utf8');
   const fn = src.match(/async function postUsageReport\(body\) \{[\s\S]*?\n\}/);
   assert.ok(fn, 'postUsageReport missing');
   assert.match(fn[0], /IL_postKeepalive\('\/api\/extension-usage', payload/);
+  assert.match(src, /il-extension-feedback/);
   assert.match(fn[0], /if \(model\) payload\.model = model/);
-  assert.doesNotMatch(fn[0], /payload\.error/);
-  assert.doesNotMatch(fn[0], /payload\.detail/);
-  assert.match(fn[0], /detail: body\?\.detail/);
+  assert.match(fn[0], /payload\.error = err/);
+  assert.match(fn[0], /payload\.detail = detail/);
   assert.doesNotMatch(src, /function usageModelId/);
-  assert.match(src, /IL_postKeepalive\('\/api\/extension-analysis-fail'/);
+  assert.doesNotMatch(src, /\/api\/extension-analysis-fail/);
 });

@@ -29,6 +29,7 @@ const CONTENT_JS = [
   'scrollGeometry.js',
   'progressAxis.js',
   'overlay.js',
+  'statusFeedback.js',
   'semantic/page-document.js',
   'cache/ring-store.js',
   'semantic/analyzeCache.js',

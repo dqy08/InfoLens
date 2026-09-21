@@ -479,7 +479,7 @@
       </div>
       <select id="analyze_pref" aria-label="Where to analyze">
         <option value="auto">Auto</option>
-        <option value="local">On this device only</option>
+        <option value="local" disabled>On this device only</option>
         <option value="cloud">Cloud only</option>
       </select>
     </div>
@@ -540,6 +540,7 @@
   <script src="cache/ring-store.js"></script>
   <script src="analyzeCache.js"></script>
   <script src="local/state.js"></script>
+  <script src="local/userErrors.js"></script>
   <script src="auto-sites.js"></script>
   <script src="highlightStyle.js"></script>
   <script src="sw/action-dot.js"></script>
@@ -547,7 +548,7 @@
   <script src="options-catalog.js"></script>
   <script src="options-new-dots.js"></script>
   <script src="options.js"></script>
-  <!-- SYNC: background.js CONTENT_JS，无 drop-stale / tokenTip / 第二份 highlightStyle -->
+  <!-- SYNC: background.js CONTENT_JS，无 drop-stale / tokenTip / 第二份 highlightStyle / 第二份 local/userErrors.js -->
   <script src="vendor/Readability.js"></script>
   <script src="extractRootPatches.js"></script>
   <script src="articleRoot.js"></script>
@@ -558,6 +559,8 @@
   <script src="scrollGeometry.js"></script>
   <script src="progressAxis.js"></script>
   <script src="overlay.js"></script>
+  <script src="statusFeedback.js"></script>
+  <script src="feedbackContext.js"></script>
   <script src="options-page-flags.js"></script>
   <script src="wordMerge.js"></script>
   <script src="page-map.js"></script>

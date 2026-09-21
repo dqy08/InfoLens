@@ -163,6 +163,28 @@
    * @param {number} u1
    * @returns {Range[]}
    */
+  /**
+   * 单 piece 上建 Range；节点失效或偏移越界则跳过（不抛），便于动态页局部放弃。
+   */
+  function rangeForPiece(p, text, seg0, seg1) {
+    if (!p?.node?.isConnected) return null;
+    const nodeText = p.node.nodeValue ?? p.node.data;
+    if (nodeText == null) return null;
+    const nodeLen = nodeText.length;
+    const startOff = seg0 - p.start;
+    const endOff = seg1 - p.start;
+    if (startOff < 0 || endOff > nodeLen || endOff <= startOff) return null;
+    if (!/\S/.test(text.slice(seg0, seg1))) return null;
+    const r = document.createRange();
+    try {
+      r.setStart(p.node, startOff);
+      r.setEnd(p.node, endOff);
+    } catch {
+      return null;
+    }
+    return r.collapsed ? null : r;
+  }
+
   function rangesFromUtf16(pieces, text, u0, u1) {
     if (u1 <= u0) return [];
     let i = globalThis.IL_findPieceIndex(pieces, u0);
@@ -171,15 +193,11 @@
     for (; i < pieces.length; i++) {
       const p = pieces[i];
       if (p.start >= u1) break;
-      if (!p.node.isConnected) continue;
       const seg0 = Math.max(u0, p.start);
       const seg1 = Math.min(u1, p.end);
       if (seg1 <= seg0) continue;
-      if (!/\S/.test(text.slice(seg0, seg1))) continue;
-      const r = document.createRange();
-      r.setStart(p.node, seg0 - p.start);
-      r.setEnd(p.node, seg1 - p.start);
-      if (!r.collapsed) out.push(r);
+      const r = rangeForPiece(p, text, seg0, seg1);
+      if (r) out.push(r);
     }
     return out;
   }
@@ -645,6 +663,9 @@
   });
 
   function shortError(msg) {
+    if (globalThis.IH_userErrors?.pageAnalyzeError) {
+      return globalThis.IH_userErrors.pageAnalyzeError(msg);
+    }
     let t = String(msg || 'Analyze failed').replace(/\s+/g, ' ').trim();
     if (/Failed to fetch|NetworkError|ERR_CONNECTION/i.test(t)) {
       t = 'Cannot reach the analyze server';
@@ -659,16 +680,37 @@
     return list;
   }
 
+  function attachErrorFeedback(el, userDetail) {
+    const feedback = globalThis.IL_statusFeedback;
+    const ctx = globalThis.IH_feedbackContext;
+    if (!feedback || !ctx) return;
+    const feedbackBtn = el.querySelector('.semantic-find-status-feedback');
+    if (!(feedbackBtn instanceof HTMLButtonElement)) return;
+    feedback.resetButton(feedbackBtn);
+    feedbackBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      feedback.sendReport(
+        feedbackBtn,
+        ctx.buildUserReport({ label: 'Failed', detail: userDetail }),
+      );
+    });
+  }
+
   async function showError(msg) {
+    const ctx = globalThis.IH_feedbackContext;
+    if (ctx && !ctx.peek()) ctx.stashMinimal(msg, 'web');
+    const userDetail = shortError(msg);
     const list = await noticeList();
-    list.replaceChildren(requireOverlay().createStatus({
+    const el = requireOverlay().createStatus({
       label: 'Failed',
-      detail: shortError(msg),
+      detail: userDetail,
       tone: 'error',
       continueHidden: true,
-      feedbackHidden: true,
+      feedbackHidden: false,
       onClose: clearError,
-    }));
+    });
+    attachErrorFeedback(el, userDetail);
+    list.replaceChildren(el);
   }
 
   async function showPaused(onContinue) {

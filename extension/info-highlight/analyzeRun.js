@@ -73,7 +73,6 @@ globalThis.IH_analyzeRun ||= (function () {
     if (report.outcome === 'failed' && report.error) {
       msg.error = String(report.error).slice(0, 500);
     }
-    // detail 只给 fail 通道；SW 不得把它写进 /api/extension-usage
     if (report.outcome === 'failed' && report.detail && typeof report.detail === 'object' && !Array.isArray(report.detail)) {
       msg.detail = report.detail;
     }
@@ -142,11 +141,6 @@ globalThis.IH_analyzeRun ||= (function () {
     const align = clipAlignErr(lastAlignErr || report?.last_align_err);
     if (align) detail.last_align_err = align;
     return detail;
-  }
-
-  function formatPaintFailSummary(d) {
-    if (!d) return '';
-    return `(in=${d.tokens_in} skip_lvl=${d.tokens_skip_level} empty=${d.tokens_skip_empty_range} align=${d.align_fail_n} painted=${d.painted})`;
   }
 
   /** @param {boolean | null} inferred 仅 `false` 计为 cache hit；`null` 表示未知（失败路径） */
@@ -333,18 +327,21 @@ globalThis.IH_analyzeRun ||= (function () {
     }
     if (!session.painted) {
       const detail = buildPaintFailDetail(session, report, lastAlignErr);
-      if (report) report.detail = detail;
-      if (lastAlignErr) throw lastAlignErr;
-      throw new Error(`${emptyMsg} ${formatPaintFailSummary(detail)}`);
+      if (report) {
+        report.detail = detail;
+        report.error = emptyMsg;
+      }
+      throw new Error(emptyMsg);
     }
   }
 
   /**
    * @param {() => boolean} still
-   * @param {{ fail: (err: unknown) => void | Promise<void>, idle: () => void }} hooks
+   * @param {{ fail: (err: unknown) => void | Promise<void>, idle: () => void, onFailed?: (args: { err: unknown, report: ReturnType<typeof newUsageReport> }) => void }} hooks
    * @param {(report: ReturnType<typeof newUsageReport>) => Promise<void>} job
    */
-  async function runJob(still, { fail, idle }, job) {
+  async function runJob(still, hooks, job) {
+    const { fail, idle, onFailed } = hooks;
     globalThis.IH_clearError();
     await globalThis.IH_setProgressSearching(true);
     const report = newUsageReport();
@@ -358,6 +355,7 @@ globalThis.IH_analyzeRun ||= (function () {
       } else {
         report.outcome = 'failed';
         report.error = String(err?.message || err).slice(0, 500);
+        onFailed?.({ err, report });
         await fail(err);
       }
     } finally {

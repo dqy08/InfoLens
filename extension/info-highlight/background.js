@@ -18,6 +18,7 @@ importScripts('pdf/sw.js');
 importScripts('cache/ring-store.js');
 importScripts('analyzeCache.js');
 importScripts('local/state.js');
+importScripts('local/userErrors.js');
 importScripts('init-window-bounds.js');
 importScripts('action-state.js');
 
@@ -27,6 +28,7 @@ if (!globalThis.IH_CONFIG || typeof IH_CONFIG.apiBase !== 'string' || !IH_CONFIG
   throw new Error('IH_CONFIG.apiBase missing — inject config.js before background.js');
 }
 if (!globalThis.IH_localState) throw new Error('IH_localState missing');
+if (!globalThis.IH_userErrors) throw new Error('IH_userErrors missing');
 if (!globalThis.IH_analyzeCache) throw new Error('IH_analyzeCache missing');
 if (!globalThis.IH_initWindowBounds) throw new Error('IH_initWindowBounds missing');
 if (!globalThis.IH_actionState) throw new Error('IH_actionState missing');
@@ -54,8 +56,11 @@ const CONTENT_JS = [
   'scrollGeometry.js',
   'progressAxis.js',
   'overlay.js',
+  'statusFeedback.js',
+  'feedbackContext.js',
   'highlightStyle.js',
   'wordMerge.js',
+  'local/userErrors.js',
   'page-map.js',
   'tokenTip.js',
   'analyzeRun.js',
@@ -261,6 +266,8 @@ function autoMenuTitle(host, on) {
 const manualTabs = new Set();
 /** tabId -> 导航代数；reset 时 +1，过期的自动分析不再改状态 */
 const autoGenByTab = new Map();
+/** 同一 tabId 的 maybeAutoAnalyze 互斥：onActivated / onUpdated(complete) 可能几乎同时触发 */
+const autoAnalyzeInFlight = new Set();
 
 /**
  * 无 tabs 权限时只看得见已授权站点的 url；看不见即未授权，正好是要显示「添加」的情形。
@@ -314,49 +321,57 @@ function resetAutoForTab(tabId) {
  * @param {number} tabId
  */
 async function maybeAutoAnalyze(tabId) {
-  const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (!tab?.active || tab.status !== 'complete' || manualTabs.has(tabId)) return;
-  const url = tab.url || '';
-  const host = IH_autoSites.hostOf(url);
-  if (!host || IL_isRestrictedUrl(url) || IL_pdfSw.isPdfUrl(url)) return;
-  if (!(await IH_autoSites.granted(host))) return;
-  const gen = autoGenByTab.get(tabId) || 0;
-  const stillCurrent = () => (autoGenByTab.get(tabId) || 0) === gen;
+  // onActivated / onUpdated(complete) 可能几乎同时触发；不互斥会各自把 content.js 注入一遍，
+  // 两份独立的页面管线各跑一次分析，对同一段正文重复发请求。
+  if (autoAnalyzeInFlight.has(tabId)) return;
+  autoAnalyzeInFlight.add(tabId);
   try {
-    const peek = await pageCsPeek(tabId, 'start');
-    if (!stillCurrent()) return;
-    if (peek.state === 'stale') {
-      await refuseStalePage(tabId);
-      return;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab?.active || tab.status !== 'complete' || manualTabs.has(tabId)) return;
+    const url = tab.url || '';
+    const host = IH_autoSites.hostOf(url);
+    if (!host || IL_isRestrictedUrl(url) || IL_pdfSw.isPdfUrl(url)) return;
+    if (!(await IH_autoSites.granted(host))) return;
+    const gen = autoGenByTab.get(tabId) || 0;
+    const stillCurrent = () => (autoGenByTab.get(tabId) || 0) === gen;
+    try {
+      const peek = await pageCsPeek(tabId, 'start');
+      if (!stillCurrent()) return;
+      if (peek.state === 'stale') {
+        await refuseStalePage(tabId);
+        return;
+      }
+      if (peek.state === 'live') {
+        const started = peek.result;
+        if (started === 'painted') IH_actionState.set(tabId, 'on');
+        if (started && started !== 'busy') clearBadge(tabId);
+        return;
+      }
+      IH_actionState.set(tabId, 'analyzing');
+      await IL_injectWithRetry(tabId, { css: CONTENT_CSS, js: CONTENT_JS }, {
+        logLabel: 'Info Highlight auto',
+        waitComplete: false,
+        isStale: () => !stillCurrent(),
+      });
+      if (!stillCurrent()) return;
+      const after = await pageCsPeek(tabId, 'start');
+      if (!stillCurrent()) return;
+      if (after.state === 'live' && after.result) {
+        clearBadge(tabId);
+        return;
+      }
+      await setBadgeError(tabId, 'inject');
+    } catch (err) {
+      if (!stillCurrent()) return;
+      if (String(err?.message || err).includes('navigation superseded')) {
+        IH_actionState.set(tabId, 'off');
+        return;
+      }
+      console.error('[Info Highlight] auto inject failed', err);
+      await setBadgeError(tabId, 'inject');
     }
-    if (peek.state === 'live') {
-      const started = peek.result;
-      if (started === 'painted') IH_actionState.set(tabId, 'on');
-      if (started && started !== 'busy') clearBadge(tabId);
-      return;
-    }
-    IH_actionState.set(tabId, 'analyzing');
-    await IL_injectWithRetry(tabId, { css: CONTENT_CSS, js: CONTENT_JS }, {
-      logLabel: 'Info Highlight auto',
-      waitComplete: false,
-      isStale: () => !stillCurrent(),
-    });
-    if (!stillCurrent()) return;
-    const after = await pageCsPeek(tabId, 'start');
-    if (!stillCurrent()) return;
-    if (after.state === 'live' && after.result) {
-      clearBadge(tabId);
-      return;
-    }
-    await setBadgeError(tabId, 'inject');
-  } catch (err) {
-    if (!stillCurrent()) return;
-    if (String(err?.message || err).includes('navigation superseded')) {
-      IH_actionState.set(tabId, 'off');
-      return;
-    }
-    console.error('[Info Highlight] auto inject failed', err);
-    await setBadgeError(tabId, 'inject');
+  } finally {
+    autoAnalyzeInFlight.delete(tabId);
   }
 }
 
@@ -450,7 +465,7 @@ async function postAnalyze(text, model) {
   } catch (err) {
     const msg = String(err?.message || err);
     if (/Failed to fetch|NetworkError|ERR_CONNECTION/i.test(msg)) {
-      throw new Error(`Cannot reach ${IH_CONFIG.apiBase}`);
+      throw new Error('Cannot reach the analyze server');
     }
     throw err;
   }
@@ -766,9 +781,7 @@ async function maybeOfferInitOnce() {
     console.warn('[Info Highlight] WebGPU probe failed', err);
     await IH_localState.set({ webgpuOk: false });
     if (st.pref === IH_localState.PREF_LOCAL) {
-      throw new Error(
-        `On-device WebGPU probe failed: ${String(err?.message || err)}. On-device only is selected, so cloud will not be used.`,
-      );
+      throw new Error(IH_userErrors.localOnlyFailure(err));
     }
     return;
   }
@@ -798,18 +811,27 @@ function maybeOfferInit() {
 function engineFrom(st) {
   if (st.pref === IH_localState.PREF_CLOUD) return 'cloud';
   if (st.pref === IH_localState.PREF_LOCAL) return 'local';
-  return st.ready ? 'local' : 'cloud';
+  return st.ready && st.webgpuOk !== false ? 'local' : 'cloud';
 }
 
-function localOnlyBlockReason(st) {
-  if (st.pref !== IH_localState.PREF_LOCAL) return '';
-  if (st.webgpuOk === false) {
-    return 'On-device WebGPU is unavailable. On-device only is selected, so cloud will not be used.';
+/**
+ * @returns {Promise<{ tokens: unknown[], model: string, engine: 'local' | 'cloud' }>}
+ */
+async function fetchTokensWithAutoFallback(st, forceCloud, text) {
+  const primary = forceCloud ? 'cloud' : engineFrom(st);
+  if (primary === 'cloud') {
+    const got = await fetchTokens('cloud', text, st.cloudModel);
+    return { ...got, engine: 'cloud' };
   }
-  if (!st.ready) {
-    return 'On-device model is not ready. On-device only is selected, so cloud will not be used. Prepare the on-device model first.';
+  try {
+    const got = await fetchTokens('local', text, st.cloudModel);
+    return { ...got, engine: 'local' };
+  } catch (err) {
+    if (forceCloud || st.pref !== IH_localState.PREF_AUTO) throw err;
+    if (IH_userErrors.isGpuRelated(err?.message || err)) await IH_localState.set({ webgpuOk: false });
+    const got = await fetchTokens('cloud', text, st.cloudModel);
+    return { ...got, engine: 'cloud' };
   }
-  return '';
 }
 
 async function resolveEngine() {
@@ -857,23 +879,24 @@ async function handleAnalyze(text, skipCache, forceCloud) {
   if (!forceCloud) await maybeOfferInit();
   const st = await IH_localState.get();
   if (!forceCloud) {
-    const blocked = localOnlyBlockReason(st);
+    const blocked = IH_userErrors.localOnlyBlock(st);
     if (blocked) throw new Error(blocked);
   }
-  const engine = forceCloud ? 'cloud' : engineFrom(st);
+  let engine = forceCloud ? 'cloud' : engineFrom(st);
   let inferred = false;
   let model = engine === 'local' ? IH_localState.MODEL_ID : st.cloudModel;
   let tokens;
   try {
     tokens = await IH_analyzeCache.tokens(text, async () => {
       inferred = true;
-      const got = await fetchTokens(engine, text, st.cloudModel);
+      const got = await fetchTokensWithAutoFallback(st, forceCloud, text);
       if (got.model) model = got.model;
+      engine = got.engine;
       return got.tokens;
     }, { skip: skipCache });
   } catch (err) {
     if (!forceCloud && st.pref === IH_localState.PREF_LOCAL) {
-      throw new Error(`On-device analysis failed: ${String(err?.message || err)}`);
+      throw new Error(IH_userErrors.localOnlyFailure(err));
     }
     throw err;
   }
@@ -935,25 +958,6 @@ async function handleLinger(msg) {
   await destroyOffscreen();
 }
 
-/** 阶段性调试：分析失败原因（可随门面通道一起删除）。不写入 /api/extension-usage。 */
-async function postAnalysisFailReport({ engine, error, segments, duration_ms, detail }) {
-  if (!IL_reportsEnabled(IH_CONFIG)) return;
-  const msg = String(error || '').slice(0, 500);
-  if (!msg) return;
-  const body = {
-    extension: EXTENSION_ID,
-    version: chrome.runtime.getManifest().version,
-    outcome: 'failed',
-    error: msg,
-    duration_ms: clampDurationMs(duration_ms),
-  };
-  if (engine === 'local' || engine === 'cloud') body.engine = engine;
-  const n = Math.max(0, Math.min(512, Number(segments) || 0));
-  if (n >= 1) body.segments = n;
-  if (detail && typeof detail === 'object' && !Array.isArray(detail)) body.detail = detail;
-  IL_postKeepalive('/api/extension-analysis-fail', body, IH_CONFIG.apiBase);
-}
-
 async function postUsageReport(body) {
   if (!IL_reportsEnabled(IH_CONFIG)) return;
   let engine = body?.engine;
@@ -969,7 +973,6 @@ async function postUsageReport(body) {
   const duration_ms = clampDurationMs(body?.duration_ms);
   const client_id = await IL_getClientId(IH_CONFIG.apiBase).catch(() => null);
   const model = typeof body?.model === 'string' ? body.model.trim().slice(0, 64) : '';
-  // 正式用量 POST 只计数字段；error/detail 不得进入 keepalive body
   const payload = {
     extension: EXTENSION_ID,
     version: chrome.runtime.getManifest().version,
@@ -982,16 +985,13 @@ async function postUsageReport(body) {
   };
   if (model) payload.model = model;
   if (client_id) payload.client_id = client_id;
-  IL_postKeepalive('/api/extension-usage', payload, IH_CONFIG.apiBase);
   if (outcome === 'failed') {
-    void postAnalysisFailReport({
-      engine,
-      error: body?.error || body?.message,
-      segments,
-      duration_ms,
-      detail: body?.detail,
-    });
+    const err = String(body?.error || body?.message || '').slice(0, 500);
+    if (err) payload.error = err;
+    const detail = body?.detail;
+    if (detail && typeof detail === 'object' && !Array.isArray(detail)) payload.detail = detail;
   }
+  IL_postKeepalive('/api/extension-usage', payload, IH_CONFIG.apiBase);
 }
 
 async function postLocalInitReport({ outcome, duration_ms, error }) {
@@ -1028,7 +1028,7 @@ async function handleAgree() {
     assertNotCancelled();
     const webgpu = await probeAndStore();
     assertNotCancelled();
-    if (!webgpu) throw new Error('WebGPU is unavailable');
+    if (!webgpu) throw new Error(IH_userErrors.gpuUnavailableShort());
     const res = await initEngine();
     initCancellable = false;
     if (!res?.ok) throw new Error(res?.error || 'local model init failed');
@@ -1100,6 +1100,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'ih-local-set-pref') {
     const pref = IH_localState.normalizePref(msg.pref);
     (async () => {
+      if (pref === IH_localState.PREF_LOCAL) {
+        const webgpu = await probeAndStore();
+        if (!webgpu) throw new Error(IH_userErrors.setLocalPrefBlocked());
+      }
       const prev = await resolveEngine();
       await IH_localState.set({ pref });
       if ((await resolveEngine()) !== prev) await IH_analyzeCache.dropAll();
@@ -1176,6 +1180,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .then(() => sendResponse({ ok: true }))
       .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
     return true;
+  }
+
+  if (msg?.type === 'il-extension-feedback') {
+    IL_postKeepalive(
+      '/api/extension-feedback',
+      {
+        ...(msg.body && typeof msg.body === 'object' ? msg.body : {}),
+        extension: EXTENSION_ID,
+        extension_version: chrome.runtime.getManifest().version,
+      },
+      msg.apiBase || IH_CONFIG.apiBase,
+    );
+    return;
   }
 
   if (msg?.type !== 'ih-analyze') return;

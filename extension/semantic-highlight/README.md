@@ -108,6 +108,7 @@ page/splitTextToChunks.js   # SYNC ← client
 page/scrollGeometry.js      # 滚动容器 ↔ 文档 Y
 page/progressAxis.js        # 进度图段 Y / 增量铺线
 page/overlay.js             # 进度图 / 状态条主题与 DOM
+page/statusFeedback.js      # 状态条「反馈作者」按钮：图标态、发送、感谢动画
 ui/overlay.css              # 进度图 / 状态条外壳
 sw/inject.js                # 网页 content 注入重试
 pdf/                        # 宿主页入口、暂存、viewer 渲染、file-access 引导
