@@ -9,6 +9,7 @@
   --ih-paint-deco: none;
   --ih-underline-thickness: 12.5%;
   --ih-underline-offset: 18.75%;
+  --ih-highlight-rgb: 255, 71, 64;
   --ih-token-0: rgba(255, 71, 64, 0);
   --ih-token-1: rgba(255, 71, 64, 0.03125);
   --ih-token-2: rgba(255, 71, 64, 0.0625);

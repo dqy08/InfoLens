@@ -1,6 +1,7 @@
 /**
  * 从正文根收集可见文本节点与 UTF-16 偏移（与高亮 pieces 同源）。
  * 只提当前可呈现节点：提取 ≡ 可见 ≡ 可画。
+ * `[aria-hidden="true"]` 除外：看得见，但节点自己声明不算正文。
  */
 (() => {
   /**
@@ -24,6 +25,7 @@
       '#il-scope-divider-host',
       '#il-scope-divider',
       '[data-il-underline]',
+      '[aria-hidden="true"]',
       extraExclude,
     ]
       .filter(Boolean)

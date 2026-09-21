@@ -49,6 +49,7 @@
     .page-demo {
       display: flex;
       align-items: center;
+      justify-content: flex-end;
       gap: 10px;
       margin: 0 0 22px;
       cursor: pointer;
@@ -204,12 +205,82 @@
       background: var(--ih-intensity-accent, #ff4740);
       box-shadow: none;
     }
+    /* 淡去滑条：黑白灰，不跟高亮色走 */
+    input[type="range"].ih-intensity.ih-fade::-webkit-slider-runnable-track {
+      background: linear-gradient(
+        to right,
+        var(--muted) 0 var(--ih-intensity-pct, 100%),
+        var(--line) var(--ih-intensity-pct, 100%) 100%
+      );
+    }
+    input[type="range"].ih-intensity.ih-fade::-webkit-slider-thumb {
+      background: var(--muted);
+    }
+    input[type="range"].ih-intensity.ih-fade::-moz-range-progress {
+      background: var(--muted);
+    }
+    input[type="range"].ih-intensity.ih-fade::-moz-range-thumb {
+      background: var(--muted);
+    }
     .row-nested {
       padding-left: 12px;
       border-left: 2px solid var(--line);
       margin-left: 4px;
     }
-    .row-nested[hidden] { display: none; }
+    .row[hidden] { display: none; }
+    .row-paint {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+    }
+    .ih-paint-cards {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      width: 100%;
+    }
+    button.ih-paint-card {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      height: auto;
+      padding: 12px 14px;
+      border-color: transparent;
+      border-radius: 12px;
+      white-space: normal;
+    }
+    button.ih-paint-card:hover:not(:disabled) {
+      filter: none;
+      background: color-mix(in srgb, var(--fg) 6%, transparent);
+    }
+    button.ih-paint-card[aria-checked="true"] {
+      border-color: var(--btn-border);
+    }
+    .ih-paint-demo {
+      width: 100%;
+      font-size: 16px;
+      font-weight: 400;
+      line-height: 1.5;
+      text-align: left;
+      white-space: pre-wrap;
+    }
+    .ih-paint-card[data-style="block"] .ih-paint-demo span {
+      border-radius: 2px;
+      background-color: rgba(var(--ih-mark-rgb, 255, 71, 64), calc(var(--ih-p) * var(--ih-block-max, 0.5)));
+    }
+    .ih-paint-card[data-style="underline"] .ih-paint-demo span {
+      text-decoration-line: underline;
+      text-decoration-style: solid;
+      text-decoration-thickness: 2px;
+      text-underline-offset: 3px;
+      text-decoration-color: rgba(var(--ih-mark-rgb, 255, 71, 64), calc(var(--ih-p) * var(--ih-line-max, 1)));
+    }
+    .ih-paint-card[data-style="text"] .ih-paint-demo span {
+      color: color-mix(in srgb-linear, rgb(var(--ih-ink-rgb, 234, 0, 33)) calc(var(--ih-p) * var(--ih-ink-max, 1) * 100%), currentColor);
+    }
+    .ih-paint-card[data-style="fade"] .ih-paint-demo span {
+      color: color-mix(in srgb, currentColor calc(var(--ih-p, 1) * 100%), transparent);
+    }
     input[type="range"].ih-hue {
       -webkit-appearance: none;
       appearance: none;
@@ -252,7 +323,7 @@
       flex-wrap: wrap;
       justify-content: flex-end;
       gap: 8px;
-      width: 100%;
+      flex-shrink: 0;
     }
     button.ih-color-swatch {
       width: 22px;
@@ -300,20 +371,17 @@
   <main>
     <label class="page-demo">
       <input type="checkbox" id="ih_highlight_options_page">
-      Highlight this page to preview the highlight in real time.
+      Highlight this page to preview
     </label>
     <section>
     <h2>Highlight</h2>
     <div class="group">
-    <div class="row" data-option-id="ih_paint_style">
+    <div class="row row-paint" data-option-id="ih_paint_style">
       <div class="row-text">
         <div class="row-title">Highlight style</div>
-        <p class="row-desc">Color blocks or underlines. If a document cannot use the selected style, it falls back (PDFs cannot use color blocks, because they would cover the letters).</p>
+        <p class="row-desc">PDFs fall back to underline.</p>
       </div>
-      <select id="ih_paint_style" aria-label="Highlight style">
-        <option value="block">Color blocks</option>
-        <option value="underline">Underline</option>
-      </select>
+      <div class="ih-paint-cards" id="ih_paint_style" role="radiogroup" aria-label="Highlight style"></div>
     </div>
     <div class="row row-slider" data-option-id="ih_highlight_color">
       <div class="row-text">
@@ -322,20 +390,34 @@
       <div class="ih-color-swatches" id="ih_highlight_swatches" role="radiogroup" aria-label="Highlight color presets"></div>
       <input type="range" class="ih-hue" id="ih_highlight_color" min="0" max="359" step="1" aria-label="Highlight color">
     </div>
+    <div class="row" hidden>
+      <div class="row-text">
+        <div class="row-title">Text color</div>
+      </div>
+      <div class="ih-color-swatches" id="ih_text_swatches" role="radiogroup" aria-label="Text color"></div>
+    </div>
     <div class="row row-slider" data-option-id="ih_max_highlight_alpha">
       <div class="row-slider-top">
         <div class="row-text">
           <div class="row-title">Highlight intensity</div>
-          <p class="row-desc">How strong the highlight looks.</p>
         </div>
         <span class="row-slider-value" id="ih_depth_value"></span>
       </div>
       <input type="range" class="ih-intensity" id="ih_max_highlight_alpha" min="5" max="150" step="1" aria-label="Highlight intensity">
     </div>
+    <div class="row row-slider" data-option-id="ih_fade_min_pct" hidden>
+      <div class="row-slider-top">
+        <div class="row-text">
+          <div class="row-title">Fade floor</div>
+        </div>
+        <span class="row-slider-value" id="ih_fade_value"></span>
+      </div>
+      <input type="range" class="ih-intensity ih-fade" id="ih_fade_min_pct" min="0" max="50" step="1" aria-label="Fade floor">
+    </div>
     <label class="row" data-option-id="ih_two_tier">
       <div class="row-text">
         <div class="row-title">One-tone highlight <span class="experimental">Experimental</span></div>
-        <p class="row-desc">A single highlight level instead of a gradient. Depends on a threshold that does not generalize across model changes. (Not recommended.)</p>
+        <p class="row-desc">Not recommended. Threshold does not generalize across models.</p>
       </div>
       <input type="checkbox" id="ih_two_tier">
     </label>
@@ -343,7 +425,6 @@
       <div class="row-slider-top">
         <div class="row-text">
           <div class="row-title">Highlight threshold</div>
-          <p class="row-desc">Minimum information density to highlight.</p>
         </div>
         <span class="row-slider-value" id="ih_threshold_value"></span>
       </div>
@@ -357,21 +438,20 @@
     <label class="row" data-option-id="show_token_tip">
       <div class="row-text">
         <div class="row-title">Hover for details</div>
-        <p class="row-desc">When the pointer rests on text, show its information density and more likely words. Hidden when you analyze the same page again.</p>
+        <p class="row-desc">Hidden if you analyze the page again.</p>
       </div>
       <input type="checkbox" id="show_token_tip" checked>
     </label>
     <label class="row" data-option-id="show_progress">
       <div class="row-text">
         <div class="row-title">Progress chart <span class="experimental">Experimental</span></div>
-        <p class="row-desc">Show how information density changes across the page, and where you are</p>
       </div>
       <input type="checkbox" id="show_progress">
     </label>
     <label class="row" data-option-id="ih_word_merge">
       <div class="row-text">
         <div class="row-title">Merge subwords <span class="experimental">Experimental</span></div>
-        <p class="row-desc">Paint each word as one block by adding its subword scores. Hover still shows individual tokens. (Not recommended.)</p>
+        <p class="row-desc">Not recommended. Hover still shows tokens.</p>
       </div>
       <input type="checkbox" id="ih_word_merge">
     </label>
@@ -383,7 +463,7 @@
     <label class="row" data-option-id="ih_article_only">
       <div class="row-text">
         <div class="row-title">Main article only</div>
-        <p class="row-desc">Highlight the main text of the page. Turn off to include other visible text.</p>
+        <p class="row-desc">Turn off to include other visible text.</p>
       </div>
       <input type="checkbox" id="ih_article_only" checked>
     </label>
@@ -395,7 +475,7 @@
     <div class="row" data-option-id="analyze_pref">
       <div class="row-text">
         <div class="row-title">Where to analyze</div>
-        <p class="row-desc">Auto prefers this device. On-device only does not upload the page, and will not fall back to the cloud.</p>
+        <p class="row-desc">On-device only never uploads, and never uses the cloud.</p>
       </div>
       <select id="analyze_pref" aria-label="Where to analyze">
         <option value="auto">Auto</option>
@@ -406,7 +486,6 @@
     <div class="row" data-option-id="ih_cloud_model">
       <div class="row-text">
         <div class="row-title">Cloud model</div>
-        <p class="row-desc">Used when analysis runs in the cloud.</p>
       </div>
       <select id="ih_cloud_model" aria-label="Cloud model"></select>
     </div>
@@ -434,7 +513,7 @@
     <div class="row" data-option-id="ih_auto_sites">
       <div class="row-text">
         <div class="row-title">Sites</div>
-        <p class="row-desc">Analyze once when a tab on these sites comes to the front. Add a site here, or right-click a page and choose “Always analyze …”. Use <code>*.example.com</code> for subdomains, or <code>*</code> for every site.</p>
+        <p class="row-desc">When a matching tab comes to the front. <code>*.example.com</code> or <code>*</code>.</p>
       </div>
     </div>
     <div class="row">

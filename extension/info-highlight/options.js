@@ -41,7 +41,9 @@
     'cache_desc', 'cache_clear',
     'ih_threshold_row', 'ih_threshold_value', 'ih_highlight_threshold_pct',
     'ih_depth_value', 'ih_max_highlight_alpha',
+    'ih_fade_value', 'ih_fade_min_pct',
     'ih_paint_style', 'ih_highlight_color', 'ih_highlight_swatches',
+    'ih_text_swatches',
   ];
   const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
   if (ids.some((id) => !el[id])) {
@@ -58,16 +60,81 @@
   el.brand_icon.src = iconRel;
   el.brand_icon.alt = name;
 
+  function demoPFor(bits, style) {
+    if (style === HS.PAINT_FADE) {
+      const level = HS.tokenLevelForFade(bits);
+      if (level < 0) return HS.clampFadeMinPct(el.ih_fade_min_pct.value) / 100;
+      return HS.fadeOpacityForLevel(
+        level,
+        HS.clampFadeMinPct(el.ih_fade_min_pct.value),
+      );
+    }
+    const twoTier = !!document.getElementById(HS.KEY_TWO_TIER)?.checked;
+    const level = HS.tokenLevelFromBits(bits, {
+      twoTier,
+      thresholdPct: HS.clampThresholdPct(el.ih_highlight_threshold_pct.value),
+    });
+    if (level < 0) return 0;
+    return twoTier ? 1 : level / HS.TOKEN_LEVELS;
+  }
+
+  function syncPaintDemo() {
+    for (const card of el.ih_paint_style.querySelectorAll('.ih-paint-card')) {
+      const style = card.dataset.style;
+      for (const s of card.querySelectorAll('.ih-paint-demo span')) {
+        s.style.setProperty('--ih-p', String(demoPFor(Number(s.dataset.bits), style)));
+      }
+    }
+  }
+
+  function rowFor(optionId) {
+    return document.querySelector(`[data-option-id="${optionId}"]`);
+  }
+
   function syncTwoTierUi(on) {
-    el.ih_threshold_row.hidden = !on;
+    const fade = paintStyle === HS.PAINT_FADE;
+    const twoTierRow = rowFor(HS.KEY_TWO_TIER);
+    if (twoTierRow) twoTierRow.hidden = fade;
+    el.ih_threshold_row.hidden = fade || !on;
+    syncPaintDemo();
+  }
+
+  function syncPaintColorUi() {
+    const text = paintStyle === HS.PAINT_TEXT;
+    const fade = paintStyle === HS.PAINT_FADE;
+    el.ih_highlight_swatches.closest('.row').hidden = text || fade;
+    el.ih_text_swatches.closest('.row').hidden = !text;
+    const intensityRow = rowFor(HS.KEY_MAX_ALPHA_DEPTH);
+    if (intensityRow) intensityRow.hidden = fade;
+    const fadeRow = rowFor(HS.KEY_FADE_MIN_PCT);
+    if (fadeRow) fadeRow.hidden = !fade;
+  }
+
+  function syncPaintStyle(v) {
+    paintStyle = HS.normalizePaintStyle(v);
+    for (const btn of el.ih_paint_style.querySelectorAll('.ih-paint-card')) {
+      btn.setAttribute('aria-checked', btn.dataset.style === paintStyle ? 'true' : 'false');
+    }
+    syncPaintColorUi();
+    syncTwoTierUi(!!document.getElementById(HS.KEY_TWO_TIER)?.checked);
   }
 
   function syncThresholdLabel(pct) {
     el.ih_threshold_value.textContent = HS.formatThresholdLabel(pct);
+    syncPaintDemo();
   }
 
+  let paintStyle = HS.PAINT_BLOCK;
   let highlightColor = HS.HUE_RED;
   let lastHue = HS.HUE_RED;
+  let textColor = 'red';
+
+  const PAINT_CARD_LABEL = Object.freeze({
+    [HS.PAINT_BLOCK]: 'Color blocks',
+    [HS.PAINT_UNDERLINE]: 'Underline',
+    [HS.PAINT_TEXT]: 'Text color',
+    [HS.PAINT_FADE]: 'Fade unimportant',
+  });
 
   function hueNear(a, b) {
     const d = Math.abs(a - b) % 360;
@@ -78,10 +145,16 @@
     return rgb.split(',').map((s) => Number(s.trim()));
   }
 
+  function activeRgb() {
+    return paintStyle === HS.PAINT_TEXT
+      ? HS.rgbForTextColor(textColor)
+      : HS.rgbForColor(highlightColor);
+  }
+
   /** 滑条 accent 合成到页面底色上，观感接近正文里的高亮 */
   function intensityAccent(depth) {
-    const a = HS.depthToMaxAlpha(depth, el.ih_paint_style.value);
-    const [r, g, b] = parseRgb(HS.rgbForColor(highlightColor));
+    const a = HS.depthToMaxAlpha(depth, paintStyle);
+    const [r, g, b] = parseRgb(activeRgb());
     const bg = getComputedStyle(document.body).backgroundColor;
     const m = bg.match(/\d+/g);
     if (!m || m.length < 3) return `rgba(${r}, ${g}, ${b}, ${a})`;
@@ -95,8 +168,9 @@
     if (!ink) lastHue = highlightColor;
     el.ih_highlight_color.value = String(lastHue);
     el.ih_highlight_color.hidden = ink;
-    const rgb = HS.rgbForColor(highlightColor);
+    const rgb = activeRgb();
     document.documentElement.style.setProperty('--ih-highlight-rgb', rgb);
+    document.documentElement.style.setProperty('--ih-mark-rgb', HS.rgbForColor(highlightColor));
     el.ih_highlight_color.style.setProperty('--ih-hue-track', HS.hueTrackCss());
     for (const btn of el.ih_highlight_swatches.querySelectorAll('.ih-color-swatch')) {
       const id = btn.dataset.color;
@@ -104,6 +178,18 @@
         ? ink
         : !ink && hueNear(HS.hueForColorId(id), lastHue);
       btn.setAttribute('aria-checked', on ? 'true' : 'false');
+    }
+    syncDepthLabel(HS.clampMaxAlphaDepth(el.ih_max_highlight_alpha.value));
+  }
+
+  function syncTextColor(v) {
+    textColor = HS.normalizeTextColor(v);
+    for (const btn of el.ih_text_swatches.querySelectorAll('.ih-color-swatch')) {
+      btn.setAttribute('aria-checked', btn.dataset.color === textColor ? 'true' : 'false');
+    }
+    document.documentElement.style.setProperty('--ih-ink-rgb', HS.rgbForTextColor(textColor));
+    if (paintStyle === HS.PAINT_TEXT) {
+      document.documentElement.style.setProperty('--ih-highlight-rgb', HS.rgbForTextColor(textColor));
     }
     syncDepthLabel(HS.clampMaxAlphaDepth(el.ih_max_highlight_alpha.value));
   }
@@ -116,10 +202,15 @@
     const pct = max === min ? 100 : ((depth - min) / (max - min)) * 100;
     input.style.setProperty('--ih-intensity-accent', intensityAccent(depth));
     input.style.setProperty('--ih-intensity-pct', `${pct}%`);
+    const root = document.documentElement;
+    root.style.setProperty('--ih-block-max', String(HS.depthToMaxAlpha(depth, HS.PAINT_BLOCK)));
+    root.style.setProperty('--ih-line-max', String(HS.depthToMaxAlpha(depth, HS.PAINT_UNDERLINE)));
+    root.style.setProperty('--ih-ink-max', String(HS.depthToMaxAlpha(depth, HS.PAINT_TEXT)));
   }
 
   HS.watchColorScheme(() => {
     syncHighlightColor(highlightColor);
+    syncTextColor(textColor);
   });
 
   function loadToggles() {
@@ -144,13 +235,28 @@
         const prefs = HS.normalizePrefs(res);
         el.ih_highlight_threshold_pct.value = String(prefs.thresholdPct);
         syncThresholdLabel(prefs.thresholdPct);
-        el.ih_paint_style.value = prefs.paintStyle;
+        el.ih_fade_min_pct.value = String(prefs.fadeMinPct);
+        syncPaintStyle(prefs.paintStyle);
         el.ih_max_highlight_alpha.value = String(prefs.maxAlphaDepth);
         syncHighlightColor(prefs.highlightColor);
+        syncTextColor(prefs.textColor);
+        syncFadeLabel(prefs.fadeMinPct);
         syncTwoTierUi(prefs.twoTier);
         resolve();
       });
     });
+  }
+
+  function syncFadeLabel(pct) {
+    const p = HS.clampFadeMinPct(pct);
+    el.ih_fade_min_pct.value = String(p);
+    el.ih_fade_value.textContent = HS.formatFadeLabel(p);
+    const input = el.ih_fade_min_pct;
+    const min = Number(input.min);
+    const max = Number(input.max);
+    const fill = max === min ? 100 : ((p - min) / (max - min)) * 100;
+    input.style.setProperty('--ih-intensity-pct', `${fill}%`);
+    syncPaintDemo();
   }
 
   el.ih_highlight_threshold_pct.addEventListener('input', () => {
@@ -167,12 +273,57 @@
     chrome.storage.local.set({ [HS.KEY_MAX_ALPHA_DEPTH]: depth });
   });
 
-  el.ih_paint_style.addEventListener('change', () => {
-    const style = HS.normalizePaintStyle(el.ih_paint_style.value);
-    el.ih_paint_style.value = style;
-    chrome.storage.local.set({ [HS.KEY_PAINT_STYLE]: style });
-    syncDepthLabel(HS.clampMaxAlphaDepth(el.ih_max_highlight_alpha.value));
+  el.ih_fade_min_pct.addEventListener('input', () => {
+    const pct = HS.clampFadeMinPct(el.ih_fade_min_pct.value);
+    syncFadeLabel(pct);
+    chrome.storage.local.set({ [HS.KEY_FADE_MIN_PCT]: pct });
   });
+
+  function pickPaint(v) {
+    syncPaintStyle(v);
+    chrome.storage.local.set({ [HS.KEY_PAINT_STYLE]: paintStyle });
+    syncHighlightColor(highlightColor);
+    syncTextColor(textColor);
+  }
+
+  function paintDemo(style) {
+    const demo = document.createElement('span');
+    demo.className = 'ih-paint-demo';
+    demo.setAttribute('aria-hidden', 'true');
+    // Qwen3-0.6B-Base surprisal bits；--ih-p 按每张卡自己的样式现算（淡去走 fadeOpacity）
+    const tokens = [
+      ['Try', 12.39], [' Info', 14.04], [' Highlight', 19], ['.', 7.28],
+      [' It', 4.64], [' uses', 7.4], [' large', 11.11], [' language', 6.03],
+      [' models', 0.11], [' to', 0.81], [' analyze', 4.5], [' text', 3.03],
+      [' information', 9.97], [' density', 17.48], [' and', 1.37],
+      [' visual', 8.31], ['izes', 10.65], [' where', 10.72], [' the', 2.28],
+      [' important', 8.38], [' parts', 3.45], [' are', 1.44], ['.\n', 3.78],
+      ['The', 5.26], [' color', 10.57], [' intensity', 5.06], [' of', 1.15],
+      [' each', 2.34], [' token', 8.51], [' indicates', 4.09], [' how', 2.69],
+      [' much', 2.39], [' information', 1.68], [' it', 1.82], [' carries', 2.91],
+      ['.', 1.13], [' Try', 8.72], [' it', 3.01], [' yourself', 4.29], ['!', 3.91],
+    ];
+    for (const [raw, bits] of tokens) {
+      const s = document.createElement('span');
+      s.dataset.bits = String(bits);
+      s.style.setProperty('--ih-p', String(demoPFor(bits, style ?? paintStyle)));
+      s.textContent = raw;
+      demo.append(s);
+    }
+    return demo;
+  }
+
+  for (const id of HS.PAINT_STYLES) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ih-paint-card';
+    btn.dataset.style = id;
+    btn.setAttribute('role', 'radio');
+    btn.setAttribute('aria-label', PAINT_CARD_LABEL[id]);
+    btn.append(paintDemo(id));
+    btn.addEventListener('click', () => pickPaint(id));
+    el.ih_paint_style.append(btn);
+  }
 
   el.ih_highlight_color.addEventListener('input', () => {
     syncHighlightColor(el.ih_highlight_color.value);
@@ -198,6 +349,21 @@
     appendColorSwatch(id, `${id[0].toUpperCase()}${id.slice(1)}`, HS.rgbForHue(HS.hueForColorId(id)));
   }
   appendColorSwatch(HS.COLOR_INK, 'Black / white');
+
+  for (const id of HS.TEXT_COLOR_IDS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ih-color-swatch';
+    btn.dataset.color = id;
+    btn.setAttribute('role', 'radio');
+    btn.setAttribute('aria-label', `${id[0].toUpperCase()}${id.slice(1)}`);
+    btn.style.setProperty('--ih-swatch-rgb', HS.rgbForTextColor(id));
+    btn.addEventListener('click', () => {
+      syncTextColor(id);
+      chrome.storage.local.set({ [HS.KEY_TEXT_COLOR]: textColor });
+    });
+    el.ih_text_swatches.append(btn);
+  }
 
   function modelStatusText(st, webgpu) {
     if (st.ready) return 'Ready (Gemma 3 270M)';
