@@ -72,9 +72,26 @@ test('normalizePrefs 填默认', () => {
   assert.equal(p.twoTier, false);
   assert.equal(p.thresholdPct, 25);
   assert.equal(p.maxAlphaDepth, 100);
+  assert.equal(p.fadeMinPct, HS.FADE_MIN_DEFAULT);
   assert.equal(p.paintStyle, HS.PAINT_BLOCK);
   assert.equal(p.highlightColor, HS.HUE_RED);
   assert.equal(p.textColor, 'red');
+});
+
+test('淡去：档位不过滤，最重要的字始终 1，下限只有 0 才全透明', () => {
+  assert.equal(HS.tokenLevelForFade(0), 0);
+  assert.equal(HS.tokenLevelForFade(0.5), 0);
+  assert.equal(HS.tokenLevelForFade(HS.MAX_SURPRISAL_BITS), HS.TOKEN_LEVELS - 1);
+  assert.equal(HS.tokenLevelForFade(NaN), -1);
+  assert.equal(HS.fadeOpacityForLevel(15, 30), 1);
+  assert.equal(HS.fadeOpacityForLevel(0, 30), 0.3);
+  assert.equal(HS.fadeOpacityForLevel(0, 0), 0);
+  assert.equal(HS.fadeOpacityForLevel(0, 50), 0.5);
+  assert.equal(HS.fadeOpacityForLevel(15, 0), 1);
+  assert.equal(HS.clampFadeMinPct(-3), 0);
+  assert.equal(HS.clampFadeMinPct(150), 50);
+  assert.equal(HS.FADE_MIN_MAX, 50);
+  assert.equal(HS.formatFadeLabel(30), '30%');
 });
 
 test('normalizeHighlightHue：色相环绕；旧 id 迁到色相', () => {
@@ -132,16 +149,20 @@ test('normalizePaintStyle：未知值回块', () => {
   assert.equal(HS.normalizePaintStyle('underline'), HS.PAINT_UNDERLINE);
   assert.equal(HS.normalizePaintStyle('block'), HS.PAINT_BLOCK);
   assert.equal(HS.normalizePaintStyle('text'), HS.PAINT_TEXT);
+  assert.equal(HS.normalizePaintStyle('fade'), HS.PAINT_FADE);
   assert.equal(HS.normalizePaintStyle('nope'), HS.PAINT_BLOCK);
+  assert.deepEqual([...HS.PAINT_STYLES], ['block', 'underline', 'text', 'fade']);
 });
 
-test('resolvePaintStyle：PDF 色块/字色回退下划线，网页不回退', () => {
+test('resolvePaintStyle：PDF 色块/字色/淡去回退下划线，网页不回退', () => {
   assert.equal(HS.resolvePaintStyle('block', 'pdf'), HS.PAINT_UNDERLINE);
   assert.equal(HS.resolvePaintStyle('underline', 'pdf'), HS.PAINT_UNDERLINE);
   assert.equal(HS.resolvePaintStyle('text', 'pdf'), HS.PAINT_UNDERLINE);
+  assert.equal(HS.resolvePaintStyle('fade', 'pdf'), HS.PAINT_UNDERLINE);
   assert.equal(HS.resolvePaintStyle('block', 'web'), HS.PAINT_BLOCK);
   assert.equal(HS.resolvePaintStyle('underline', 'web'), HS.PAINT_UNDERLINE);
   assert.equal(HS.resolvePaintStyle('text', 'web'), HS.PAINT_TEXT);
+  assert.equal(HS.resolvePaintStyle('fade', 'web'), HS.PAINT_FADE);
   assert.equal(HS.depthToMaxAlpha(100, 'block', 'pdf'), HS.PAINT_CAP.underline);
   assert.equal(HS.depthToMaxAlpha(100, 'text', 'pdf'), HS.PAINT_CAP.underline);
   assert.equal(HS.depthToMaxAlpha(100, 'block', 'web'), HS.PAINT_CAP.block);
@@ -181,6 +202,24 @@ test('applyCssVars：下划线透明底、block 写底色、text 写字色；100
   assert.equal(props['--ih-highlight-rgb'], HS.rgbForTextColor('blue'));
   HS.applyCssVars(root, { twoTier: false, maxAlphaDepth: 100, paintStyle: 'block' });
   assert.equal(props['--ih-token-pct-8'], undefined);
+});
+
+test('applyCssVars：淡去写 --ih-fade-pct-*，底色透明，不写字色变量', () => {
+  const props = {};
+  const root = {
+    style: {
+      setProperty(k, v) { props[k] = v; },
+      removeProperty(k) { delete props[k]; },
+    },
+  };
+  HS.applyCssVars(root, { twoTier: false, maxAlphaDepth: 100, fadeMinPct: 30, paintStyle: 'fade' });
+  assert.equal(props['--ih-paint-deco'], 'none');
+  assert.equal(props['--ih-token-bg-8'], 'transparent');
+  assert.equal(props['--ih-token-pct-8'], undefined);
+  assert.equal(props['--ih-fade-pct-15'], '100%');
+  assert.equal(props['--ih-fade-pct-0'], '30%');
+  HS.applyCssVars(root, { twoTier: false, maxAlphaDepth: 100, paintStyle: 'block' });
+  assert.equal(props['--ih-fade-pct-0'], undefined);
 });
 
 test('underlineOverlayBox：16px 字盒 = 2px 粗、再上移 1px', () => {

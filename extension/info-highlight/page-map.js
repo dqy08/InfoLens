@@ -215,7 +215,7 @@
     return el.sheet;
   }
 
-  /** 字色规则写死了当时的原文色和终点墨；主题或字色变了必须丢掉再画。 */
+  /** 字色/淡去规则写死了当时的原文色；主题变了必须丢掉再画。 */
   function forgetTextFg() {
     document.getElementById('ih-text-fg-css')?.remove();
     if (!CSS.highlights?.delete) return;
@@ -226,11 +226,15 @@
     }
   }
 
+  /** 原文色/rgb 进 Highlight 名前先洗成合法标识，两处共用，改一处即全改 */
+  function identForHighlightName(s) {
+    return String(s).replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '');
+  }
+
   function highlightForTextRange(range, level) {
     const origin = originCssColor(range.startContainer);
     const rgb = HS.rgbForTextColor(highlightPrefs.textColor);
-    const ident = (s) => String(s).replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '');
-    const name = `${HL_PREFIX}${level}-${ident(origin)}-${ident(rgb)}`;
+    const name = `${HL_PREFIX}${level}-${identForHighlightName(origin)}-${identForHighlightName(rgb)}`;
     if (!CSS.highlights.has(name)) {
       const h = new Highlight();
       h.priority = level;
@@ -239,6 +243,26 @@
       sheet.insertRule(
         // 覆盖率：线性光 lerp。Oklab 会把前半段混成浑浊深色。
         `::highlight(${name}){background-color:transparent;color:color-mix(in srgb-linear,rgb(${rgb}) var(--ih-token-pct-${level}),${origin})}`,
+        sheet.cssRules.length,
+      );
+    }
+    const h = CSS.highlights.get(name);
+    if (!h) throw new Error(`highlight missing: ${name}`);
+    return h;
+  }
+
+  /** 淡去：只混原文色与透明，不引入高亮色；不透明度走 --ih-fade-pct-level。 */
+  function highlightForFadeRange(range, level) {
+    const origin = originCssColor(range.startContainer);
+    const name = `${HL_PREFIX}fade-${level}-${identForHighlightName(origin)}`;
+    if (!CSS.highlights.has(name)) {
+      const h = new Highlight();
+      h.priority = level;
+      CSS.highlights.set(name, h);
+      const fallback = HS.fadeOpacityForLevel(level, highlightPrefs.fadeMinPct) * 100;
+      const sheet = textFgSheet();
+      sheet.insertRule(
+        `::highlight(${name}){background-color:transparent;color:color-mix(in srgb,${origin} var(--ih-fade-pct-${level},${fallback}%),transparent)}`,
         sheet.cssRules.length,
       );
     }
@@ -298,7 +322,7 @@
   /** @type {{ tokens: unknown[], mapped: { text: string, pieces: unknown[], root?: Element } | null, overlay: boolean }} */
   let paintBuf = { tokens: [], mapped: null, overlay: false };
 
-  /** @type {{ twoTier: boolean, thresholdPct: number, maxAlphaDepth: number }} */
+  /** @type {{ twoTier: boolean, thresholdPct: number, maxAlphaDepth: number, fadeMinPct: number, paintStyle: string }} */
   let highlightPrefs = HS.normalizePrefs(HS.STORAGE_DEFAULTS);
 
   function tokenMaxAlpha() {
@@ -431,6 +455,7 @@
   function tokenLevel(tok) {
     const bits = tokenBits(tok);
     if (bits == null) return -1;
+    if (highlightPrefs.paintStyle === HS.PAINT_FADE) return HS.tokenLevelForFade(bits);
     return HS.tokenLevelFromBits(bits, highlightPrefs);
   }
 
@@ -487,7 +512,8 @@
     };
     for (const tok of list) {
       const level = tokenLevel(tok);
-      if (level < 1) {
+      const fadePaint = !overlay && highlightPrefs.paintStyle === HS.PAINT_FADE;
+      if (fadePaint ? level < 0 : level < 1) {
         stats.tokens_skip_level += 1;
         continue;
       }
@@ -498,13 +524,20 @@
       const u0 = idx.cpToUtf16(off[0]);
       const u1 = idx.cpToUtf16(off[1]);
       const textPaint = !overlay && highlightPrefs.paintStyle === HS.PAINT_TEXT;
-      const h = overlay || textPaint ? null : CSS.highlights.get(HL_PREFIX + level);
-      if (!overlay && !textPaint && !h) throw new Error(`highlight missing: ${HL_PREFIX}${level}`);
+      const h = overlay || textPaint || fadePaint ? null : CSS.highlights.get(HL_PREFIX + level);
+      if (!overlay && !textPaint && !fadePaint && !h) {
+        throw new Error(`highlight missing: ${HL_PREFIX}${level}`);
+      }
       let n = 0;
       for (const range of rangesFromUtf16(mapped.pieces, mapped.text, u0, u1)) {
         if (!/\S/.test(range.toString())) continue;
         if (!overlay) {
-          (textPaint ? highlightForTextRange(range, level) : h).add(range);
+          (fadePaint
+            ? highlightForFadeRange(range, level)
+            : textPaint
+              ? highlightForTextRange(range, level)
+              : h
+          ).add(range);
           n += 1;
           continue;
         }
@@ -528,14 +561,18 @@
 
   function applyHighlightPrefs(raw) {
     const next = HS.normalizePrefs(raw);
-    const levelChanged =
+    // 淡去模式下强度/阈值/颜色行已隐藏，改它们不用重画；淡去量走 CSS 变量实时生效；切画法自会重画。
+    const fadeInvolved = next.paintStyle === HS.PAINT_FADE
+      || highlightPrefs.paintStyle === HS.PAINT_FADE;
+    const levelChanged = !fadeInvolved && (
       next.twoTier !== highlightPrefs.twoTier
-      || next.thresholdPct !== highlightPrefs.thresholdPct;
+      || next.thresholdPct !== highlightPrefs.thresholdPct
+    );
     const paintStyleChanged = next.paintStyle !== highlightPrefs.paintStyle;
-    const alphaChanged = next.maxAlphaDepth !== highlightPrefs.maxAlphaDepth
-      || paintStyleChanged;
-    const colorChanged = next.highlightColor !== highlightPrefs.highlightColor
-      || next.textColor !== highlightPrefs.textColor;
+    const alphaChanged = !fadeInvolved && (next.maxAlphaDepth !== highlightPrefs.maxAlphaDepth
+      || paintStyleChanged);
+    const colorChanged = !fadeInvolved && (next.highlightColor !== highlightPrefs.highlightColor
+      || next.textColor !== highlightPrefs.textColor);
     highlightPrefs = next;
     applyTokenColors();
     if (
@@ -583,6 +620,7 @@
       !(HS.KEY_TWO_TIER in changes)
       && !(HS.KEY_THRESHOLD_PCT in changes)
       && !(HS.KEY_MAX_ALPHA_DEPTH in changes)
+      && !(HS.KEY_FADE_MIN_PCT in changes)
       && !(HS.KEY_PAINT_STYLE in changes)
       && !(HS.KEY_HIGHLIGHT_COLOR in changes)
       && !(HS.KEY_TEXT_COLOR in changes)
@@ -596,7 +634,12 @@
 
   HS.watchColorScheme(() => {
     applyTokenColors();
-    if (highlightPrefs.paintStyle !== HS.PAINT_TEXT) return;
+    if (
+      highlightPrefs.paintStyle !== HS.PAINT_TEXT
+      && highlightPrefs.paintStyle !== HS.PAINT_FADE
+    ) {
+      return;
+    }
     if (!paintBuf.mapped || !paintBuf.tokens.length) return;
     requestAnimationFrame(() => repaintFromBuffer());
   });

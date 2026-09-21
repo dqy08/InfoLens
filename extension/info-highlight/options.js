@@ -41,6 +41,7 @@
     'cache_desc', 'cache_clear',
     'ih_threshold_row', 'ih_threshold_value', 'ih_highlight_threshold_pct',
     'ih_depth_value', 'ih_max_highlight_alpha',
+    'ih_fade_value', 'ih_fade_min_pct',
     'ih_paint_style', 'ih_highlight_color', 'ih_highlight_swatches',
     'ih_text_swatches',
   ];
@@ -59,7 +60,15 @@
   el.brand_icon.src = iconRel;
   el.brand_icon.alt = name;
 
-  function demoP(bits) {
+  function demoPFor(bits, style) {
+    if (style === HS.PAINT_FADE) {
+      const level = HS.tokenLevelForFade(bits);
+      if (level < 0) return HS.clampFadeMinPct(el.ih_fade_min_pct.value) / 100;
+      return HS.fadeOpacityForLevel(
+        level,
+        HS.clampFadeMinPct(el.ih_fade_min_pct.value),
+      );
+    }
     const twoTier = !!document.getElementById(HS.KEY_TWO_TIER)?.checked;
     const level = HS.tokenLevelFromBits(bits, {
       twoTier,
@@ -70,20 +79,35 @@
   }
 
   function syncPaintDemo() {
-    for (const s of el.ih_paint_style.querySelectorAll('.ih-paint-demo span')) {
-      s.style.setProperty('--ih-p', String(demoP(Number(s.dataset.bits))));
+    for (const card of el.ih_paint_style.querySelectorAll('.ih-paint-card')) {
+      const style = card.dataset.style;
+      for (const s of card.querySelectorAll('.ih-paint-demo span')) {
+        s.style.setProperty('--ih-p', String(demoPFor(Number(s.dataset.bits), style)));
+      }
     }
   }
 
+  function rowFor(optionId) {
+    return document.querySelector(`[data-option-id="${optionId}"]`);
+  }
+
   function syncTwoTierUi(on) {
-    el.ih_threshold_row.hidden = !on;
+    const fade = paintStyle === HS.PAINT_FADE;
+    const twoTierRow = rowFor(HS.KEY_TWO_TIER);
+    if (twoTierRow) twoTierRow.hidden = fade;
+    el.ih_threshold_row.hidden = fade || !on;
     syncPaintDemo();
   }
 
   function syncPaintColorUi() {
     const text = paintStyle === HS.PAINT_TEXT;
-    el.ih_highlight_swatches.closest('.row').hidden = text;
+    const fade = paintStyle === HS.PAINT_FADE;
+    el.ih_highlight_swatches.closest('.row').hidden = text || fade;
     el.ih_text_swatches.closest('.row').hidden = !text;
+    const intensityRow = rowFor(HS.KEY_MAX_ALPHA_DEPTH);
+    if (intensityRow) intensityRow.hidden = fade;
+    const fadeRow = rowFor(HS.KEY_FADE_MIN_PCT);
+    if (fadeRow) fadeRow.hidden = !fade;
   }
 
   function syncPaintStyle(v) {
@@ -92,6 +116,7 @@
       btn.setAttribute('aria-checked', btn.dataset.style === paintStyle ? 'true' : 'false');
     }
     syncPaintColorUi();
+    syncTwoTierUi(!!document.getElementById(HS.KEY_TWO_TIER)?.checked);
   }
 
   function syncThresholdLabel(pct) {
@@ -108,6 +133,7 @@
     [HS.PAINT_BLOCK]: 'Color blocks',
     [HS.PAINT_UNDERLINE]: 'Underline',
     [HS.PAINT_TEXT]: 'Text color',
+    [HS.PAINT_FADE]: 'Fade unimportant',
   });
 
   function hueNear(a, b) {
@@ -209,14 +235,28 @@
         const prefs = HS.normalizePrefs(res);
         el.ih_highlight_threshold_pct.value = String(prefs.thresholdPct);
         syncThresholdLabel(prefs.thresholdPct);
+        el.ih_fade_min_pct.value = String(prefs.fadeMinPct);
         syncPaintStyle(prefs.paintStyle);
         el.ih_max_highlight_alpha.value = String(prefs.maxAlphaDepth);
         syncHighlightColor(prefs.highlightColor);
         syncTextColor(prefs.textColor);
+        syncFadeLabel(prefs.fadeMinPct);
         syncTwoTierUi(prefs.twoTier);
         resolve();
       });
     });
+  }
+
+  function syncFadeLabel(pct) {
+    const p = HS.clampFadeMinPct(pct);
+    el.ih_fade_min_pct.value = String(p);
+    el.ih_fade_value.textContent = HS.formatFadeLabel(p);
+    const input = el.ih_fade_min_pct;
+    const min = Number(input.min);
+    const max = Number(input.max);
+    const fill = max === min ? 100 : ((p - min) / (max - min)) * 100;
+    input.style.setProperty('--ih-intensity-pct', `${fill}%`);
+    syncPaintDemo();
   }
 
   el.ih_highlight_threshold_pct.addEventListener('input', () => {
@@ -233,6 +273,12 @@
     chrome.storage.local.set({ [HS.KEY_MAX_ALPHA_DEPTH]: depth });
   });
 
+  el.ih_fade_min_pct.addEventListener('input', () => {
+    const pct = HS.clampFadeMinPct(el.ih_fade_min_pct.value);
+    syncFadeLabel(pct);
+    chrome.storage.local.set({ [HS.KEY_FADE_MIN_PCT]: pct });
+  });
+
   function pickPaint(v) {
     syncPaintStyle(v);
     chrome.storage.local.set({ [HS.KEY_PAINT_STYLE]: paintStyle });
@@ -240,11 +286,11 @@
     syncTextColor(textColor);
   }
 
-  function paintDemo() {
+  function paintDemo(style) {
     const demo = document.createElement('span');
     demo.className = 'ih-paint-demo';
     demo.setAttribute('aria-hidden', 'true');
-    // Qwen3-0.6B-Base surprisal bits；--ih-p 由 tokenLevelFromBits 现算
+    // Qwen3-0.6B-Base surprisal bits；--ih-p 按每张卡自己的样式现算（淡去走 fadeOpacity）
     const tokens = [
       ['Try', 12.39], [' Info', 14.04], [' Highlight', 19], ['.', 7.28],
       [' It', 4.64], [' uses', 7.4], [' large', 11.11], [' language', 6.03],
@@ -260,7 +306,7 @@
     for (const [raw, bits] of tokens) {
       const s = document.createElement('span');
       s.dataset.bits = String(bits);
-      s.style.setProperty('--ih-p', String(demoP(bits)));
+      s.style.setProperty('--ih-p', String(demoPFor(bits, style ?? paintStyle)));
       s.textContent = raw;
       demo.append(s);
     }
@@ -274,7 +320,7 @@
     btn.dataset.style = id;
     btn.setAttribute('role', 'radio');
     btn.setAttribute('aria-label', PAINT_CARD_LABEL[id]);
-    btn.append(paintDemo());
+    btn.append(paintDemo(id));
     btn.addEventListener('click', () => pickPaint(id));
     el.ih_paint_style.append(btn);
   }

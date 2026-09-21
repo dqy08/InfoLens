@@ -13,6 +13,10 @@ globalThis.IH_highlightStyle ||= (function () {
   const KEY_THRESHOLD_PCT = 'ih_highlight_threshold_pct';
   /** 用户侧强度 5–150%；100% = PAINT_CAP[该表面实际形式]，再高按比例加深，α 上限 1 */
   const KEY_MAX_ALPHA_DEPTH = 'ih_max_highlight_alpha';
+  /** 淡去下限 0–50%：最不重要的字保留的不透明度；只有 0 才全透明 */
+  const KEY_FADE_MIN_PCT = 'ih_fade_min_pct';
+  const FADE_MIN_DEFAULT = 25;
+  const FADE_MIN_MAX = 50;
   const KEY_PAINT_STYLE = 'ih_paint_style';
   const KEY_HIGHLIGHT_COLOR = 'ih_highlight_color';
   const KEY_TEXT_COLOR = 'ih_text_color';
@@ -20,10 +24,15 @@ globalThis.IH_highlightStyle ||= (function () {
   const PAINT_BLOCK = 'block';
   const PAINT_UNDERLINE = 'underline';
   const PAINT_TEXT = 'text';
-  const PAINT_STYLES = Object.freeze([PAINT_BLOCK, PAINT_UNDERLINE, PAINT_TEXT]);
-  /** 表面画不了所选形式时回退。PDF 色块会盖住 canvas 字形；字色也改不了 canvas。 */
+  const PAINT_FADE = 'fade';
+  const PAINT_STYLES = Object.freeze([PAINT_BLOCK, PAINT_UNDERLINE, PAINT_TEXT, PAINT_FADE]);
+  /** 表面画不了所选形式时回退。PDF 色块会盖住 canvas 字形；字色、淡去都改不了 canvas。 */
   const PAINT_FALLBACK = Object.freeze({
-    pdf: Object.freeze({ [PAINT_BLOCK]: PAINT_UNDERLINE, [PAINT_TEXT]: PAINT_UNDERLINE }),
+    pdf: Object.freeze({
+      [PAINT_BLOCK]: PAINT_UNDERLINE,
+      [PAINT_TEXT]: PAINT_UNDERLINE,
+      [PAINT_FADE]: PAINT_UNDERLINE,
+    }),
   });
 
   const INTENSITY_MIN = 5;
@@ -33,6 +42,7 @@ globalThis.IH_highlightStyle ||= (function () {
     [PAINT_BLOCK]: 0.5,
     [PAINT_UNDERLINE]: 1,
     [PAINT_TEXT]: 1,
+    [PAINT_FADE]: 1,
   });
   /** 下划线相对 used font-size（16px 时网页 = 2px 粗 / 3px 距） */
   const UNDERLINE_THICKNESS = 0.125;
@@ -45,6 +55,7 @@ globalThis.IH_highlightStyle ||= (function () {
     [KEY_TWO_TIER]: false,
     [KEY_THRESHOLD_PCT]: 25,
     [KEY_MAX_ALPHA_DEPTH]: 100,
+    [KEY_FADE_MIN_PCT]: FADE_MIN_DEFAULT,
     [KEY_PAINT_STYLE]: PAINT_BLOCK,
     [KEY_HIGHLIGHT_COLOR]: 0,
     [KEY_TEXT_COLOR]: 'red',
@@ -62,6 +73,10 @@ globalThis.IH_highlightStyle ||= (function () {
 
   function clampMaxAlphaDepth(n) {
     return clampInt(n, INTENSITY_MIN, INTENSITY_MAX);
+  }
+
+  function clampFadeMinPct(n) {
+    return clampInt(n, 0, FADE_MIN_MAX);
   }
 
   function capAlpha(paintStyle) {
@@ -95,6 +110,10 @@ globalThis.IH_highlightStyle ||= (function () {
 
   function formatDepthLabel(depth) {
     return `${clampMaxAlphaDepth(depth)}%`;
+  }
+
+  function formatFadeLabel(pct) {
+    return `${clampFadeMinPct(pct)}%`;
   }
 
   function normalizePaintStyle(v) {
@@ -270,6 +289,30 @@ globalThis.IH_highlightStyle ||= (function () {
     return level < 1 ? -1 : level;
   }
 
+  /**
+   * 淡去档位：不过滤低分，0..TOKEN_LEVELS-1 全画；只有 bits 非法才 -1。
+   * @param {number} bits
+   * @returns {number} level，或 -1 表示不画
+   */
+  function tokenLevelForFade(bits) {
+    if (!Number.isFinite(bits)) return -1;
+    const t = Math.max(0, Math.min(1, bits / MAX_SURPRISAL_BITS));
+    return Math.min(TOKEN_LEVELS - 1, Math.floor(t * TOKEN_LEVELS));
+  }
+
+  /**
+   * 淡去不透明度：最重要的字始终 1，最不重要的字停在下限 m；只有 m=0 才全透明。
+   * @param {number} level 0..TOKEN_LEVELS-1
+   * @param {number} fadeMinPct 0..100
+   * @returns {number} 0..1
+   */
+  function fadeOpacityForLevel(level, fadeMinPct) {
+    const m = clampFadeMinPct(fadeMinPct) / 100;
+    const t = Math.max(0, Math.min(1, Number(level) / (TOKEN_LEVELS - 1)));
+    if (!Number.isFinite(t)) return m;
+    return m + (1 - m) * t;
+  }
+
   /** @param {Record<string, unknown>} raw storage get 结果 */
   function normalizePrefs(raw) {
     return {
@@ -279,6 +322,9 @@ globalThis.IH_highlightStyle ||= (function () {
       ),
       maxAlphaDepth: clampMaxAlphaDepth(
         raw?.[KEY_MAX_ALPHA_DEPTH] ?? STORAGE_DEFAULTS[KEY_MAX_ALPHA_DEPTH],
+      ),
+      fadeMinPct: clampFadeMinPct(
+        raw?.[KEY_FADE_MIN_PCT] ?? STORAGE_DEFAULTS[KEY_FADE_MIN_PCT],
       ),
       paintStyle: normalizePaintStyle(
         raw?.[KEY_PAINT_STYLE] ?? STORAGE_DEFAULTS[KEY_PAINT_STYLE],
@@ -293,14 +339,15 @@ globalThis.IH_highlightStyle ||= (function () {
   }
 
   /**
-   * 写入色阶变量与 --ih-token-pct-*。
+   * 写入色阶变量与 --ih-token-pct-* / --ih-fade-pct-*。
    * @param {HTMLElement} [root]
-   * @param {{ twoTier: boolean, maxAlphaDepth: number, paintStyle: string, highlightColor?: number | string, textColor?: string }} prefs
+   * @param {{ twoTier: boolean, maxAlphaDepth: number, fadeMinPct?: number, paintStyle: string, highlightColor?: number | string, textColor?: string }} prefs
    */
   function applyCssVars(root, prefs) {
     const el = root || document.documentElement;
     const paintStyle = normalizePaintStyle(prefs.paintStyle);
     const text = paintStyle === PAINT_TEXT;
+    const fade = paintStyle === PAINT_FADE;
     const rgb = text ? rgbForTextColor(prefs.textColor) : rgbForColor(prefs.highlightColor);
     const underline = paintStyle === PAINT_UNDERLINE;
     const maxAlpha = depthToMaxAlpha(prefs.maxAlphaDepth, paintStyle);
@@ -312,9 +359,17 @@ globalThis.IH_highlightStyle ||= (function () {
       const a = alphaForLevel(i, maxAlpha, !!prefs.twoTier);
       const color = `rgba(${rgb}, ${a})`;
       el.style.setProperty(`--ih-token-${i}`, color);
-      el.style.setProperty(`--ih-token-bg-${i}`, underline || text ? 'transparent' : color);
+      el.style.setProperty(`--ih-token-bg-${i}`, underline || text || fade ? 'transparent' : color);
       if (text) el.style.setProperty(`--ih-token-pct-${i}`, `${a * 100}%`);
       else el.style.removeProperty(`--ih-token-pct-${i}`);
+      if (fade) {
+        el.style.setProperty(
+          `--ih-fade-pct-${i}`,
+          `${fadeOpacityForLevel(i, prefs.fadeMinPct ?? FADE_MIN_DEFAULT) * 100}%`,
+        );
+      } else {
+        el.style.removeProperty(`--ih-fade-pct-${i}`);
+      }
     }
   }
 
@@ -350,12 +405,16 @@ globalThis.IH_highlightStyle ||= (function () {
     KEY_TWO_TIER,
     KEY_THRESHOLD_PCT,
     KEY_MAX_ALPHA_DEPTH,
+    KEY_FADE_MIN_PCT,
+    FADE_MIN_DEFAULT,
+    FADE_MIN_MAX,
     KEY_PAINT_STYLE,
     KEY_HIGHLIGHT_COLOR,
     KEY_TEXT_COLOR,
     PAINT_BLOCK,
     PAINT_UNDERLINE,
     PAINT_TEXT,
+    PAINT_FADE,
     PAINT_STYLES,
     INTENSITY_MIN,
     INTENSITY_MAX,
@@ -366,12 +425,14 @@ globalThis.IH_highlightStyle ||= (function () {
     STORAGE_DEFAULTS,
     clampThresholdPct,
     clampMaxAlphaDepth,
+    clampFadeMinPct,
     capAlpha,
     depthToMaxAlpha,
     watchColorScheme,
     thresholdBits,
     formatThresholdLabel,
     formatDepthLabel,
+    formatFadeLabel,
     normalizePaintStyle,
     normalizeHighlightHue,
     normalizeHighlightColor,
@@ -385,6 +446,8 @@ globalThis.IH_highlightStyle ||= (function () {
     resolvePaintStyle,
     alphaForLevel,
     tokenLevelFromBits,
+    tokenLevelForFade,
+    fadeOpacityForLevel,
     normalizePrefs,
     applyCssVars,
     underlineOverlayBox,

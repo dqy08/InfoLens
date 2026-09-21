@@ -347,3 +347,43 @@ test('字色：按原文色分 Highlight，rgb(12,34,56) 与 rgb(1,234,56) 不�
     }
   }
 });
+
+test('淡去：低 surprisal 也画，按原文色分 Highlight，规则混透明', () => {
+  const HS = globalThis.IH_highlightStyle;
+  stored.ih_paint_style = HS.PAINT_FADE;
+  stored.ih_fade_min_pct = 30;
+  try {
+    for (const fn of storageListeners) {
+      fn({ ih_paint_style: { newValue: HS.PAINT_FADE } }, 'local');
+    }
+    hlMap.clear();
+    styleEls.clear();
+    const mapped = mappedFor('Hello', { color: 'rgb(12, 34, 56)' });
+    const stats = globalThis.IH_paintTokens(
+      [
+        { offset: [0, 5], p: COLD },
+        { offset: [0, 5], p: HOT },
+      ],
+      mapped,
+      { append: false },
+    );
+    assert.equal(stats.tokens_in, 2);
+    assert.equal(stats.tokens_skip_level, 0);
+    assert.equal(stats.painted, 2);
+    const names = [...hlMap.keys()].filter((k) => k.startsWith('ih-token-fade-'));
+    assert.ok(names.length >= 1);
+    assert.ok(names.every((n) => n.includes('rgb-12-34-56')));
+    const sheet = styleEls.get('ih-text-fg-css');
+    assert.ok(sheet);
+    const css = sheet.sheet.cssRules.join('\n');
+    assert.match(css, /--ih-fade-pct-/);
+    assert.match(css, /transparent/);
+    assert.equal([...hlMap.get('ih-token-5') ?? []].length, 0);
+  } finally {
+    delete stored.ih_paint_style;
+    delete stored.ih_fade_min_pct;
+    for (const fn of storageListeners) {
+      fn({ ih_paint_style: { newValue: 'block' } }, 'local');
+    }
+  }
+});

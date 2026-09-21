@@ -205,6 +205,23 @@
       background: var(--ih-intensity-accent, #ff4740);
       box-shadow: none;
     }
+    /* 淡去滑条：黑白灰，不跟高亮色走 */
+    input[type="range"].ih-intensity.ih-fade::-webkit-slider-runnable-track {
+      background: linear-gradient(
+        to right,
+        var(--muted) 0 var(--ih-intensity-pct, 100%),
+        var(--line) var(--ih-intensity-pct, 100%) 100%
+      );
+    }
+    input[type="range"].ih-intensity.ih-fade::-webkit-slider-thumb {
+      background: var(--muted);
+    }
+    input[type="range"].ih-intensity.ih-fade::-moz-range-progress {
+      background: var(--muted);
+    }
+    input[type="range"].ih-intensity.ih-fade::-moz-range-thumb {
+      background: var(--muted);
+    }
     .row-nested {
       padding-left: 12px;
       border-left: 2px solid var(--line);
@@ -260,6 +277,9 @@
     }
     .ih-paint-card[data-style="text"] .ih-paint-demo span {
       color: color-mix(in srgb-linear, rgb(var(--ih-ink-rgb, 234, 0, 33)) calc(var(--ih-p) * var(--ih-ink-max, 1) * 100%), currentColor);
+    }
+    .ih-paint-card[data-style="fade"] .ih-paint-demo span {
+      color: color-mix(in srgb, currentColor calc(var(--ih-p, 1) * 100%), transparent);
     }
     input[type="range"].ih-hue {
       -webkit-appearance: none;
@@ -384,6 +404,15 @@
         <span class="row-slider-value" id="ih_depth_value"></span>
       </div>
       <input type="range" class="ih-intensity" id="ih_max_highlight_alpha" min="5" max="150" step="1" aria-label="Highlight intensity">
+    </div>
+    <div class="row row-slider" data-option-id="ih_fade_min_pct" hidden>
+      <div class="row-slider-top">
+        <div class="row-text">
+          <div class="row-title">Fade floor</div>
+        </div>
+        <span class="row-slider-value" id="ih_fade_value"></span>
+      </div>
+      <input type="range" class="ih-intensity ih-fade" id="ih_fade_min_pct" min="0" max="50" step="1" aria-label="Fade floor">
     </div>
     <label class="row" data-option-id="ih_two_tier">
       <div class="row-text">
