@@ -22,6 +22,10 @@ test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () =>
   assert.match(html, /id="ih_highlight_color"/);
   assert.match(html, /id="ih_text_swatches"/);
   assert.match(html, /id="ih_fade_min_pct"/);
+  assert.match(html, /id="ih_fade_norm"/);
+  assert.match(html, /Normalize scale/);
+  assert.match(html, /Scale the highlight so about 20% of the text is at full highlight\./);
+  assert.doesNotMatch(html, /Normalize brightness/);
   assert.match(html, /id="ih_fade_value"/);
   assert.match(html, /data-option-id="ih_fade_min_pct"/);
   assert.match(html, /Fade floor/);
@@ -62,6 +66,7 @@ test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () =>
   assert.match(catalog, /'ih_paint_style'/);
   assert.match(catalog, /'ih_highlight_color'/);
   assert.match(catalog, /'ih_fade_min_pct'/);
+  assert.match(catalog, /'ih_fade_norm'/);
   assert.doesNotMatch(catalog, /ih_text_color/);
   assert.doesNotMatch(
     catalog.slice(catalog.indexOf('globalThis.IL_OPTIONS_SEED_SEEN')),
@@ -99,6 +104,9 @@ test('选项页挂网页管线，无 tokenTip，实验项标在所属组', () =>
   assert.match(opts, /fadeOpacityForLevel/);
   assert.match(opts, /function syncFadeLabel/);
   assert.match(opts, /KEY_FADE_MIN_PCT/);
+  assert.match(opts, /KEY_FADE_NORM/);
+  assert.match(opts, /fadeNormScaleBits/);
+  assert.match(opts, /syncDemoFadeScale/);
   assert.match(opts, /Fade unimportant/);
   assert.match(opts, /setAttribute\('aria-hidden', 'true'\)/);
   const collect = readFileSync(join(dir, '../../shared/page/collectTextMap.js'), 'utf8');
@@ -128,7 +136,7 @@ test('选项页抽字忽略只标主文；分析强制云端', () => {
   const bg = readFileSync(join(dir, '../background.js'), 'utf8');
   assert.match(bg, /'wordMerge\.js'/);
   assert.match(bg, /function isOwnOptionsPage\(sender\)/);
-  assert.match(bg, /handleAnalyze\(text, !!msg\.skipCache, isOwnOptionsPage\(sender\)\)/);
+  assert.match(bg, /handleAnalyze\(text, !!msg\.skipCache, isOwnOptionsPage\(sender\), sender\.tab\?\.id\)/);
   assert.match(bg, /fetchTokensWithAutoFallback/);
   assert.match(bg, /st\.ready && st\.webgpuOk !== false \? 'local' : 'cloud'/);
   assert.match(bg, /if \(!forceCloud\) await maybeOfferInit\(\)/);

@@ -36,7 +36,7 @@ cd extension/semantic-highlight && npm run test:e2e
 
 ```bash
 cd cf/facade && npm run test:api
-# 默认用 extension/semantic-highlight/config.dev.js 的 apiBase。打主域名：API_BASE=https://api.info-lens.app npm run test:api
+# 默认打 https://api.info-lens.app。换地址：API_BASE=https://… npm run test:api
 ```
 
 只检查能返回成功并开始吐流，不断言某个词一定被标上。
@@ -51,7 +51,7 @@ cd cf/facade && npm run test:api
 node scripts/check-site.mjs
 ```
 
-插件所依赖的接口（开发域名，同级别 3）：
+插件所依赖的接口（同级别 3）：
 
 ```bash
 cd cf/facade && npm run test:api

@@ -65,7 +65,7 @@ test('两插件均引入 client-id，并预热上报', () => {
 
 test('远程成功时采用服务端 client_id 并写入 storage', async () => {
   const { sandbox, store } = load();
-  const id = await sandbox.IL_getClientId('https://api.example');
+  const id = await sandbox.IL_getClientId();
   assert.equal(id, '11111111-2222-4333-8444-555555555555');
   assert.equal(store.il_client_id, id);
 });
@@ -76,7 +76,7 @@ test('远程失败时回退本地 UUID', async () => {
       throw new Error('offline');
     },
   });
-  const id = await sandbox.IL_getClientId('https://api.example');
+  const id = await sandbox.IL_getClientId();
   assert.match(id, UUID_RE);
   assert.equal(store.il_client_id, id);
 });
@@ -91,7 +91,7 @@ test('有缓存时直接用本地 id，不打网络', async () => {
       throw new Error('不该请求');
     },
   });
-  assert.equal(await sandbox.IL_getClientId('https://api.example'), existing);
+  assert.equal(await sandbox.IL_getClientId(), existing);
   assert.equal(calls.length, 0);
 });
 
@@ -106,9 +106,9 @@ test('无缓存时带 Cookie GET 门面', async () => {
       };
     },
   });
-  await sandbox.IL_getClientId('https://api.example');
+  await sandbox.IL_getClientId();
   assert.equal(calls.length, 1);
-  assert.match(calls[0].url, /\/api\/client-id$/);
+  assert.equal(calls[0].url, 'https://api.info-lens.app/api/client-id');
   assert.equal(calls[0].method, 'GET');
   assert.equal(calls[0].credentials, 'include');
 });

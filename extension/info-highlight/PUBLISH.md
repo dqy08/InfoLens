@@ -38,7 +38,7 @@ CHROME_EXTENSION_ID_INFO_HIGHLIGHT=gemajnklkebeikmfphiddpjfimahacdk
 ./extension/info-highlight/pack.sh
 ```
 
-产出：`extension/dist/info-highlight-v<version>.zip`（`--release`，固定 `config.prod.js`）。
+产出：`extension/dist/info-highlight-v<version>.zip`（`--release`，包内是空配置，不带本地 `config.js`）。
 
 ### 3. 上传 + 提交审核
 

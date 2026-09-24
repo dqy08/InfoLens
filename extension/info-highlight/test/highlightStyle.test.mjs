@@ -73,6 +73,7 @@ test('normalizePrefs 填默认', () => {
   assert.equal(p.thresholdPct, 25);
   assert.equal(p.maxAlphaDepth, 100);
   assert.equal(p.fadeMinPct, HS.FADE_MIN_DEFAULT);
+  assert.equal(p.fadeNorm, false);
   assert.equal(p.paintStyle, HS.PAINT_BLOCK);
   assert.equal(p.highlightColor, HS.HUE_RED);
   assert.equal(p.textColor, 'red');
@@ -92,6 +93,23 @@ test('淡去：档位不过滤，最重要的字始终 1，下限只有 0 才全
   assert.equal(HS.clampFadeMinPct(150), 50);
   assert.equal(HS.FADE_MIN_MAX, 50);
   assert.equal(HS.formatFadeLabel(30), '30%');
+});
+
+test('淡去归一化：前 20% 文字的惊讶度落到最强档，其下线性铺开', () => {
+  assert.equal(HS.FADE_NORM_TOP, 0.2);
+  const samples = [];
+  for (let i = 0; i < 8; i++) samples.push({ bits: 1, weight: 10 });
+  samples.push({ bits: 8, weight: 10 }, { bits: 8, weight: 10 });
+  const scale = HS.fadeNormScaleBits(samples);
+  assert.equal(scale, 8);
+  assert.equal(HS.tokenLevelForFade(8, scale), HS.TOKEN_LEVELS - 1);
+  assert.equal(HS.tokenLevelForFade(8.5, scale), HS.TOKEN_LEVELS - 1);
+  assert.equal(HS.tokenLevelForFade(1, scale), Math.floor((1 / 8) * (HS.TOKEN_LEVELS - 1)));
+  assert.ok(HS.tokenLevelForFade(1, scale) < HS.TOKEN_LEVELS - 1);
+  assert.equal(HS.tokenLevelForFade(0, scale), 0);
+  assert.equal(HS.fadeNormScaleBits([]), null);
+  assert.equal(HS.fadeNormScaleBits([{ bits: 3, weight: 0 }]), null);
+  assert.equal(HS.tokenLevelForFade(0, 0), HS.TOKEN_LEVELS - 1);
 });
 
 test('normalizeHighlightHue：色相环绕；旧 id 迁到色相', () => {

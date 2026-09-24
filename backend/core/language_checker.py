@@ -203,6 +203,25 @@ class QwenLM(AbstractLanguageChecker):
         # 初始化分析计数器（用于控制GPU内存统计打印频率）
         self._analysis_count = 0
 
+    @classmethod
+    def from_loaded(
+        cls,
+        tokenizer,
+        model,
+        device,
+        model_name: Optional[str] = None,
+    ):
+        """用已加载的 tokenizer/model 构造，供 Serverless 半快照等路径复用 analyze_text。"""
+        self = cls.__new__(cls)
+        AbstractLanguageChecker.__init__(self)
+        self.device = device
+        name = model_name or getattr(cls, "_registered_model_name", DEFAULT_BASE_MODEL)
+        self._load_runtime_config(name)
+        self.tokenizer = tokenizer
+        self.model = model
+        self._analysis_count = 0
+        return self
+
     def _load_runtime_config(self, model_name: Optional[str]):
         """
         加载运行时配置：基于模型和平台的四层配置合并
@@ -255,8 +274,8 @@ class QwenLM(AbstractLanguageChecker):
         """
         分块推理并即时处理：核心内存优化逻辑
         利用 KV Cache 分段计算 Logits，计算完立即释放，避免保留全量 Logits。
-        每一块右补到 chunk_size，softmax/topk 在固定形状上算，再用 valid_len 切片；
-        避免 MPS 按不同长度各留一份词表工作区。
+        CPU 和 MPS 把每一块右补到 chunk_size，softmax/topk 用固定形状，避免按长度各留一份词表工作区。
+        CUDA 按真实长度前向。
 
         数值说明：在 float16（如 MPS）上，在「仅前缀 forward」vs「整段 forward」同位置 logits 的逐元素对比，可能出现微小差异；
         float16（MPS/CUDA）可能因实现路径出现约 1%的 量级差，非掩码错误。CPU float32 下则完全一致。
@@ -269,10 +288,7 @@ class QwenLM(AbstractLanguageChecker):
         real_probs_list = []
         pred_topk_list = []
         past_key_values = None
-        
-        # 预先清理
-        DeviceManager.clear_cache(self.device)
-        
+
         full_input_ids = token_ids
         pad_id = self.tokenizer.pad_token_id
         if pad_id is None:
@@ -293,7 +309,10 @@ class QwenLM(AbstractLanguageChecker):
                 start_idx = i * chunk_size
                 end_idx = min((i + 1) * chunk_size, seq_len)
                 input_chunk = full_input_ids[:, start_idx:end_idx]
-                input_chunk, chunk_mask = right_pad_chunk(input_chunk, chunk_size, pad_id)
+                if self.device.type == "cuda":
+                    chunk_mask = torch.ones_like(input_chunk)
+                else:
+                    input_chunk, chunk_mask = right_pad_chunk(input_chunk, chunk_size, pad_id)
                 past_len = 0 if past_key_values is None else past_key_values.get_seq_length()
                 if past_len:
                     attention_mask = torch.cat(
@@ -329,7 +348,7 @@ class QwenLM(AbstractLanguageChecker):
                 valid_len = chunk_targets.shape[1]
                 if valid_len == 0:
                     continue
-                # softmax/topk 用满块形状；valid_len 可能短于块长（最后一块裁掉「预测下一 token」的那一位）
+                # valid_len 可能短于这次前向的长度：最后一块丢掉预测下一个 token 的那一位；CPU 和 MPS 还有右侧 padding
                 probs_chunk = torch.softmax(logits, dim=2)
                 
                 # 提取真实概率
@@ -359,10 +378,8 @@ class QwenLM(AbstractLanguageChecker):
                     pct = int(end_idx / seq_len * 100)  # 推理阶段独立的 0-100%
                     progress_callback(2, 3, 'inference', pct)
 
-        # 循环结束，清理 KV Cache
         del past_key_values
-        DeviceManager.clear_cache(self.device)
-        
+
         return pred_topk_list, real_probs_list
 
     def _decode_topk_tokens(
@@ -409,7 +426,13 @@ class QwenLM(AbstractLanguageChecker):
         
         return bpe_strings
 
-    def analyze_text(self, in_text: str, progress_callback: Optional[Callable[[int, int, str, Optional[int]], None]] = None) -> Dict[str, List[Dict]]:
+    def analyze_text(
+        self,
+        in_text: str,
+        progress_callback: Optional[Callable[[int, int, str, Optional[int]], None]] = None,
+        *,
+        release_cache: bool = True,
+    ) -> Dict[str, List[Dict]]:
         """
         计算文本中每个 token 的概率
         
@@ -458,9 +481,12 @@ class QwenLM(AbstractLanguageChecker):
 
         bpe_strings = self._build_bpe_strings(payload_offsets, real_topk, pred_topk, in_text)
 
-        # 最终清理
-        DeviceManager.clear_cache(self.device)
-        gc.collect()
+        # CUDA 的缓存分配器会复用显存，这里 gc 扫的是模型对象，不降低显存。
+        # empty_cache 会等整张卡。两档同时在一张卡上时要关掉，避免互相停住。
+        if release_cache:
+            DeviceManager.clear_cache(self.device)
+        if self.device.type != "cuda":
+            gc.collect()
 
         # 更新分析计数器
         self._analysis_count += 1

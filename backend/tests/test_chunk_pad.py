@@ -1,4 +1,4 @@
-"""分块打分：右补到固定 chunk_size。"""
+"""分块打分：CPU 和 MPS 右补到固定 chunk_size，CUDA 按真实长度。"""
 from types import SimpleNamespace
 
 import pytest
@@ -127,7 +127,7 @@ class _FakeModel:
         )
 
 
-def test_chunked_inference_always_forwards_chunk_size():
+def test_cpu_chunk_pads_to_chunk_size():
     checker = _checker(_FakeModel(), _fake_tokenizer(), torch.device("cpu"), 8)
 
     token_ids = torch.tensor([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]])
@@ -139,6 +139,18 @@ def test_chunked_inference_always_forwards_chunk_size():
     assert checker.model.shapes[1][2] == 2
     assert checker.model.shapes[1][1] == (1, 16)
     # 因果 LM：10 token 打 9 个分
+    assert len(real_probs) == 9
+    assert len(pred_topk) == 9
+
+
+def test_cuda_chunk_forwards_actual_length():
+    checker = _checker(_FakeModel(), _fake_tokenizer(), torch.device("cuda"), 8)
+
+    token_ids = torch.tensor([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]])
+    pred_topk, real_probs = checker._run_inference_and_process_chunked(token_ids, effective_topk=3)
+
+    assert [shape[0] for shape in checker.model.shapes] == [(1, 8), (1, 2)]
+    assert checker.model.shapes[1][1] == (1, 10)
     assert len(real_probs) == 9
     assert len(pred_topk) == 9
 

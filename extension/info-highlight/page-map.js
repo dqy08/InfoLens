@@ -15,6 +15,9 @@
   if (typeof globalThis.IH_mergeWordTokens !== 'function') {
     throw new Error('IH_mergeWordTokens missing — inject wordMerge.js first');
   }
+  if (!globalThis.IH_cloudWait) {
+    throw new Error('IH_cloudWait missing — inject cloudWait.js first');
+  }
   const HS = globalThis.IH_highlightStyle;
   /** SYNC: client/src/shared/core/constants.ts → SEMANTIC_CHUNK_BYTES */
   const UNIT_BYTES = 800;
@@ -340,8 +343,11 @@
   /** @type {{ tokens: unknown[], mapped: { text: string, pieces: unknown[], root?: Element } | null, overlay: boolean }} */
   let paintBuf = { tokens: [], mapped: null, overlay: false };
 
-  /** @type {{ twoTier: boolean, thresholdPct: number, maxAlphaDepth: number, fadeMinPct: number, paintStyle: string }} */
+  /** @type {{ twoTier: boolean, thresholdPct: number, maxAlphaDepth: number, fadeMinPct: number, fadeNorm: boolean, paintStyle: string }} */
   let highlightPrefs = HS.normalizePrefs(HS.STORAGE_DEFAULTS);
+  /** 整页分析结束后才有值；流式绘制仍走绝对刻度 */
+  let fadeScaleBits = null;
+  let fadeNormReady = false;
 
   function tokenMaxAlpha() {
     return HS.depthToMaxAlpha(highlightPrefs.maxAlphaDepth, highlightPrefs.paintStyle, 'pdf');
@@ -455,6 +461,47 @@
     clearTokenPaints();
     clearUnderline();
     paintBuf = { tokens: [], mapped: null, overlay: false };
+    fadeScaleBits = null;
+    fadeNormReady = false;
+  }
+
+  /** 非空白字符数；没有 raw 时用 offset 跨度 */
+  function fadeTextWeight(tok) {
+    if (typeof tok?.raw === 'string' && tok.raw) {
+      let n = 0;
+      for (const ch of tok.raw) {
+        if (!/\s/u.test(ch)) n += 1;
+      }
+      return n;
+    }
+    const off = tok?.offset;
+    if (Array.isArray(off) && off.length >= 2 && off[1] > off[0]) return off[1] - off[0];
+    return 0;
+  }
+
+  /** 用当前缓冲里已画的字重算最强档下沿，并整页重画一次 */
+  function applyFadeNorm() {
+    const mapped = paintBuf.mapped;
+    const tokens = paintBuf.tokens;
+    if (!mapped || !tokens.length) return false;
+    const samples = [];
+    for (const tok of tokensForPaint(tokens, mapped.text)) {
+      const bits = tokenBits(tok);
+      const weight = fadeTextWeight(tok);
+      if (bits == null || !(weight > 0)) continue;
+      samples.push({ bits, weight });
+    }
+    const scale = HS.fadeNormScaleBits(samples);
+    if (scale == null) return false;
+    fadeScaleBits = scale;
+    repaintFromBuffer();
+    return true;
+  }
+
+  function settleFadeNorm() {
+    fadeNormReady = true;
+    if (!highlightPrefs.fadeNorm || highlightPrefs.paintStyle !== HS.PAINT_FADE) return;
+    applyFadeNorm();
   }
 
   /**
@@ -473,7 +520,7 @@
   function tokenLevel(tok) {
     const bits = tokenBits(tok);
     if (bits == null) return -1;
-    if (highlightPrefs.paintStyle === HS.PAINT_FADE) return HS.tokenLevelForFade(bits);
+    if (highlightPrefs.paintStyle === HS.PAINT_FADE) return HS.tokenLevelForFade(bits, fadeScaleBits);
     return HS.tokenLevelFromBits(bits, highlightPrefs);
   }
 
@@ -591,15 +638,27 @@
       || paintStyleChanged);
     const colorChanged = !fadeInvolved && (next.highlightColor !== highlightPrefs.highlightColor
       || next.textColor !== highlightPrefs.textColor);
+    const normChanged = next.fadeNorm !== highlightPrefs.fadeNorm;
+    if (normChanged && !next.fadeNorm) fadeScaleBits = null;
     highlightPrefs = next;
     applyTokenColors();
+    const normOff = normChanged && !next.fadeNorm && paintBuf.mapped && paintBuf.tokens.length;
     if (
       levelChanged
       || paintStyleChanged
+      || normOff
       || ((alphaChanged || colorChanged) && paintBuf.overlay)
       || (colorChanged && next.paintStyle === HS.PAINT_TEXT)
     ) {
       repaintFromBuffer();
+    }
+    if (
+      next.fadeNorm
+      && next.paintStyle === HS.PAINT_FADE
+      && fadeNormReady
+      && (normChanged || paintStyleChanged)
+    ) {
+      applyFadeNorm();
     }
   }
 
@@ -631,7 +690,13 @@
       const next = changes[KEY_WORD_MERGE].newValue === true;
       if (next !== wordMerge) {
         wordMerge = next;
-        if (paintBuf.mapped && paintBuf.tokens.length) repaintFromBuffer();
+        if (paintBuf.mapped && paintBuf.tokens.length) {
+          const norm = highlightPrefs.fadeNorm
+            && highlightPrefs.paintStyle === HS.PAINT_FADE
+            && fadeNormReady
+            && applyFadeNorm();
+          if (!norm) repaintFromBuffer();
+        }
       }
     }
     if (
@@ -639,6 +704,7 @@
       && !(HS.KEY_THRESHOLD_PCT in changes)
       && !(HS.KEY_MAX_ALPHA_DEPTH in changes)
       && !(HS.KEY_FADE_MIN_PCT in changes)
+      && !(HS.KEY_FADE_NORM in changes)
       && !(HS.KEY_PAINT_STYLE in changes)
       && !(HS.KEY_HIGHLIGHT_COLOR in changes)
       && !(HS.KEY_TEXT_COLOR in changes)
@@ -696,7 +762,60 @@
     });
   }
 
+  let cloudWaitGen = 0;
+  let cloudWaitDotTimer = null;
+
+  function stopCloudWaitDots() {
+    if (cloudWaitDotTimer != null) {
+      clearInterval(cloudWaitDotTimer);
+      cloudWaitDotTimer = null;
+    }
+  }
+
+  function invalidateCloudWait() {
+    cloudWaitGen += 1;
+    stopCloudWaitDots();
+  }
+
+  /** 跟最近一次冷启动等待。分析请求一旦返回结果就清掉，不留到绘制。 */
+  async function showCloudWait() {
+    const gen = ++cloudWaitGen;
+    stopCloudWaitDots();
+    const wait = globalThis.IH_cloudWait;
+    const copy = wait.status(0);
+    const list = await noticeList();
+    if (gen !== cloudWaitGen) return;
+    const el = requireOverlay().createStatus({
+      label: copy.label,
+      detail: copy.detail,
+      tone: 'info',
+      continueHidden: true,
+      feedbackHidden: true,
+      onClose: clearError,
+    });
+    el.dataset.ihCloudWait = '1';
+    list.replaceChildren(el);
+    const labelEl = el.querySelector('.semantic-find-status-label');
+    const textEl = el.querySelector('.semantic-find-status-text');
+    let dot = 0;
+    cloudWaitDotTimer = setInterval(() => {
+      if (gen !== cloudWaitGen) return;
+      dot = (dot + 1) % 3;
+      const next = wait.status(dot);
+      if (labelEl) labelEl.textContent = next.label;
+      if (textEl) textEl.title = next.label;
+    }, wait.DOT_INTERVAL_MS);
+  }
+
+  function clearCloudWait() {
+    invalidateCloudWait();
+    const list = ui$('ih-status-list');
+    if (!list?.querySelector('[data-ih-cloud-wait]')) return;
+    list.replaceChildren();
+  }
+
   async function showError(msg) {
+    invalidateCloudWait();
     const ctx = globalThis.IH_feedbackContext;
     if (ctx && !ctx.peek()) ctx.stashMinimal(msg, 'web');
     const userDetail = shortError(msg);
@@ -714,6 +833,7 @@
   }
 
   async function showPaused(onContinue) {
+    invalidateCloudWait();
     const list = await noticeList();
     list.replaceChildren(requireOverlay().createStatus({
       label: 'Paused',
@@ -729,6 +849,7 @@
   }
 
   function clearError() {
+    invalidateCloudWait();
     ui$('ih-status-list')?.replaceChildren();
   }
 
@@ -1225,6 +1346,7 @@
   globalThis.IH_segmentWindow = segmentWindow;
   globalThis.IH_tokensInSegment = tokensInSegment;
   globalThis.IH_paintTokens = paintTokens;
+  globalThis.IH_settleFadeNorm = settleFadeNorm;
   globalThis.IH_tokensForPaint = tokensForPaint;
   globalThis.IH_tokenBits = tokenBits;
   globalThis.IH_rangesFromUtf16 = rangesFromUtf16;
@@ -1232,6 +1354,8 @@
   globalThis.IH_showError = showError;
   globalThis.IH_showPaused = showPaused;
   globalThis.IH_clearError = clearError;
+  globalThis.IH_showCloudWait = showCloudWait;
+  globalThis.IH_clearCloudWait = clearCloudWait;
   globalThis.IH_bindProgress = bindProgress;
   globalThis.IH_setProgressSearching = setProgressSearching;
   globalThis.IH_appendProgress = appendProgress;

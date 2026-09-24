@@ -1,6 +1,6 @@
 /**
  * 工具栏点击 / 右键菜单 → 注入 content（activeTab 手势）。已注入则 toggle。
- * 分析：本机 WebGPU（已就绪）或 IH_CONFIG.apiBase/api/analyze。
+ * 分析：本机 WebGPU（已就绪）或 /api/analyze。
  * PDF：整条流程在 pdf/sw.js（共享），本文件只负责在网页管线里的何处插入它。
  */
 
@@ -19,27 +19,24 @@ importScripts('cache/ring-store.js');
 importScripts('analyzeCache.js');
 importScripts('local/state.js');
 importScripts('local/userErrors.js');
+importScripts('cloudWait.js');
 importScripts('init-window-bounds.js');
 importScripts('action-state.js');
 
 const EXTENSION_ID = 'info-highlight';
 
-if (!globalThis.IH_CONFIG || typeof IH_CONFIG.apiBase !== 'string' || !IH_CONFIG.apiBase) {
-  throw new Error('IH_CONFIG.apiBase missing — inject config.js before background.js');
-}
 if (!globalThis.IH_localState) throw new Error('IH_localState missing');
 if (!globalThis.IH_userErrors) throw new Error('IH_userErrors missing');
+if (!globalThis.IH_cloudWait) throw new Error('IH_cloudWait missing');
 if (!globalThis.IH_analyzeCache) throw new Error('IH_analyzeCache missing');
 if (!globalThis.IH_initWindowBounds) throw new Error('IH_initWindowBounds missing');
 if (!globalThis.IH_actionState) throw new Error('IH_actionState missing');
 if (!globalThis.IH_autoSites) throw new Error('IH_autoSites missing');
 
-if (IL_reportsEnabled(IH_CONFIG)) {
-  IL_prepareClientIdReporting(EXTENSION_ID, IH_CONFIG.apiBase);
-}
+IL_prepareClientIdReporting(EXTENSION_ID);
 
 function analyzeUrl() {
-  return `${String(IH_CONFIG.apiBase).replace(/\/$/, '')}/api/analyze`;
+  return `${IL_API_BASE}/api/analyze`;
 }
 
 const CONTENT_CSS = ['content.css'];
@@ -61,6 +58,7 @@ const CONTENT_JS = [
   'highlightStyle.js',
   'wordMerge.js',
   'local/userErrors.js',
+  'cloudWait.js',
   'page-map.js',
   'tokenTip.js',
   'analyzeRun.js',
@@ -421,9 +419,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 
   void IL_optionsAttention.onInstalled(details, IL_OPTIONS_CATALOG);
   IL_setActionIconDotted(true);
-  if (IL_reportsEnabled(IH_CONFIG)) {
-    IL_reportInstallOrUpdate(details, EXTENSION_ID, IH_CONFIG.apiBase);
-  }
+  IL_reportInstallOrUpdate(details, EXTENSION_ID);
   if (details.reason === 'install') {
     void chrome.tabs.create({
       url: chrome.runtime.getURL('options.html') + '?prepare=1',
@@ -448,8 +444,8 @@ function isJsonContentType(contentTypeHeader) {
   return ct === 'application/json' || ct.endsWith('+json');
 }
 
-/** POST /api/analyze；站点成功体无 success=true，仅 success===false 视为失败。 */
-async function postAnalyze(text, model) {
+/** POST /api/analyze；站点成功体无 success=true，仅 success===false 视为失败。冷启动时这一次请求等到返回。 */
+async function postAnalyze(text, model, tabId) {
   const url = analyzeUrl();
   let res;
   try {
@@ -459,7 +455,8 @@ async function postAnalyze(text, model) {
       body: JSON.stringify({
         model,
         text,
-        privacy_mode: IH_CONFIG.privacyMode !== false,
+        privacy_mode: true,
+        ...(IH_CONFIG.modalDebug ? { modal_debug: true } : {}),
       }),
     });
   } catch (err) {
@@ -469,6 +466,10 @@ async function postAnalyze(text, model) {
     }
     throw err;
   }
+  return await readAnalyzeResponse(res);
+}
+
+async function readAnalyzeResponse(res) {
   const raw = await res.text();
   const ctHeader = res.headers.get('Content-Type') || '';
   const ct = ctHeader.split(';')[0].trim().toLowerCase() || '(none)';
@@ -526,6 +527,52 @@ async function ensureOffscreen() {
 }
 
 let localInflight = 0;
+
+/** 已发出、还没进藏页的本机分析。一个标签最多一条。 */
+const localWaiters = [];
+let localDraining = false;
+
+function pickLocalWaiter(waiters, activeTabId) {
+  const i = waiters.findIndex((w) => activeTabId != null && w.tabId === activeTabId);
+  return i >= 0 ? i : 0;
+}
+
+function focusedTabId() {
+  return chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(
+    (tabs) => (tabs && tabs[0] ? tabs[0].id : null),
+    () => null,
+  );
+}
+
+/**
+ * 同时只放行一条，已在等的激活标签优先。
+ * 前台要等上一段回到页面才发下一段，空档里后台最多插进一段，所以前台至少大约一半。
+ */
+function runLocalAnalyze(tabId, run) {
+  return new Promise((resolve, reject) => {
+    localWaiters.push({ tabId, run, resolve, reject });
+    void drainLocalAnalyze();
+  });
+}
+
+async function drainLocalAnalyze() {
+  if (localDraining) return;
+  localDraining = true;
+  try {
+    while (localWaiters.length) {
+      const activeId = await focusedTabId();
+      const job = localWaiters.splice(pickLocalWaiter(localWaiters, activeId), 1)[0];
+      try {
+        job.resolve(await job.run());
+      } catch (err) {
+        job.reject(err);
+      }
+    }
+  } finally {
+    localDraining = false;
+    if (localWaiters.length) void drainLocalAnalyze();
+  }
+}
 
 function isOffscreenGone(err) {
   const msg = String(err?.message || err);
@@ -817,19 +864,19 @@ function engineFrom(st) {
 /**
  * @returns {Promise<{ tokens: unknown[], model: string, engine: 'local' | 'cloud' }>}
  */
-async function fetchTokensWithAutoFallback(st, forceCloud, text) {
+async function fetchTokensWithAutoFallback(st, forceCloud, text, tabId) {
   const primary = forceCloud ? 'cloud' : engineFrom(st);
   if (primary === 'cloud') {
-    const got = await fetchTokens('cloud', text, st.cloudModel);
+    const got = await fetchTokens('cloud', text, st.cloudModel, tabId);
     return { ...got, engine: 'cloud' };
   }
   try {
-    const got = await fetchTokens('local', text, st.cloudModel);
+    const got = await fetchTokens('local', text, st.cloudModel, tabId);
     return { ...got, engine: 'local' };
   } catch (err) {
     if (forceCloud || st.pref !== IH_localState.PREF_AUTO) throw err;
     if (IH_userErrors.isGpuRelated(err?.message || err)) await IH_localState.set({ webgpuOk: false });
-    const got = await fetchTokens('cloud', text, st.cloudModel);
+    const got = await fetchTokens('cloud', text, st.cloudModel, tabId);
     return { ...got, engine: 'cloud' };
   }
 }
@@ -843,7 +890,7 @@ async function initEngine() {
   return sendToEngine({ cmd: 'init', hub: st.hub });
 }
 
-async function fetchTokens(engine, text, cloudModel) {
+async function fetchTokens(engine, text, cloudModel, tabId) {
   if (engine === 'local') {
     localInflight += 1;
     try {
@@ -853,21 +900,23 @@ async function fetchTokens(engine, text, cloudModel) {
         const loaded = await initEngine();
         if (!loaded?.ok) throw new Error(loaded?.error || 'local model reload failed');
       }
-      const res = await sendToEngine({ cmd: 'analyze', text });
+      const res = await runLocalAnalyze(tabId, () => sendToEngine({ cmd: 'analyze', text }));
       if (!res?.ok) throw new Error(res?.error || 'local analyze failed');
       const tokens = res.result?.bpe_strings;
       if (!Array.isArray(tokens)) throw new Error('local analyze returned no tokens');
-      return { tokens, model: IH_localState.MODEL_ID };
+      const device = typeof res.result?.device === 'string' ? res.result.device.trim() : '';
+      return { tokens, model: IH_localState.MODEL_ID, device };
     } finally {
       localInflight -= 1;
     }
   }
-  const data = await postAnalyze(text, cloudModel);
+  const data = await postAnalyze(text, cloudModel, tabId);
   const tokens = data?.result?.bpe_strings;
   if (!Array.isArray(tokens)) throw new Error('Analyze returned no tokens');
   const raw = data?.result?.model;
   const model = typeof raw === 'string' && raw.trim() ? raw.trim() : cloudModel;
-  return { tokens, model };
+  const device = typeof data?.result?.device === 'string' ? data.result.device.trim() : '';
+  return { tokens, model, device };
 }
 
 function isOwnOptionsPage(sender) {
@@ -875,7 +924,7 @@ function isOwnOptionsPage(sender) {
   return url === chrome.runtime.getURL('options.html');
 }
 
-async function handleAnalyze(text, skipCache, forceCloud) {
+async function handleAnalyze(text, skipCache, forceCloud, tabId) {
   if (!forceCloud) await maybeOfferInit();
   const st = await IH_localState.get();
   if (!forceCloud) {
@@ -885,12 +934,14 @@ async function handleAnalyze(text, skipCache, forceCloud) {
   let engine = forceCloud ? 'cloud' : engineFrom(st);
   let inferred = false;
   let model = engine === 'local' ? IH_localState.MODEL_ID : st.cloudModel;
+  let device = '';
   let tokens;
   try {
     tokens = await IH_analyzeCache.tokens(text, async () => {
       inferred = true;
-      const got = await fetchTokensWithAutoFallback(st, forceCloud, text);
+      const got = await fetchTokensWithAutoFallback(st, forceCloud, text, tabId);
       if (got.model) model = got.model;
+      if (got.device) device = got.device;
       engine = got.engine;
       return got.tokens;
     }, { skip: skipCache });
@@ -906,6 +957,7 @@ async function handleAnalyze(text, skipCache, forceCloud) {
       result: {
         model,
         bpe_strings: tokens,
+        ...(device ? { device } : {}),
       },
     },
     inferred,
@@ -924,7 +976,6 @@ function clampDurationMs(v) {
 
 /** 阶段性调试：分析结束 10s 后 offscreen 仍在（可随门面通道一起删除）。 */
 async function postLocalEngineLinger(payload) {
-  if (!IL_reportsEnabled(IH_CONFIG)) return;
   const body = {
     extension: EXTENSION_ID,
     version: chrome.runtime.getManifest().version,
@@ -937,9 +988,9 @@ async function postLocalEngineLinger(payload) {
   };
   const heap = Number(payload.js_heap_bytes);
   if (Number.isFinite(heap) && heap >= 0) body.js_heap_bytes = Math.round(heap);
-  const client_id = await IL_getClientId(IH_CONFIG.apiBase).catch(() => null);
+  const client_id = await IL_getClientId().catch(() => null);
   if (client_id) body.client_id = client_id;
-  IL_postKeepalive('/api/extension-local-engine', body, IH_CONFIG.apiBase);
+  IL_postKeepalive('/api/extension-local-engine', body);
 }
 
 /**
@@ -959,7 +1010,6 @@ async function handleLinger(msg) {
 }
 
 async function postUsageReport(body) {
-  if (!IL_reportsEnabled(IH_CONFIG)) return;
   let engine = body?.engine;
   if (engine !== 'local' && engine !== 'cloud') {
     engine = await resolveEngine();
@@ -971,7 +1021,7 @@ async function postUsageReport(body) {
   const segments_ok = Math.max(0, Math.min(segments, Number(body?.segments_ok) || 0));
   const cached = Math.max(0, Math.min(segments, Number(body?.cached) || 0));
   const duration_ms = clampDurationMs(body?.duration_ms);
-  const client_id = await IL_getClientId(IH_CONFIG.apiBase).catch(() => null);
+  const client_id = await IL_getClientId().catch(() => null);
   const model = typeof body?.model === 'string' ? body.model.trim().slice(0, 64) : '';
   const payload = {
     extension: EXTENSION_ID,
@@ -991,11 +1041,10 @@ async function postUsageReport(body) {
     const detail = body?.detail;
     if (detail && typeof detail === 'object' && !Array.isArray(detail)) payload.detail = detail;
   }
-  IL_postKeepalive('/api/extension-usage', payload, IH_CONFIG.apiBase);
+  IL_postKeepalive('/api/extension-usage', payload);
 }
 
 async function postLocalInitReport({ outcome, duration_ms, error }) {
-  if (!IL_reportsEnabled(IH_CONFIG)) return;
   if (outcome !== 'ok' && outcome !== 'failed' && outcome !== 'cancelled') return;
   const st = await IH_localState.get();
   const hub =
@@ -1010,9 +1059,9 @@ async function postLocalInitReport({ outcome, duration_ms, error }) {
     hub,
   };
   if (outcome !== 'ok' && error) body.error = String(error).slice(0, 500);
-  const client_id = await IL_getClientId(IH_CONFIG.apiBase).catch(() => null);
+  const client_id = await IL_getClientId().catch(() => null);
   if (client_id) body.client_id = client_id;
-  IL_postKeepalive('/api/extension-local-init', body, IH_CONFIG.apiBase);
+  IL_postKeepalive('/api/extension-local-init', body);
 }
 
 async function handleAgree() {
@@ -1190,7 +1239,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         extension: EXTENSION_ID,
         extension_version: chrome.runtime.getManifest().version,
       },
-      msg.apiBase || IH_CONFIG.apiBase,
     );
     return;
   }
@@ -1201,7 +1249,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: false, error: 'Missing text' });
     return;
   }
-  handleAnalyze(text, !!msg.skipCache, isOwnOptionsPage(sender))
+  handleAnalyze(text, !!msg.skipCache, isOwnOptionsPage(sender), sender.tab?.id)
     .then(({ data, inferred, engine }) => sendResponse({ ok: true, data, inferred, engine }))
     .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
   return true;

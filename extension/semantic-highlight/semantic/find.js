@@ -74,6 +74,8 @@
   // 数字/标点/代码等 token 密度高的内容，800 字节可能超出后端 token 限，被静默截断（仅日志提示），
   // 导致该 chunk 的相关度判断只基于截断后的前缀 —— 后果是漏检，非误报。无法靠调大固定 token 数根治。
   const CHUNK_BYTES = 800;
+  // SYNC: client/src/shared/core/constants.ts → SEMANTIC_MATCH_THRESHOLD
+  const MATCH_THRESHOLD = 0.1;
   // 原则 2：一火最多新打这么多块。SYNC: 门面 MULTI_CHUNK_MAX
   const MAX_CHUNKS_PER_SEARCH = 32;
   // 原则 1 的硬上限：无匹配时最多打 8 次网（含第一批）。纯缓存回放不占。以后可做成 IL_CONFIG。
@@ -804,7 +806,6 @@
     btn.disabled = true;
     chrome.runtime.sendMessage({
       type: 'il-extension-feedback',
-      apiBase: CFG.apiBase,
       body: buildFeedbackBody(status),
     });
     globalThis.IL_statusFeedback.markThanks(btn);
@@ -954,9 +955,8 @@
         || /** @type {HTMLInputElement | null} */ (ui$('semantic_find_input'))?.value?.trim()
         || '',
       config: {
-        apiBase: CFG.apiBase,
         chunkBytes: CHUNK_BYTES,
-        matchThreshold: CFG.matchThreshold,
+        matchThreshold: MATCH_THRESHOLD,
       },
       progress: {
         content_chunks: lastSearchMeta?.contentChunkCount ?? 0,
@@ -1913,7 +1913,7 @@
     const body = {
       query,
       texts,
-      privacy_mode: CFG.privacyMode !== false,
+      privacy_mode: true,
     };
     if (searching) syncClearButton(true);
     return new Promise((resolve, reject) => {
@@ -1952,7 +1952,6 @@
         }
       }
       port.postMessage({
-        apiBase: CFG.apiBase,
         path: '/api/v2/analyze-semantic-relevance',
         body,
       });
@@ -1974,7 +1973,7 @@
       query,
       text,
       stream: true,
-      privacy_mode: CFG.privacyMode !== false,
+      privacy_mode: true,
     };
     if (searching) syncClearButton(true);
     return new Promise((resolve, reject) => {
@@ -2012,7 +2011,6 @@
         }
       }
       port.postMessage({
-        apiBase: CFG.apiBase,
         path: '/api/v2/analyze-semantic-keywords',
         body,
       });
@@ -2679,7 +2677,7 @@
     const line = /** @type {SVGPathElement} */ (group.querySelector('.semantic-match-progress-line'));
     const label = /** @type {SVGTextElement} */ (group.querySelector('.semantic-match-progress-label'));
     const hitArea = /** @type {SVGRectElement} */ (group.querySelector('.semantic-match-progress-hit-area'));
-    const showMatchRed = degree >= CFG.matchThreshold && !!chunk.hasKeywords;
+    const showMatchRed = degree >= MATCH_THRESHOLD && !!chunk.hasKeywords;
     line.classList.toggle('is-gray', !showMatchRed);
     line.classList.toggle('is-selected', selectedProgressChunkStarts.has(chunk.start));
     line.classList.toggle('is-hovered', hoveredProgressChunkStart === chunk.start);
@@ -2773,7 +2771,7 @@
     const line = group?.querySelector('.semantic-match-progress-line');
     if (line) {
       const degree = Math.max(0, Math.min(1, Number(row.matchDegree) || 0));
-      line.classList.toggle('is-gray', !(degree >= CFG.matchThreshold));
+      line.classList.toggle('is-gray', !(degree >= MATCH_THRESHOLD));
       return;
     }
     if (chart.hasAttribute('hidden')) return;
@@ -2830,7 +2828,7 @@
     const { n, degrees } = await globalThis.IL_analyzeCache.windowPlan(
       query,
       fromStart.map((c) => c.text),
-      CFG.matchThreshold,
+      MATCH_THRESHOLD,
       MAX_CHUNKS_PER_SEARCH
     );
     return { chunks: fromStart.slice(0, n), degrees };
@@ -3113,7 +3111,7 @@
         let deferredFollow = null;
         const absorbRelevanceRow = (i, chunk, degree, deferPaint) => {
           // SYNC: semanticSearchController — matched = degree >= threshold；未匹配块不上色
-          const matched = degree >= CFG.matchThreshold;
+          const matched = degree >= MATCH_THRESHOLD;
           const chunkCpStart = doc.toPaintOffset(chunk.start);
           const chunkCpEnd = doc.toPaintOffset(chunk.end);
           analyzedCpEnd = Math.max(analyzedCpEnd, chunkCpEnd);
@@ -3311,7 +3309,7 @@
   function fetchCacheVersion() {
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(
-        { type: 'il-analyze-semantic-version', apiBase: CFG.apiBase },
+        { type: 'il-analyze-semantic-version' },
         (resp) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));

@@ -4,6 +4,7 @@
  */
 const IL_CLIENT_ID_KEY = 'il_client_id';
 const IL_CLIENT_ID_PATH = '/api/client-id';
+var IL_API_BASE = 'https://api.info-lens.app';
 const IL_CLIENT_ID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -41,13 +42,10 @@ function IL_storageSetClientId(id) {
 
 /**
  * 向门面取 id：带 Cookie 的 GET，服务端有 Cookie 则回显，否则新发并 Set-Cookie。
- * @param {string} apiBase
  * @returns {Promise<string | null>}
  */
-async function IL_fetchClientId(apiBase) {
-  const base = String(apiBase || '').replace(/\/$/, '');
-  if (!base) return null;
-  const res = await fetch(`${base}${IL_CLIENT_ID_PATH}`, {
+async function IL_fetchClientId() {
+  const res = await fetch(`${IL_API_BASE}${IL_CLIENT_ID_PATH}`, {
     method: 'GET',
     credentials: 'include',
   });
@@ -59,10 +57,9 @@ async function IL_fetchClientId(apiBase) {
 
 /**
  * 缓存优先：有本地 id 就直接用，只有首次（含重装后）才问门面。
- * @param {string} [apiBase]
  * @returns {Promise<string>}
  */
-globalThis.IL_getClientId = function IL_getClientId(apiBase) {
+globalThis.IL_getClientId = function IL_getClientId() {
   if (_ilClientIdPromise) return _ilClientIdPromise;
   _ilClientIdPromise = (async () => {
     let cached = null;
@@ -75,7 +72,7 @@ globalThis.IL_getClientId = function IL_getClientId(apiBase) {
 
     let id = null;
     try {
-      id = await IL_fetchClientId(apiBase);
+      id = await IL_fetchClientId();
     } catch {
       /* 离线或无 host 权限：本地新建，与门面 Cookie 可能不一致 */
     }

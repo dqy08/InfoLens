@@ -18,6 +18,7 @@ globalThis.IL_OPTIONS_CATALOG = Object.freeze([
   'ih_highlight_color',
   'ih_max_highlight_alpha',
   'ih_fade_min_pct',
+  'ih_fade_norm',
   'ih_two_tier',
   'ih_word_merge',
   'analyze_pref',

@@ -17,6 +17,9 @@ globalThis.IH_highlightStyle ||= (function () {
   const KEY_FADE_MIN_PCT = 'ih_fade_min_pct';
   const FADE_MIN_DEFAULT = 25;
   const FADE_MIN_MAX = 50;
+  /** 勾选后，整页文字里惊讶度最高的这一比例落到最强档 */
+  const KEY_FADE_NORM = 'ih_fade_norm';
+  const FADE_NORM_TOP = 0.2;
   const KEY_PAINT_STYLE = 'ih_paint_style';
   const KEY_HIGHLIGHT_COLOR = 'ih_highlight_color';
   const KEY_TEXT_COLOR = 'ih_text_color';
@@ -56,6 +59,7 @@ globalThis.IH_highlightStyle ||= (function () {
     [KEY_THRESHOLD_PCT]: 25,
     [KEY_MAX_ALPHA_DEPTH]: 100,
     [KEY_FADE_MIN_PCT]: FADE_MIN_DEFAULT,
+    [KEY_FADE_NORM]: false,
     [KEY_PAINT_STYLE]: PAINT_BLOCK,
     [KEY_HIGHLIGHT_COLOR]: 0,
     [KEY_TEXT_COLOR]: 'red',
@@ -291,13 +295,47 @@ globalThis.IH_highlightStyle ||= (function () {
 
   /**
    * 淡去档位：不过滤低分，0..TOKEN_LEVELS-1 全画；只有 bits 非法才 -1。
+   * scaleBits 有值时，把它当成最强档的下沿（含），其下线性铺到其余档。
    * @param {number} bits
+   * @param {number | null} [scaleBits]
    * @returns {number} level，或 -1 表示不画
    */
-  function tokenLevelForFade(bits) {
+  function tokenLevelForFade(bits, scaleBits) {
     if (!Number.isFinite(bits)) return -1;
-    const t = Math.max(0, Math.min(1, bits / MAX_SURPRISAL_BITS));
-    return Math.min(TOKEN_LEVELS - 1, Math.floor(t * TOKEN_LEVELS));
+    if (scaleBits == null || !Number.isFinite(scaleBits)) {
+      const t = Math.max(0, Math.min(1, bits / MAX_SURPRISAL_BITS));
+      return Math.min(TOKEN_LEVELS - 1, Math.floor(t * TOKEN_LEVELS));
+    }
+    if (!(scaleBits > 0) || bits >= scaleBits) return TOKEN_LEVELS - 1;
+    const t = Math.max(0, bits / scaleBits);
+    return Math.min(TOKEN_LEVELS - 2, Math.floor(t * (TOKEN_LEVELS - 1)));
+  }
+
+  /**
+   * 按文字权重从高到低累加，跨过前 FADE_NORM_TOP 的那一档 bits。
+   * 并列时最强档会略多于这一比例。没有正权重则 null。
+   * @param {Array<{ bits: number, weight: number }>} samples
+   * @returns {number | null}
+   */
+  function fadeNormScaleBits(samples) {
+    const rows = [];
+    let total = 0;
+    for (const s of samples) {
+      const bits = Number(s?.bits);
+      const weight = Number(s?.weight);
+      if (!Number.isFinite(bits) || !(weight > 0)) continue;
+      rows.push({ bits, weight });
+      total += weight;
+    }
+    if (!(total > 0)) return null;
+    rows.sort((a, b) => b.bits - a.bits);
+    const need = total * FADE_NORM_TOP;
+    let acc = 0;
+    for (const row of rows) {
+      acc += row.weight;
+      if (acc >= need) return row.bits;
+    }
+    return rows[rows.length - 1].bits;
   }
 
   /**
@@ -326,6 +364,7 @@ globalThis.IH_highlightStyle ||= (function () {
       fadeMinPct: clampFadeMinPct(
         raw?.[KEY_FADE_MIN_PCT] ?? STORAGE_DEFAULTS[KEY_FADE_MIN_PCT],
       ),
+      fadeNorm: !!(raw?.[KEY_FADE_NORM] ?? STORAGE_DEFAULTS[KEY_FADE_NORM]),
       paintStyle: normalizePaintStyle(
         raw?.[KEY_PAINT_STYLE] ?? STORAGE_DEFAULTS[KEY_PAINT_STYLE],
       ),
@@ -408,6 +447,8 @@ globalThis.IH_highlightStyle ||= (function () {
     KEY_FADE_MIN_PCT,
     FADE_MIN_DEFAULT,
     FADE_MIN_MAX,
+    KEY_FADE_NORM,
+    FADE_NORM_TOP,
     KEY_PAINT_STYLE,
     KEY_HIGHLIGHT_COLOR,
     KEY_TEXT_COLOR,
@@ -447,6 +488,7 @@ globalThis.IH_highlightStyle ||= (function () {
     alphaForLevel,
     tokenLevelFromBits,
     tokenLevelForFade,
+    fadeNormScaleBits,
     fadeOpacityForLevel,
     normalizePrefs,
     applyCssVars,

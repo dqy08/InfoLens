@@ -153,9 +153,7 @@ async function activateTab(tab, opts = {}) {
 
 const CONTEXT_MENU_ID = 'il-semantic-search';
 
-if (IL_reportsEnabled(IL_CONFIG)) {
-  IL_prepareClientIdReporting(EXTENSION_ID, IL_CONFIG?.apiBase);
-}
+IL_prepareClientIdReporting(EXTENSION_ID);
 
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.contextMenus.removeAll(() => {
@@ -168,9 +166,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 
   void IL_optionsAttention.onInstalled(details, IL_OPTIONS_CATALOG);
   IL_setActionIconDotted(true);
-  if (IL_reportsEnabled(IL_CONFIG)) {
-    IL_reportInstallOrUpdate(details, EXTENSION_ID, IL_CONFIG?.apiBase);
-  }
+  IL_reportInstallOrUpdate(details, EXTENSION_ID);
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -305,9 +301,8 @@ chrome.runtime.onConnect.addListener((port) => {
     started = true;
     (async () => {
       try {
-        const apiBase = msg?.apiBase || (typeof IL_CONFIG !== 'undefined' ? IL_CONFIG.apiBase : undefined);
         const path = msg?.path || '/api/v2/analyze-semantic-relevance';
-        const res = await fetch(`${String(apiBase).replace(/\/$/, '')}${path}`, {
+        const res = await fetch(`${IL_API_BASE}${path}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(msg?.body || {}),
@@ -377,9 +372,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'il-analyze-semantic-version') {
     (async () => {
       try {
-        const apiBase = msg.apiBase || IL_CONFIG.apiBase;
         const { data } = await getJsonApi(
-          `${String(apiBase).replace(/\/$/, '')}/api/v2/analyze-semantic-version`
+          `${IL_API_BASE}/api/v2/analyze-semantic-version`
         );
         const relevance = data.relevance;
         const keywords = data.keywords;
@@ -397,10 +391,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'il-analyze-semantic') {
     (async () => {
       try {
-        const apiBase = msg.apiBase || IL_CONFIG.apiBase;
         const path = msg.path || '/api/analyze-semantic';
         const { data, backend } = await postJsonApi(
-          `${String(apiBase).replace(/\/$/, '')}${path}`,
+          `${IL_API_BASE}${path}`,
           msg.body
         );
         sendResponse({ ok: true, data, backend });
@@ -420,7 +413,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         ...(msg.body && typeof msg.body === 'object' ? msg.body : {}),
         extension_version: chrome.runtime.getManifest().version,
       },
-      msg.apiBase || IL_CONFIG?.apiBase
     );
     return;
   }

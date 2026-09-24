@@ -414,6 +414,13 @@
       </div>
       <input type="range" class="ih-intensity ih-fade" id="ih_fade_min_pct" min="0" max="50" step="1" aria-label="Fade floor">
     </div>
+    <label class="row" data-option-id="ih_fade_norm" hidden>
+      <div class="row-text">
+        <div class="row-title">Normalize scale</div>
+        <p class="row-desc">Scale the highlight so about 20% of the text is at full highlight.</p>
+      </div>
+      <input type="checkbox" id="ih_fade_norm">
+    </label>
     <label class="row" data-option-id="ih_two_tier">
       <div class="row-text">
         <div class="row-title">One-tone highlight <span class="experimental">Experimental</span></div>
@@ -563,6 +570,7 @@
   <script src="feedbackContext.js"></script>
   <script src="options-page-flags.js"></script>
   <script src="wordMerge.js"></script>
+  <script src="cloudWait.js"></script>
   <script src="page-map.js"></script>
   <script src="analyzeRun.js"></script>
   <script src="content.js"></script>

@@ -93,7 +93,7 @@ export https_proxy=http://127.0.0.1:7890
 ./extension/semantic-highlight/pack.sh
 ```
 
-产出：`extension/dist/info-lens-semantic-highlight-v<version>.zip`（构建带 `--release`，固定用 `config.prod.js` 生成包内 `config.js`，不受 `dev-env.sh` 状态影响，也不改工作树）。
+产出：`extension/dist/info-lens-semantic-highlight-v<version>.zip`（`--release`，包内是空配置，不带本地 `config.js`）。
 
 ### 3. 上传 + 提交审核
 

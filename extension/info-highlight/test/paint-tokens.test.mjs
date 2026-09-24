@@ -130,6 +130,9 @@ runInThisContext(readFileSync(join(dir, '../highlightStyle.js'), 'utf8'), {
 runInThisContext(readFileSync(join(dir, '../wordMerge.js'), 'utf8'), {
   filename: 'wordMerge.js',
 });
+runInThisContext(readFileSync(join(dir, '../cloudWait.js'), 'utf8'), {
+  filename: 'cloudWait.js',
+});
 runInThisContext(readFileSync(join(dir, '../page-map.js'), 'utf8'), {
   filename: 'page-map.js',
 });
@@ -402,6 +405,41 @@ test('淡去：低 surprisal 也画，按原文色分 Highlight，规则混透�
   } finally {
     delete stored.ih_paint_style;
     delete stored.ih_fade_min_pct;
+    for (const fn of storageListeners) {
+      fn({ ih_paint_style: { newValue: 'block' } }, 'local');
+    }
+  }
+});
+
+test('淡去归一化：整页结束后，最高的 20% 文字进最强档', () => {
+  const HS = globalThis.IH_highlightStyle;
+  stored.ih_paint_style = HS.PAINT_FADE;
+  stored.ih_fade_norm = true;
+  try {
+    for (const fn of storageListeners) {
+      fn({ ih_fade_norm: { newValue: true } }, 'local');
+    }
+    hlMap.clear();
+    styleEls.clear();
+    const chars = 'abcdefghij';
+    const tokens = [];
+    for (let i = 0; i < 8; i++) {
+      tokens.push({ offset: [i, i + 1], raw: chars[i], p: 0.5 });
+    }
+    tokens.push(
+      { offset: [8, 9], raw: chars[8], p: 2 ** -8 },
+      { offset: [9, 10], raw: chars[9], p: 2 ** -8 },
+    );
+    globalThis.IH_paintTokens(tokens, mappedFor(chars), { append: false });
+    assert.equal([...hlMap.keys()].some((k) => k.includes('fade-15-')), false);
+    globalThis.IH_settleFadeNorm();
+    const top = [...hlMap.keys()].filter((k) => k.includes('fade-15-'));
+    assert.equal(top.length, 1);
+    assert.equal([...hlMap.get(top[0])].length, 2);
+  } finally {
+    delete stored.ih_paint_style;
+    delete stored.ih_fade_norm;
+    globalThis.IH_clearHighlights();
     for (const fn of storageListeners) {
       fn({ ih_paint_style: { newValue: 'block' } }, 'local');
     }

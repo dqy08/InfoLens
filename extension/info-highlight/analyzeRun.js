@@ -7,21 +7,37 @@ globalThis.IH_analyzeRun ||= (function () {
   /** SYNC: local/scoring.js → alignUtf16Offsets fail() */
   const ALIGN_FAIL = 'token offset align failed';
 
-  function sendAnalyze(text, skipCache) {
+  function sendAnalyze(text, skipCache, { armCloudWait = false } = {}) {
+    const waitMs = globalThis.IH_cloudWait?.FIRST_SEGMENT_WAIT_MS ?? 2000;
+    let timer = null;
+    if (armCloudWait) {
+      timer = setTimeout(() => void globalThis.IH_showCloudWait?.(), waitMs);
+    }
+    const finishWaitUi = () => {
+      if (timer != null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      globalThis.IH_clearCloudWait?.();
+    };
     return new Promise((resolve, reject) => {
       const msg = { type: 'ih-analyze', text };
       if (skipCache) msg.skipCache = true;
       chrome.runtime.sendMessage(msg, (res) => {
         if (chrome.runtime.lastError) {
+          finishWaitUi();
           reject(new Error(chrome.runtime.lastError.message));
           return;
         }
         if (!res?.ok) {
+          finishWaitUi();
           reject(new Error(res?.error || 'Analyze failed'));
           return;
         }
+        finishWaitUi();
         const model = typeof res.data?.result?.model === 'string' ? res.data.result.model.trim() : '';
-        if (model) globalThis.IH_tokenTip?.setModel?.(model);
+        const device = typeof res.data?.result?.device === 'string' ? res.data.result.device.trim() : '';
+        if (model) globalThis.IH_tokenTip?.setModel?.(model, device);
         resolve({
           data: res.data,
           inferred: !!res.inferred,
@@ -160,10 +176,14 @@ globalThis.IH_analyzeRun ||= (function () {
    *   | { kind: 'error', err: Error, inferred: boolean, engine: string | null, model: string | null }
    * >}
    */
-  async function analyzeSegment(text, segs, i, skipCache) {
+  async function analyzeSegment(text, segs, i, skipCache, session) {
     if (!/\S/.test(segs[i].text)) return { kind: 'empty' };
+    const armCloudWait = !!session?.armFirstAnalyze;
+    if (armCloudWait) session.armFirstAnalyze = false;
     const win = globalThis.IH_segmentWindow(text, segs, i);
-    const { data, inferred, engine, model } = await sendAnalyze(win.requestText, skipCache);
+    const { data, inferred, engine, model } = await sendAnalyze(win.requestText, skipCache, {
+      armCloudWait,
+    });
     const raw = data?.result?.bpe_strings;
     if (!Array.isArray(raw)) {
       return { kind: 'error', err: new Error('Analyze returned no tokens'), inferred, engine, model };
@@ -182,11 +202,6 @@ globalThis.IH_analyzeRun ||= (function () {
       }
       throw err;
     }
-  }
-
-  /** 取下一段前让一帧：后台标签不触发 rAF，就停在段边界不再发请求。引擎闲置 10s 自己卸。 */
-  function nextFrame() {
-    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
   }
 
   /** 当前任务结束并完成一次绘制后再继续。单次 rAF 会在绘制前执行，挡不住高亮。 */
@@ -274,11 +289,10 @@ globalThis.IH_analyzeRun ||= (function () {
     reportActionFilled(0, batch);
     let lastAlignErr;
     for (let i = from; i < to; i++) {
-      await nextFrame();
       if (!still()) return lastAlignErr;
       let got;
       try {
-        got = await analyzeSegment(session.mapped.text, session.segs, i, opts?.skipCache);
+        got = await analyzeSegment(session.mapped.text, session.segs, i, opts?.skipCache, session);
       } catch (err) {
         if (!still()) return lastAlignErr;
         // SW/通道失败：计入尝试，但不记 cached（inferred 未知）
@@ -316,7 +330,7 @@ globalThis.IH_analyzeRun ||= (function () {
     if (!segs.length) throw new Error(emptyMsg);
     globalThis.IH_clearHighlights();
     await globalThis.IH_bindProgress(mapped, segs);
-    return { mapped, segs, next: 0, painted: 0, tokensBySeg: [] };
+    return { mapped, segs, next: 0, painted: 0, tokensBySeg: [], armFirstAnalyze: true };
   }
 
   async function afterPaint(session, lastAlignErr, emptyMsg, onMore, report) {
@@ -325,6 +339,7 @@ globalThis.IH_analyzeRun ||= (function () {
       await onMore();
       return;
     }
+    globalThis.IH_settleFadeNorm?.();
     if (!session.painted) {
       const detail = buildPaintFailDetail(session, report, lastAlignErr);
       if (report) {

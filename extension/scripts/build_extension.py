@@ -15,7 +15,7 @@ FLATTEN = "page/"  # 注入宿主页的脚本平铺到包根，迁就 background
 SKIP_DIRS = {LOCALES, "dist", "e2e", "node_modules", "test"}
 SKIP_NAMES = {
     ".DS_Store", "package.json", "package-lock.json",
-    "config.js", "config.dev.js", "config.prod.js", "config.secrets.js",
+    "config.js", "config.secrets.js",
 }
 SKIP_SUFFIXES = {".md", ".mjs", ".py", ".sh"}  # 文档与开发脚本不进扩展
 
@@ -106,6 +106,26 @@ def copy_info_highlight_transformers(source: Path, output: Path) -> None:
     print("build: vendor/transformers <- transformers.web.js + onnxruntime-web/ort.webgpu.mjs")
 
 
+EMPTY_CONFIG = {
+    "info-highlight": "var IH_CONFIG = {};\n",
+    "semantic-highlight": "var IL_CONFIG = {};\n",
+}
+
+
+def write_config(name: str, source: Path, output: Path, release: bool) -> None:
+    body = EMPTY_CONFIG.get(name)
+    if body is None:
+        return
+    dest = output / "config.js"
+    local = source / "config.js"
+    if release or not local.is_file():
+        dest.write_text(body, encoding="utf-8")
+        print("build: config.js <- empty")
+        return
+    copy(local, dest)
+    print("build: config.js <- config.js")
+
+
 def build(name: str, release: bool) -> Path:
     source = EXTENSIONS / name
     output = EXTENSIONS / "dist" / name
@@ -123,14 +143,8 @@ def build(name: str, release: bool) -> Path:
         copy(SHARED / shared_rel, output / packaged_rel)
     merge_locales(source, output)
     copy_info_highlight_transformers(source, output)
-    # config.js 由源头变体生成：--release 固定 prod，否则用 dev-env.sh 生成的 config.js。
-    prod = source / "config.prod.js"
-    if prod.is_file():
-        config = source / "config.js"
-        if release or not config.is_file():
-            config = prod
-        copy(config, output / "config.js")
-        print(f"build: config.js <- {config.name}")
+    # 上架写空配置，不带本地 config.js。本地构建有这份才拷进去，没有也写空的。
+    write_config(name, source, output, release)
     print(output)
     return output
 
@@ -140,7 +154,7 @@ if __name__ == "__main__":
     parser.add_argument("name", choices=extension_names())
     parser.add_argument(
         "--release", action="store_true",
-        help="上架构建：固定用 config.prod.js，忽略 dev-env.sh 生成的 config.js",
+        help="上架构建：写入空 config.js，不带本地调试配置",
     )
     args = parser.parse_args()
     build(args.name, args.release)

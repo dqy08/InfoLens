@@ -93,6 +93,9 @@ test('相同请求命中缓存后按当前文档位置重新映射', async () =>
   runInThisContext(readFileSync(join(dir, '../wordMerge.js'), 'utf8'), {
     filename: 'wordMerge.js',
   });
+  runInThisContext(readFileSync(join(dir, '../cloudWait.js'), 'utf8'), {
+    filename: 'cloudWait.js',
+  });
   runInThisContext(readFileSync(join(dir, '../page-map.js'), 'utf8'), {
     filename: 'page-map.js',
   });

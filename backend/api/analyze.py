@@ -6,6 +6,7 @@ import queue
 import threading
 from typing import Optional
 from backend.platform.schemas import create_empty_analysis_result
+from backend.models.device import hardware_name
 from backend.models.model_manager import (
     project_registry,
     DEFAULT_BASE_MODEL,
@@ -56,6 +57,9 @@ def _build_response(model: str, text: str, result):
         model_value = model
     # 重新构建 result，确保 model 在最前面
     result = {'model': _analyze_result_model_display(model_value), **result}
+    device = hardware_name()
+    if device:
+        result['device'] = device
     return {
         "request": {'text': text},
         "result": result

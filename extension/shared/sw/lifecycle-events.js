@@ -5,14 +5,8 @@
  */
 const IL_UNINSTALL_SURVEY_URL = 'https://info-lens.app/uninstall.html';
 
-/** config.reportUsage === false 时跳过 install/update/用量等上报（dev 用）。缺省视为开启。 */
-globalThis.IL_reportsEnabled = function IL_reportsEnabled(config) {
-  return config?.reportUsage !== false;
-};
-
-globalThis.IL_postKeepalive = function IL_postKeepalive(path, body, apiBase) {
-  const base = String(apiBase || 'https://api.info-lens.app').replace(/\/$/, '');
-  void fetch(`${base}${path}`, {
+globalThis.IL_postKeepalive = function IL_postKeepalive(path, body) {
+  void fetch(`${IL_API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -36,7 +30,6 @@ globalThis.IL_setUninstallSurveyUrl = function IL_setUninstallSurveyUrl(extensio
 globalThis.IL_reportInstallOrUpdate = function IL_reportInstallOrUpdate(
   details,
   extensionId,
-  apiBase,
 ) {
   if (details.reason !== 'install' && details.reason !== 'update') return;
   void (async () => {
@@ -48,18 +41,17 @@ globalThis.IL_reportInstallOrUpdate = function IL_reportInstallOrUpdate(
     if (details.reason === 'update' && details.previousVersion) {
       body.previous_version = details.previousVersion;
     }
-    const clientId = await IL_getClientId(apiBase).catch(() => null);
+    const clientId = await IL_getClientId().catch(() => null);
     if (clientId) body.client_id = clientId;
-    IL_postKeepalive('/api/extension-events', body, apiBase);
+    IL_postKeepalive('/api/extension-events', body);
   })();
 };
 
 /** 启动时取 client_id 并写进卸载问卷 URL（重装后靠门面 Cookie 认回同一 id）。 */
 globalThis.IL_prepareClientIdReporting = function IL_prepareClientIdReporting(
   extensionId,
-  apiBase,
 ) {
-  void IL_getClientId(apiBase)
+  void IL_getClientId()
     .catch(() => null)
     .then((cid) => IL_setUninstallSurveyUrl(extensionId, cid));
 };

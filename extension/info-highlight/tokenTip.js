@@ -1,7 +1,7 @@
 /**
  * Token 悬停面板：网页 token 只绑 ::highlight、没有 DOM 可挂事件，
  * 故由 caretPositionFromPoint 反查指针下的字，再按码点偏移二分到 token。
- * 内容取站点 tooltip 的精简版：token 文字 + 信息量一行 + Top-K 条形图；底部另附本轮 result.model。
+ * 内容取站点 tooltip 的精简版：token 文字 + 信息量一行 + Top-K 条形图；底部为本轮 result.model，有硬件时下一行是去掉商标和主频后的名字。
  * SYNC: client/src/shared/vis/ToolTip.ts → 行文案、d3.format('.3g') 数值格式与右下偏移
  * SYNC: client/src/shared/cross/topkChartUtils.ts → 行结构、省略行、条形与百分比
  */
@@ -147,6 +147,8 @@ globalThis.IH_tokenTip ||= (function () {
   let shown = null;
   /** 本轮分析返回的 result.model；全局一份，不进 token */
   let modelName = '';
+  /** result.device 去掉商标和主频；缓存命中不带 device，沿用这一轮已有的 */
+  let deviceName = '';
   /** options.js 的 show_token_tip；默认开 */
   let enabled = true;
   chrome.storage?.local?.get({ show_token_tip: true }, (res) => {
@@ -304,6 +306,7 @@ globalThis.IH_tokenTip ||= (function () {
       const foot = document.createElement('div');
       foot.className = 'model';
       foot.textContent = modelName;
+      if (deviceName) foot.append(document.createElement('br'), `@ ${deviceName}`);
       el.appendChild(foot);
     }
   }
@@ -405,14 +408,28 @@ globalThis.IH_tokenTip ||= (function () {
     if (!raf) raf = requestAnimationFrame(update);
   }
 
-  /** @param {string} name 本轮 `result.model` */
-  function setModel(name) {
+  /** 去掉 (R)/(TM) 和 @ 后面的主频，并丢掉末尾的 CPU / Processor。型号词不动。 */
+  function deviceLabel(raw) {
+    return String(raw ?? '')
+      .replace(/\(r\)|\(tm\)|®|™/gi, '')
+      .split('@')[0]
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/\s+(cpu|processor)$/i, '')
+      .trim();
+  }
+
+  /** @param {string} name 本轮 `result.model` @param {string} [device] 本轮 `result.device` 原文 */
+  function setModel(name, device) {
     modelName = typeof name === 'string' ? name.trim() : '';
+    const label = deviceLabel(device);
+    if (label) deviceName = label;
   }
 
   /** @param {{ text: string, pieces: Array<{ node: Text, start: number, end: number }> }} next */
   function bind(next) {
     modelName = '';
+    deviceName = '';
     mapped = next;
     idx = globalThis.IL_createTextIndex(next.text);
     pieceOf = new Map(next.pieces.map((p) => [p.node, p]));
@@ -444,7 +461,8 @@ globalThis.IH_tokenTip ||= (function () {
     pieceOf = new Map();
     tokens = [];
     modelName = '';
+    deviceName = '';
   }
 
-  return { bind, add, clear, setModel };
+  return { bind, add, clear, setModel, deviceLabel };
 })();

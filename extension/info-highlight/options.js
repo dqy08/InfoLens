@@ -28,6 +28,7 @@
     show_progress: false,
     show_token_tip: true,
     [HS.KEY_TWO_TIER]: HS.STORAGE_DEFAULTS[HS.KEY_TWO_TIER],
+    [HS.KEY_FADE_NORM]: HS.STORAGE_DEFAULTS[HS.KEY_FADE_NORM],
     ih_word_merge: false,
     ih_highlight_options_page: false,
   };
@@ -60,9 +61,42 @@
   el.brand_icon.src = iconRel;
   el.brand_icon.alt = name;
 
+  // Qwen3-0.6B-Base surprisal bits。勾选归一化时，只用这段预览自己的文字定最强档。
+  const DEMO_TOKENS = [
+    ['Try', 12.39], [' Info', 14.04], [' Highlight', 19], ['.', 7.28],
+    [' It', 4.64], [' uses', 7.4], [' large', 11.11], [' language', 6.03],
+    [' models', 0.11], [' to', 0.81], [' analyze', 4.5], [' text', 3.03],
+    [' information', 9.97], [' density', 17.48], [' and', 1.37],
+    [' visual', 8.31], ['izes', 10.65], [' where', 10.72], [' the', 2.28],
+    [' important', 8.38], [' parts', 3.45], [' are', 1.44], ['.\n', 3.78],
+    ['The', 5.26], [' color', 10.57], [' intensity', 5.06], [' of', 1.15],
+    [' each', 2.34], [' token', 8.51], [' indicates', 4.09], [' how', 2.69],
+    [' much', 2.39], [' information', 1.68], [' it', 1.82], [' carries', 2.91],
+    ['.', 1.13], [' Try', 8.72], [' it', 3.01], [' yourself', 4.29], ['!', 3.91],
+  ];
+  let demoFadeScale = null;
+
+  function demoTextWeight(raw) {
+    let n = 0;
+    for (const ch of raw) {
+      if (!/\s/u.test(ch)) n += 1;
+    }
+    return n;
+  }
+
+  function syncDemoFadeScale() {
+    const on = !!document.getElementById(HS.KEY_FADE_NORM)?.checked;
+    demoFadeScale = on
+      ? HS.fadeNormScaleBits(DEMO_TOKENS.map(([raw, bits]) => ({
+        bits,
+        weight: demoTextWeight(raw),
+      })))
+      : null;
+  }
+
   function demoPFor(bits, style) {
     if (style === HS.PAINT_FADE) {
-      const level = HS.tokenLevelForFade(bits);
+      const level = HS.tokenLevelForFade(bits, demoFadeScale);
       if (level < 0) return HS.clampFadeMinPct(el.ih_fade_min_pct.value) / 100;
       return HS.fadeOpacityForLevel(
         level,
@@ -79,6 +113,7 @@
   }
 
   function syncPaintDemo() {
+    syncDemoFadeScale();
     for (const card of el.ih_paint_style.querySelectorAll('.ih-paint-card')) {
       const style = card.dataset.style;
       for (const s of card.querySelectorAll('.ih-paint-demo span')) {
@@ -108,6 +143,8 @@
     if (intensityRow) intensityRow.hidden = fade;
     const fadeRow = rowFor(HS.KEY_FADE_MIN_PCT);
     if (fadeRow) fadeRow.hidden = !fade;
+    const fadeNormRow = rowFor(HS.KEY_FADE_NORM);
+    if (fadeNormRow) fadeNormRow.hidden = !fade;
   }
 
   function syncPaintStyle(v) {
@@ -220,11 +257,13 @@
       chrome.storage.local.get({ [key]: fallback }, (res) => {
         box.checked = !!res[key];
         if (key === HS.KEY_TWO_TIER) syncTwoTierUi(box.checked);
+        if (key === HS.KEY_FADE_NORM) syncPaintDemo();
         resolve();
       });
       box.addEventListener('change', () => {
         chrome.storage.local.set({ [key]: box.checked });
         if (key === HS.KEY_TWO_TIER) syncTwoTierUi(box.checked);
+        if (key === HS.KEY_FADE_NORM) syncPaintDemo();
       });
     })));
   }
@@ -290,20 +329,7 @@
     const demo = document.createElement('span');
     demo.className = 'ih-paint-demo';
     demo.setAttribute('aria-hidden', 'true');
-    // Qwen3-0.6B-Base surprisal bits；--ih-p 按每张卡自己的样式现算（淡去走 fadeOpacity）
-    const tokens = [
-      ['Try', 12.39], [' Info', 14.04], [' Highlight', 19], ['.', 7.28],
-      [' It', 4.64], [' uses', 7.4], [' large', 11.11], [' language', 6.03],
-      [' models', 0.11], [' to', 0.81], [' analyze', 4.5], [' text', 3.03],
-      [' information', 9.97], [' density', 17.48], [' and', 1.37],
-      [' visual', 8.31], ['izes', 10.65], [' where', 10.72], [' the', 2.28],
-      [' important', 8.38], [' parts', 3.45], [' are', 1.44], ['.\n', 3.78],
-      ['The', 5.26], [' color', 10.57], [' intensity', 5.06], [' of', 1.15],
-      [' each', 2.34], [' token', 8.51], [' indicates', 4.09], [' how', 2.69],
-      [' much', 2.39], [' information', 1.68], [' it', 1.82], [' carries', 2.91],
-      ['.', 1.13], [' Try', 8.72], [' it', 3.01], [' yourself', 4.29], ['!', 3.91],
-    ];
-    for (const [raw, bits] of tokens) {
+    for (const [raw, bits] of DEMO_TOKENS) {
       const s = document.createElement('span');
       s.dataset.bits = String(bits);
       s.style.setProperty('--ih-p', String(demoPFor(bits, style ?? paintStyle)));

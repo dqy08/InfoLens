@@ -15,7 +15,7 @@ PDF：http(s) 页内读字节；`file:` 由 SW 读 tab URL（`optional_host_perm
 ## 开发
 
 ```bash
-./extension/semantic-highlight/dev-env.sh prod   # 或 dev；生成 gitignore 的 config.js 并构建（clone 后至少一次）
+python3 extension/scripts/build_extension.py semantic-highlight
 ```
 
 Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选 `extension/dist/semantic-highlight/`。
@@ -24,16 +24,7 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 
 测试入口见 [TESTING.md](./TESTING.md)。
 
-改配置改源头，再生成（**不要手改** `config.js`）：
-
-```bash
-./extension/semantic-highlight/dev-env.sh prod    # apiBase=api.info-lens.app
-./extension/semantic-highlight/dev-env.sh dev     # apiBase=*.workers.dev（不上报）
-```
-
-`dev` 设 `reportUsage: false`。构建会把源目录的 `config.js` 拷进产物（缺失则回落 `config.prod.js`），并打印用了哪份；
-`dev-env.sh` 切完会自动重新构建（浏览器加载的是产物，不构建则重载无效）。
-上架构建带 `--release`，固定用 `config.prod.js`，不受本地切换状态影响。
+匹配阈值写在 `semantic/find.js` 的 `MATCH_THRESHOLD`。本地调试改 gitignore 的 `config.js`（例如 `domDebug: true`），再构建。没有这份就用空配置。上架构建带 `--release`，写入空配置，不带本地这份。
 
 改动共享代码或插件源码后执行 `python3 extension/scripts/build_extension.py semantic-highlight`，再重新加载扩展。浮条改 `extension/semantic-highlight/ui/`。
 
@@ -51,9 +42,7 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 
 | 字段 | 含义 |
 |------|------|
-| `apiBase` | API 根；prod / dev 由 `dev-env.sh` 切换 |
-| `matchThreshold` | 计入 ↑↓ 的 match 阈值 |
-| `domDebug` | `true` 只划正文范围 |
+| `domDebug` | 本地 `config.js`。`true` 只划正文范围 |
 
 ### PDF viewer
 
@@ -87,10 +76,8 @@ Chrome → `chrome://extensions` → 开发者模式 → 加载已解压 → 选
 ```text
 manifest.json
 icons/icon*.png
-pack.sh / dev-env.sh / PUBLISH.md
-config.prod.js         # 上架默认 / 官方域名（源头）；--release 打进包
-config.dev.js          # Dev 门面 *.workers.dev（源头）
-config.js              # gitignore；dev-env 生成
+pack.sh / PUBLISH.md
+config.js              # gitignore；本地调试。上架包写成空配置
 _locales/              # 商店名称与短描述
 ui/                    # Find bar 权威源
 semantic/              # DocumentAdapter + semantic find（page/pdf + find.js）

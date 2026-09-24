@@ -84,7 +84,7 @@ test('catalog / SEED_SEEN 与选项页 data-option-id 对齐', () => {
   }
 });
 
-test('Info Highlight 本版：升级后 intensity / one-tone / auto-sites / cloud model / fade floor 为新；工具栏与选项解耦', async () => {
+test('Info Highlight 本版：升级后 intensity / one-tone / auto-sites / cloud model / fade floor / fade norm 为新；工具栏与选项解耦', async () => {
   const icons = { 16: 'icons/icon16.png', 32: 'icons/icon32.png' };
   const catSandbox = { globalThis: {} };
   catSandbox.globalThis = catSandbox;
@@ -105,6 +105,7 @@ test('Info Highlight 本版：升级后 intensity / one-tone / auto-sites / clou
   assert.ok(!seed.includes('ih_paint_style'));
   assert.ok(!seed.includes('ih_highlight_color'));
   assert.ok(!seed.includes('ih_fade_min_pct'));
+  assert.ok(!seed.includes('ih_fade_norm'));
 
   const env = loadAttention(
     { action: { default_icon: icons }, update_url: 'https://example' },
@@ -117,7 +118,7 @@ test('Info Highlight 本版：升级后 intensity / one-tone / auto-sites / clou
   const unseen = await env.sandbox.IL_optionsAttention.unseen(catalog);
   assert.equal(
     unseen.slice().sort().join(','),
-    'ih_article_only,ih_auto_sites,ih_cloud_model,ih_fade_min_pct,ih_highlight_color,ih_max_highlight_alpha,ih_paint_style,ih_two_tier,ih_word_merge',
+    'ih_article_only,ih_auto_sites,ih_cloud_model,ih_fade_min_pct,ih_fade_norm,ih_highlight_color,ih_max_highlight_alpha,ih_paint_style,ih_two_tier,ih_word_merge',
   );
 });
 

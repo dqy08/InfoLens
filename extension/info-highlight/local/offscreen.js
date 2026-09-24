@@ -218,6 +218,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       disarmLinger();
       try {
         const result = await analyzeText(msg.text);
+        result.device = 'local WebGPU';
         return { ok: true, result };
       } finally {
         // 标签暂停不再发消息时，靠这段闲置计时卸引擎；下一段到来会先 disarm

@@ -67,7 +67,7 @@ test('IL_setUninstallSurveyUrl / IL_reportInstallOrUpdate 带 ext、extension �
     'https://info-lens.app/uninstall.html?v=0.1.0&ext=info-highlight&cid=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
   );
 
-  sandbox.IL_reportInstallOrUpdate({ reason: 'install' }, 'info-highlight', 'https://api.example');
+  sandbox.IL_reportInstallOrUpdate({ reason: 'install' }, 'info-highlight');
   await new Promise((r) => setTimeout(r, 20));
   const ev = calls.fetch.find((c) => c.url.includes('/api/extension-events'));
   assert.ok(ev);
@@ -81,15 +81,10 @@ test('IL_setUninstallSurveyUrl / IL_reportInstallOrUpdate 带 ext、extension �
   sandbox.IL_reportInstallOrUpdate(
     { reason: 'update', previousVersion: '0.0.9' },
     'semantic-highlight',
-    'https://api.example'
   );
   await new Promise((r) => setTimeout(r, 20));
   const upd = calls.fetch.filter((c) => c.url.includes('/api/extension-events')).at(-1);
   assert.equal(upd.body.extension, 'semantic-highlight');
   assert.equal(upd.body.previous_version, '0.0.9');
   assert.equal(upd.body.client_id, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
-
-  assert.equal(sandbox.IL_reportsEnabled(undefined), true);
-  assert.equal(sandbox.IL_reportsEnabled({ reportUsage: true }), true);
-  assert.equal(sandbox.IL_reportsEnabled({ reportUsage: false }), false);
 });

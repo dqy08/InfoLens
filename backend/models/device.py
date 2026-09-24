@@ -1,6 +1,9 @@
 """设备管理：CPU/CUDA/MPS 检测与内存统计"""
 
 import os
+import subprocess
+import sys
+
 import torch
 
 
@@ -95,3 +98,45 @@ class DeviceManager:
         except Exception:
             pass
         print(f"{'='*60}\n")
+
+
+_hardware_name = None
+_hardware_name_read = False
+
+
+def hardware_name():
+    """本进程硬件原文。tip 再去掉商标和主频。一次读完后不变。"""
+    global _hardware_name, _hardware_name_read
+    if _hardware_name_read:
+        return _hardware_name
+    name = _read_hardware_name()
+    _hardware_name = name
+    _hardware_name_read = True
+    return name
+
+
+def _read_hardware_name():
+    if DeviceManager.get_device().type == "cuda":
+        name = torch.cuda.get_device_name(0).strip()
+        return name or None
+    if sys.platform == "darwin":
+        try:
+            name = subprocess.check_output(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                text=True,
+                timeout=2,
+            ).strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return name or None
+    if sys.platform != "linux":
+        return None
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8") as f:
+            for line in f:
+                if line.lower().startswith("model name") and ":" in line:
+                    name = line.split(":", 1)[1].strip()
+                    return name or None
+    except OSError:
+        return None
+    return None
