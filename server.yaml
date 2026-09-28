@@ -429,6 +429,9 @@ paths:
                 description: segments served from local analyze cache (no inference)
               version:
                 type: string
+              trigger:
+                type: string
+                description: auto | icon | menu | rerun | other
       responses:
         200:
           description: counted in visit_stats.api

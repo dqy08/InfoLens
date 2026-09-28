@@ -323,6 +323,7 @@ test('runJob：failed 时 ih-usage-report 带 detail；ok 时不带', async () =
   assert.equal(failMsg.detail.painted, 0);
   assert.equal(failMsg.error, 'No tokens mapped onto the page');
   assert.equal(failMsg.segments, 1);
+  assert.equal('trigger' in failMsg, false);
 
   messages.length = 0;
   await R.runJob(
@@ -358,9 +359,32 @@ test('runJob：onFailed 在 fail 之前收到 report', async () => {
   assert.equal(seen, 'failed');
 });
 
+test('runJob：hooks.trigger 写入 ih-usage-report；未知则省略', async () => {
+  await R.runJob(
+    () => true,
+    { fail: async () => {}, idle: () => {}, trigger: 'icon' },
+    async (report) => {
+      report.segments = 1;
+    },
+  );
+  const iconMsg = messages.find((m) => m.type === 'ih-usage-report');
+  assert.equal(iconMsg.trigger, 'icon');
+
+  messages.length = 0;
+  await R.runJob(
+    () => true,
+    { fail: async () => {}, idle: () => {}, trigger: 'not-a-trigger' },
+    async (report) => {
+      report.segments = 1;
+    },
+  );
+  const badMsg = messages.find((m) => m.type === 'ih-usage-report');
+  assert.equal('trigger' in badMsg, false);
+});
+
 test('background.js：失败时 error/detail 写进同一条 /api/extension-usage', () => {
   const src = readFileSync(join(dir, '../background.js'), 'utf8');
-  const fn = src.match(/async function postUsageReport\(body\) \{[\s\S]*?\n\}/);
+  const fn = src.match(/async function postUsageReport\(body(?:, tabId)?\) \{[\s\S]*?\n\}/);
   assert.ok(fn, 'postUsageReport missing');
   assert.match(fn[0], /IL_postKeepalive\('\/api\/extension-usage', payload/);
   assert.match(src, /il-extension-feedback/);
@@ -368,7 +392,14 @@ test('background.js：失败时 error/detail 写进同一条 /api/extension-usag
   assert.match(fn[0], /payload\.error = err/);
   assert.match(fn[0], /payload\.detail = detail/);
   assert.match(fn[0], /payload\.options = options/);
+  assert.match(fn[0], /const trigger = normalizeUsageTrigger\(body\?\.trigger\)/);
+  assert.match(fn[0], /outcome,\s*trigger,\s*segments,/);
   assert.match(src, /auto_sites: sites\.length/);
+  assert.match(src, /USAGE_TRIGGERS = \['auto', 'icon', 'menu', 'rerun', 'other'\]/);
+  assert.match(src, /void activateTab\(tab, false, '', 'icon'\)/);
+  assert.match(src, /void activateTab\(tab, false, '', 'menu'\)/);
+  assert.match(src, /void activateTab\(tab, true, '', 'rerun'\)/);
+  assert.match(src, /triggerByTab\.set\(tabId, 'auto'\)/);
   assert.doesNotMatch(src, /function usageModelId/);
   assert.doesNotMatch(src, /\/api\/extension-analysis-fail/);
 });

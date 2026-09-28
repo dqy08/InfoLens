@@ -83,7 +83,7 @@ test('drop-stale：无 isLive / 已作废则清掉全局', () => {
 
 test('扩展重载后的旧世界：有痕迹则 stale，拒绝再注入', () => {
   const bg = readFileSync(join(dir, '../background.js'), 'utf8');
-  const peek = bg.match(/async function pageCsPeek\(tabId, method, cloudModel\) \{[\s\S]*?\n\}/);
+  const peek = bg.match(/async function pageCsPeek\(tabId, method, cloudModel, trigger\) \{[\s\S]*?\n\}/);
   assert.ok(peek, 'pageCsPeek missing');
   assert.match(peek[0], /data-ih-cs/);
   assert.doesNotMatch(peek[0], /il-pdf-entry/);
@@ -91,7 +91,9 @@ test('扩展重载后的旧世界：有痕迹则 stale，拒绝再注入', () =>
   assert.doesNotMatch(peek[0], /ih-token-0/);
   assert.match(peek[0], /demo\.isLive/);
   assert.match(peek[0], /pdf\?\.isLive/);
-  assert.match(bg, /pageCsPeek\(tab\.id, force \? 'force' : 'toggle', pinned\)/);
+  assert.match(peek[0], /demo\.toggle\(why\)/);
+  assert.match(peek[0], /demo\.force\(model, why\)/);
+  assert.match(bg, /pageCsPeek\(tab\.id, force \? 'force' : 'toggle', pinned, why\)/);
   assert.match(bg, /peek\.state === 'live' && peek\.result/);
   assert.match(bg, /pageCsPeek\(tabId, 'start'\)/);
   assert.match(bg, /IL_pdfSw\.isPdfUrl\(url\)[\s\S]*pageCsPeek\(tab\.id\)/);

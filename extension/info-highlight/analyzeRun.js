@@ -81,6 +81,14 @@ globalThis.IH_analyzeRun ||= (function () {
     reportActionState('analyzing', Math.min(ACTION_TILES, filled));
   }
 
+  /** SYNC: background.js USAGE_TRIGGERS / normalizeUsageTrigger */
+  const USAGE_TRIGGERS = ['auto', 'icon', 'menu', 'rerun', 'other'];
+
+  function normalizeUsageTrigger(v) {
+    const s = typeof v === 'string' ? v.trim() : '';
+    return USAGE_TRIGGERS.includes(s) ? s : '';
+  }
+
   /** 一轮结束后上报；未尝试任何段时不发。失败时附带截断后的 error（不含页面 URL/正文）。 */
   function reportUsage(report) {
     if (!report || report.segments < 1) return;
@@ -93,6 +101,8 @@ globalThis.IH_analyzeRun ||= (function () {
       cached: report.cached,
       duration_ms: Math.max(0, Math.round(Number(report.duration_ms) || 0)),
     };
+    const trigger = normalizeUsageTrigger(report.trigger);
+    if (trigger) msg.trigger = trigger;
     if (report.model) msg.model = String(report.model);
     if (report.outcome === 'failed' && report.error) {
       msg.error = String(report.error).slice(0, 500);
@@ -112,6 +122,7 @@ globalThis.IH_analyzeRun ||= (function () {
       cached: 0,
       engine: null,
       model: null,
+      trigger: null,
       outcome: null,
       error: null,
       duration_ms: 0,
@@ -361,7 +372,7 @@ globalThis.IH_analyzeRun ||= (function () {
 
   /**
    * @param {() => boolean} still
-   * @param {{ fail: (err: unknown) => void | Promise<void>, idle: () => void, onFailed?: (args: { err: unknown, report: ReturnType<typeof newUsageReport> }) => void }} hooks
+   * @param {{ fail: (err: unknown) => void | Promise<void>, idle: () => void, onFailed?: (args: { err: unknown, report: ReturnType<typeof newUsageReport> }) => void, trigger?: string }} hooks
    * @param {(report: ReturnType<typeof newUsageReport>) => Promise<void>} job
    */
   async function runJob(still, hooks, job) {
@@ -369,6 +380,7 @@ globalThis.IH_analyzeRun ||= (function () {
     globalThis.IH_clearError();
     await globalThis.IH_setProgressSearching(true);
     const report = newUsageReport();
+    report.trigger = normalizeUsageTrigger(hooks.trigger) || null;
     const t0 = Date.now();
     try {
       await job(report);
@@ -393,6 +405,8 @@ globalThis.IH_analyzeRun ||= (function () {
   return {
     MAX_SEGMENTS_PER_RUN,
     FORCE_BUSY_MSG: 'Info Highlight is still analyzing this page. Try again when it finishes.',
+    USAGE_TRIGGERS,
+    normalizeUsageTrigger,
     reportActionState,
     beginSession,
     paintRange,

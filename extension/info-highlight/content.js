@@ -44,6 +44,8 @@
   let gen = 0;
   let busy = false;
   let active = false;
+  /** 本轮是怎么开跑的；继续下一段沿用 session.trigger。 */
+  let lastTrigger = '';
   /** 这份抽字是否已过晚到窗口（手点开跑即稳定；自动分析要等对拍窗结束） */
   let extractStable = false;
   /** @type {{ mapped: { text: string, pieces: unknown[] }, segs: { start: number, end: number, text: string }[], next: number, painted: number, skipCache?: boolean, cloudModel?: string } | null} */
@@ -86,9 +88,11 @@
 
   async function openSession(skip, cloudModel) {
     const pinned = cloudModel || session?.cloudModel || '';
+    const prevTrigger = session?.trigger;
     session = await R.beginSession(globalThis.IH_extractPage(), 'No article text');
     session.skipCache = skip;
     if (pinned) session.cloudModel = pinned;
+    if (prevTrigger) session.trigger = prevTrigger;
     globalThis.IH_tokenTip.bind(session.mapped);
     if (extractStable) globalThis.IH_watchHighlightLive();
   }
@@ -132,13 +136,15 @@
       if (!active) return;
       R.reportActionState('on');
     };
+    const trig = R.normalizeUsageTrigger(session?.trigger || lastTrigger);
     // settle：idle 延到对拍窗结束，图标一直显示分析中
     const hooks = settle
-      ? { fail: (err) => { heldErr = err; }, idle() {}, onFailed }
-      : { fail, idle, onFailed };
+      ? { fail: (err) => { heldErr = err; }, idle() {}, onFailed, trigger: trig }
+      : { fail, idle, onFailed, trigger: trig };
     const job = async (report) => {
       if (!settle) extractStable = true;
       if (!session) await openSession(skip, pinned);
+      if (trig) session.trigger = trig;
       const opts = { onTokens: (tokens) => globalThis.IH_tokenTip.add(tokens), skipCache: skip };
       const paintTo = async (to) => {
         const err = await R.paintRange(session, session.next, to, still, opts, report);
@@ -188,10 +194,12 @@
     gen += 1;
     busy = false;
     clearAll();
+    lastTrigger = 'rerun';
     void runBatch(gen, false, false);
   }
 
-  function setEnabled(on) {
+  function setEnabled(on, trigger) {
+    lastTrigger = R.normalizeUsageTrigger(trigger) || 'other';
     if (on) {
       if (busy || active) return;
       void runBatch(gen += 1, false, false);
@@ -204,16 +212,17 @@
     }
   }
 
-  function toggle() {
-    setEnabled(!(busy || active));
+  function toggle(trigger) {
+    setEnabled(!(busy || active), trigger);
   }
 
-  function force(cloudModel) {
+  function force(cloudModel, trigger) {
     if (busy) {
       alert(R.FORCE_BUSY_MSG);
       return;
     }
     if (active) clearAll();
+    lastTrigger = R.normalizeUsageTrigger(trigger) || 'rerun';
     const pinned = typeof cloudModel === 'string' ? cloudModel : '';
     void runBatch(gen += 1, false, true, pinned);
   }
@@ -230,6 +239,7 @@
   function start() {
     if (busy) return 'busy';
     if (active) return 'painted';
+    lastTrigger = 'auto';
     void runBatch(gen += 1, true, false);
     return true;
   }

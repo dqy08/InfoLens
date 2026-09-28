@@ -15,6 +15,8 @@
   let generation = 0;
   let busy = false;
   let enabled = true;
+  /** 本轮是怎么开跑的；viewer 首次自启时可能还空，交给 SW 按 tab 补。 */
+  let lastTrigger = '';
   /** @type {{ mapped: { text: string, pieces: unknown[], root: Element }, segs: { start: number, end: number, text: string }[], next: number, painted: number, tokensBySeg?: unknown[][], skipCache?: boolean, cloudModel?: string } | null} */
   let session = null;
 
@@ -53,6 +55,8 @@
     const still = () => myGeneration === generation;
     busy = true;
     R.reportActionState('analyzing');
+    const trig = R.normalizeUsageTrigger(session?.trigger || lastTrigger);
+    if (trig) lastTrigger = trig;
     return R.runJob(still, {
       onFailed({ report, err }) {
         globalThis.IH_feedbackContext?.stash({ session, report, err, surface: 'pdf' });
@@ -69,6 +73,7 @@
         if (!enabled) R.reportActionState('off');
         else if (session) R.reportActionState('on');
       },
+      trigger: trig,
     }, work);
   }
 
@@ -82,6 +87,8 @@
         session.skipCache = skip;
         if (pinned) session.cloudModel = pinned;
       }
+      const trig = R.normalizeUsageTrigger(lastTrigger || session.trigger);
+      if (trig) session.trigger = trig;
       const end = Math.min(session.next + R.MAX_SEGMENTS_PER_RUN, session.segs.length);
       const lastAlignErr = await R.paintRange(
         session, session.next, end, still, { overlay: true, skipCache: skip }, report,
@@ -140,6 +147,7 @@
   function retryAnalyze() {
     enabled = true;
     busy = false;
+    lastTrigger = 'rerun';
     restart();
   }
 
@@ -183,9 +191,12 @@
           enabled = true;
           clear();
           const pinned = typeof message.cloudModel === 'string' ? message.cloudModel : '';
+          lastTrigger = R.normalizeUsageTrigger(message.trigger) || 'rerun';
           void runBatch(generation += 1, true, pinned);
         }
       } else {
+        const why = R.normalizeUsageTrigger(message.trigger);
+        if (why) lastTrigger = why;
         toggle();
       }
       sendResponse({ ok: true });

@@ -7,8 +7,10 @@ from backend.platform.visit_stats import bump_api
 _EXTENSIONS = frozenset({"info-highlight"})
 _ENGINES = frozenset({"local", "cloud"})
 _OUTCOMES = frozenset({"ok", "failed", "cancelled"})
+_TRIGGERS = frozenset({"auto", "icon", "menu", "rerun", "other"})
 _MAX_SEGMENTS = 512
 _MAX_DURATION_MS = 86_400_000
+_MAX_TRIGGER_LEN = 16
 
 
 def _nonneg_int(v, default=0) -> int:
@@ -43,6 +45,18 @@ def _optional_duration_ms(v):
     return min(n, _MAX_DURATION_MS)
 
 
+def _optional_trigger(v):
+    """已知集合原样；其它短字符串截断后收下。非法/缺失视为缺省（None），不 400。"""
+    if not isinstance(v, str):
+        return None
+    s = v.strip()
+    if not s:
+        return None
+    if s in _TRIGGERS:
+        return s
+    return s[:_MAX_TRIGGER_LEN]
+
+
 def extension_usage_report(usage_body=None):
     d = usage_body if isinstance(usage_body, dict) else {}
     extension = str(d.get("extension") or "").strip()
@@ -60,6 +74,7 @@ def extension_usage_report(usage_body=None):
     duration_ms = _optional_duration_ms(d.get("duration_ms"))
     client_id = optional_client_id(d.get("client_id"))
     model = _optional_model(d.get("model"))
+    trigger = _optional_trigger(d.get("trigger"))
 
     bump_api("info_highlight_run")
     bump_api(f"info_highlight_run__{engine}")
@@ -78,6 +93,8 @@ def extension_usage_report(usage_body=None):
         details += f" v={version}"
     if model:
         details += f" m={model}"
+    if trigger:
+        details += f" trigger={trigger}"
     if duration_ms is not None:
         details += f" dur={duration_ms}"
     if client_id:

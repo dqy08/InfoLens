@@ -83,14 +83,15 @@ const CONTENT_JS = [
  * SYNC: content.js 的 data-ih-cs。PDF 入口节点由 entry.js 同 id 回收，不当 stale。
  * @param {'toggle' | 'start' | 'force' | ''} [method]
  * @param {string} [cloudModel] force 时钉住的云端模型 id；空则走当前偏好
+ * @param {string} [trigger] auto | icon | menu | rerun | other
  * @returns {Promise<{ state: 'live' | 'stale' | 'empty', result?: unknown }>}
  */
-async function pageCsPeek(tabId, method, cloudModel) {
+async function pageCsPeek(tabId, method, cloudModel, trigger) {
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId, frameIds: [0] },
-      args: [method || '', typeof cloudModel === 'string' ? cloudModel : ''],
-      func: (m, model) => {
+      args: [method || '', typeof cloudModel === 'string' ? cloudModel : '', typeof trigger === 'string' ? trigger : ''],
+      func: (m, model, why) => {
         const demo = window.__IH_DEMO__;
         const pdf = window.__IH_PDF_ENTRY__;
         let live = false;
@@ -111,11 +112,11 @@ async function pageCsPeek(tabId, method, cloudModel) {
             return { state: 'live', result: demo.start() };
           }
           if (m === 'force' && typeof demo?.force === 'function') {
-            demo.force(model);
+            demo.force(model, why);
             return { state: 'live', result: true };
           }
           if (m === 'toggle' && typeof demo?.toggle === 'function') {
-            demo.toggle();
+            demo.toggle(why);
             return { state: 'live', result: true };
           }
           return { state: 'live' };
@@ -170,9 +171,11 @@ async function setBadgeError(tabId, brief) {
   }
 }
 
-async function activateTab(tab, force, cloudModel) {
+async function activateTab(tab, force, cloudModel, trigger) {
   if (!tab?.id) return;
   const pinned = force ? knownCloudModel(cloudModel) : '';
+  const why = normalizeUsageTrigger(trigger) || (force ? 'rerun' : '');
+  if (why) triggerByTab.set(tab.id, why);
   // optional file:// request 必须在手势同步阶段启动；前面不能有 await
   const fileHostPromise = IL_pdfSw.isFileUrl(tab.url) ? IL_pdfSw.requestFileHostFromGesture() : null;
   IL_setActionIconDotted(false);
@@ -191,6 +194,7 @@ async function activateTab(tab, force, cloudModel) {
           type: force ? 'ih-pdf-force' : 'ih-pdf-toggle',
           tabId: tab.id,
           ...(pinned ? { cloudModel: pinned } : {}),
+          ...(why ? { trigger: why } : {}),
         }, (res) => {
           resolve(!chrome.runtime.lastError && res?.ok === true);
         });
@@ -224,7 +228,7 @@ async function activateTab(tab, force, cloudModel) {
     }
     // 无 .pdf 后缀时先由页内按 Content-Type / 魔数确认，再退回网页管线
     {
-      const peek = await pageCsPeek(tab.id, force ? 'force' : 'toggle', pinned);
+      const peek = await pageCsPeek(tab.id, force ? 'force' : 'toggle', pinned, why);
       if (peek.state === 'stale') {
         await refuseStalePage(tab.id);
         return;
@@ -247,7 +251,7 @@ async function activateTab(tab, force, cloudModel) {
       logLabel: 'Info Highlight',
       waitComplete: false,
     });
-    const after = await pageCsPeek(tab.id, force ? 'force' : 'toggle', pinned);
+    const after = await pageCsPeek(tab.id, force ? 'force' : 'toggle', pinned, why);
     if (after.state !== 'live') {
       await setBadgeError(tab.id, 'inject');
       return;
@@ -306,6 +310,16 @@ function autoMenuTitle(host, on) {
 
 /** 人工点过图标的标签：自动分析别再插手，直到下次导航 */
 const manualTabs = new Set();
+/** SYNC: analyzeRun.js USAGE_TRIGGERS / normalizeUsageTrigger */
+const USAGE_TRIGGERS = ['auto', 'icon', 'menu', 'rerun', 'other'];
+
+function normalizeUsageTrigger(v) {
+  const s = typeof v === 'string' ? v.trim() : '';
+  return USAGE_TRIGGERS.includes(s) ? s : '';
+}
+
+/** tabId -> auto | icon | menu | rerun | other；PDF 首次自启时页内还不知道 */
+const triggerByTab = new Map();
 /** tabId -> 导航代数；reset 时 +1，过期的自动分析不再改状态 */
 const autoGenByTab = new Map();
 /** 同一 tabId 的 maybeAutoAnalyze 互斥：onActivated / onUpdated(complete) 可能几乎同时触发 */
@@ -463,6 +477,7 @@ async function maybeAutoAnalyze(tabId) {
     const gen = autoGenByTab.get(tabId) || 0;
     const stillCurrent = () => (autoGenByTab.get(tabId) || 0) === gen;
     try {
+      triggerByTab.set(tabId, 'auto');
       const peek = await pageCsPeek(tabId, 'start');
       if (!stillCurrent()) return;
       if (peek.state === 'stale') {
@@ -504,7 +519,7 @@ async function maybeAutoAnalyze(tabId) {
 }
 
 chrome.action.onClicked.addListener((tab) => {
-  void activateTab(tab);
+  void activateTab(tab, false, '', 'icon');
 });
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
@@ -524,6 +539,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   IH_actionState.clear(tabId);
   manualTabs.delete(tabId);
+  triggerByTab.delete(tabId);
   autoGenByTab.delete(tabId);
 });
 
@@ -597,12 +613,12 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (!tab?.id) return;
   // 用过菜单也算用过插件；Chrome 右键工具栏图标本身不发事件，只能在这里灭蓝点
   IL_setActionIconDotted(false);
-  if (info.menuItemId === CONTEXT_MENU_ID) void activateTab(tab);
-  else if (info.menuItemId === FORCE_MENU_ID) void activateTab(tab, true);
+  if (info.menuItemId === CONTEXT_MENU_ID) void activateTab(tab, false, '', 'menu');
+  else if (info.menuItemId === FORCE_MENU_ID) void activateTab(tab, true, '', 'rerun');
   else if (typeof info.menuItemId === 'string' && info.menuItemId.startsWith(FORCE_MODEL_PREFIX)) {
     const modelId = info.menuItemId.slice(FORCE_MODEL_PREFIX.length);
     if (!knownCloudModel(modelId)) return;
-    void activateTab(tab, true, modelId);
+    void activateTab(tab, true, modelId, 'rerun');
   }
   // permissions.request 要手势，toggleAutoSite 里首句就发，别在这之前 await
   else if (info.menuItemId === AUTO_MENU_ID) void toggleAutoSite(info, tab.id, tab.url);
@@ -1244,7 +1260,7 @@ async function changedOptionsSnapshot() {
   return snap;
 }
 
-async function postUsageReport(body) {
+async function postUsageReport(body, tabId) {
   let engine = body?.engine;
   if (engine !== 'local' && engine !== 'cloud') {
     engine = await resolveEngine();
@@ -1258,11 +1274,15 @@ async function postUsageReport(body) {
   const duration_ms = clampDurationMs(body?.duration_ms);
   const client_id = await IL_getClientId().catch(() => null);
   const model = typeof body?.model === 'string' ? body.model.trim().slice(0, 64) : '';
+  const trigger = normalizeUsageTrigger(body?.trigger)
+    || (tabId != null ? triggerByTab.get(tabId) : '')
+    || 'other';
   const payload = {
     extension: EXTENSION_ID,
     version: chrome.runtime.getManifest().version,
     engine,
     outcome,
+    trigger,
     segments,
     segments_ok,
     cached,
@@ -1507,7 +1527,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg?.type === 'ih-usage-report') {
-    postUsageReport(msg)
+    postUsageReport(msg, sender.tab?.id)
       .then(() => sendResponse({ ok: true }))
       .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
     return true;

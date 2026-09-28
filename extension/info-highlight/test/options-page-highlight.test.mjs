@@ -180,9 +180,12 @@ test('选项页抽字忽略只标主文；分析不单独指定后端', () => {
   assert.match(html, /<option value="local" disabled data-i18n>/);
   assert.match(optJs, /localOpt\.disabled = !webgpu/);
   const content = readFileSync(join(dir, '../content.js'), 'utf8');
-  assert.match(content, /function setEnabled\(on\)/);
+  assert.match(content, /function setEnabled\(on, trigger\)/);
   assert.match(content, /void runBatch\(gen \+= 1, false, false\)/);
-  assert.match(content, /setEnabled\(\!\(busy \|\| active\)\)/);
+  assert.match(content, /setEnabled\(\!\(busy \|\| active\), trigger\)/);
+  assert.match(content, /lastTrigger = R\.normalizeUsageTrigger\(trigger\) \|\| 'other'/);
+  assert.match(content, /lastTrigger = 'auto'/);
+  assert.match(content, /lastTrigger = R\.normalizeUsageTrigger\(trigger\) \|\| 'rerun'/);
   const run = readFileSync(join(dir, '../analyzeRun.js'), 'utf8');
   assert.match(run, /if \(globalThis\.IH_OPTIONS_PAGE\) return;/);
   assert.match(run, /armCloudWait && !globalThis\.IH_OPTIONS_PAGE/);
