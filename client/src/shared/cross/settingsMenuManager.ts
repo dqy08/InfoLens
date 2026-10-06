@@ -44,6 +44,7 @@ export class SettingsMenuManager {
     private semanticThresholdInput: d3.Selection<HTMLInputElement, unknown, HTMLElement, any>;
     private semanticThresholdItem: d3.Selection<HTMLElement, unknown, HTMLElement, any>;
     private semanticOptionsRow: d3.Selection<HTMLElement, unknown, HTMLElement, any>;
+    private semanticAnalysisEnableRow: d3.Selection<HTMLElement, unknown, HTMLElement, any>;
     private weakenSurprisalColorToggle: d3.Selection<HTMLInputElement, unknown, HTMLElement, any>;
     private themeDropdownContainer: d3.Selection<Element, unknown, HTMLElement, any>;
     private adminManager: AdminManager;
@@ -81,6 +82,7 @@ export class SettingsMenuManager {
         this.semanticThresholdInput = d3.select<HTMLInputElement, any>('#semantic_threshold_input');
         this.semanticThresholdItem = d3.select<HTMLElement, any>('#semantic_threshold_item');
         this.semanticOptionsRow = d3.select<HTMLElement, any>('#semantic_options_row');
+        this.semanticAnalysisEnableRow = d3.select<HTMLElement, any>('.semantic-analysis-enable-row');
         this.weakenSurprisalColorToggle = d3.select<HTMLInputElement, any>('#weaken_surprisal_color_toggle');
         this.themeDropdownContainer = d3.select('#theme_dropdown');
         this.adminManager = adminManager;
@@ -245,6 +247,12 @@ export class SettingsMenuManager {
         // 显示/隐藏所有带 data-admin-only 的菜单项
         this.settingsMenu.selectAll<HTMLElement, unknown>('.settings-menu-item[data-admin-only]')
             .style('display', isAdmin ? null : 'none');
+        if (this.semanticAnalysisEnableRow.node()) {
+            this.semanticAnalysisEnableRow.style('display', isAdmin ? null : 'none');
+        }
+        if (this.menuContext === 'analysis') {
+            this.updateSemanticOptionsRowVisibility();
+        }
         this.tokenRenderStyleDropdown?.updateCurrent(getTokenRenderStyle());
         if (this.menuContext === 'analysis' && this.semanticAnalysisToggle.node()) {
             this.setSemanticAnalysisEnabled(getSemanticAnalysisEnabled());

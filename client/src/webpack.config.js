@@ -18,6 +18,16 @@ const PAGE_META_DOC = JSON.parse(
 );
 const BUILD_TIME = new Date().toISOString();
 
+function copyHtmlWithIncludes(file) {
+    return {
+        from: file,
+        to: file,
+        transform(content) {
+            return expandHtmlIncludes(content.toString('utf8'), SRC_ROOT);
+        },
+    };
+}
+
 function copyHtmlWithIncludesAndPageMeta(from, to, pageKey) {
     return {
         from,
@@ -175,6 +185,9 @@ module.exports = {
                 copyHtmlWithIncludesAndPageMeta('causal_flow.html', 'causal_flow.html', 'causalFlow'),
                 { from: 'privacy-policy.html', to: 'privacy-policy.html' },
                 { from: 'privacy-policy-info-highlight.html', to: 'privacy-policy-info-highlight.html' },
+                copyHtmlWithIncludes('info-highlight.html'),
+                copyHtmlWithIncludes('info-highlight-terms.html'),
+                copyHtmlWithIncludes('info-highlight-privacy.html'),
                 {
                     from: 'uninstall.html',
                     to: 'uninstall.html',

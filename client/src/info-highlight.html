@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Info Highlight</title>
+    <!-- INCLUDE partials/info-highlight-head.html -->
+</head>
+
+<body>
+    <h1 lang="zh">信息高亮｜Info Highlight</h1>
+    <h1 lang="en">Info Highlight</h1>
+
+    <!-- 一节一个 section，以后加介绍内容照此追加 -->
+    <section id="intro">
+        <p lang="zh">高亮信息量大的字，加快阅读。扩展用语言模型在网页和 PDF 上标出信息量大的词：点击工具栏图标开始，再点一次清除。本机分析免费；云端分析按额度计费，目前限时免费。</p>
+        <p lang="en">Highlight the informative words. Read faster. The extension uses a language model to highlight informative words on web pages and PDFs: click the toolbar icon to start, click again to clear. Local analysis is free; cloud analysis uses credits and is currently free for a limited time.</p>
+        <p>
+            <a href="https://chromewebstore.google.com/detail/gemajnklkebeikmfphiddpjfimahacdk" target="_blank" rel="noopener">
+                <span lang="zh">在 Chrome 应用商店安装</span><span lang="en">Get it on the Chrome Web Store</span>
+            </a>
+        </p>
+    </section>
+
+    <section id="pricing">
+        <h2 lang="zh">云端分析额度</h2>
+        <h2 lang="en">Cloud credits</h2>
+        <!-- 与 cf/facade/wrangler.jsonc 的 CREDIT_PACK_* 保持一致 -->
+        <table>
+            <tr><th><span lang="zh">点数</span><span lang="en">Credits</span></th><th><span lang="zh">人民币</span><span lang="en">CNY</span></th><th><span lang="zh">美元</span><span lang="en">USD</span></th></tr>
+            <tr><td>1,000</td><td>¥10</td><td>$2</td></tr>
+            <tr><td>3,000</td><td>¥30</td><td>$5</td></tr>
+            <tr><td>10,000</td><td>¥100</td><td>$15</td></tr>
+        </table>
+        <p lang="zh">额度原则上不退款，例外情况见<a href="info-highlight-terms.html">服务条款</a>。</p>
+        <p lang="en">Credits are in principle non-refundable; for exceptions see the <a href="info-highlight-terms.html">Terms</a>.</p>
+    </section>
+
+    <!-- INCLUDE partials/info-highlight-footer.html -->
+</body>
+
+</html>

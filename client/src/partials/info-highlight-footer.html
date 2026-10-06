@@ -1,0 +1,16 @@
+    <footer>
+        <a href="info-highlight-terms.html"><span lang="zh">服务条款</span><span lang="en">Terms</span></a>
+        <a href="info-highlight-privacy.html"><span lang="zh">隐私政策</span><span lang="en">Privacy</span></a>
+        <a href="mailto:xiaoyundqy@qq.com">xiaoyundqy@qq.com</a>
+        <a href="#" data-set-lang="en" lang="zh">English</a><a href="#" data-set-lang="zh" lang="en">中文</a>
+    </footer>
+    <script>
+        document.title = document.querySelector('h1[lang="' + document.documentElement.lang + '"]').textContent;
+        document.querySelectorAll('[data-set-lang]').forEach(function (a) {
+            a.addEventListener('click', function (e) {
+                e.preventDefault();
+                localStorage.setItem('app_language', a.dataset.setLang);
+                location.href = location.pathname;
+            });
+        });
+    </script>

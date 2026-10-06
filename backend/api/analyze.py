@@ -45,25 +45,26 @@ def _analyze_result_model_display(model: Optional[str]) -> Optional[str]:
 
 
 def _build_response(model: str, text: str, result):
-    """构建标准响应"""
-    # 将 model 添加到 result 中，并确保 model 在最前面
+    """构建标准响应。input_tokens 提到顶层，供门面按点扣费。"""
     if not isinstance(result, dict):
         result = {}
     result = result.copy()
-    # 如果 result 中已有 model，先移除
+    input_tokens = result.pop('input_tokens', None)
     if 'model' in result:
         model_value = result.pop('model')
     else:
         model_value = model
-    # 重新构建 result，确保 model 在最前面
     result = {'model': _analyze_result_model_display(model_value), **result}
     device = hardware_name()
     if device:
         result['device'] = device
-    return {
+    body = {
         "request": {'text': text},
-        "result": result
+        "result": result,
     }
+    if input_tokens is not None:
+        body['input_tokens'] = input_tokens
+    return body
 
 
 def _error_response(model: str, text: str, message: str, status_code: int):

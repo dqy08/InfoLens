@@ -1,0 +1,45 @@
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Info Highlight 介绍 / 条款 / 隐私页共用：样式同 privacy-policy-info-highlight.html；中英两份正文用 lang 属性，只显示当前语言 -->
+    <style>
+        :root {
+            color-scheme: light dark;
+            --fg: #222;
+            --bg: #fff;
+            --link: #06c;
+            --muted: #666;
+            --line: #ddd;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --fg: #e3e3e3;
+                --bg: #1f1f1f;
+                --link: #8ab4f8;
+                --muted: #aaa;
+                --line: #444;
+            }
+        }
+        body {
+            max-width: 700px;
+            margin: 40px auto;
+            padding: 0 20px;
+            font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif;
+            line-height: 1.6;
+            color: var(--fg);
+            background: var(--bg);
+        }
+        a { color: var(--link); }
+        table { border-collapse: collapse; }
+        th, td { padding: 0.3em 1.2em 0.3em 0; text-align: left; border-bottom: 1px solid var(--line); }
+        footer { margin-top: 48px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.9em; }
+        footer a { margin-right: 1.2em; }
+        html[lang="zh"] [lang="en"], html[lang="en"] [lang="zh"] { display: none; }
+    </style>
+    <script>
+        // 语言：?lang=zh|en 优先，其次站内设置（localStorage app_language，与首页设置菜单同一个键），再其次浏览器语言
+        (function () {
+            var q = new URLSearchParams(location.search).get('lang');
+            var s = localStorage.getItem('app_language');
+            var pref = q === 'zh' || q === 'en' ? q : s === 'zh' || s === 'en' ? s : navigator.language;
+            document.documentElement.lang = /^zh/i.test(pref || '') ? 'zh' : 'en';
+        })();
+    </script>

@@ -448,6 +448,7 @@ class QwenLM(AbstractLanguageChecker):
         if progress_callback:
             progress_callback(1, TOTAL_STEPS, 'encoding', None)
         token_ids, token_offsets = self._encode_text(in_text)
+        input_tokens = int(token_ids.shape[1])
         payload_offsets, insert_first = scoring_payload_offsets(token_offsets)
 
         # Step 2: 分块推理并处理（带百分比进度）
@@ -496,7 +497,7 @@ class QwenLM(AbstractLanguageChecker):
             device_idx = self.device.index if self.device.index is not None else 0
             DeviceManager.print_cuda_memory_summary(device=device_idx)
 
-        return {'bpe_strings': bpe_strings}
+        return {'bpe_strings': bpe_strings, 'input_tokens': input_tokens}
     
     # _cleanup_tensors 方法已被移除，因为不再需要显式清理小张量
 

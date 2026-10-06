@@ -24,6 +24,7 @@ export const translations: Translations = {
         'A toolbox for exploring the informational nature of LLMs and language': '用于探索 LLM 与语言的信息本质的工具箱',
         'Info Highlight': 'Info Highlight 信息高亮',
         "- highlight the 'informative' parts": '- 高亮“信息量大”的地方',
+        'Info Highlight Extension': 'Info Highlight 信息高亮插件',
         'LLM Raw Chat': 'LLM Raw Chat 原始对话',
         '- chat with explicit raw prompts': '- 用精确的 prompt 进行对话',
         'Context Attribution': 'Context Attribution 上下文归因',
